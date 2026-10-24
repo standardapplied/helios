@@ -2,129 +2,171 @@
 
 package com.standardapplied.helios.runtime;
 
+import static com.standardapplied.helios.runtime.FramingServers.MAX_BODY;
+import static com.standardapplied.helios.runtime.FramingServers.REQUESTS_PER_PRINCIPAL;
+import static com.standardapplied.helios.runtime.FramingServers.SMUGGLED;
+import static com.standardapplied.helios.runtime.FramingServers.identity;
+import static com.standardapplied.helios.runtime.FramingServers.messages;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.session.SessionOptions;
-import com.standardapplied.helios.testing.ScriptedModel;
-import io.helidon.http.Header;
-import io.helidon.http.HeaderValues;
-import io.helidon.webserver.WebServer;
-import io.helidon.webserver.http.HttpRouting;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import jdk.jfr.consumer.RecordingStream;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Every answer, Helios's or Helidon's own, that leaves a request body unread is delivered complete
- * and then ends the connection, so nothing the client sends after it is drained or run as a
- * request; a request whose body was read to its end, or that has none, keeps its connection. Each
- * request reaches a {@link RuntimeServer}, or an {@link AgentHttpService} on a plain server without
- * the feature, over a raw socket from the loopback peer that its {@link TrustedProxyAuthenticator}
- * trusts.
+ * No body byte is ever parsed as a request. Every answer of a Helios route that leaves a request
+ * body unread is delivered complete and then ends the connection; Helidon's own answers within the
+ * body bound read the body and keep the connection; a body declared over the bound is refused by
+ * Helidon unread. A request whose body was read to its end, or that has none, keeps its connection.
+ * Each request reaches a {@link RuntimeServer}, or an {@link AgentHttpService} on a plain server of
+ * its own, over a raw socket from the loopback peer that its {@link TrustedProxyAuthenticator}
+ * trusts. A body is itself a complete request, from an identity no client may claim, which the
+ * authenticator counts if it is ever run.
  */
 final class RuntimeServerRequestFramingTest {
-
-  private static final int MAX_BODY = 64;
-
-  /**
-   * Requests of one principal in flight at a time: above one, so an earlier request whose slot is
-   * not yet given back never turns a later one into a refusal.
-   */
-  private static final int REQUESTS_PER_PRINCIPAL = 2;
 
   /** The most one read of Helidon's {@code PlainSocket} takes off the connection. */
   private static final int SERVER_READ_BUFFER = 8 * 1024;
 
   private static final String SOCKET_READ = "jdk.SocketRead";
 
-  /** A complete request, sent as the body of another, from an identity no client may claim. */
-  private static final String SMUGGLED =
-      "POST /v1/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Authenticated-Tenant: evil\r\n"
-          + "X-Authenticated-Subject: smuggler\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+  private static final String UNMATCHED = "/elsewhere";
 
-  private static final Header SMUGGLER =
-      HeaderValues.create(TrustedProxyAuthenticator.DEFAULT_SUBJECT_HEADER, "smuggler");
-
-  private static final Principal ALICE = new Principal("acme", "alice");
-
-  private static final Header CRASH = HeaderValues.create("X-Crash", "yes");
-
-  private final AtomicInteger smuggledSeen = new AtomicInteger();
-  private final List<RawConnection> heldUploads = new ArrayList<>();
-  private final SessionRegistry registry = registry();
-  private final RuntimeServer server = server();
-  private Map<String, String> sessions;
-
-  @BeforeEach
-  void createSessions() {
-    sessions = Map.of("alice", create("alice"), "bob", create("bob"), "carol", create("carol"));
-  }
+  private final FramingServers servers = new FramingServers();
+  private final List<RawConnection> heldStreams = new ArrayList<>();
 
   @AfterEach
   void close() throws IOException {
-    for (var held : heldUploads) {
+    for (var held : heldStreams) {
       held.close();
     }
-    server.close();
+    servers.close();
   }
 
-  static Stream<Arguments> unreadBodies() {
+  /** Where a case's requests go. */
+  enum Target {
+    RUNTIME_SERVER,
+    OWN_SERVER_WITH_THE_SETTINGS;
+
+    int port(FramingServers servers) {
+      return this == RUNTIME_SERVER ? servers.runtime.port() : servers.own.port();
+    }
+  }
+
+  static Stream<Arguments> heliosAnswers() {
+    return everyTargetBothWays(
+        refusal(
+            "401 without an identity",
+            "HTTP/1.1 401 Unauthorized",
+            "{\"error\":\"unauthenticated\"}",
+            t -> Upload.declared("POST", messages(t.servers.sessions.get("alice")), "")),
+        refusal(
+            "404 for an unknown session",
+            "HTTP/1.1 404 Not Found",
+            "{\"error\":\"session not found\"}",
+            t -> Upload.declared("POST", messages("missing"), identity("alice"))),
+        refusal(
+            "429 for a request over the principal's bound",
+            "HTTP/1.1 429 Too Many Requests",
+            "{\"error\":\"too many requests in progress\"}",
+            t ->
+                Upload.declared(
+                    "POST", messages(t.servers.sessions.get("alice")), identity("alice"))),
+        answer(
+            "201 for a create that ignores its body",
+            "HTTP/1.1 201 Created",
+            Pattern.compile("\\{\"sessionId\":\"[^\"]+\",\"eventsUrl\":\"[^\"]+\"}"),
+            t -> Upload.declared("POST", "/v1/sessions", identity("alice"))),
+        refusal(
+            "413 for a chunked body one byte past the bound",
+            "HTTP/1.1 413 Request Entity Too Large",
+            "{\"error\":\"request body too large\"}",
+            t ->
+                Upload.chunkedPastBound(
+                    messages(t.servers.sessions.get("alice")), identity("alice"))));
+  }
+
+  @ParameterizedTest(name = "{0} on {2}, Expect: 100-continue {3}")
+  @MethodSource("heliosAnswers")
+  void aHeliosAnswerLeavingTheBodyUnreadIsDeliveredWholeThenEndsTheConnection(
+      String name, Exchange exchange, Target target, boolean expectContinue) throws IOException {
+    var port = target.port(servers);
+    if (exchange.statusLine().contains("429")) {
+      holdEveryRequestOfAlice(port);
+    }
+    var upload = exchange.upload().apply(this);
+    try (var connection = RawConnection.open(port)) {
+      var answer = answeredBeforeTheBody(connection, upload, expectContinue);
+
+      assertEquals(exchange.statusLine(), answer.statusLine());
+      assertTrue(exchange.body().matcher(answer.body()).matches(), answer::body);
+      assertEquals("application/json", answer.headers().get("content-type"));
+      assertTrue(answer.closesConnection(), () -> "headers: " + answer.headers());
+      assertEquals(-1, connection.next());
+    }
+    assertEquals(0, servers.smuggledSeen.get());
+  }
+
+  static Stream<Arguments> helidonsAnswersThatReadTheBody() {
     return Stream.of(
-            refusal(
-                "401 without an identity",
-                "HTTP/1.1 401 Unauthorized",
-                "{\"error\":\"unauthenticated\"}",
-                t -> Upload.declared("POST", messages(t.sessions.get("alice")), "")),
-            refusal(
-                "404 for an unknown session",
-                "HTTP/1.1 404 Not Found",
-                "{\"error\":\"session not found\"}",
-                t -> Upload.declared("POST", messages("missing"), identity("alice"))),
-            refusal(
-                "404 for a path no route matches",
-                "HTTP/1.1 404 Not Found",
-                "Endpoint not found",
-                t -> Upload.declared("POST", "/elsewhere", identity("alice"))),
-            refusal(
-                "413 for a declared length over the bound",
-                "HTTP/1.1 413 Request Entity Too Large",
-                "{\"error\":\"request body too large\"}",
-                t -> Upload.declared("POST", messages(t.sessions.get("alice")), identity("alice"))),
-            refusal(
-                "413 for a chunked body one byte past the bound",
-                "HTTP/1.1 413 Request Entity Too Large",
-                "{\"error\":\"request body too large\"}",
-                t -> Upload.chunkedPastBound(messages(t.sessions.get("alice")), identity("alice"))),
-            refusal(
-                "429 for a request over the principal's bound",
-                "HTTP/1.1 429 Too Many Requests",
-                "{\"error\":\"too many requests in progress\"}",
-                t -> t.holdingEveryRequest(messages(t.sessions.get("alice")), "alice")),
-            answer(
-                "201 for a create that ignores its body",
-                "HTTP/1.1 201 Created",
-                Pattern.compile("\\{.*\"sessionId\":\"[^\"]+\".*}"),
-                t -> Upload.declared("POST", "/v1/sessions", identity("alice"))),
+            Arguments.of(
+                refusal(
+                    "404 for a path no route matches",
+                    "HTTP/1.1 404 Not Found",
+                    "Endpoint not found",
+                    t -> Upload.declared("POST", UNMATCHED, identity("alice"))),
+                Target.RUNTIME_SERVER),
+            Arguments.of(
+                refusal(
+                    "404 for a path no route matches",
+                    "HTTP/1.1 404 Not Found",
+                    "Endpoint not found",
+                    t -> Upload.declared("POST", UNMATCHED, identity("alice"))),
+                Target.OWN_SERVER_WITH_THE_SETTINGS),
+            Arguments.of(
+                refusal(
+                    "500 for an Error a route lets escape",
+                    "HTTP/1.1 500 Internal Server Error",
+                    "Internal Server Error",
+                    t -> Upload.declared("POST", "/v1/sessions", "X-Crash: yes\r\n")),
+                Target.RUNTIME_SERVER))
+        .flatMap(RuntimeServerRequestFramingTest::bothWays);
+  }
+
+  @ParameterizedTest(name = "{0} on {2}, Expect: 100-continue {3}")
+  @MethodSource("helidonsAnswersThatReadTheBody")
+  void helidonsOwnAnswerWithinTheBoundReadsTheBodyAndKeepsTheConnection(
+      String name, Exchange exchange, Target target, boolean expectContinue) throws IOException {
+    var upload = exchange.upload().apply(this);
+    try (var connection = RawConnection.open(target.port(servers))) {
+      var answer = answeredAfterTheBody(connection, upload, expectContinue);
+
+      assertEquals(exchange.statusLine(), answer.statusLine());
+      assertTrue(exchange.body().matcher(answer.body()).matches(), answer::body);
+      assertFalse(answer.closesConnection(), () -> "headers: " + answer.headers());
+      assertEquals("HTTP/1.1 204 No Content", pollResult(connection).statusLine());
+    }
+    assertEquals(0, servers.smuggledSeen.get());
+  }
+
+  static Stream<Arguments> helidonsRefusals() {
+    return Stream.of(
             refusal(
                 "406 raised by Helidon",
                 "HTTP/1.1 406 Not Acceptable",
@@ -132,131 +174,124 @@ final class RuntimeServerRequestFramingTest {
                 t ->
                     Upload.declared(
                         "GET",
-                        "/v1/sessions/" + t.sessions.get("alice") + "/events",
+                        "/v1/sessions/" + t.servers.sessions.get("alice") + "/events",
                         identity("alice") + "Accept: application/json\r\n")),
             refusal(
                 "400 without a body for an Accept header Helidon cannot parse",
                 "HTTP/1.1 400 Bad Request",
                 "",
-                t -> Upload.declared("POST", "/v1/sessions", "Accept: a;b;c\r\n")),
-            refusal(
-                "500 for an Error a route lets escape",
-                "HTTP/1.1 500 Internal Server Error",
-                "Internal Server Error",
-                t -> Upload.declared("POST", "/v1/sessions", "X-Crash: yes\r\n")))
-        .flatMap(
-            exchange ->
-                Stream.of(
-                    Arguments.of(exchange.name(), exchange, false),
-                    Arguments.of(exchange.name(), exchange, true)));
+                t ->
+                    Upload.declared(
+                        "GET",
+                        "/v1/sessions/" + t.servers.sessions.get("alice") + "/events",
+                        identity("alice") + "Accept: a;b;c\r\n")))
+        .flatMap(exchange -> bothWays(Arguments.of(exchange, Target.RUNTIME_SERVER)));
   }
 
-  @ParameterizedTest(name = "{0}, Expect: 100-continue {2}")
-  @MethodSource("unreadBodies")
-  void anAnswerLeavingTheBodyUnreadIsDeliveredWholeThenEndsTheConnection(
-      String name, Exchange exchange, boolean expectContinue) throws IOException {
+  @ParameterizedTest(name = "{0}, Expect: 100-continue {3}")
+  @MethodSource("helidonsRefusals")
+  void helidonsOwnRefusalWithinTheBoundRunsNothingSmuggled(
+      String name, Exchange exchange, Target target, boolean expectContinue) throws IOException {
     var upload = exchange.upload().apply(this);
-    try (var connection = RawConnection.open(server.port())) {
-      var answer = send(connection, upload, expectContinue);
+    try (var connection = RawConnection.open(target.port(servers))) {
+      var answer = answeredAfterTheBody(connection, upload, expectContinue);
 
       assertEquals(exchange.statusLine(), answer.statusLine());
       assertTrue(exchange.body().matcher(answer.body()).matches(), answer::body);
       assertTrue(answer.closesConnection(), () -> "headers: " + answer.headers());
       assertEquals(-1, connection.next());
     }
-    assertEquals(0, smuggledSeen.get());
+    assertEquals(0, servers.smuggledSeen.get());
   }
 
-  @Test
-  void aRequestSmuggledInTheBodyOfARefusedOneIsNeverRun() throws IOException {
-    assertARequestSmuggledInARefusedBodyNeverRuns(server.port());
-    assertEquals(3, registry.size());
+  static Stream<Arguments> bodiesDeclaredOverTheBound() {
+    return Stream.of(
+            Arguments.of("a Helios route", Target.RUNTIME_SERVER),
+            Arguments.of("a Helios route", Target.OWN_SERVER_WITH_THE_SETTINGS),
+            Arguments.of(UNMATCHED, Target.RUNTIME_SERVER),
+            Arguments.of(UNMATCHED, Target.OWN_SERVER_WITH_THE_SETTINGS))
+        .flatMap(RuntimeServerRequestFramingTest::bothWays);
   }
 
-  @Test
-  void theServiceOnAServerWithoutTheGuardStillEndsTheConnectionsItsRoutesLeaveUnread()
-      throws IOException {
-    var deployed = deploy(registry(), 64);
-    try {
-      assertARequestSmuggledInARefusedBodyNeverRuns(deployed.port());
-    } finally {
-      deployed.stop();
-    }
-  }
-
-  @Test
-  void aServerAtHelidonsRequestCapAnswersOneMore503AndEndsItsConnection() throws IOException {
-    var own = registry();
-    var session = (StubSession) own.create(options(new SessionRequest("held", ALICE)), ALICE);
-    var deployed = deploy(own, 1);
-    try (var stream = RawConnection.open(deployed.port());
-        var refused = RawConnection.open(deployed.port())) {
-      stream.write(
-          "GET /v1/sessions/held/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-              + identity("alice")
-              + "\r\n");
-      assertEquals("HTTP/1.1 200 OK", stream.response().statusLine());
-      refused.write(
-          "GET /v1/sessions/held/result?timeout=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-              + identity("alice")
-              + "\r\n");
-
-      var answer = refused.response();
-
-      assertEquals("HTTP/1.1 503 Service Unavailable", answer.statusLine());
-      assertEquals(-1, refused.next());
-      session.completeEvents();
-    } finally {
-      deployed.stop();
-    }
-  }
-
-  /** {@link AgentHttpService} over {@code registry} on a plain server without the guard. */
-  private WebServer deploy(SessionRegistry registry, int maxConcurrentRequests) {
-    var mapper = JsonMapper.builder().build();
-    var service =
-        new AgentHttpService(
-            registry,
-            RuntimeServerRequestFramingTest::options,
-            authenticator(),
-            mapper,
-            "/v1",
-            RequestLimits.defaults());
-    return WebServer.builder()
-        .host("127.0.0.1")
-        .port(0)
-        .maxConcurrentRequests(maxConcurrentRequests)
-        .featuresDiscoverServices(false)
-        .mediaContext(
-            mc ->
-                mc.mediaSupportsDiscoverServices(false)
-                    .addMediaSupport(JacksonSupport.create(mapper)))
-        .routing((HttpRouting.Builder routing) -> routing.register("/v1", service))
-        .build()
-        .start();
-  }
-
-  /** A body that is itself a request follows a {@code 401} sent before the body was asked for. */
-  private void assertARequestSmuggledInARefusedBodyNeverRuns(int port) throws IOException {
-    try (var connection = RawConnection.open(port)) {
+  @ParameterizedTest(name = "{0} on {2}, Expect: 100-continue {3}")
+  @MethodSource("bodiesDeclaredOverTheBound")
+  void aBodyDeclaredOverTheBoundIsRefusedByHelidonUnread(
+      String name, String path, Target target, boolean expectContinue) throws IOException {
+    var overBound = SMUGGLED + "x".repeat(MAX_BODY + 1 - SMUGGLED.length());
+    try (var connection = RawConnection.open(target.port(servers))) {
       connection.write(
-          "POST /v1/sessions/missing/messages HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-              + "Content-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: "
-              + SMUGGLED.length()
-              + "\r\n\r\n");
+          "POST "
+              + (path.equals(UNMATCHED) ? path : messages(servers.sessions.get("alice")))
+              + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "Content-Type: application/json\r\nContent-Length: "
+              + overBound.length()
+              + "\r\n"
+              + (expectContinue ? "Expect: 100-continue\r\n\r\n" : "\r\n" + overBound));
+      var refused = connection.response();
+      if (expectContinue) {
+        connection.write(overBound);
+      }
+
+      assertEquals("HTTP/1.1 413 Request Entity Too Large", refused.statusLine());
+      assertTrue(refused.closesConnection(), () -> "headers: " + refused.headers());
+      assertEquals(-1, connection.next());
+    }
+    assertEquals(0, servers.smuggledSeen.get());
+  }
+
+  @Test
+  void aRequestSmuggledInTheBodyOfAHeliosRefusalIsNeverRun() throws IOException {
+    try (var connection = RawConnection.open(servers.runtime.port())) {
+      connection.write(expectingContinue("/v1/sessions/missing/messages", ""));
+      assertEquals("HTTP/1.1 100 Continue", connection.response().statusLine());
       var refused = connection.response();
       connection.write(SMUGGLED);
 
       assertEquals("HTTP/1.1 401 Unauthorized", refused.statusLine());
       assertEquals(-1, connection.next());
     }
-    assertEquals(0, smuggledSeen.get());
+    assertEquals(0, servers.smuggledSeen.get());
+    assertEquals(3, servers.registry.size());
+  }
+
+  @Test
+  void aRequestSmuggledInTheBodyOfAnUnmatchedPathIsNeverRun() throws IOException {
+    try (var connection = RawConnection.open(servers.runtime.port())) {
+      connection.write(expectingContinue(UNMATCHED, identity("alice")));
+      assertEquals("HTTP/1.1 100 Continue", connection.response().statusLine());
+      connection.write(SMUGGLED);
+      var refused = connection.response();
+
+      assertEquals("HTTP/1.1 404 Not Found", refused.statusLine());
+      assertEquals("HTTP/1.1 204 No Content", pollResult(connection).statusLine());
+    }
+    assertEquals(0, servers.smuggledSeen.get());
+    assertEquals(3, servers.registry.size());
+  }
+
+  @Test
+  void theServiceOnAServerWithoutTheSettingsStillEndsTheConnectionsItsRoutesLeaveUnread()
+      throws IOException {
+    var deployed = servers.deploy(FramingServers.registry(), 512, builder -> {});
+    try (var connection = RawConnection.open(deployed.port())) {
+      connection.write(expectingContinue("/v1/sessions/missing/messages", ""));
+      var refused = connection.response();
+      connection.write(SMUGGLED);
+
+      assertEquals("HTTP/1.1 401 Unauthorized", refused.statusLine());
+      assertTrue(refused.closesConnection(), () -> "headers: " + refused.headers());
+      assertEquals(-1, connection.next());
+    } finally {
+      deployed.stop();
+    }
+    assertEquals(0, servers.smuggledSeen.get());
   }
 
   @Test
   void requestsWhoseBodiesAreReadOrAbsentKeepTheirConnection() throws IOException {
-    var alice = sessions.get("alice");
-    try (var connection = RawConnection.open(server.port())) {
+    var alice = servers.sessions.get("alice");
+    try (var connection = RawConnection.open(servers.runtime.port())) {
       var answers = new ArrayList<RawConnection.Response>();
       for (var body : List.of("{\"text\":\"one\"}", "{\"text\":", "{\"text\":\"two\"}")) {
         connection.write(
@@ -298,12 +333,12 @@ final class RuntimeServerRequestFramingTest {
   @Test
   void helidonsOwnAnswersWithoutABodyKeepTheConnectionUnlessTheirExceptionEndsIt()
       throws IOException {
-    try (var connection = RawConnection.open(server.port())) {
+    try (var connection = RawConnection.open(servers.runtime.port())) {
       var answers = new ArrayList<RawConnection.Response>();
       for (var accept : List.of("*/*", "*/*", "application/json")) {
         connection.write(
             "GET /v1/sessions/"
-                + sessions.get("alice")
+                + servers.sessions.get("alice")
                 + "/events/elsewhere HTTP/1.1\r\nHost: 127.0.0.1\r\n"
                 + identity("alice")
                 + "Accept: "
@@ -313,7 +348,7 @@ final class RuntimeServerRequestFramingTest {
       }
       connection.write(
           "GET /v1/sessions/"
-              + sessions.get("alice")
+              + servers.sessions.get("alice")
               + "/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
               + identity("alice")
               + "Accept: application/json\r\n\r\n");
@@ -329,16 +364,50 @@ final class RuntimeServerRequestFramingTest {
     }
   }
 
+  @Test
+  void aServerAtHelidonsRequestCapAnswersOneMore503AndEndsItsConnection() throws IOException {
+    var own = FramingServers.registry();
+    var alice = new Principal("acme", "alice");
+    var session =
+        (StubSession) own.create(FramingServers.options(new SessionRequest("held", alice)), alice);
+    var deployed = servers.deploy(own, 1, builder -> {});
+    try (var stream = RawConnection.open(deployed.port());
+        var refused = RawConnection.open(deployed.port())) {
+      stream.write(
+          "GET /v1/sessions/held/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "\r\n");
+      assertEquals("HTTP/1.1 200 OK", stream.response().statusLine());
+      refused.write(
+          "GET /v1/sessions/held/result?timeout=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "\r\n");
+
+      var answer = refused.response();
+
+      assertEquals("HTTP/1.1 503 Service Unavailable", answer.statusLine());
+      assertEquals(-1, refused.next());
+      session.completeEvents();
+    } finally {
+      deployed.stop();
+    }
+  }
+
+  static Stream<String> pathsOfARefusedLargeBody() {
+    return Stream.of("a Helios route", UNMATCHED);
+  }
+
   /**
    * The server's end of the connection reads the head and, in the same read, at most one 8 KiB
    * socket buffer of the body, counted from the JDK's {@code jdk.SocketRead} events for the socket
    * whose peer is the client; a server that drained would read all 64 MiB.
    */
-  @Test
-  void aRefusedBodyLargerThanTheSocketBuffersIsNotRead() throws IOException {
+  @ParameterizedTest(name = "to {0}")
+  @MethodSource("pathsOfARefusedLargeBody")
+  void aRefusedBodyLargerThanTheSocketBuffersIsNotRead(String path) throws IOException {
     var head =
         "POST "
-            + messages(sessions.get("alice"))
+            + (path.equals(UNMATCHED) ? path : messages(servers.sessions.get("alice")))
             + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
             + identity("alice")
             + "Content-Type: application/json\r\nContent-Length: "
@@ -352,7 +421,7 @@ final class RuntimeServerRequestFramingTest {
           SOCKET_READ,
           event -> reads.add(new SocketRead(event.getInt("port"), event.getLong("bytesRead"))));
       recording.startAsync();
-      try (var connection = RawConnection.open(server.port())) {
+      try (var connection = RawConnection.open(servers.runtime.port())) {
         clientPort = connection.localPort();
         connection.write(head);
         var writing = CompletableFuture.runAsync(() -> writeUntilRefused(connection));
@@ -388,49 +457,86 @@ final class RuntimeServerRequestFramingTest {
     }
   }
 
-  private RawConnection.Response send(
+  /**
+   * Send {@code upload} and read the answer a route gives before it reads the body; with {@code
+   * Expect: 100-continue}, the server's {@code 100 Continue} comes first, at once.
+   */
+  private static RawConnection.Response answeredBeforeTheBody(
       RawConnection connection, Upload upload, boolean expectContinue) throws IOException {
-    var head = upload.head() + (expectContinue ? "Expect: 100-continue\r\n" : "") + "\r\n";
     if (!expectContinue) {
-      connection.write(head + upload.readable() + upload.rest());
+      connection.write(upload.head() + "\r\n" + upload.readable() + upload.rest());
       return connection.response();
     }
-    connection.write(head);
-    if (!upload.readable().isEmpty()) {
-      assertEquals("HTTP/1.1 100 Continue", connection.response().statusLine());
-      connection.write(upload.readable());
-    }
+    connection.write(upload.head() + "Expect: 100-continue\r\n\r\n");
+    assertEquals("HTTP/1.1 100 Continue", connection.response().statusLine());
+    connection.write(upload.readable());
     var answer = connection.response();
     connection.write(upload.rest());
     return answer;
   }
 
-  /** Hold uploads of {@code principal} open, every request its bound admits, then upload. */
-  private Upload holdingEveryRequest(String path, String principal) {
-    for (var i = 0; i < REQUESTS_PER_PRINCIPAL; i++) {
-      Await.until("an upload to be admitted and held", () -> heldUpload(principal));
+  /**
+   * Send {@code upload} whole and read the answer; Helidon holds its own answers until the body has
+   * arrived.
+   */
+  private static RawConnection.Response answeredAfterTheBody(
+      RawConnection connection, Upload upload, boolean expectContinue) throws IOException {
+    if (!expectContinue) {
+      connection.write(upload.head() + "\r\n" + upload.readable() + upload.rest());
+      return connection.response();
     }
-    return Upload.declared("POST", path, identity(principal));
+    connection.write(upload.head() + "Expect: 100-continue\r\n\r\n");
+    assertEquals("HTTP/1.1 100 Continue", connection.response().statusLine());
+    connection.write(upload.readable() + upload.rest());
+    return connection.response();
+  }
+
+  /** A create's head declaring the smuggled request as its body, sent with {@code Expect}. */
+  private static String expectingContinue(String path, String headers) {
+    return "POST "
+        + path
+        + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        + headers
+        + "Content-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: "
+        + SMUGGLED.length()
+        + "\r\n\r\n";
+  }
+
+  /** Ask for alice's result on {@code connection}, which a live session answers {@code 204}. */
+  private RawConnection.Response pollResult(RawConnection connection) throws IOException {
+    connection.write(
+        "GET /v1/sessions/"
+            + servers.sessions.get("alice")
+            + "/result?timeout=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            + identity("alice")
+            + "\r\n");
+    return connection.response();
+  }
+
+  /** Hold event streams of alice open on {@code port}, every request her bound admits. */
+  private void holdEveryRequestOfAlice(int port) {
+    for (var i = 0; i < REQUESTS_PER_PRINCIPAL; i++) {
+      Await.until("an event stream to be admitted and held", () -> heldStream(port));
+    }
   }
 
   /**
-   * Start an upload of {@code principal} and keep it open once admitted. A request gives its slot
-   * back just after its answer is sent, so one sent as soon as the earlier answer arrived may still
-   * be refused.
+   * Open an event stream of alice and keep it once admitted. A request gives its slot back just
+   * after its answer is sent, so one sent as soon as the earlier answer arrived may still be
+   * refused.
    */
-  private boolean heldUpload(String principal) {
+  private boolean heldStream(int port) {
     try {
-      var held = RawConnection.open(server.port());
+      var held = RawConnection.open(port);
       held.write(
-          "POST "
-              + messages(sessions.get(principal))
-              + " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-              + identity(principal)
-              + "Content-Type: application/json\r\nContent-Length: 2\r\n"
-              + "Expect: 100-continue\r\n\r\n");
+          "GET /v1/sessions/"
+              + servers.sessions.get("alice")
+              + "/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+              + identity("alice")
+              + "\r\n");
       var answer = held.response();
-      if (answer.statusLine().equals("HTTP/1.1 100 Continue")) {
-        heldUploads.add(held);
+      if (answer.statusLine().equals("HTTP/1.1 200 OK")) {
+        heldStreams.add(held);
         return true;
       }
       held.close();
@@ -441,65 +547,25 @@ final class RuntimeServerRequestFramingTest {
     }
   }
 
-  private RuntimeServer server() {
-    return RuntimeServer.builder()
-        .withRegistry(registry)
-        .withOptionsFactory(RuntimeServerRequestFramingTest::options)
-        .withRequestLimits(new RequestLimits(MAX_BODY, REQUESTS_PER_PRINCIPAL))
-        .withAuthenticator(authenticator())
-        .build();
+  private static Stream<Arguments> everyTargetBothWays(Exchange... exchanges) {
+    return Stream.of(exchanges)
+        .flatMap(
+            exchange -> Stream.of(Target.values()).map(target -> Arguments.of(exchange, target)))
+        .flatMap(RuntimeServerRequestFramingTest::bothWays);
   }
 
-  private static SessionRegistry registry() {
-    return SessionRegistry.newBuilder()
-        .withFactory(options -> new StubSession(options.sessionId(), 8))
-        .build();
-  }
-
-  private static SessionOptions options(SessionRequest request) {
-    return SessionOptions.newBuilder()
-        .withModel(ScriptedModel.newBuilder().withTextTurn("x").build())
-        .withSessionId(request.sessionId())
-        .build();
-  }
-
-  /** Trusts the loopback peer, counts each request from the smuggler, and crashes on demand. */
-  private Authenticator authenticator() {
-    var trusted =
-        TrustedProxyAuthenticator.newBuilder()
-            .withTrustedProxy(InetAddress.getLoopbackAddress())
-            .build();
-    return new TestAuthenticator(
-        request -> {
-          if (request.headers().contains(SMUGGLER)) {
-            smuggledSeen.incrementAndGet();
-          }
-          if (request.headers().contains(CRASH)) {
-            throw new AssertionError("an Error escaping a route");
-          }
-          return trusted.authenticate(request);
-        });
-  }
-
-  private String create(String principal) {
-    try (var connection = RawConnection.open(server.port())) {
-      connection.write(
-          "POST /v1/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\n" + identity(principal) + "\r\n");
-      var created = connection.response();
-      assertEquals("HTTP/1.1 201 Created", created.statusLine(), created::body);
-      return (String)
-          JsonMapper.builder().build().readValue(created.body(), Map.class).get("sessionId");
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-  }
-
-  private static String identity(String principal) {
-    return "X-Authenticated-Tenant: acme\r\nX-Authenticated-Subject: " + principal + "\r\n";
-  }
-
-  private static String messages(String sessionId) {
-    return "/v1/sessions/" + sessionId + "/messages";
+  /** {@code arguments} with and without {@code Expect: 100-continue}, its name first. */
+  private static Stream<Arguments> bothWays(Arguments arguments) {
+    var given = arguments.get();
+    return Stream.of(false, true)
+        .map(
+            expect -> {
+              var all = new Object[given.length + 2];
+              all[0] = given[0].toString();
+              System.arraycopy(given, 0, all, 1, given.length);
+              all[all.length - 1] = expect;
+              return Arguments.of(all);
+            });
   }
 
   /**

@@ -78,10 +78,6 @@ final class AdmissionHarness implements AutoCloseable {
     return server(registry, limits(requestsPerPrincipal));
   }
 
-  RuntimeServer server(SessionRegistry.Builder registry, RequestLimits limits, JsonMapper mapper) {
-    return start(registry, builder -> builder.withRequestLimits(limits).withObjectMapper(mapper));
-  }
-
   String create(RuntimeServer server, String token) {
     var resp = sendAdmitted(server, "POST", "/sessions", token);
     assertEquals(201, resp.statusCode(), resp::body);

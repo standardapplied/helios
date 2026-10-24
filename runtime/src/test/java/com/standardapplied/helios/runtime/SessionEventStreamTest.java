@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
 /** Unit tests for {@link SessionEventStream} as a subscriber, against a recording sink. */
 final class SessionEventStreamTest {
@@ -98,7 +97,7 @@ final class SessionEventStreamTest {
   }
 
   @Test
-  void aTimedOutCallStreamsTheSameThroughEitherMapperTheRuntimeIsGiven() {
+  void aTimedOutCallStreamsItsOutcomeKindThroughTheRuntimesMapper() {
     var event =
         new QueryEvent.ToolResult(
             "sess-1",
@@ -115,11 +114,11 @@ final class SessionEventStreamTest {
             + "\"output\":\"tool 'slow' timed out after PT1M\",\"attachments\":[]},"
             + "\"redactions\":{}}";
 
-    for (var mapper : List.of(new ObjectMapper(), JsonMapper.builder().build())) {
-      var sink = new RecordingSink(null);
-      new SessionEventStream("sess-1", sink, ToolOutcomeSerializer.addTo(mapper)).onNext(event);
-      assertEquals(List.of(expected), sink.emitted);
-    }
+    var sink = new RecordingSink(null);
+
+    new SessionEventStream("sess-1", sink, JsonBody.MAPPER).onNext(event);
+
+    assertEquals(List.of(expected), sink.emitted);
   }
 
   @Test

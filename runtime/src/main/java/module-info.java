@@ -16,7 +16,6 @@ module com.standardapplied.helios.runtime {
   requires io.helidon.webserver;
   requires io.helidon.webserver.sse;
   requires io.helidon.http;
-  requires io.helidon.http.media;
   requires io.helidon.http.sse;
   requires io.helidon.common;
   requires tools.jackson.databind;

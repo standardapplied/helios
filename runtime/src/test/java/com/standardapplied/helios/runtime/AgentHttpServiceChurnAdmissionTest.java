@@ -3,6 +3,7 @@
 package com.standardapplied.helios.runtime;
 
 import static com.standardapplied.helios.runtime.AdmissionHarness.assertRefused;
+import static com.standardapplied.helios.runtime.AdmissionHarness.messages;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
 import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,41 +11,33 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
-import com.standardapplied.helios.session.ResultMessage;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import tools.jackson.core.JsonGenerator;
-import tools.jackson.databind.SerializationContext;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.module.SimpleModule;
-import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
  * An event stream or result poll holds its principal's request slot until it ends, even after its
  * session is deleted, so creating and deleting sessions never lifts the bound. A revoked event
- * stream holds its slot until the event it is still serializing is done, so revoking credentials
- * never lifts it either.
+ * stream holds its slot until the event it is still writing is done, so revoking credentials never
+ * lifts it either.
  */
 final class AgentHttpServiceChurnAdmissionTest {
 
-  private static final QueryEvent.AssistantText EVENT =
-      new QueryEvent.AssistantText("held", 0L, Instant.EPOCH, "held");
+  private static final QueryEvent.AssistantText LARGE =
+      new QueryEvent.AssistantText("held", 0L, Instant.EPOCH, "x".repeat(32 * 1024 * 1024));
 
   private final AdmissionHarness harness = new AdmissionHarness();
-  private final CountDownLatch serializing = new CountDownLatch(1);
-  private final CountDownLatch release = new CountDownLatch(1);
 
   @AfterEach
   void closeHarness() {
-    release.countDown();
     harness.close();
   }
 
@@ -64,41 +57,43 @@ final class AgentHttpServiceChurnAdmissionTest {
 
   @Test
   void aResultPollOfADeletedSessionHoldsItsSlotUntilItIsAnswered() {
-    var server =
-        harness.server(
-            harness.registry(), AdmissionHarness.limits(2), held(ResultMessage.Cancelled.class));
+    var server = harness.server(harness.registry(), 2);
     var deleted = harness.create(server, "alice");
+    assertEquals(
+        202, harness.sendAdmitted(server, "POST", messages(deleted), "alice").statusCode());
     var held = waitingPoll(server, deleted, "alice");
     delete(server, deleted);
-    Await.latch("the cancelled result to be serialized", serializing);
 
     assertRefusedWhileHoldingOneMore(server);
 
-    release.countDown();
+    harness.sessions.get(deleted).terminate();
     assertEquals(200, Await.value("the held poll to be answered", held).statusCode());
     assertEquals(201, harness.sendAdmitted(server, "POST", "/sessions", "alice").statusCode());
   }
 
+  /**
+   * The event is larger than every buffer between the server and the client, so its write stays
+   * under way while the client reads no further than its first line.
+   */
   @Test
-  void aRevokedEventStreamKeepsItsAdmissionUntilTheEventItIsSerializingIsDone() throws IOException {
-    var server =
-        harness.server(
-            harness.registry(), AdmissionHarness.limits(1), held(QueryEvent.AssistantText.class));
+  void aRevokedEventStreamKeepsItsAdmissionUntilTheEventItIsWritingIsDone() throws IOException {
+    var server = harness.server(harness.registry(), 1);
     var sessionId = harness.create(server, "alice");
     var events = harness.openEventsOnOwnConnectionAdmitted(server, sessionId, "alice");
     var session = harness.sessions.get(sessionId);
-    var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(EVENT));
-    Await.latch("the event to be serialized", serializing);
+    var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(LARGE));
+    assertEquals(
+        "event:AssistantText",
+        Await.value(
+            "the event's write to start", CompletableFuture.supplyAsync(() -> line(events))));
 
     harness.tokens.revoke("alice");
-    var streamed = rest(events);
     var refused = open(server, sessionId, "alice");
 
-    assertEquals(List.of(), streamed);
     assertStreamRefused(refused);
     assertFalse(delivery.isDone());
-    release.countDown();
-    Await.value("the held delivery to end", delivery);
+    events.close();
+    Await.value("the event's write to end", delivery);
     harness.openEventsAdmitted(server, sessionId, "alice").close();
   }
 
@@ -139,13 +134,6 @@ final class AgentHttpServiceChurnAdmissionTest {
     return poll;
   }
 
-  /** A mapper that holds the serialization of every {@code type} until {@link #release}. */
-  private <T> JsonMapper held(Class<T> type) {
-    return JsonMapper.builder()
-        .addModule(new SimpleModule("held").addSerializer(type, new HeldSerializer<>(type)))
-        .build();
-  }
-
   private static void assertStreamRefused(HttpResponse<InputStream> resp) {
     assertEquals(429, resp.statusCode());
     assertEquals(
@@ -153,17 +141,11 @@ final class AgentHttpServiceChurnAdmissionTest {
     assertEquals(AdmissionHarness.TOO_MANY_REQUESTS, ResponseBodies.text(resp.body()));
   }
 
-  private final class HeldSerializer<T> extends StdSerializer<T> {
-
-    private HeldSerializer(Class<T> type) {
-      super(type);
-    }
-
-    @Override
-    public void serialize(T value, JsonGenerator gen, SerializationContext ctxt) {
-      serializing.countDown();
-      Await.latch("the test to release the serialization", release);
-      gen.writeString("held");
+  private static String line(BufferedReader reader) {
+    try {
+      return reader.readLine();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
   }
 }

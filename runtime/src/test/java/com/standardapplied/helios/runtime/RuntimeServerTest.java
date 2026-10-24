@@ -5,7 +5,7 @@
 package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,12 +15,12 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.SessionOptions;
+import io.helidon.webserver.http1.Http1Config;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
 
 final class RuntimeServerTest {
 
@@ -84,14 +84,6 @@ final class RuntimeServerTest {
         assertThrows(
             NullPointerException.class, () -> RuntimeServer.builder().withOptionsFactory(null));
     assertEquals("optionsFactory must not be null", ex.getMessage());
-  }
-
-  @Test
-  void withObjectMapperRejectsNull() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> RuntimeServer.builder().withObjectMapper(null));
-    assertEquals("objectMapper must not be null", ex.getMessage());
   }
 
   @Test
@@ -283,6 +275,33 @@ final class RuntimeServerTest {
     }
   }
 
+  /**
+   * Helidon serves HTTP/1 by the first of its HTTP/1 configs; the one it discovers on the classpath
+   * follows the server's own.
+   */
+  @Test
+  void theServerBoundsEveryBodyAndAnswersExpectContinueAtOnce() {
+    var limits = new RequestLimits(4096, 8);
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(factory())
+            .withRequestLimits(limits)
+            .withoutAuthentication()
+            .build();
+    try (server) {
+      var config = server.configForTests();
+      assertEquals(limits.maxRequestBytes(), config.maxPayloadSize());
+      var http1 =
+          config.protocols().stream()
+              .filter(Http1Config.class::isInstance)
+              .map(Http1Config.class::cast)
+              .toList();
+      assertFalse(http1.isEmpty());
+      assertTrue(http1.getFirst().continueImmediately());
+    }
+  }
+
   private static String nonLoopbackRefusal(String host) {
     return "host "
         + host
@@ -337,26 +356,6 @@ final class RuntimeServerTest {
             .build();
     server.close();
     server.close();
-  }
-
-  @Test
-  void buildWithCustomObjectMapperHonors() {
-    var customMapper = JsonMapper.builder().build();
-    var server =
-        RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
-            .withOptionsFactory(factory())
-            .withObjectMapper(customMapper)
-            .withPort(0)
-            .withoutAuthentication()
-            .withHost("127.0.0.1")
-            .build();
-    try {
-      assertNotNull(server);
-      assertTrue(server.port() > 0);
-    } finally {
-      server.close();
-    }
   }
 
   @Test

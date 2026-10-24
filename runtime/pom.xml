@@ -17,7 +17,7 @@
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
         <!--
-          UnreadBodyGuardTest counts what the server reads from the JDK's jdk.SocketRead events,
+          RuntimeServerRequestFramingTest counts what the server reads from the JDK's jdk.SocketRead events,
           through jdk.jfr, which the main module does not require.
         -->
         <helios.test.opens>--add-modules jdk.jfr --add-reads com.standardapplied.helios.runtime=jdk.jfr</helios.test.opens>
