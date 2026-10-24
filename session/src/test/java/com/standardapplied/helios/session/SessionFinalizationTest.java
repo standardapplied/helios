@@ -21,11 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.TurnRunner;
@@ -36,6 +39,7 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -214,6 +218,82 @@ final class SessionFinalizationTest {
     session.close();
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsCannotKeepAClosedSessionsQuestionPending() {
+    var question =
+        new ToolCall(
+            "c-ask",
+            AskUserQuestionTool.NAME,
+            Map.of(
+                "question",
+                "Proceed?",
+                "options",
+                List.of(
+                    Map.of("label", "Yes", "description", "go on"),
+                    Map.of("label", "No", "description", "stop"))));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(question).withTextTurn("done").build();
+    var provider = new RecordingProvider(order);
+    var limits =
+        SessionLimits.newBuilder()
+            .withStopGrace(SHORT_GRACE)
+            .withToolTimeoutDefault(NOT_REACHED)
+            .build();
+    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
+    var asked = new CountDownLatch(1);
+    session
+        .events()
+        .subscribe(
+            new CollectingSubscriber(
+                event -> {
+                  if (event instanceof QueryEvent.QuestionAsked) {
+                    asked.countDown();
+                  }
+                }));
+    session.send("go");
+    Await.latch("the question to be asked", asked);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  @Test
+  void aCancellationCallbackThatNeverReturnsCannotKeepAClosedSessionsBackOffAsleep() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(new TransientStreamException("reset", null, "test")))
+            .withTextTurn("done")
+            .build();
+    var provider = new RecordingProvider(order);
+    var limits =
+        SessionLimits.newBuilder()
+            .withStopGrace(SHORT_GRACE)
+            .withStreamRetryPolicy(
+                new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
+            .build();
+    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
+    var retried = new CountDownLatch(1);
+    session
+        .events()
+        .subscribe(
+            new CollectingSubscriber(
+                event -> {
+                  if (event instanceof QueryEvent.TurnRetried) {
+                    retried.countDown();
+                  }
+                }));
+    session.send("go");
+    Await.latch("the turn to be retried", retried);
+
+    session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertEquals(1, model.calls().size());
   }
 
   @Test

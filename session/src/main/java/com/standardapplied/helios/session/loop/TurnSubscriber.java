@@ -220,18 +220,14 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * <p>An interrupt ends the stream as cancellation does, unless another ending came first, and
    * this returns the turn's outcome with the interrupt status restored.
    *
-   * <p>The token is also read as this waits ({@link TokenWait}), so a callback registered before
-   * this one that blocks cannot keep the stream open. The cancellation callback is removed in
-   * {@code finally} so a long-lived session token does not accumulate one stale registration per
-   * turn (see the {@code CancellationToken.onCancel} cleanup contract).
+   * <p>The cancellation callback is removed in {@code finally} so a long-lived session token does
+   * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
+   * cleanup contract).
    */
   StreamedTurn awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
     try {
-      if (!TokenWait.opens(done, cancellation)) {
-        end(new CancellationException(CANCELLED), true);
-        done.await();
-      }
+      done.await();
     } catch (InterruptedException e) {
       end(e, true);
       Thread.currentThread().interrupt();
