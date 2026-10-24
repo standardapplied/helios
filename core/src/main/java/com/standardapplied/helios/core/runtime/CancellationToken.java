@@ -111,7 +111,7 @@ public final class CancellationToken {
   /**
    * Signal cancellation as {@link #cancel(String)} does, but run each claimed callback on a virtual
    * thread of its own, concurrently and in no order. The token is cancelled when this returns; a
-   * callback that blocks or throws holds up only the returned future, never the caller nor another
+   * callback that blocks or throws holds up only the returned future, not the caller or another
    * callback. Each {@link Error} a callback throws is handed to {@code onError} on that callback's
    * thread. A caller that needs two steps in order registers one callback that does both.
    *
