@@ -38,7 +38,7 @@ import java.util.Optional;
 public class TransientStreamException extends RuntimeException {
 
   private final String providerName;
-  private final Optional<Duration> retryAfter;
+  private final Duration retryAfter;
 
   /**
    * A failure with no {@code Retry-After}.
@@ -84,7 +84,7 @@ public class TransientStreamException extends RuntimeException {
           "retryAfter must not be negative, got " + retryAfter.get());
     }
     this.providerName = providerName;
-    this.retryAfter = retryAfter;
+    this.retryAfter = retryAfter.orElse(null);
   }
 
   /**
@@ -103,6 +103,6 @@ public class TransientStreamException extends RuntimeException {
    * @return the wait, or empty when the provider named none
    */
   public Optional<Duration> retryAfter() {
-    return retryAfter;
+    return Optional.ofNullable(retryAfter);
   }
 }
