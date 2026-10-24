@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -18,14 +19,17 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.Exchange;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ExchangeTurns;
 import com.standardapplied.helios.core.test.RecordingSubscriber;
+import com.standardapplied.helios.core.test.StubHttpServer;
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -164,6 +168,28 @@ class PauseContinuationTest {
 
     assertEquals(refused.getMessage(), error.message());
     assertSame(refused, error.cause());
+  }
+
+  @Test
+  void aContinuationAnsweredOverloadedEndsTheStreamInOneTransientError() throws IOException {
+    var overloaded = "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}";
+    try (var server =
+            StubHttpServer.start(
+                InetAddress.getLoopbackAddress(),
+                0,
+                r -> new StubHttpServer.Reply(529, Map.of(), overloaded));
+        var client = HttpClientFactory.create()) {
+      var config = ModelConfig.newBuilder().withBaseUrl(server.uri().toString()).build();
+      var streams = new AnthropicStreams(config, client, List.of());
+
+      var error = resumeFailingWith(streams::open);
+
+      var transientFailure = assertInstanceOf(TransientStreamException.class, error.cause());
+      var cause = assertInstanceOf(AnthropicException.class, transientFailure.getCause());
+      assertEquals(529, cause.statusCode());
+      assertEquals("API error (status 529): " + overloaded, error.message());
+      assertEquals(1, server.requests().size());
+    }
   }
 
   @Test
@@ -508,7 +534,9 @@ class PauseContinuationTest {
   }
 
   private StreamEvent.Error lastError(ChatExchange.StreamOpener<MessagesRequest> segments) {
-    return assertInstanceOf(StreamEvent.Error.class, events(segments).getLast());
+    var events = events(segments);
+    assertEquals(1, events.stream().filter(StreamEvent.Error.class::isInstance).count());
+    return assertInstanceOf(StreamEvent.Error.class, events.getLast());
   }
 
   private List<StreamEvent> events(ChatExchange.StreamOpener<MessagesRequest> segments) {

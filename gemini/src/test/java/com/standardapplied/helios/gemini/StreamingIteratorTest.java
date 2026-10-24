@@ -83,7 +83,7 @@ class StreamingIteratorTest {
       var error = (StreamEvent.Error) event;
       assertTrue(error.message().contains("idle timeout"));
       assertInstanceOf(GeminiException.class, error.cause());
-      assertTrue(((GeminiException) error.cause()).isRetryable());
+      assertFalse(((GeminiException) error.cause()).isRetryable());
     }
   }
 

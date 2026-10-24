@@ -25,7 +25,7 @@ import com.standardapplied.helios.gemini.api.InteractionRequest;
  */
 public class GeminiProvider implements ModelProvider {
 
-  private static final String PROVIDER_NAME = "gemini";
+  static final String PROVIDER_NAME = "gemini";
 
   @Override
   public String name() {

@@ -80,9 +80,9 @@ class AnthropicExceptionTest {
   }
 
   @Test
-  void isRetryableNetworkError() {
-    assertTrue(new AnthropicException("timeout").isRetryable());
-    assertTrue(new AnthropicException("timeout", new RuntimeException()).isRetryable());
+  void aFailureWithoutAStatusIsNotRetryable() {
+    assertFalse(new AnthropicException("timeout").isRetryable());
+    assertFalse(new AnthropicException("timeout", new RuntimeException()).isRetryable());
   }
 
   @Test

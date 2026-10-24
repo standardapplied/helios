@@ -12,11 +12,15 @@ import java.util.Objects;
  * Policy controlling how the agent loop retries a model-stream attempt that failed with a {@link
  * com.standardapplied.helios.core.model.TransientStreamException}.
  *
- * <p>The loop owns retry orchestration; the provider classifies which exceptions are transient. On
- * each failure the loop emits a {@link QueryEvent.TurnRetried} carrying the next back-off delay,
- * sleeps with cancellation honoured, and re-invokes {@code model.chatStream(...)} from the same
- * history snapshot. When the attempt budget is exhausted, the loop terminates the session as {@link
- * ResultMessage.ErrorTransientStream}.
+ * <p>The loop owns retry orchestration; the provider classifies which exceptions are transient: a
+ * transport failure, a 408, 429 or 5xx answer to the stream request, or an error event the provider
+ * marks retryable mid-stream. On each failure the loop emits a {@link QueryEvent.TurnRetried}
+ * carrying the next back-off delay, sleeps with cancellation honoured, and re-invokes {@code
+ * model.chatStream(...)} from the same history snapshot. When the attempt budget is exhausted, the
+ * loop terminates the session as {@link ResultMessage.ErrorTransientStream}.
+ *
+ * <p>The delay is the answer's {@code Retry-After}, capped by {@link Backoff#maxDelay()} and
+ * without jitter, when the failed answer carried one, and {@link #nextDelay(int)} otherwise.
  *
  * <p>The {@code maxAttempts} field counts the <i>total</i> attempts including the initial one,
  * mirroring the existing {@link com.standardapplied.helios.core.fault.RetryPolicy} convention.

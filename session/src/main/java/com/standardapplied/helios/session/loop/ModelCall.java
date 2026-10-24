@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
 import java.time.Duration;
 import java.util.List;
@@ -60,10 +61,12 @@ final class ModelCall {
 
   /**
    * Stream the model's response, retrying under {@link SessionLimits#streamRetryPolicy()}. Each
-   * failed attempt emits a {@link QueryEvent.TurnRetried} carrying the next back-off delay; the
-   * back-off sleep honours the session's {@link CancellationToken} so wall-clock / explicit-cancel
-   * terminations abort cleanly without burning the full delay. The caller maps a still-failing
-   * transient error to {@link
+   * failed attempt emits a {@link QueryEvent.TurnRetried} carrying the next back-off delay: the
+   * failure's {@link TransientStreamException#retryAfter()} capped by the policy's {@link
+   * com.standardapplied.helios.core.fault.Backoff#maxDelay()}, or else the policy's {@link
+   * StreamRetryPolicy#nextDelay(int)}; the back-off sleep honours the session's {@link
+   * CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly without burning
+   * the full delay. The caller maps a still-failing transient error to {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
@@ -85,7 +88,7 @@ final class ModelCall {
           || state.cancellation().isCancelled()) {
         return new Attempts(turn, attempt);
       }
-      var backoff = policy.nextDelay(attempt);
+      var backoff = delay(policy, attempt, transientErr);
       emitter.emit(
           state,
           new QueryEvent.TurnRetried(
@@ -100,6 +103,15 @@ final class ModelCall {
         return new Attempts(turn, attempt);
       }
     }
+  }
+
+  private static Duration delay(
+      StreamRetryPolicy policy, int failedAttempt, TransientStreamException failure) {
+    var cap = policy.backoff().maxDelay();
+    return failure
+        .retryAfter()
+        .map(wait -> wait.compareTo(cap) < 0 ? wait : cap)
+        .orElseGet(() -> policy.nextDelay(failedAttempt));
   }
 
   /**
@@ -186,11 +198,10 @@ final class ModelCall {
    * callback registration is removed in {@code finally} so a long-lived session token does not
    * accumulate dead callbacks across many retries.
    *
-   * <p>{@code delay} is contractually non-null and non-negative — callers pass {@link
-   * com.standardapplied.helios.session.StreamRetryPolicy#nextDelay(int)} which is itself bounded by
-   * {@link com.standardapplied.helios.core.fault.Backoff}'s validation. Zero short-circuits the
-   * latch path; the caller's subsequent retry attempt re-checks cancellation before issuing the
-   * next request.
+   * <p>{@code delay} is contractually non-null and non-negative — the policy's back-off is bounded
+   * by {@link com.standardapplied.helios.core.fault.Backoff}'s validation and a {@code Retry-After}
+   * by {@link TransientStreamException}'s. Zero short-circuits the latch path; the caller's
+   * subsequent retry attempt re-checks cancellation before issuing the next request.
    */
   private static boolean sleepHonouringCancellation(Duration delay, CancellationToken token) {
     if (token.isCancelled()) {

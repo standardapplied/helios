@@ -36,6 +36,13 @@ public sealed interface Backoff permits Backoff.Fixed, Backoff.Exponential {
   }
 
   /**
+   * The longest delay this strategy waits before any attempt, jitter aside.
+   *
+   * @return the maximum delay
+   */
+  Duration maxDelay();
+
+  /**
    * Create a fixed backoff strategy.
    *
    * @param delay the constant delay between retries
@@ -83,6 +90,11 @@ public sealed interface Backoff permits Backoff.Fixed, Backoff.Exponential {
     @Override
     public Duration delay(int attempt, double jitter) {
       return applyJitter(delay, jitter);
+    }
+
+    @Override
+    public Duration maxDelay() {
+      return delay;
     }
   }
 
