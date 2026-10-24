@@ -211,11 +211,37 @@ final class SessionFinalizationTest {
         ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
     var provider = new RecordingProvider(order);
     var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
-    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
+    var token = provider.context.cancellation();
+    token.onCancel(() -> Uninterruptible.await(released));
+    var armed = token.activeCallbackCountForTests();
     session.send("go");
     Await.latch("the model call to start", entered);
+    Await.until(
+        "the stream to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
 
     session.close();
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  @Test
+  void aHostsOwnCancelOfTheSessionsTokenEndsTheModelStreamWhileACallbackNeverReturns() {
+    var entered = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+    var provider = new RecordingProvider(order);
+    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
+    var token = provider.context.cancellation();
+    token.onCancel(() -> Uninterruptible.await(released));
+    var armed = token.activeCallbackCountForTests();
+    session.send("go");
+    Await.latch("the model call to start", entered);
+    Await.until(
+        "the stream to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
+
+    Thread.ofVirtual().start(() -> token.cancel("host cancelled"));
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
   }
