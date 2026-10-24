@@ -250,6 +250,7 @@ final class ModelCallTest {
 
     assertEquals(2, attempts.count());
     assertEquals(2, model.calls.get());
+    assertEquals(0, state.cancellation().activeCallbackCountForTests());
   }
 
   private static SessionLimits retrying(int attempts, Duration backoff) {
