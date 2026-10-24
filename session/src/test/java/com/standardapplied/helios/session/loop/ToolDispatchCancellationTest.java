@@ -156,7 +156,7 @@ final class ToolDispatchCancellationTest {
     var running = start(d, "stuck", session, NEVER);
     Await.latch("the tool to start", fixture.entered);
 
-    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    session.cancelAsync("session closed", fixture.ending::fail);
     Await.latch("the session's first callback to block", callbackEntered);
 
     assertCancelled("session closed", running);
@@ -176,7 +176,7 @@ final class ToolDispatchCancellationTest {
     d.expireLiveCalls();
     Await.latch("the call to be timed out", cancelled);
 
-    Thread.ofVirtual().start(() -> session.cancel("session closed"));
+    session.cancelAsync("session closed", fixture.ending::fail);
     Await.latch("the session's first callback to block", callbackEntered);
 
     assertCancelled("session closed", running);

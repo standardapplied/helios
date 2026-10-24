@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -110,7 +111,7 @@ final class DispatchedCall {
    */
   boolean endsBy(long until) {
     try {
-      ended.get(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+      ended.get(until - System.nanoTime(), TimeUnit.NANOSECONDS);
       return true;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -154,15 +155,20 @@ final class DispatchedCall {
   }
 
   /**
-   * Wait until {@code future} settles or {@code until} passes, reading the session's token as it
-   * waits and once more before it returns. A call the session's cancellation leaves running is
-   * abandoned.
+   * Wait until {@code future} settles, normally or not, or {@code until} passes, then read the
+   * session's token. The session's cancellation ends the wait through the call's link to that
+   * token, which settles the answer and completes what the stop grace waits on. A call the
+   * session's cancellation leaves running is abandoned.
    *
    * @return {@code true} if {@code future} settled
+   * @throws InterruptedException if the waiting thread is interrupted, even once {@code future}
+   *     settled
    * @throws CancellationException if the session's token is cancelled before this method returns
    */
   private boolean settlesBy(CompletableFuture<?> future, long until) throws InterruptedException {
-    var settled = TokenWait.settlesBy(future, parent, until);
+    var latch = new CountDownLatch(1);
+    future.whenComplete((result, failure) -> latch.countDown());
+    var settled = latch.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
     if (parent.isCancelled()) {
       var reason = parent.reason().orElseThrow();
       cancel(reason);

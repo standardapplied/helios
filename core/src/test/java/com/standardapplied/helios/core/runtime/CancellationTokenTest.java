@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.test.Await;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -281,21 +282,26 @@ final class CancellationTokenTest {
   // ── Linearization contract ───────────────────────────────────────────────
 
   @Test
-  void callbacksFireInRegistrationOrder() {
+  void cancelRunsALaterCallbackWhileAnEarlierOneBlocks() throws Exception {
     var t = new CancellationToken();
-    var order = new StringBuilder();
-    t.onCancel(() -> order.append('a'));
-    t.onCancel(() -> order.append('b'));
-    t.onCancel(() -> order.append('c'));
-    t.cancel("flush");
-    assertEquals("abc", order.toString());
+    var release = new CountDownLatch(1);
+    var later = new CountDownLatch(1);
+    t.onCancel(() -> Await.latch("the test to release the blocking callback", release));
+    t.onCancel(later::countDown);
+
+    var canceller = Thread.ofVirtual().start(() -> t.cancel("host"));
+    Await.latch("the later callback to run while the earlier one blocks", later);
+    assertTrue(canceller.isAlive(), "cancel returns only once every callback has run");
+
+    release.countDown();
+    Await.termination("the cancelling thread", canceller);
   }
 
   @Test
   void registerAndRemoveWhileCancelIsMidFireObeyContract() throws Exception {
-    // Callback A parks the cancelling thread outside the lock. While it is parked the token is
-    // already cancelled, so a new registration must fire immediately on the registering thread,
-    // and removing an already-claimed registration must be a no-op that still lets it fire.
+    // Callback A blocks the cancel outside the lock. While it blocks the token is already
+    // cancelled, so a new registration must fire immediately on the registering thread, and
+    // removing an already-claimed registration must be a no-op that still lets it fire.
     var t = new CancellationToken();
     var midFire = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -317,7 +323,6 @@ final class CancellationTokenTest {
     assertSame(CancellationToken.Registration.NOOP, late);
     assertEquals(1, lateFired.get(), "registration after cancellation fires on the caller");
     claimed.remove();
-    assertEquals(0, claimedFired.get(), "claimed callback has not yet run: canceller is parked");
     assertEquals(0, t.activeCallbackCountForTests(), "claimed registrations already drained");
 
     release.countDown();
@@ -367,8 +372,9 @@ final class CancellationTokenTest {
         });
     t.onCancel(cleanup::incrementAndGet);
     var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
-    assertSame(first, thrown);
-    assertEquals(List.of(second), List.of(thrown.getSuppressed()));
+    var suppressed = List.of(thrown.getSuppressed());
+    assertEquals(Set.of(first, second), Set.of(thrown, suppressed.getFirst()));
+    assertEquals(1, suppressed.size());
     assertEquals(1, cleanup.get(), "cleanup after a throwing callback must still run");
     assertTrue(t.isCancelled(), "state transition precedes callback dispatch");
     assertEquals(0, t.activeCallbackCountForTests());
@@ -392,8 +398,9 @@ final class CancellationTokenTest {
 
     var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
 
-    assertSame(first, thrown);
-    assertEquals(List.of(second), List.of(thrown.getSuppressed()));
+    var suppressed = List.of(thrown.getSuppressed());
+    assertEquals(1, suppressed.size());
+    assertEquals(Set.of(first, second), Set.of(thrown, suppressed.getFirst()));
     assertEquals(4, failures.get(), "every throwing callback must run exactly once");
     assertEquals(1, cleanup.get(), "repeated Error instances must not skip cleanup");
     assertEquals(Optional.of("host-failure"), t.reason());
@@ -401,6 +408,48 @@ final class CancellationTokenTest {
     assertFalse(t.cancel("retry"), "the failed dispatch must not undo cancellation");
     assertEquals(4, failures.get());
     assertEquals(1, cleanup.get());
+  }
+
+  @Test
+  void cancelSuppressesAnErrorThrownTwiceOnceAndNeverInItself() {
+    var t = new CancellationToken();
+    var first = new AssertionError("first");
+    var repeated = new AssertionError("repeated");
+    var firstThread = new CompletableFuture<Thread>();
+    t.onCancel(
+        () -> {
+          firstThread.complete(Thread.currentThread());
+          throw first;
+        });
+    for (var i = 0; i < 2; i++) {
+      t.onCancel(
+          () -> {
+            Await.termination("the first error's thread", Await.value("it", firstThread));
+            throw repeated;
+          });
+    }
+
+    var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
+
+    assertSame(first, thrown);
+    assertEquals(List.of(repeated), List.of(thrown.getSuppressed()));
+  }
+
+  @Test
+  void cancelThrowsAnErrorEveryCallbackThrewWithNothingSuppressed() {
+    var t = new CancellationToken();
+    var shared = new AssertionError("shared");
+    for (var i = 0; i < 2; i++) {
+      t.onCancel(
+          () -> {
+            throw shared;
+          });
+    }
+
+    var thrown = assertThrows(AssertionError.class, () -> t.cancel("host-failure"));
+
+    assertSame(shared, thrown);
+    assertEquals(0, thrown.getSuppressed().length);
   }
 
   @Test
@@ -477,15 +526,68 @@ final class CancellationTokenTest {
   }
 
   @Test
-  void cancelAsyncRunsTheCallbacksOffTheCallingThread() {
+  void cancelAsyncWithNoCallbackReturnsACompletedFuture() {
     var token = new CancellationToken();
-    var ranOn = new AtomicReference<Thread>();
-    token.onCancel(() -> ranOn.set(Thread.currentThread()));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    assertTrue(fired.isDone(), "nothing to run");
+    assertEquals(Optional.of("closed"), token.reason());
+  }
+
+  @Test
+  void cancelAsyncRunsEachCallbackOnAVirtualThreadOfItsOwn() {
+    var token = new CancellationToken();
+    var first = new CompletableFuture<Thread>();
+    var second = new CompletableFuture<Thread>();
+    token.onCancel(() -> first.complete(Thread.currentThread()));
+    token.onCancel(() -> second.complete(Thread.currentThread()));
 
     Await.value("the callbacks to have run", token.cancelAsync("closed", error -> {}));
 
-    assertTrue(ranOn.get().isVirtual(), "callbacks run on a virtual thread");
-    assertFalse(ranOn.get() == Thread.currentThread(), "not on the caller's thread");
+    var threads = List.of(first.join(), second.join());
+    assertTrue(threads.stream().allMatch(Thread::isVirtual), "callbacks run on virtual threads");
+    assertFalse(threads.get(0) == threads.get(1), "each callback has a thread of its own");
+    assertFalse(threads.contains(Thread.currentThread()), "not on the caller's thread");
+    assertEquals("helios-cancellation-callback", threads.get(0).getName());
+  }
+
+  @Test
+  void cancelAsyncRunsALaterCallbackWhileAnEarlierOneBlocks() {
+    var token = new CancellationToken();
+    var release = new CountDownLatch(1);
+    var later = new CountDownLatch(1);
+    token.onCancel(() -> Await.latch("the earlier callback released", release));
+    token.onCancel(later::countDown);
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    try {
+      Await.latch("the later callback to run", later);
+      assertFalse(fired.isDone(), "the earlier callback still blocks");
+    } finally {
+      release.countDown();
+    }
+    Await.value("the callbacks to have run", fired);
+  }
+
+  @Test
+  void cancelAsyncCompletesOnlyOnceALaterCallbackThatBlocksReturns() {
+    var token = new CancellationToken();
+    var earlier = new CompletableFuture<Thread>();
+    var release = new CountDownLatch(1);
+    token.onCancel(() -> earlier.complete(Thread.currentThread()));
+    token.onCancel(() -> Await.latch("the later callback released", release));
+
+    var fired = token.cancelAsync("closed", error -> {});
+
+    try {
+      Await.termination("the earlier callback's thread to end", Await.value("it ran", earlier));
+      assertFalse(fired.isDone(), "the later callback still blocks");
+    } finally {
+      release.countDown();
+    }
+    Await.value("the callbacks to have run", fired);
   }
 
   @Test
@@ -507,8 +609,10 @@ final class CancellationTokenTest {
 
     Await.value("the callbacks to have run", token.cancelAsync("closed", errors::add));
 
-    assertEquals(List.of(first, second), errors);
+    assertEquals(Set.of(first, second), Set.copyOf(errors));
+    assertEquals(2, errors.size());
     assertEquals(0, first.getSuppressed().length);
+    assertEquals(0, second.getSuppressed().length);
     assertEquals(1, laterCallbacks.get());
   }
 
