@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  * The end of one session's runtime, in the reverse order of what the session acquired: the session
  * is cancelled ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which
  * cancels and interrupts every tool call still running, and the token's callbacks and the calls are
- * given {@link SessionLimits#teardownGrace()} to end; the execution provider's {@code onSessionEnd}
+ * given {@link SessionLimits#stopGrace()} to end; the execution provider's {@code onSessionEnd}
  * runs on a thread of its own and is given the same grace to return; the scheduler is shut down;
  * event subscribers are given the same grace to drain. A tool call or {@code onSessionEnd} still
  * running when its grace has passed is logged as such, never taken for ended.

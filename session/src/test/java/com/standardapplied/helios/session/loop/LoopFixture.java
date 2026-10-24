@@ -9,7 +9,6 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
@@ -53,8 +52,6 @@ final class LoopFixture implements AutoCloseable {
     return new ToolDispatch(
         new SessionContext(sessionId, new CancellationToken(), clock, secrets),
         tools,
-        ConcurrencyLimits.defaults(),
-        scheduler,
         new SessionEnding("test", new CancellationToken()));
   }
 

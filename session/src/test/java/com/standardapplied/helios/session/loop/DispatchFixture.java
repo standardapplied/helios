@@ -15,7 +15,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -28,8 +27,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * What {@link ToolDispatchTest} and {@link ToolDispatchCancellationTest} share: a {@link
- * ManualScheduler} on which every deadline is armed beyond the hang guard, tools that block on
+ * What {@link ToolDispatchTest} and {@link ToolDispatchCancellationTest} share: deadlines beyond
+ * the hang guard that a test fires with {@link ToolDispatch#expireLiveCalls()}, tools that block on
  * {@link #release} until {@link #close} opens it, and dispatches run on their own virtual threads.
  */
 final class DispatchFixture implements AutoCloseable {
@@ -38,12 +37,11 @@ final class DispatchFixture implements AutoCloseable {
   static final Duration NEVER = Duration.ofMinutes(10);
   static final Duration SHORT = Duration.ofMillis(1);
 
-  final ManualScheduler scheduler = new ManualScheduler();
   final SessionEnding ending = new SessionEnding("dispatch", new CancellationToken());
   final CountDownLatch release = new CountDownLatch(1);
   final CountDownLatch entered = new CountDownLatch(1);
   final CountDownLatch callbackRelease = new CountDownLatch(1);
-  final CountDownLatch schedulerFree = new CountDownLatch(1);
+  final AtomicInteger reads = new AtomicInteger();
 
   /** What a dispatch on its own thread ended with, and whether that thread was left interrupted. */
   record Ending(ToolResult result, RuntimeException thrown, boolean interrupted) {}
@@ -60,16 +58,10 @@ final class DispatchFixture implements AutoCloseable {
   public void close() {
     release.countDown();
     callbackRelease.countDown();
-    schedulerFree.countDown();
-    scheduler.shutdownNow();
-  }
-
-  ToolDispatch dispatcher(ConcurrencyLimits limits, ToolBinding... bindings) {
-    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), limits, scheduler, ending);
   }
 
   ToolDispatch dispatcher(ToolBinding... bindings) {
-    return dispatcher(ConcurrencyLimits.defaults(), bindings);
+    return new ToolDispatch(CTX, new ToolRegistry(List.of(bindings)), ending);
   }
 
   /**
@@ -78,12 +70,7 @@ final class DispatchFixture implements AutoCloseable {
   ToolDispatch dispatcher(SecretRegistry secrets, ToolBinding... bindings) {
     var session =
         new SessionContext(CTX.sessionId(), new CancellationToken(), CTX.clock(), secrets);
-    return new ToolDispatch(
-        session,
-        new ToolRegistry(List.of(bindings)),
-        ConcurrencyLimits.defaults(),
-        scheduler,
-        ending);
+    return new ToolDispatch(session, new ToolRegistry(List.of(bindings)), ending);
   }
 
   static ToolBinding binding(String name, ToolCategory category, ToolExecutor executor) {
@@ -169,42 +156,36 @@ final class DispatchFixture implements AutoCloseable {
     };
   }
 
-  /**
-   * The next call of {@code d}'s {@code write} tool queues and starts only once {@link #release}
-   * opens.
-   */
-  void assertTheNextWriterWaitsForRelease(ToolDispatch d, AtomicInteger starts) {
-    var next = start(d, "write");
-    Await.until(
-        "the next writer to queue for the write permit",
-        () -> d.permitsFor(ToolCategory.WRITE).queued() == 1);
-    assertEquals(1, starts.get(), "the next writer has not started");
-
-    release.countDown();
-    assertEquals(ToolResult.success("done"), next.ending("the next dispatch").result());
-    assertEquals(2, starts.get());
+  /** A {@code read} tool that counts its runs in {@link #reads} and answers {@code read}. */
+  ToolBinding reader() {
+    return binding(
+        "read",
+        ToolCategory.READ,
+        (args, ctx) -> {
+          reads.incrementAndGet();
+          return ToolResult.success("read");
+        });
   }
 
   /**
-   * The next call of {@code d}'s {@code write} tool is refused at once because the earlier writer
-   * did not stop, and its tool never starts; once {@link #release} opens and that writer ends, the
-   * next one runs.
+   * The next call of {@code d}'s {@link #reader() read} tool is refused at once because the call to
+   * {@code stuck} did not stop, and its tool never starts; once {@link #release} opens and that
+   * call's work ends, the same call runs.
    */
-  void assertTheNextWriterIsRefusedUntilTheStuckOneEnds(ToolDispatch d, AtomicInteger starts) {
+  void assertTheNextCallIsRefusedUntilTheStuckOneEnds(ToolDispatch d) {
     assertEquals(
         new ToolResult(
             new ToolOutcome.Rejected(
-                "ToolDispatch", "tool 'write' did not stop; no tool runs until it ends"),
-            "blocked by ToolDispatch: tool 'write' did not stop; no tool runs until it ends",
+                "ToolDispatch", "tool 'stuck' did not stop; no tool runs until it ends"),
+            "blocked by ToolDispatch: tool 'stuck' did not stop; no tool runs until it ends",
             List.of()),
-        start(d, "write").ending("the refused dispatch").result());
-    assertEquals(1, starts.get(), "the refused writer's tool never started");
+        start(d, "read").ending("the refused dispatch").result());
+    assertEquals(0, reads.get(), "the refused tool never started");
 
     release.countDown();
     awaitIdle(d);
-    assertEquals(
-        ToolResult.success("done"), start(d, "write").ending("the next dispatch").result());
-    assertEquals(2, starts.get());
+    assertEquals(ToolResult.success("read"), start(d, "read").ending("the next dispatch").result());
+    assertEquals(1, reads.get());
   }
 
   /**

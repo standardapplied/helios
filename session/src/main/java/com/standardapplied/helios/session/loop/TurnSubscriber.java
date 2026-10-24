@@ -51,7 +51,7 @@ import java.util.concurrent.ScheduledExecutorService;
  * <h2>Cancelling the subscription</h2>
  *
  * The subscription is the provider's code, so it is cancelled through {@link StreamCancel}, within
- * {@code cancelGrace} ({@link com.standardapplied.helios.session.SessionLimits#teardownGrace()}): a
+ * {@code cancelGrace} ({@link com.standardapplied.helios.session.SessionLimits#stopGrace()}): a
  * cancel that blocks never strands the runner.
  *
  * <h2>Host errors</h2>

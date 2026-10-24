@@ -33,7 +33,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -170,7 +169,7 @@ final class ToolOutcomeSessionTest {
             .withLimits(
                 SessionLimits.newBuilder()
                     .withToolTimeoutDefault(limit)
-                    .withToolStopGrace(Duration.ofMinutes(10))
+                    .withStopGrace(Duration.ofMinutes(10))
                     .build());
 
     assertEquals(
@@ -309,31 +308,6 @@ final class ToolOutcomeSessionTest {
         events.eventsOf(QueryEvent.ToolResult.class).stream()
             .map(QueryEvent.ToolResult::result)
             .toList());
-  }
-
-  @Test
-  void aRunningCallsDeadlineIsOnTheSessionsSchedulerAndAFinishedCallsIsGone() {
-    var entered = new CountDownLatch(1);
-    var options =
-        withTools(
-            tool("quick", (args, ctx) -> ToolResult.success("done")),
-            tool(
-                "holds",
-                (args, ctx) -> {
-                  entered.countDown();
-                  return blockUntilInterrupted();
-                }));
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("quick"), call("holds")).build();
-    try (var session = (AgentSessionImpl) AgentSession.create(options.withModel(model).build())) {
-      session.send(UserMessage.text("go"));
-      Await.latch("the call to start", entered);
-
-      var scheduler = (ScheduledThreadPoolExecutor) session.lifecycleForTests().scheduler();
-
-      Await.until(
-          "only the session's wall-clock deadline and the running call's, not the finished call's",
-          () -> scheduler.getQueue().size() == 2);
-    }
   }
 
   private static ToolResult blockUntilInterrupted() {

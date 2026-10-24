@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,47 +23,36 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.RunnableScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
  * The interleavings {@link ToolDispatchTest} cannot force through the dispatcher, whose caller
- * always waits: the deadline passes before the worker is admitted, and no caller has yet cancelled
- * the call, and the session's token is cancelled, its callbacks held up by an earlier one, before
- * the caller reads the call's result or its timeout. A scheduler on which every deadline is overdue
- * fires it as it is armed, before the worker starts; a scheduler whose only thread is busy never
- * fires it. A test that holds a category's permits or its scope's lock itself decides when a queued
- * worker is admitted.
+ * always waits: the deadline passes or the session's token is cancelled before the worker starts
+ * the tool, and no caller has yet cancelled the call, and the session's token is cancelled, its
+ * callbacks held up by an earlier one, before the caller reads the call's result or its timeout. A
+ * set of live calls that cancels the session as the call is added to it does so after the call is
+ * linked to the session and before its worker starts.
  */
 final class DispatchedCallTest {
 
   private static final Duration NEVER = Duration.ofMinutes(10);
 
-  private final Overdue scheduler = new Overdue();
   private final AtomicInteger runs = new AtomicInteger();
-  private final Set<DispatchedCall.Live> live = ConcurrentHashMap.newKeySet();
+  private final Set<DispatchedCall> live = ConcurrentHashMap.newKeySet();
   private final SessionEnding ending =
       new SessionEnding("dispatched-call", new CancellationToken());
-  private final ScheduledThreadPoolExecutor busy = new ScheduledThreadPoolExecutor(1);
-  private final CountDownLatch busyRelease = new CountDownLatch(1);
   private final CountDownLatch callbackEntered = new CountDownLatch(1);
   private final CountDownLatch callbackRelease = new CountDownLatch(1);
-  private final CountDownLatch toolRelease = new CountDownLatch(1);
 
   @AfterEach
-  void stopTheSchedulers() {
-    busyRelease.countDown();
+  void releaseTheCallbacks() {
     callbackRelease.countDown();
-    toolRelease.countDown();
-    scheduler.shutdownNow();
-    busy.shutdownNow();
   }
 
   private DispatchedCall dispatched(Duration timeout) {
@@ -70,16 +60,19 @@ final class DispatchedCallTest {
   }
 
   private DispatchedCall dispatched(Duration timeout, CancellationToken session) {
-    return dispatched(timeout, session, new CategoryPermits(1, new CategoryPermits.Scope()));
+    return dispatched(timeout, session, live, this::counting);
   }
 
   private DispatchedCall dispatched(
-      Duration timeout, CancellationToken session, CategoryPermits permits) {
-    return dispatched(timeout, session, permits, this::counting);
+      Duration timeout, CancellationToken session, ToolExecutor executor) {
+    return dispatched(timeout, session, live, executor);
   }
 
   private DispatchedCall dispatched(
-      Duration timeout, CancellationToken session, CategoryPermits permits, ToolExecutor executor) {
+      Duration timeout,
+      CancellationToken session,
+      Set<DispatchedCall> liveCalls,
+      ToolExecutor executor) {
     return new DispatchedCall(
         ToolBinding.newBuilder(
                 Tool.newBuilder().withName("t").withDescription("t").withExecutor(executor).build())
@@ -90,20 +83,13 @@ final class DispatchedCallTest {
         session,
         timeout,
         key -> false,
-        permits,
-        live,
+        liveCalls,
+        abandoned -> {},
         ending);
   }
 
   private ToolResult counting(Map<String, Object> args, ToolContext ctx) {
     return ToolResult.success("run " + runs.incrementAndGet());
-  }
-
-  /** Counts its run, then waits for {@link #toolRelease} through every interruption. */
-  private ToolResult blocking(Map<String, Object> args, ToolContext ctx) {
-    var result = counting(args, ctx);
-    Uninterruptible.await(toolRelease);
-    return result;
   }
 
   /** A session token whose first callback signals {@link #callbackEntered}, then blocks. */
@@ -123,124 +109,105 @@ final class DispatchedCallTest {
     Await.latch("the session's first callback to block", callbackEntered);
   }
 
-  private static void neverRefused(String reason) {
-    throw new AssertionError("refused: " + reason);
-  }
-
-  /** Runs each deadline as it is armed, as if its delay had already passed. */
-  private static final class Overdue extends ScheduledThreadPoolExecutor {
-
-    Overdue() {
-      super(1);
-      setRemoveOnCancelPolicy(true);
-    }
-
-    @Override
-    protected <V> RunnableScheduledFuture<V> decorateTask(
-        Runnable runnable, RunnableScheduledFuture<V> task) {
-      runnable.run();
-      return task;
-    }
+  /**
+   * The live calls of a call whose session is cancelled, behind its blocked first callback, as the
+   * call is added: after the call is linked to the session, before its worker starts.
+   */
+  private Set<DispatchedCall> cancellingOnAdd(CancellationToken session) {
+    return new CopyOnWriteArraySet<>() {
+      @Override
+      public boolean add(DispatchedCall call) {
+        cancelBehindTheBlockedCallback(session);
+        return super.add(call);
+      }
+    };
   }
 
   @Test
-  void aDeadlineThatFiredBeforeTheWorkerWasAdmittedKeepsTheToolFromStarting() {
-    dispatched(NEVER).start(scheduler);
+  void aDeadlineThatFiredBeforeTheWorkerStartedKeepsTheToolFromStarting() {
+    var dispatched = dispatched(NEVER);
+    dispatched.expire();
+
+    dispatched.start();
 
     Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
   @Test
-  void aWorkerReachingAdmissionPastItsDeadlineKeepsTheToolFromStarting() {
-    busy.execute(() -> Uninterruptible.await(busyRelease));
+  void aCallerInterruptedBeforeTheWorkerStartedKeepsTheToolFromStarting() {
+    var dispatched = dispatched(NEVER);
+    Thread.currentThread().interrupt();
+    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
 
-    dispatched(Duration.ofNanos(1)).start(busy);
+    dispatched.start();
 
     Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
   @Test
-  void aWorkerReachingAdmissionAfterItsSessionWasCancelledKeepsTheToolFromStarting()
-      throws InterruptedException {
+  void aWorkerStartingPastItsDeadlineKeepsTheToolFromStarting() {
+    dispatched(Duration.ofNanos(1)).start();
+
+    Await.until("the worker to end", live::isEmpty);
+    assertEquals(0, runs.get(), "the tool never ran");
+  }
+
+  @Test
+  void aWorkerStartingAfterItsSessionWasCancelledKeepsTheToolFromStarting() {
     var session = blockedSession();
-    var permits = new CategoryPermits(1, new CategoryPermits.Scope());
-    var holder = dispatched(NEVER, session, permits);
-    permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
-    dispatched(NEVER, session, permits).start(busy);
-    Await.until("the worker to queue for the permit", () -> permits.queued() == 1);
-    cancelBehindTheBlockedCallback(session);
+    var calls = cancellingOnAdd(session);
 
-    permits.release(holder);
+    dispatched(NEVER, session, calls, this::counting).start();
 
-    Await.until("the worker to end", live::isEmpty);
+    Await.until("the worker to end", calls::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
   }
 
   @Test
-  void aCallArrivingWhileAnEarlierOneWaitsIsNotAdmittedBeforeIt() throws InterruptedException {
-    var scope = new CategoryPermits.Scope();
-    var permits = new CategoryPermits(1, scope);
-    var holder = dispatched(NEVER, new CancellationToken(), permits);
-    var later = dispatched(NEVER, new CancellationToken(), permits);
-    permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
-    dispatched(NEVER, new CancellationToken(), permits).start(busy);
-    Await.until("the earlier call to queue for the permit", () -> permits.queued() == 1);
+  void aCallLeavesItsLiveCallsOnlyOnceItsWorkHasEnded() {
+    var runningWhenRemoved = new CompletableFuture<Boolean>();
+    var calls =
+        new CopyOnWriteArraySet<DispatchedCall>() {
+          @Override
+          public boolean remove(Object call) {
+            runningWhenRemoved.complete(((DispatchedCall) call).isRunning());
+            return super.remove(call);
+          }
+        };
 
-    int runsBeforeTheLaterCall;
-    synchronized (scope) {
-      permits.release(holder);
-      permits.admit(later, () -> true, DispatchedCallTest::neverRefused);
-      runsBeforeTheLaterCall = runs.get();
-    }
-    permits.release(later);
+    dispatched(NEVER, new CancellationToken(), calls, this::counting).start();
 
-    Await.until("the earlier call's worker to end", live::isEmpty);
-    assertEquals(
-        1, runsBeforeTheLaterCall, "the earlier call ran before the later one was admitted");
-  }
-
-  @Test
-  void aCallAdmittedFromTheHeadOfTheQueueLetsTheNextOneInWhileRoomRemains()
-      throws InterruptedException {
-    var scope = new CategoryPermits.Scope();
-    var permits = new CategoryPermits(3, scope);
-    var holders =
-        Stream.generate(() -> dispatched(NEVER, new CancellationToken(), permits))
-            .limit(3)
-            .toList();
-    for (var holder : holders) {
-      permits.admit(holder, () -> true, DispatchedCallTest::neverRefused);
-    }
-    var next = dispatched(NEVER, new CancellationToken(), permits);
-    dispatched(NEVER, new CancellationToken(), permits, this::blocking).start(busy);
-    Await.until("the earlier call to queue for a permit", () -> permits.queued() == 1);
-    var admission =
-        new FutureTask<>(
-            () -> {
-              synchronized (scope) {
-                permits.release(holders.get(0));
-                permits.release(holders.get(1));
-                return permits.admit(next, () -> true, DispatchedCallTest::neverRefused);
-              }
-            });
-    Thread.ofVirtual().start(admission);
-
-    assertTrue(Await.value("the next call to be admitted", admission));
+    assertFalse(Await.value("the call to leave its live calls", runningWhenRemoved));
   }
 
   @Test
   void aResultReadAfterTheSessionWasCancelledIsNotReturned() {
     var session = blockedSession();
     var dispatched = dispatched(NEVER, session);
-    dispatched.start(busy);
+    dispatched.start();
     Await.until("the worker to end", live::isEmpty);
     assertEquals(1, runs.get(), "the tool ran and answered");
     cancelBehindTheBlockedCallback(session);
 
     var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
     assertEquals("session closed", thrown.getMessage());
+  }
+
+  @Test
+  void aCallerInterruptedAfterTheToolAnsweredIsCancelledWithItsInterruptStatusKept() {
+    var dispatched = dispatched(NEVER);
+    dispatched.start();
+    Await.until("the worker to end", live::isEmpty);
+    assertEquals(1, runs.get(), "the tool ran and answered");
+
+    Thread.currentThread().interrupt();
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+
+    assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
+    assertEquals("interrupted waiting for tool t", thrown.getMessage());
   }
 
   @Test
@@ -251,11 +218,10 @@ final class DispatchedCallTest {
         dispatched(
             NEVER,
             session,
-            new CategoryPermits(1, new CategoryPermits.Scope()),
             (args, ctx) -> {
               throw sentinel;
             });
-    dispatched.start(busy);
+    dispatched.start();
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
@@ -270,10 +236,9 @@ final class DispatchedCallTest {
         dispatched(
             NEVER,
             session,
-            new CategoryPermits(1, new CategoryPermits.Scope()),
             (args, ctx) ->
                 DispatchFixture.sneakyThrow(new Throwable("neither an Exception nor an Error")));
-    dispatched.start(busy);
+    dispatched.start();
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
@@ -283,10 +248,9 @@ final class DispatchedCallTest {
 
   @Test
   void aTimeoutReadAfterTheSessionWasCancelledIsNotReturned() {
-    busy.execute(() -> Uninterruptible.await(busyRelease));
     var session = blockedSession();
     var dispatched = dispatched(Duration.ofNanos(1), session);
-    dispatched.start(busy);
+    dispatched.start();
     Await.until("the worker to end", live::isEmpty);
     assertEquals(0, runs.get(), "the tool never ran");
     cancelBehindTheBlockedCallback(session);

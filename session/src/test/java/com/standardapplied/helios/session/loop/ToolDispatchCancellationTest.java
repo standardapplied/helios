@@ -17,7 +17,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -26,6 +25,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * {@link ToolDispatch} when the session's token is cancelled or the caller is interrupted, and when
@@ -42,31 +43,6 @@ final class ToolDispatchCancellationTest {
   }
 
   // ── cancellation and interruption ─────────────────────────────────────────
-
-  @Test
-  void cancellingTheSessionWhileTheCallQueuesEndsItAndNeverStartsTheTool() {
-    var starts = new AtomicInteger();
-    var d =
-        fixture.dispatcher(
-            new ConcurrencyLimits(1, 1, 1, 1),
-            binding("slow", ToolCategory.READ, fixture.stuck(starts)));
-    var holder = start(d, "slow");
-    Await.latch("the first call to take the only permit", fixture.entered);
-    var session = new CancellationToken();
-
-    var queued = start(d, "slow", session, NEVER);
-    Await.until(
-        "the second call to queue for the permit",
-        () -> d.permitsFor(ToolCategory.READ).queued() == 1);
-    session.cancel("user-stop");
-
-    assertCancelled("user-stop", queued);
-    fixture.release.countDown();
-    assertEquals(ToolResult.success("done"), holder.ending("the first dispatch").result());
-    awaitIdle(d);
-    assertEquals(1, starts.get(), "the cancelled call's tool never ran");
-    assertEquals(0, session.activeCallbackCountForTests(), "no link to the session is left");
-  }
 
   @Test
   void cancellingTheSessionWhileTheToolRunsEndsTheCallAndInterruptsTheTool() {
@@ -103,13 +79,11 @@ final class ToolDispatchCancellationTest {
           }
           return ToolResult.failure("stopped");
         };
-    var d =
-        fixture.dispatcher(
-            new ConcurrencyLimits(8, 1, 1, 8), binding("write", ToolCategory.WRITE, needsTwo));
+    var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, needsTwo));
     var session = new CancellationToken();
     var running = start(d, "write", session, SHORT);
     Await.latch("the tool to start", fixture.entered);
-    fixture.scheduler.fireLatest();
+    d.expireLiveCalls();
     assertEquals(ToolResult.unknown("write", NEVER), running.ending("the dispatch").result());
     Await.latch("the timeout's interrupt to reach the tool", firstInterrupt);
 
@@ -117,7 +91,6 @@ final class ToolDispatchCancellationTest {
 
     Await.latch("the session's cancellation to interrupt it again", secondInterrupt);
     awaitIdle(d);
-    assertEquals(1, d.availableFileWritePermits(), "the write permit is back");
   }
 
   @Test
@@ -146,7 +119,7 @@ final class ToolDispatchCancellationTest {
 
     var running = start(d, "stuck");
     Await.latch("the tool to start", fixture.entered);
-    fixture.scheduler.fireLatest();
+    d.expireLiveCalls();
     Await.latch("the call to be timed out", cancelled);
     running.thread().interrupt();
 
@@ -165,9 +138,9 @@ final class ToolDispatchCancellationTest {
 
     var running = start(d, "stuck", session, NEVER);
     Await.latch("the tool to start", fixture.entered);
-    fixture.scheduler.fireLatest();
+    d.expireLiveCalls();
     Await.latch("the call to be timed out", cancelled);
-    session.cancel("session closed");
+    session.cancelAsync("session closed", fixture.ending::fail);
 
     assertCancelled("session closed", running);
   }
@@ -200,7 +173,7 @@ final class ToolDispatchCancellationTest {
     var d = fixture.dispatcher(binding("stuck", ToolCategory.READ, stuck));
     var running = start(d, "stuck", session, NEVER);
     Await.latch("the tool to start", fixture.entered);
-    fixture.scheduler.fireLatest();
+    d.expireLiveCalls();
     Await.latch("the call to be timed out", cancelled);
 
     Thread.ofVirtual().start(() -> session.cancel("session closed"));
@@ -209,54 +182,62 @@ final class ToolDispatchCancellationTest {
     assertCancelled("session closed", running);
   }
 
-  @Test
-  void cancellingTheSessionWhileAStuckWriterRunsRefusesEveryCallUntilItEnds() {
-    var starts = new AtomicInteger();
-    var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"READ", "WRITE"})
+  void cancellingTheSessionWhileAStuckCallRunsRefusesEveryCallUntilItEnds(ToolCategory category) {
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())), fixture.reader());
     var session = new CancellationToken();
-    var first = start(d, "write", session, NEVER);
-    Await.latch("the first writer to start", fixture.entered);
+    var first = start(d, "stuck", session, NEVER);
+    Await.latch("the stuck tool to start", fixture.entered);
     session.cancel("user-stop");
     assertCancelled("user-stop", first);
 
-    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }
 
   @Test
   void cancellingTheSessionDuringTheStopGraceRefusesEveryCallUntilItEnds() {
-    var starts = new AtomicInteger();
     var cancelled = new CountDownLatch(1);
-    var stuck = fixture.stuck(starts);
+    var stuck = fixture.stuck(new AtomicInteger());
     var d =
         fixture.dispatcher(
             binding(
-                "write",
+                "stuck",
                 ToolCategory.WRITE,
                 (args, ctx) -> {
                   ctx.cancellation().onCancel(cancelled::countDown);
                   return stuck.execute(args, ctx);
-                }));
+                }),
+            fixture.reader());
     var session = new CancellationToken();
-    var first = start(d, "write", session, NEVER);
-    Await.latch("the first writer to start", fixture.entered);
-    fixture.scheduler.fireLatest();
-    Await.latch("the first writer to be timed out", cancelled);
+    var first = start(d, "stuck", session, NEVER);
+    Await.latch("the stuck tool to start", fixture.entered);
+    d.expireLiveCalls();
+    Await.latch("the stuck call to be timed out", cancelled);
     session.cancel("user-stop");
     assertCancelled("user-stop", first);
 
-    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }
 
-  @Test
-  void interruptingTheCallerWhileAStuckWriterRunsRefusesEveryCallUntilItEnds() {
-    var starts = new AtomicInteger();
-    var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, fixture.stuck(starts)));
-    var first = start(d, "write");
-    Await.latch("the first writer to start", fixture.entered);
+  @ParameterizedTest
+  @EnumSource(
+      value = ToolCategory.class,
+      names = {"READ", "WRITE"})
+  void interruptingTheCallerWhileAStuckCallRunsRefusesEveryCallUntilItEnds(ToolCategory category) {
+    var d =
+        fixture.dispatcher(
+            binding("stuck", category, fixture.stuck(new AtomicInteger())), fixture.reader());
+    var first = start(d, "stuck");
+    Await.latch("the stuck tool to start", fixture.entered);
     first.thread().interrupt();
-    assertCancelled("interrupted waiting for tool write", first);
+    assertCancelled("interrupted waiting for tool stuck", first);
 
-    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }
 
   // ── the call's cancellation callbacks ─────────────────────────────────────
@@ -270,7 +251,7 @@ final class ToolDispatchCancellationTest {
 
     var running = start(d, "blocking");
     Await.latch("the tool to start", fixture.entered);
-    fixture.scheduler.fireLatest();
+    d.expireLiveCalls();
 
     Await.latch("the tool to be interrupted", interrupted);
     fixture.release.countDown();
@@ -296,19 +277,16 @@ final class ToolDispatchCancellationTest {
 
   @Test
   void aCallWhoseCancellationCallbackStillRunsIsUnknownAndRefusesEveryCall() {
-    var starts = new AtomicInteger();
-    ToolExecutor writer =
-        (args, ctx) -> {
-          starts.incrementAndGet();
-          return fixture.blockingCallback(new CountDownLatch(1)).execute(args, ctx);
-        };
-    var d = fixture.dispatcher(binding("write", ToolCategory.WRITE, writer));
-    var first = start(d, "write", new CancellationToken(), SHORT);
-    Await.latch("the first writer to start", fixture.entered);
-    fixture.scheduler.fireLatest();
-    assertEquals(ToolResult.unknown("write", NEVER), first.ending("the first dispatch").result());
+    var d =
+        fixture.dispatcher(
+            binding("stuck", ToolCategory.READ, fixture.blockingCallback(new CountDownLatch(1))),
+            fixture.reader());
+    var first = start(d, "stuck", new CancellationToken(), SHORT);
+    Await.latch("the tool to start", fixture.entered);
+    d.expireLiveCalls();
+    assertEquals(ToolResult.unknown("stuck", NEVER), first.ending("the first dispatch").result());
 
-    fixture.assertTheNextWriterIsRefusedUntilTheStuckOneEnds(d, starts);
+    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }
 
   @Test
