@@ -206,19 +206,7 @@ final class SessionFinalizationTest {
 
   @Test
   void aCancellationCallbackThatNeverReturnsCannotKeepAClosedModelStreamOpen() {
-    var entered = new CountDownLatch(1);
-    var model =
-        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
-    var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
-    var token = provider.context.cancellation();
-    token.onCancel(() -> Uninterruptible.await(released));
-    var armed = token.activeCallbackCountForTests();
-    session.send("go");
-    Await.latch("the model call to start", entered);
-    Await.until(
-        "the stream to wait on the session's token",
-        () -> token.activeCallbackCountForTests() == armed + 1);
+    var session = streamingBehindACallbackThatNeverReturns(new RecordingProvider(order));
 
     session.close();
 
@@ -227,10 +215,18 @@ final class SessionFinalizationTest {
 
   @Test
   void aHostsOwnCancelOfTheSessionsTokenEndsTheModelStreamWhileACallbackNeverReturns() {
+    var provider = new RecordingProvider(order);
+    var session = streamingBehindACallbackThatNeverReturns(provider);
+
+    Thread.ofVirtual().start(() -> provider.context.cancellation().cancel("host cancelled"));
+
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+  }
+
+  private AgentSession streamingBehindACallbackThatNeverReturns(RecordingProvider provider) {
     var entered = new CountDownLatch(1);
     var model =
         ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
-    var provider = new RecordingProvider(order);
     var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
     var token = provider.context.cancellation();
     token.onCancel(() -> Uninterruptible.await(released));
@@ -240,10 +236,7 @@ final class SessionFinalizationTest {
     Await.until(
         "the stream to wait on the session's token",
         () -> token.activeCallbackCountForTests() == armed + 1);
-
-    Thread.ofVirtual().start(() -> token.cancel("host cancelled"));
-
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    return session;
   }
 
   @Test
