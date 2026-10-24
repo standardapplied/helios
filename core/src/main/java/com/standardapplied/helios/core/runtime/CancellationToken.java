@@ -125,12 +125,8 @@ public final class CancellationToken {
    */
   public CompletableFuture<Void> cancelAsync(String reason, Consumer<Error> onError) {
     Objects.requireNonNull(onError, "onError must not be null");
-    var claimed = claim(reason);
-    if (claimed.isEmpty()) {
-      return CompletableFuture.completedFuture(null);
-    }
     return CompletableFuture.allOf(
-        claimed.get().stream()
+        claim(reason).orElse(List.of()).stream()
             .map(registration -> fireAsync(registration, onError))
             .toArray(CompletableFuture[]::new));
   }
