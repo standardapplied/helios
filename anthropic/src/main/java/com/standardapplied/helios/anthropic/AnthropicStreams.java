@@ -43,7 +43,8 @@ final class AnthropicStreams {
         httpRequest(serialize(request)),
         config.streamIdleTimeout(),
         new AnthropicStreamParser(),
-        AnthropicException::new);
+        AnthropicException::new,
+        AnthropicProvider.PROVIDER_NAME);
   }
 
   /** The HTTP request carrying {@code jsonBody}, authenticated by the configured API key if any. */

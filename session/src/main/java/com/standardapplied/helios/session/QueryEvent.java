@@ -294,13 +294,16 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A model-stream attempt failed with a recoverable transport error ({@link
-   * com.standardapplied.helios.core.model.TransientStreamException}) and the agent loop is about to
-   * retry the turn. Fires after each failed attempt, before the configured back-off delay; the next
-   * attempt is the {@code attemptNumber + 1}-th overall. Subscribers can use this to surface
-   * "retrying…" UI affordances and to correlate per-attempt token usage in their own ledgers. The
-   * {@link AssistantText} and {@link AssistantThinking} deltas the failed attempt streamed are
-   * superseded: the next attempt streams its answer from the start.
+   * A model-stream attempt failed with a {@link
+   * com.standardapplied.helios.core.model.TransientStreamException} and the agent loop is about to
+   * retry the turn: a transport failure, a 408, 429 or 5xx answer to the stream request (the
+   * error's {@code cause()} is the provider's exception, whose message starts {@code API error
+   * (status <n>)}), or an error event the provider marks retryable mid-stream. Fires after each
+   * failed attempt, before the configured back-off delay; the next attempt is the {@code
+   * attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI affordances
+   * and to correlate per-attempt token usage in their own ledgers. The {@link AssistantText} and
+   * {@link AssistantThinking} deltas the failed attempt streamed are superseded: the next attempt
+   * streams its answer from the start.
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
@@ -311,8 +314,9 @@ public sealed interface QueryEvent
    * @param timestamp the event timestamp (captured before the back-off sleep begins)
    * @param attemptNumber the 1-based attempt number that just failed; the next attempt is {@code
    *     attemptNumber + 1}
-   * @param backoff the wall-clock delay the loop will wait before issuing the next attempt;
-   *     non-null and non-negative
+   * @param backoff the wall-clock delay the loop will wait before issuing the next attempt: the
+   *     response's {@code Retry-After} capped by the policy back-off's {@code maxDelay()} when the
+   *     response carried one, the policy's {@code nextDelay} otherwise; non-null and non-negative
    * @param providerName the provider's short identifier carried from {@link
    *     com.standardapplied.helios.core.model.TransientStreamException#providerName()}; non-blank
    * @param error the serialised throwable that caused this attempt to fail, with cause chain intact

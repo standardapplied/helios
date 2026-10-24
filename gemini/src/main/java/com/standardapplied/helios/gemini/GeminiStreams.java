@@ -33,7 +33,8 @@ final class GeminiStreams {
         httpRequest(serialize(request)),
         config.streamIdleTimeout(),
         new GeminiStreamParser(config.providerContinuation(), endpoint.apiVersion()),
-        GeminiException::new);
+        GeminiException::new,
+        GeminiProvider.PROVIDER_NAME);
   }
 
   /** The HTTP request carrying {@code jsonBody}, authenticated by the configured API key if any. */

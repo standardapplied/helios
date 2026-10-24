@@ -136,6 +136,18 @@ class BackoffTest {
   }
 
   @Test
+  void theMaxDelayOfAFixedBackoffIsItsDelay() {
+    assertEquals(Duration.ofMillis(500), Backoff.fixed(Duration.ofMillis(500)).maxDelay());
+  }
+
+  @Test
+  void theMaxDelayOfAnExponentialBackoffIsItsCap() {
+    assertEquals(
+        Duration.ofSeconds(10),
+        Backoff.exponential(Duration.ofMillis(100), 1.5, Duration.ofSeconds(10)).maxDelay());
+  }
+
+  @Test
   void fixedRejectsNullDelay() {
     assertThrows(IllegalArgumentException.class, () -> Backoff.fixed(null));
   }

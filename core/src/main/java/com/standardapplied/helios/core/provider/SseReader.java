@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -96,8 +97,11 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   /**
    * Sends {@code request} and reads its response as a stream. A status other than 200 fails with
-   * the provider's exception, carrying the status and the start of the response body.
+   * the provider's exception, carrying the status and the start of the response body; when that
+   * status is {@linkplain ProviderException#isRetryable() retryable}, the exception is the cause of
+   * a {@link TransientStreamException} carrying the response's {@code Retry-After}.
    *
+   * @param providerName the provider name a {@link TransientStreamException} carries
    * @return the reader of the response
    * @throws IOException if the request cannot be sent
    * @throws InterruptedException if interrupted while sending
@@ -107,16 +111,27 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       HttpRequest request,
       Duration idleTimeout,
       Parser parser,
-      ProviderFailure failure)
+      ProviderFailure failure,
+      String providerName)
       throws IOException, InterruptedException {
     var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
     if (response.statusCode() != 200) {
-      throw failure.create(
-          "API error (status " + response.statusCode() + "): " + errorBody(response.body()),
-          response.statusCode(),
-          null);
+      throw refused(response, failure, providerName);
     }
     return new SseReader(response.body(), idleTimeout, parser, failure);
+  }
+
+  private static RuntimeException refused(
+      HttpResponse<InputStream> response, ProviderFailure failure, String providerName)
+      throws IOException {
+    var status = response.statusCode();
+    var exception =
+        failure.create(
+            "API error (status " + status + "): " + errorBody(response.body()), status, null);
+    return exception.isRetryable()
+        ? new TransientStreamException(
+            exception.getMessage(), exception, providerName, RetryAfter.of(response.headers()))
+        : exception;
   }
 
   private static String errorBody(InputStream body) throws IOException {

@@ -53,14 +53,13 @@ public class ProviderException extends RuntimeException {
   }
 
   /**
-   * Whether this error is retryable. Network errors (status 0), request timeouts (408), rate limits
-   * (429), overloaded (529), and server errors (5xx) are considered retryable.
+   * Whether the same request may succeed if sent again: {@code true} for a request timeout (408), a
+   * rate limit (429) and every server error (500 or more, 529 included), {@code false} for every
+   * other status. A transport failure is never a provider exception but a {@link
+   * TransientStreamException}; a status-0 provider exception is a protocol failure (an idle
+   * timeout, an oversized line, a malformed or unknown event) and is not retried.
    */
   public boolean isRetryable() {
-    return statusCode == 0
-        || statusCode == 408
-        || statusCode == 429
-        || statusCode == 529
-        || statusCode >= 500;
+    return statusCode == 408 || statusCode == 429 || statusCode >= 500;
   }
 }

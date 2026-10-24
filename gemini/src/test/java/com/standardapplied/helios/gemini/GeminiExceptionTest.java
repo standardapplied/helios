@@ -80,9 +80,9 @@ class GeminiExceptionTest {
   }
 
   @Test
-  void isRetryableNetworkError() {
-    assertTrue(new GeminiException("timeout").isRetryable());
-    assertTrue(new GeminiException("timeout", new RuntimeException()).isRetryable());
+  void aFailureWithoutAStatusIsNotRetryable() {
+    assertFalse(new GeminiException("timeout").isRetryable());
+    assertFalse(new GeminiException("timeout", new RuntimeException()).isRetryable());
   }
 
   @Test

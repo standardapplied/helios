@@ -274,7 +274,7 @@ class StreamingIteratorTest {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("idle timeout"));
-      assertTrue(assertInstanceOf(AnthropicException.class, error.cause()).isRetryable());
+      assertFalse(assertInstanceOf(AnthropicException.class, error.cause()).isRetryable());
     }
   }
 

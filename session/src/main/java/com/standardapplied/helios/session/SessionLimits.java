@@ -69,8 +69,11 @@ import java.util.OptionalLong;
  *       maxWallClock} would otherwise catch only at the end of the wall-clock budget.
  *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
  *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
- *       with {@link com.standardapplied.helios.core.model.TransientStreamException}; on exhaustion
- *       the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
+ *       with {@link com.standardapplied.helios.core.model.TransientStreamException}: a transport
+ *       failure, a 408, 429 or 5xx answer to the stream request, or an error event the provider
+ *       marks retryable mid-stream. It waits the answer's {@code Retry-After} capped by the
+ *       back-off's maximum delay when the answer carried one, the back-off's delay otherwise. On
+ *       exhaustion the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
  *   <li>{@code startTimeout}: 60 seconds — how long {@link AgentSession#create} waits for the
  *       execution provider's {@code onSessionStart}, which may fork a sandbox. A start that has not

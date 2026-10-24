@@ -33,7 +33,8 @@ final class OpenAIStreams {
         httpRequest(serialize(request)),
         config.streamIdleTimeout(),
         new OpenAIStreamParser(),
-        OpenAIException::new);
+        OpenAIException::new,
+        OpenAIProvider.PROVIDER_NAME);
   }
 
   /** The HTTP request carrying {@code jsonBody}, with the configured API key as a bearer token. */
