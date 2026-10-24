@@ -111,7 +111,7 @@ final class DispatchedCall {
    */
   boolean endsBy(long until) {
     try {
-      ended.get(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+      ended.get(until - System.nanoTime(), TimeUnit.NANOSECONDS);
       return true;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -168,7 +168,7 @@ final class DispatchedCall {
   private boolean settlesBy(CompletableFuture<?> future, long until) throws InterruptedException {
     var latch = new CountDownLatch(1);
     future.whenComplete((result, failure) -> latch.countDown());
-    var settled = latch.await(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+    var settled = latch.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
     if (parent.isCancelled()) {
       var reason = parent.reason().orElseThrow();
       cancel(reason);
