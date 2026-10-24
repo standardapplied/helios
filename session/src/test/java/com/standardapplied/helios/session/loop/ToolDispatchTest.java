@@ -7,6 +7,7 @@ package com.standardapplied.helios.session.loop;
 import static com.standardapplied.helios.session.loop.DispatchFixture.CTX;
 import static com.standardapplied.helios.session.loop.DispatchFixture.NEVER;
 import static com.standardapplied.helios.session.loop.DispatchFixture.SHORT;
+import static com.standardapplied.helios.session.loop.DispatchFixture.assertCancelled;
 import static com.standardapplied.helios.session.loop.DispatchFixture.awaitIdle;
 import static com.standardapplied.helios.session.loop.DispatchFixture.binding;
 import static com.standardapplied.helios.session.loop.DispatchFixture.call;
@@ -382,13 +383,38 @@ final class ToolDispatchTest {
     var d =
         fixture.dispatcher(
             binding("stuck", category, fixture.stuck(new AtomicInteger())), fixture.reader());
+    answerStuckUnknown(d);
+    assertEquals(List.of(call("stuck")), d.awaitLiveCalls(SHORT), "the worker is still running");
+
+    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
+  }
+
+  @Test
+  void whileACallThatDidNotStopRunsAnUnknownToolIsStillNotFound() {
+    var d =
+        fixture.dispatcher(binding("stuck", ToolCategory.READ, fixture.stuck(new AtomicInteger())));
+    answerStuckUnknown(d);
+
+    assertEquals(ToolResult.notFound("nope"), start(d, "nope").ending("the dispatch").result());
+  }
+
+  @Test
+  void whileACallThatDidNotStopRunsACancelledSessionStillThrows() {
+    var d =
+        fixture.dispatcher(binding("stuck", ToolCategory.READ, fixture.stuck(new AtomicInteger())));
+    answerStuckUnknown(d);
+    var session = new CancellationToken();
+    session.cancel("user-stop");
+
+    assertCancelled("user-stop", start(d, "stuck", session, NEVER));
+  }
+
+  /** Answer a call to {@code stuck} unknown at its deadline, its tool left running. */
+  private void answerStuckUnknown(ToolDispatch d) {
     var stuck = start(d, "stuck", new CancellationToken(), SHORT);
     Await.latch("the stuck tool to start", fixture.entered);
     d.expireLiveCalls();
     assertEquals(ToolResult.unknown("stuck", NEVER), stuck.ending("the stuck dispatch").result());
-    assertEquals(List.of(call("stuck")), d.awaitLiveCalls(SHORT), "the worker is still running");
-
-    fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }
 
   @Test

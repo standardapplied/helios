@@ -135,6 +135,19 @@ final class DispatchedCallTest {
   }
 
   @Test
+  void aCallerInterruptedBeforeTheWorkerStartedKeepsTheToolFromStarting() {
+    var dispatched = dispatched(NEVER);
+    Thread.currentThread().interrupt();
+    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
+
+    dispatched.start();
+
+    Await.until("the worker to end", live::isEmpty);
+    assertEquals(0, runs.get(), "the tool never ran");
+  }
+
+  @Test
   void aWorkerStartingPastItsDeadlineKeepsTheToolFromStarting() {
     dispatched(Duration.ofNanos(1)).start();
 

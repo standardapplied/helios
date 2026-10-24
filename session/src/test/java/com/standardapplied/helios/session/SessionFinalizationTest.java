@@ -28,6 +28,7 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
@@ -81,9 +82,17 @@ final class SessionFinalizationTest {
     session.send("go");
     Await.latch("the stream requested", requested);
 
-    session.close();
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      session.close();
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    }
+    assertEquals(
+        List.of(
+            "cancelling the model stream of session "
+                + SID
+                + " did not return within PT0.05S; the stream is not known to be closed"),
+        logged.stream().map(LogRecord::getMessage).toList());
   }
 
   @Test
