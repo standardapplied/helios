@@ -13,70 +13,49 @@ import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * One tool call, from admission until its work ends. The call's answer settles once: with the
+ * One tool call, from its start until its work ends. The call's answer settles once: with the
  * tool's result, whatever the tool threw past {@link
  * com.standardapplied.helios.core.tool.Tool#execute Tool.execute}, a {@link CancellationException},
- * or a {@link TimeoutException} at the deadline. Its worker virtual thread, once admitted by the
- * category's {@link CategoryPermits}, starts the tool only while the answer is unsettled, the
- * session's token is not cancelled and the deadline has not passed. The call's own token is linked
- * to the session's and is cancelled on a thread of its own, so a callback that blocks or throws
- * holds up neither the canceller nor the worker's interrupt. The work is the worker and that
- * cancellation; when both have ended, the worker gives the permit back and removes the link. Every
- * {@link Error} of the work, one a callback on the call's token throws or one the tool throws, is
- * recorded by the session's {@link SessionEnding}, the tool's once the answer settled with it, so
- * the caller reads it as itself.
+ * or a {@link TimeoutException} at the deadline. Its worker virtual thread starts the tool only
+ * while the answer is unsettled, the session's token is not cancelled and the deadline has not
+ * passed. The call's own token is linked to the session's and is cancelled on a thread of its own,
+ * so a callback that blocks or throws holds up neither the canceller nor the worker's interrupt.
+ * The work is the worker and that cancellation; when both have ended, the worker removes the link
+ * and the call is no longer live. A call its caller stops waiting for while its work runs is handed
+ * to the dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's
+ * token throws or one the tool throws, is recorded by the session's {@link SessionEnding}, the
+ * tool's once the answer settled with it, so the caller reads it as itself.
  */
 final class DispatchedCall {
 
   private static final Logger LOGGER = Logger.getLogger(DispatchedCall.class.getName());
 
-  /** A call whose work has not ended, and the latch that opens when it has. */
-  record Live(ToolCall call, CountDownLatch ended) {
-
-    /**
-     * Wait until the call's work has ended or {@code until} passes; an interrupt of the waiting
-     * thread ends the wait, its interrupt status kept.
-     *
-     * @return {@code true} if the work ended
-     */
-    boolean endsBy(long until) {
-      try {
-        return ended.await(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        return false;
-      }
-    }
-  }
-
   private final CancellationToken token = new CancellationToken();
   private final CompletableFuture<ToolResult> answer = new CompletableFuture<>();
-  private final CountDownLatch answered = new CountDownLatch(1);
   private final AtomicBoolean tokenClaimed = new AtomicBoolean();
   private final CompletableFuture<Void> tokenSettled = new CompletableFuture<>();
-  private final CountDownLatch ended = new CountDownLatch(1);
+  private final CompletableFuture<Void> ended = new CompletableFuture<>();
+  private final CompletableFuture<Void> sessionCancelled = new CompletableFuture<>();
   private final ToolBinding binding;
   private final ToolCall call;
   private final ToolContext context;
   private final CancellationToken parent;
   private final Duration timeout;
   private final long deadline;
-  private final CategoryPermits permits;
-  private final Set<Live> liveCalls;
+  private final Set<DispatchedCall> liveCalls;
+  private final Consumer<DispatchedCall> abandoned;
   private final SessionEnding ending;
-  private final Live live;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
 
@@ -87,8 +66,8 @@ final class DispatchedCall {
       CancellationToken parent,
       Duration timeout,
       Predicate<String> withheld,
-      CategoryPermits permits,
-      Set<Live> liveCalls,
+      Set<DispatchedCall> liveCalls,
+      Consumer<DispatchedCall> abandoned,
       SessionEnding ending) {
     this.binding = binding;
     this.call = call;
@@ -96,33 +75,57 @@ final class DispatchedCall {
     this.parent = parent;
     this.timeout = timeout;
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
-    this.permits = permits;
     this.liveCalls = liveCalls;
+    this.abandoned = abandoned;
     this.ending = ending;
-    this.live = new Live(call, ended);
     this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
-    answer.whenComplete((result, failure) -> answered.countDown());
   }
 
-  /**
-   * Arm the deadline on {@code scheduler}, link the call to its parent token and start its worker.
-   */
-  void start(ScheduledExecutorService scheduler) {
-    var timer =
-        scheduler.schedule(
-            this::expire, TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
-    answer.whenComplete((result, failure) -> timer.cancel(false));
-    parentLink = parent.onCancel(() -> cancel(parent.reason().orElseThrow()));
-    liveCalls.add(live);
+  /** Link the call to its parent token, add it to the live calls and start its worker. */
+  void start() {
+    parentLink =
+        parent.onCancel(
+            () -> {
+              cancel(parent.reason().orElseThrow());
+              sessionCancelled.complete(null);
+            });
+    liveCalls.add(this);
     worker.start();
   }
 
+  ToolCall call() {
+    return call;
+  }
+
+  /** Whether the call's work, its worker and its token's cancellation, has not ended. */
+  boolean isRunning() {
+    return !ended.isDone();
+  }
+
   /**
-   * Wait for the call's answer, no later than the deadline even when the scheduler is late. At the
-   * deadline, cancel the call and give its work up to {@code stopGrace} to end: a call whose work
-   * ended is {@link ToolResult#timedOut timed out}; one whose tool still runs is {@link
-   * ToolResult#unknown unknown}. A call with side effects that this method stops waiting for while
-   * its tool runs is quarantined until its work ends.
+   * Wait until the call's work has ended or {@code until} passes; an interrupt of the waiting
+   * thread ends the wait, its interrupt status kept.
+   *
+   * @return {@code true} if the work ended
+   */
+  boolean endsBy(long until) {
+    try {
+      ended.get(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
+      return true;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    } catch (ExecutionException | TimeoutException e) {
+      return false;
+    }
+  }
+
+  /**
+   * Wait for the call's answer until the deadline. At the deadline, cancel the call and give its
+   * work up to {@code stopGrace} to end: a call whose work ended is {@link ToolResult#timedOut
+   * timed out}; one whose tool still runs is {@link ToolResult#unknown unknown}, and abandoned.
+   * Both waits end as soon as the session's token is cancelled, and a call the session's
+   * cancellation or the caller's interrupt leaves running is abandoned.
    *
    * @return the tool's result, a {@link ToolResult#threw threw} result for a non-{@link Error}
    *     throwable that escaped {@link com.standardapplied.helios.core.tool.Tool#execute
@@ -134,7 +137,7 @@ final class DispatchedCall {
    */
   ToolResult await(Duration stopGrace) {
     try {
-      if (!settlesBy(answered, deadline)) {
+      if (!settlesBy(answer, deadline)) {
         expire();
       }
       return answer.get();
@@ -151,19 +154,26 @@ final class DispatchedCall {
   }
 
   /**
-   * Wait until {@code latch} opens or {@code until} passes, reading the session's token as it waits
-   * and once more before it returns.
+   * Wait until {@code future} settles or {@code until} passes, reading the session's token as it
+   * waits and once more before it returns. A call the session's cancellation leaves running is
+   * abandoned.
    *
-   * @return {@code true} if {@code latch} opened
+   * @return {@code true} if {@code future} settled
    * @throws CancellationException if the session's token is cancelled before this method returns
    */
-  private boolean settlesBy(CountDownLatch latch, long until) throws InterruptedException {
-    var settled = TokenWait.opensBy(latch, parent, until);
-    throwIfSessionCancelled();
+  private boolean settlesBy(CompletableFuture<?> future, long until) throws InterruptedException {
+    var settled = TokenWait.settlesBy(future, parent, until);
+    if (parent.isCancelled()) {
+      var reason = parent.reason().orElseThrow();
+      cancel(reason);
+      abandoned.accept(this);
+      throw new CancellationException(reason);
+    }
     return settled;
   }
 
-  private void expire() {
+  /** Settle the answer with a {@link TimeoutException}, as the deadline does, unless it settled. */
+  void expire() {
     answer.completeExceptionally(new TimeoutException());
   }
 
@@ -176,13 +186,17 @@ final class DispatchedCall {
     }
     cancel("tool '" + call.name() + "' timed out after " + timeout);
     try {
-      settlesBy(ended, System.nanoTime() + TimeUnit.NANOSECONDS.convert(stopGrace));
+      settlesBy(
+          CompletableFuture.anyOf(ended, sessionCancelled),
+          System.nanoTime() + TimeUnit.NANOSECONDS.convert(stopGrace));
     } catch (InterruptedException e) {
       throw interrupted();
     }
-    return permits.quarantine(this, binding)
-        ? ToolResult.unknown(call.name(), timeout)
-        : ToolResult.timedOut(call.name(), timeout);
+    if (!isRunning()) {
+      return ToolResult.timedOut(call.name(), timeout);
+    }
+    abandoned.accept(this);
+    return ToolResult.unknown(call.name(), timeout);
   }
 
   /**
@@ -200,36 +214,19 @@ final class DispatchedCall {
     worker.interrupt();
   }
 
-  private void throwIfSessionCancelled() {
-    if (parent.isCancelled()) {
-      var reason = parent.reason().orElseThrow();
-      cancel(reason);
-      permits.quarantine(this, binding);
-      throw new CancellationException(reason);
-    }
-  }
-
   private CancellationException interrupted() {
     Thread.currentThread().interrupt();
     var reason = "interrupted waiting for tool " + call.name();
     cancel(reason);
-    permits.quarantine(this, binding);
+    abandoned.accept(this);
     return new CancellationException(reason);
   }
 
   private void work() {
     try {
-      var admitted =
-          permits.admit(
-              this,
-              () -> !answer.isDone() && !parent.isCancelled() && System.nanoTime() - deadline < 0,
-              reason ->
-                  answer.complete(ToolResult.rejected(ToolDispatch.class.getSimpleName(), reason)));
-      if (admitted) {
+      if (!answer.isDone() && !parent.isCancelled() && System.nanoTime() - deadline < 0) {
         answer.complete(binding.tool().execute(call.arguments(), context));
       }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
     } catch (Error e) {
       answer.completeExceptionally(e);
       ending.fail(e);
@@ -244,10 +241,9 @@ final class DispatchedCall {
       if (!tokenClaimed.compareAndSet(false, true)) {
         tokenSettled.join();
       }
-      permits.release(this);
       parentLink.remove();
-      liveCalls.remove(live);
-      ended.countDown();
+      ended.complete(null);
+      liveCalls.remove(this);
     }
   }
 }

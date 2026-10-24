@@ -180,7 +180,7 @@ final class Phase5AcceptanceTest {
               .withLimits(
                   SessionLimits.newBuilder()
                       .withToolTimeoutDefault(limit)
-                      .withToolStopGrace(Duration.ofMinutes(10))
+                      .withStopGrace(Duration.ofMinutes(10))
                       .build());
 
       var run = run(options, "trigger the tool timeout");

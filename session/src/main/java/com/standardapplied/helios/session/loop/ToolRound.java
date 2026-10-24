@@ -228,7 +228,7 @@ final class ToolRound {
               planned.call(),
               state.cancellation(),
               limits.toolTimeoutDefault(),
-              limits.toolStopGrace(),
+              limits.stopGrace(),
               planned.withheld());
     } catch (RuntimeException e) {
       return ToolResult.threw(planned.call().name(), e);

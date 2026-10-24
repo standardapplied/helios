@@ -16,7 +16,6 @@ import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.MockModel;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
@@ -58,11 +57,7 @@ final class ModelCallTest {
   private final SessionState state = new SessionState("sess-call", new CancellationToken(), CLOCK);
   private final ToolDispatch dispatch =
       new ToolDispatch(
-          SessionContext.forTesting("sess-call"),
-          ToolRegistry.empty(),
-          ConcurrencyLimits.defaults(),
-          scheduler,
-          state.ending());
+          SessionContext.forTesting("sess-call"), ToolRegistry.empty(), state.ending());
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
 

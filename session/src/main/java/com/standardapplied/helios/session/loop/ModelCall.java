@@ -115,7 +115,7 @@ final class ModelCall {
             collaborators.clock(),
             scheduler,
             limits.streamIdleTimeout(),
-            limits.teardownGrace());
+            limits.stopGrace());
     try {
       var publisher =
           outputSchema != null

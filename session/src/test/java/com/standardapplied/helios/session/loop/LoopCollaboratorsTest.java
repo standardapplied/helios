@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.MockModel;
-import com.standardapplied.helios.session.ConcurrencyLimits;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
@@ -21,7 +20,6 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -37,8 +35,6 @@ final class LoopCollaboratorsTest {
       new ToolDispatch(
           SessionContext.forTesting("loop-collaborators-test"),
           ToolRegistry.empty(),
-          ConcurrencyLimits.defaults(),
-          new ScheduledThreadPoolExecutor(1),
           new SessionEnding("test", new CancellationToken()));
   private final Function<SessionState, HookContext> contextFactory =
       s ->

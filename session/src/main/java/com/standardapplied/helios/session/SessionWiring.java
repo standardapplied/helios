@@ -53,8 +53,7 @@ final class SessionWiring {
       ScheduledExecutorService scheduler,
       SessionEnding ending) {
     var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
-    var toolDispatch =
-        new ToolDispatch(sessionContext, combinedTools, options.concurrency(), scheduler, ending);
+    var toolDispatch = new ToolDispatch(sessionContext, combinedTools, ending);
     var model = options.model();
     var evaluator = evaluator(options, combinedTools, pendingQuestions, sessionContext.secrets());
     var collaborators =

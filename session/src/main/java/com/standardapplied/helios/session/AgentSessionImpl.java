@@ -76,7 +76,7 @@ public final class AgentSessionImpl implements AgentSession {
     options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
     var sessionContext =
         new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
-    this.steeringQueue = new SteeringQueue(options.concurrency().maxQueuedUserMessages());
+    this.steeringQueue = new SteeringQueue(options.maxQueuedUserMessages());
     this.lifecycle =
         new SessionLifecycle(
             state, sessionContext, options.executionProvider(), options.limits(), resultFuture);
