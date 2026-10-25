@@ -224,18 +224,18 @@ public final class DefaultPermissionEvaluator {
       PermissionEffect effect, List<PermissionRule> rules, ToolPermissionKey key) {
     return matcher
         .firstMatch(key, rules)
-        .map(rule -> new PermissionDecision(effect, reason(effect, rule, key), Optional.of(rule)));
-  }
-
-  private static String reason(
-      PermissionEffect effect, PermissionRule rule, ToolPermissionKey key) {
-    var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
-    return effect.name().toLowerCase(Locale.ROOT)
-        + " rule "
-        + rule.toolName()
-        + pattern
-        + " matched "
-        + describe(key);
+        .map(
+            rule -> {
+              var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
+              var reason =
+                  effect.name().toLowerCase(Locale.ROOT)
+                      + " rule "
+                      + rule.toolName()
+                      + pattern
+                      + " matched "
+                      + describe(key);
+              return new PermissionDecision(effect, reason, Optional.of(rule));
+            });
   }
 
   private static PermissionDecision defaultForCategory(
