@@ -313,6 +313,84 @@ class StreamingModelTest {
   }
 
   @Test
+  void aRetryableErrorReadWhileTheReaderIsInterruptedIsThrownAsCancellationAndKeepsTheInterrupt() {
+    var reset = new IOException("Connection reset");
+    var interrupting = new InterruptingEvents(error("Stream read error", reset));
+    var stream =
+        parts(config())
+            .withExchange(request -> interrupting)
+            .build()
+            .chatStream(MESSAGES, List.of());
+
+    var cancelled = interruptedRead(stream);
+
+    assertInstanceOf(TransientStreamException.class, cancelled.getCause());
+    assertTrue(interrupting.closed());
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void aChunkReadWhileTheReaderIsInterruptedIsThrownAsCancellationAndKeepsTheInterrupt() {
+    var interrupting = new InterruptingEvents(new StreamEvent.TextDelta("read while interrupted"));
+    var stream =
+        parts(config())
+            .withExchange(request -> interrupting)
+            .build()
+            .chatStream(MESSAGES, List.of());
+
+    var cancelled = interruptedRead(stream);
+
+    assertNull(cancelled.getCause());
+    assertTrue(interrupting.closed());
+    assertFalse(stream.hasNext());
+  }
+
+  /** Reads {@code stream}, which ends interrupted, and asserts the read kept the interrupt. */
+  private static CancellationException interruptedRead(CloseableIterator<ModelChunk> stream) {
+    CancellationException cancelled;
+    boolean interruptKept;
+    try {
+      cancelled = assertThrows(CancellationException.class, stream::hasNext);
+    } finally {
+      interruptKept = Thread.interrupted();
+    }
+    assertTrue(interruptKept);
+    return cancelled;
+  }
+
+  /** Events whose one read is interrupted while it parses, as another thread's interrupt would. */
+  private static final class InterruptingEvents implements CloseableIterator<StreamEvent> {
+    private final StreamEvent event;
+    private boolean read;
+    private volatile boolean closed;
+
+    InterruptingEvents(StreamEvent event) {
+      this.event = event;
+    }
+
+    @Override
+    public boolean hasNext() {
+      return !read;
+    }
+
+    @Override
+    public StreamEvent next() {
+      read = true;
+      Thread.currentThread().interrupt();
+      return event;
+    }
+
+    @Override
+    public void close() {
+      closed = true;
+    }
+
+    boolean closed() {
+      return closed;
+    }
+  }
+
+  @Test
   void aCancellationTheEventsThrowAfterTheCloseIsThrownAsItself() {
     var awaiting = new CountDownLatch(1);
     var closing = new CountDownLatch(1);
