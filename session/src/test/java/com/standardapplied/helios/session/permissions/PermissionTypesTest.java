@@ -96,15 +96,27 @@ final class PermissionTypesTest {
     assertThrows(IllegalArgumentException.class, () -> PermissionRule.of("Read", " "));
   }
 
+  @Test
+  void ofRejectsANullGlob() {
+    assertThrows(NullPointerException.class, () -> PermissionRule.of("Read", null));
+  }
+
   // ── Permission ───────────────────────────────────────────────────────────
 
   @Test
   void permissionCanonicalConstructorDefensivelyCopiesLists() {
-    var allow = new ArrayList<PermissionRule>();
-    allow.add(PermissionRule.any("Read"));
-    var p = new Permission(PermissionMode.DEFAULT, allow, List.of(), List.of());
-    allow.add(PermissionRule.any("Sneaky"));
-    assertEquals(1, p.allow().size(), "allow list must be defensively copied");
+    var allow = new ArrayList<>(List.of(PermissionRule.any("Read")));
+    var ask = new ArrayList<>(List.of(PermissionRule.any("Write")));
+    var deny = new ArrayList<>(List.of(PermissionRule.any("Execute")));
+    var p = new Permission(PermissionMode.DEFAULT, allow, ask, deny);
+
+    allow.clear();
+    ask.clear();
+    deny.clear();
+
+    assertEquals(List.of(PermissionRule.any("Read")), p.allow());
+    assertEquals(List.of(PermissionRule.any("Write")), p.ask());
+    assertEquals(List.of(PermissionRule.any("Execute")), p.deny());
   }
 
   @Test
