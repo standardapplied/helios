@@ -153,12 +153,8 @@ public final class TurnRunner {
       return turnEnded(state, outcomeAfterTerminate(state));
     }
 
-    var finalOutcome =
-        toolCalls.isEmpty()
-            ? streamed
-            : new TurnOutcome(
-                FinishReason.TOOL_CALLS, streamed.assistantContent(), streamed.usage());
-    return turnEnded(state, finalOutcome);
+    return turnEnded(
+        state, toolCalls.isEmpty() ? streamed : streamed.withFinishReason(FinishReason.TOOL_CALLS));
   }
 
   /**
