@@ -226,7 +226,7 @@ final class CanonicalPermissionPathsTest {
   }
 
   @Test
-  void withNoPolicyTheCanonicalCallIsAnnouncedAndRun() {
+  void underTheDefaultPolicyTheCanonicalCallIsAnnouncedAndRun() {
     var run = run(sessions.withDefaultPolicy(), read("docs/../docs/a.txt"));
 
     var announced = run.events().eventsOf(QueryEvent.ToolUse.class).getFirst().call();
@@ -267,7 +267,7 @@ final class CanonicalPermissionPathsTest {
   }
 
   @Test
-  void aCanonicalPathCarryingASecretIsRefusedWithNoPolicySet() throws IOException {
+  void aCanonicalPathCarryingASecretIsRefusedUnderTheDefaultPolicy() throws IOException {
     sessions.write("s3cr3t-dir-name/f", "hidden");
     Files.createSymbolicLink(sessions.root.resolve("docs/l"), Path.of("../s3cr3t-dir-name"));
     var secrets = new SecretRegistry();
