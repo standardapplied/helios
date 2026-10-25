@@ -13,6 +13,7 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 /**
  * The one request a lazy {@link SseReader} sends: sent with {@link HttpClient#sendAsync} when its
@@ -62,8 +63,9 @@ final class SseRequest {
       return response.get();
     } catch (InterruptedException e) {
       cancel();
+      discard(response);
       Thread.currentThread().interrupt();
-      throw new CancellationException("interrupted while waiting for the response headers");
+      throw interrupted("interrupted while waiting for the response headers", e);
     } catch (ExecutionException e) {
       throw switch (e.getCause()) {
         case IOException io -> io;
@@ -71,6 +73,20 @@ final class SseRequest {
         case Error error -> throw error;
         case Throwable other -> new IOException(other);
       };
+    }
+  }
+
+  /**
+   * Closes the body of a response that arrived as its wait was interrupted, too late for the
+   * cancel: no reader takes it.
+   */
+  private static void discard(CompletableFuture<HttpResponse<InputStream>> response) {
+    if (response.state() == Future.State.SUCCESS) {
+      try {
+        response.resultNow().body().close();
+      } catch (IOException ignored) {
+        // The response is abandoned either way; a failed close leaves nothing more to release.
+      }
     }
   }
 
@@ -92,6 +108,7 @@ final class SseRequest {
    * TransientStreamException} carrying the response's {@code Retry-After}.
    *
    * @throws IOException if the body cannot be read
+   * @throws CancellationException if the reading thread is interrupted, which stays set
    */
   RuntimeException refused(HttpResponse<InputStream> response, ProviderFailure failure)
       throws IOException {
@@ -99,11 +116,22 @@ final class SseRequest {
     String text;
     try (var errorBody = response.body()) {
       text = HttpClientFactory.readBoundedErrorBody(errorBody);
+    } catch (IOException e) {
+      if (Thread.currentThread().isInterrupted()) {
+        throw interrupted("interrupted while reading the body of a refused response", e);
+      }
+      throw e;
     }
     var exception = failure.create("API error (status " + status + "): " + text, status, null);
     return exception.isRetryable()
         ? new TransientStreamException(
             exception.getMessage(), exception, providerName, RetryAfter.of(response.headers()))
         : exception;
+  }
+
+  private static CancellationException interrupted(String message, Exception cause) {
+    var cancelled = new CancellationException(message);
+    cancelled.initCause(cause);
+    return cancelled;
   }
 }

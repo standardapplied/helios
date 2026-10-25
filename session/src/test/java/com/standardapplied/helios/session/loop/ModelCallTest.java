@@ -352,6 +352,38 @@ final class ModelCallTest {
   }
 
   @Test
+  void aSessionCancelledWhileItsStreamIsBuiltClosesTheStreamOffTheLoopThread() {
+    var closing = new CountDownLatch(1);
+    var closer = new AtomicReference<String>();
+    var model =
+        new StreamModel(
+            cancellation -> {
+              cancellation.cancel("closed");
+              return blocking(
+                  new CountDownLatch(1),
+                  () -> {
+                    closer.compareAndSet(null, Thread.currentThread().getName());
+                    closing.countDown();
+                    Uninterruptible.await(released);
+                  });
+            });
+    var call = modelCall(model);
+    var limits = SessionLimits.newBuilder().withStopGrace(Duration.ofMillis(50)).build();
+
+    TurnOutcome turn;
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      turn = Await.value("the call", run(() -> call.stream(state, limits, List.of())));
+    }
+
+    var cancelled = assertInstanceOf(CancellationException.class, turn.streamError());
+    assertEquals("session cancelled while waiting for model stream", cancelled.getMessage());
+    Await.latch("the close", closing);
+    assertEquals("helios-model-stream-close-sess-call", closer.get());
+    assertEquals(1, logged.size());
+    assertEquals(Level.WARNING, logged.getFirst().getLevel());
+  }
+
+  @Test
   void anInterruptOfTheWaitingThreadClosesTheStreamAndEndsTheTurnKeepingTheInterrupt() {
     var pulled = new CountDownLatch(1);
 

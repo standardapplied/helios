@@ -256,6 +256,60 @@ class BlockingModelTest {
   }
 
   @Test
+  void closingBetweenTheChunksOfTheAnswerEndsTheStreamInCancellation() {
+    var stream = answering(() -> reply("hi").build()).chatStream(List.of(), List.of());
+    assertEquals(new ModelChunk.TextDelta("hi"), stream.next());
+
+    stream.close();
+
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertFalse(stream.hasNext());
+    assertEquals(1, calls.get());
+  }
+
+  @Test
+  void anInterruptBetweenTheChunksOfTheAnswerEndsTheStreamInCancellationAndStaysSet() {
+    var stream = answering(() -> reply("hi").build()).chatStream(List.of(), List.of());
+    assertEquals(new ModelChunk.TextDelta("hi"), stream.next());
+
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(CancellationException.class, stream::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void aStreamThatEndedIsNotCancelledByALaterClose() {
+    var stream = answering(() -> reply("hi").build()).chatStream(List.of(), List.of());
+    stream.next();
+    stream.next();
+
+    stream.close();
+
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void aFailedCallIsNeverRunAgainByAnotherRead() {
+    var refused = new IllegalStateException("refused");
+    var fatal = new OutOfMemoryError("host");
+
+    assertReadOnceFailing(
+        refused,
+        () -> {
+          throw refused;
+        });
+    assertReadOnceFailing(
+        fatal,
+        () -> {
+          throw fatal;
+        });
+  }
+
+  @Test
   void nextAfterTheStopThrows() {
     var stream = answering(() -> reply("hi").build()).chatStream(List.of(), List.of());
     stream.next();
@@ -268,6 +322,17 @@ class BlockingModelTest {
   @Test
   void aNullCallIsRejected() {
     assertThrows(NullPointerException.class, () -> BlockingModel.streamOf(null));
+  }
+
+  private void assertReadOnceFailing(Throwable failure, Supplier<Response<Void>> call) {
+    calls.set(0);
+    var stream = answering(call).chatStream(List.of(), List.of());
+
+    assertSame(failure, assertThrows(Throwable.class, stream::hasNext));
+
+    assertFalse(stream.hasNext());
+    assertThrows(NoSuchElementException.class, stream::next);
+    assertEquals(1, calls.get());
   }
 
   private BlockingModel answering(Supplier<Response<Void>> answer) {

@@ -286,6 +286,33 @@ class StreamingModelTest {
   }
 
   @Test
+  void anEventABlockedReadYieldsAfterTheCloseIsThrownAsCancellation() {
+    var streams = new ArrayList<CloseableIterator<ModelChunk>>();
+    CloseableIterator<StreamEvent> parsing =
+        new CloseableIterator<>() {
+          @Override
+          public boolean hasNext() {
+            return true;
+          }
+
+          @Override
+          public StreamEvent next() {
+            streams.getFirst().close();
+            return new StreamEvent.TextDelta("after close");
+          }
+
+          @Override
+          public void close() {}
+        };
+    var stream =
+        parts(config()).withExchange(request -> parsing).build().chatStream(MESSAGES, List.of());
+    streams.add(stream);
+
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
   void aCancellationTheEventsThrowAfterTheCloseIsThrownAsItself() {
     var closing = new CountDownLatch(1);
     var cancelled = new CancellationException("closed while awaiting the headers");

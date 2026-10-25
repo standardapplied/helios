@@ -17,7 +17,8 @@ import java.util.function.Consumer;
  * which ends the stream. A {@link StreamEvent.Error} is thrown from {@code hasNext()} as the
  * exception it ends in, and events that end without a {@code Done} throw as unterminated; either
  * closes the events first. Closing closes the events, from any thread: what the events yield or
- * throw after it, save an {@link Error}, is thrown as a {@link CancellationException}.
+ * throw after it, save an {@link Error}, is thrown as a {@link CancellationException}, an event a
+ * read that was blocked yields included.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -55,7 +56,11 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       if (!events.hasNext()) {
         throw failures.unterminated();
       }
-      next = chunkOf(events.next());
+      var chunk = chunkOf(events.next());
+      if (closed) {
+        throw cancelled(null);
+      }
+      next = chunk;
       return true;
     } catch (RuntimeException failure) {
       ended = true;
