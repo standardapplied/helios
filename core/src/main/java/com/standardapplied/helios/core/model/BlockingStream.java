@@ -12,12 +12,12 @@ import java.util.function.Supplier;
 
 /**
  * The chunk stream of {@link BlockingModel#streamOf}: runs its call once, at the first {@code
- * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs; a stream
- * closed, or a reading thread interrupted, before that never runs it. A call that ends after a
- * close, or that throws on an interrupt of the reading thread, ends the stream in a {@link
- * CancellationException}, as does a close or an interrupt between the chunks of its answer; an
- * {@link Error} the call throws is thrown as itself. Whatever ends the stream, it never runs the
- * call again.
+ * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs, an
+ * interrupt the stream keeps like any other of the reading thread; a stream closed, or a reading
+ * thread interrupted, before that never runs it. A call that ends after a close, or that throws on
+ * an interrupt of the reading thread, ends the stream in a {@link CancellationException}, as does a
+ * close or an interrupt between the chunks of its answer; an {@link Error} the call throws is
+ * thrown as itself. Whatever ends the stream, it never runs the call again.
  */
 final class BlockingStream implements CloseableIterator<ModelChunk> {
 
@@ -89,15 +89,13 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
   }
 
   /**
-   * Ends the call, clearing the interrupt of a close now that the call no longer runs, and says
-   * whether it was {@linkplain #cutShort() cut short}.
+   * Ends the call and says whether it was {@linkplain #cutShort() cut short}. The interrupt of a
+   * close stays set: it cannot be told apart from an interrupt of the reading thread, which the
+   * stream keeps.
    */
   private boolean finish() {
     synchronized (lock) {
       running = null;
-      if (closed) {
-        Thread.interrupted();
-      }
     }
     return cutShort();
   }
