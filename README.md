@@ -299,6 +299,8 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 - `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
 - `openEnded(model, root, provider)` — `workspace` plus `Execute` through the given `ExecutionProvider`; `defaultInWorkspace()` asks before each execution.
 
+Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
+
 Stream events for a live UI:
 
 ```java

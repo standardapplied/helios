@@ -151,9 +151,9 @@ turn, no FP drift. `CostCalculator.ZERO` is the default; cost tracking is opt-in
 var policy =
     new Permission(
         PermissionMode.DEFAULT,
-        List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),
-        List.of(PermissionRule.withGlob(PermissionEffect.ASK, "MemoryWrite", "/memories/**")),
-        List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));
+        List.of(PermissionRule.of("Read", "./src/**")),
+        List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
+        List.of(PermissionRule.of("Read", "**/secrets.*")));
 
 try (var session =
     AgentSession.create(SessionPresets.workspace(model, root).withPermission(policy).build())) {
@@ -161,10 +161,21 @@ try (var session =
 }
 ```
 
-Rule order: **deny → bypass-shortcut → allow → ask → default-by-category**. ASK decisions route
-through the session's `QuestionGateway` and surface as an `AskUserQuestion` prompt the host
-answers via `session.answer(questionId, response)`. `SessionPresets.workspace(...)` ships
-`Permission.defaultInWorkspace()`; `SessionPresets.readOnly(...)` ships `Permission.planMode()`.
+Rule order, in every mode: **deny > ask > allow > the mode's default for the tool's category**.
+A rule has no effect of its own; the list it sits in is its effect. ASK decisions route through
+the session's `QuestionGateway` and surface as an `AskUserQuestion` prompt the host answers via
+`session.answer(questionId, response)`. A session built without `withPermission` gets
+`Permission.empty(PermissionMode.DEFAULT)`: reads run, writes, execution and network ask. A
+headless host sets `Permission.empty(PermissionMode.BYPASS_PERMISSIONS)`, or allow rules for the
+tools its runs need. `SessionPresets.workspace(...)` ships `Permission.defaultInWorkspace()`;
+`SessionPresets.readOnly(...)` ships `Permission.planMode()`.
+
+An allow never carves an exception out of a matching ask: "ask broadly, allow a narrow exception"
+(`ASK Read(./secrets/**)` with `ALLOW Read(./secrets/README.md)`) asks for the exception too.
+Where the mode already asks for the tool's category (`WRITE`, `EXECUTION`, `NETWORK` under
+`DEFAULT`), drop the broad ask and keep the allow. For a `READ` or `CONTROL` tool, or under
+`LOCKED_DOWN`, there is no equivalent: list the exception's siblings as asks instead. This is the
+order Claude Code uses.
 
 A path tool's key is the canonical path it touches, however the model spelled it: `.` or `./a/b`
 in the workspace (`secrets/key`, `docs/../secrets/key`, an absolute path and a symlink to it are
@@ -175,11 +186,11 @@ matches `.`), `/**/` and a leading `**/` match zero or more segments, `*` and `?
 segment. Rules name real paths: a rule written through a symlink, such as `./link/**`, never
 matches, since a key never goes through one, and creation cannot detect that. A rule for a path tool
 that no canonical path can match, such as `Read("secrets/**")`, fails `AgentSession.create`. A call
-whose key carries a registered secret is refused, with or without a policy. `Glob`, `Grep`, `LS`
+whose key carries a registered secret is refused. `Glob`, `Grep`, `LS`
 and a `MemoryRead` listing withhold every entry below their path that one of their own DENY rules
 matches (for `Grep`, which returns contents, also every entry a `Read` DENY or ASK rule decides,
-without asking), never descend into a withheld directory, and end with
-`[withheld by permission policy: <n>]`. The allow that admitted a walk's start covers what it finds
+without asking, in every mode), never descend into a withheld directory, and end with
+`[withheld by permission policy: <n>]`. The decision that admitted a walk's start covers what it finds
 except what those rules withhold; a mode or category default, such as `LOCKED_DOWN`'s deny, is not
 a rule and withholds nothing. Memory is its own namespace: a memory call is authorised by
 `MemoryRead`/`MemoryWrite` rules on its `/memories/...` key, and a `Read` rule over the directory

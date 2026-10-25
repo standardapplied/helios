@@ -26,15 +26,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 final class DefaultPermissionEvaluatorTest {
 
-  private static final PermissionRule ASK_WRITE =
-      PermissionRule.withGlob(PermissionEffect.ASK, "Write", "/tmp/**");
+  private static final PermissionRule ASK_WRITE = PermissionRule.of("Write", "/tmp/**");
 
   private static Tool tool(String name) {
     return Tool.newBuilder()
@@ -66,6 +68,11 @@ final class DefaultPermissionEvaluatorTest {
       List<PermissionRule> ask,
       List<PermissionRule> deny) {
     return new Permission(mode, allow, ask, deny);
+  }
+
+  private static PermissionDecision byRule(
+      PermissionEffect effect, PermissionRule rule, String reason) {
+    return new PermissionDecision(effect, reason, Optional.of(rule));
   }
 
   private static ToolBinding.CanonicalCall call(String name) {
@@ -167,7 +174,7 @@ final class DefaultPermissionEvaluatorTest {
   void anAskRulePatternCarryingASecretReachesTheApproverRedactedWithTheRuleIntact() {
     var secrets = new SecretRegistry();
     secrets.register("PASSWORD", "secret*value");
-    var askSecret = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "secret*value");
+    var askSecret = PermissionRule.of("Write", "secret*value");
     var requests = new ArrayList<ApprovalRequest>();
     var e =
         DefaultPermissionEvaluator.newBuilder(
@@ -223,10 +230,7 @@ final class DefaultPermissionEvaluatorTest {
     var e =
         evaluator(
             rules(
-                PermissionMode.DEFAULT,
-                List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
-                List.of(),
-                List.of()),
+                PermissionMode.DEFAULT, List.of(PermissionRule.any("Read")), List.of(), List.of()),
             tools(binding("Write", ToolCategory.WRITE)));
     var impostor =
         new ToolBinding.CanonicalCall(call("Write").call(), new ToolPermissionKey("Read", "/etc"));
@@ -237,7 +241,7 @@ final class DefaultPermissionEvaluatorTest {
 
   @Test
   void authorizeDecidesOnTheKeyItIsHandedNotOneRecomputedFromTheArguments() {
-    var deny = PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./secrets/**");
+    var deny = PermissionRule.of("Read", "./secrets/**");
     var e =
         evaluator(
             rules(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny)),
@@ -247,7 +251,10 @@ final class DefaultPermissionEvaluatorTest {
             new ToolCall("c", "Read", Map.of("path", "./docs/a.txt")),
             new ToolPermissionKey("Read", "./secrets/key"));
     assertEquals(
-        PermissionDecision.byRule(deny, "deny rule Read(./secrets/**) matched Read(./secrets/key)"),
+        byRule(
+            PermissionEffect.DENY,
+            deny,
+            "deny rule Read(./secrets/**) matched Read(./secrets/key)"),
         e.authorize(handed));
   }
 
@@ -255,48 +262,119 @@ final class DefaultPermissionEvaluatorTest {
 
   @Test
   void anExplicitDenyWinsOverAnAllowForTheSameCall() {
-    var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var deny = PermissionRule.any("Read");
     var e =
         evaluator(
             rules(
                 PermissionMode.DEFAULT,
-                List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
+                List.of(PermissionRule.any("Read")),
                 List.of(),
                 List.of(deny)),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
-        PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+        byRule(PermissionEffect.DENY, deny, "deny rule Read matched Read"),
+        e.authorize(call("Read")));
   }
 
   @Test
   void anExplicitDenyWinsOverAnAskForTheSameCall() {
-    var deny = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var deny = PermissionRule.any("Read");
     var e =
         evaluator(
             rules(
                 PermissionMode.DEFAULT,
                 List.of(),
-                List.of(PermissionRule.any(PermissionEffect.ASK, "Read")),
+                List.of(PermissionRule.any("Read")),
                 List.of(deny)),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
-        PermissionDecision.byRule(deny, "deny rule Read matched Read"), e.authorize(call("Read")));
+        byRule(PermissionEffect.DENY, deny, "deny rule Read matched Read"),
+        e.authorize(call("Read")));
   }
 
   @Test
-  void anAllowRuleWinsOverAnAskForTheSameCall() {
-    var allow = PermissionRule.any(PermissionEffect.ALLOW, "Write");
+  void anAskRuleWinsOverAnAllowForTheSameCall() {
+    var ask = PermissionRule.any("Write");
     var e =
         evaluator(
             rules(
                 PermissionMode.DEFAULT,
-                List.of(allow),
-                List.of(PermissionRule.any(PermissionEffect.ASK, "Write")),
+                List.of(PermissionRule.any("Write")),
+                List.of(ask),
                 List.of()),
             tools(binding("Write", ToolCategory.WRITE)));
     assertEquals(
-        PermissionDecision.byRule(allow, "allow rule Write matched Write"),
-        e.authorize(call("Write")));
+        byRule(PermissionEffect.ASK, ask, "ask rule Write matched Write"),
+        e.evaluate(ToolPermissionKey.of("Write"), ToolCategory.WRITE));
+  }
+
+  private static final PermissionRule DENY_TMP = PermissionRule.of("Write", "/tmp/**");
+  private static final PermissionRule ASK_TMP = PermissionRule.of("Write", "/tmp/*");
+  private static final PermissionRule ALLOW_TMP_A = PermissionRule.of("Write", "/tmp/?");
+
+  /**
+   * Which of a deny, an ask and an allow rule matching one key a policy holds, and the effect that
+   * decides.
+   */
+  record Rules(boolean deny, boolean ask, boolean allow, PermissionEffect expected) {}
+
+  /** Every combination of the three rules, in every mode. */
+  static Stream<Arguments> ruleCombinations() {
+    var combinations =
+        List.of(
+            new Rules(true, true, true, PermissionEffect.DENY),
+            new Rules(true, true, false, PermissionEffect.DENY),
+            new Rules(true, false, true, PermissionEffect.DENY),
+            new Rules(true, false, false, PermissionEffect.DENY),
+            new Rules(false, true, true, PermissionEffect.ASK),
+            new Rules(false, true, false, PermissionEffect.ASK),
+            new Rules(false, false, true, PermissionEffect.ALLOW));
+    return Stream.of(PermissionMode.values())
+        .flatMap(mode -> combinations.stream().map(rules -> Arguments.of(mode, rules)));
+  }
+
+  @ParameterizedTest(name = "{0}: {1}")
+  @MethodSource("ruleCombinations")
+  void theMostRestrictiveMatchingRuleDecidesInEveryMode(PermissionMode mode, Rules held) {
+    var e =
+        evaluator(
+            rules(
+                mode,
+                held.allow() ? List.of(ALLOW_TMP_A) : List.of(),
+                held.ask() ? List.of(ASK_TMP) : List.of(),
+                held.deny() ? List.of(DENY_TMP) : List.of()),
+            tools(pathKeyed("Write", ToolCategory.WRITE)));
+    var rule =
+        switch (held.expected()) {
+          case DENY -> DENY_TMP;
+          case ASK -> ASK_TMP;
+          case ALLOW -> ALLOW_TMP_A;
+        };
+
+    var decision = e.evaluate(new ToolPermissionKey("Write", "/tmp/a"), ToolCategory.WRITE);
+
+    assertEquals(held.expected(), decision.effect());
+    assertEquals(Optional.of(rule), decision.rule());
+  }
+
+  @ParameterizedTest(name = "{0} -> {1}")
+  @CsvSource({
+    "DEFAULT, ASK",
+    "PLAN, DENY",
+    "ACCEPT_EDITS, ALLOW",
+    "LOCKED_DOWN, DENY",
+    "BYPASS_PERMISSIONS, ALLOW"
+  })
+  void withNoMatchingRuleTheModesCategoryDefaultDecides(
+      PermissionMode mode, PermissionEffect expected) {
+    var e =
+        evaluator(
+            rules(mode, List.of(ALLOW_TMP_A), List.of(ASK_TMP), List.of(DENY_TMP)),
+            tools(pathKeyed("Write", ToolCategory.WRITE)));
+
+    var decision = e.evaluate(new ToolPermissionKey("Write", "/var/a/b"), ToolCategory.WRITE);
+
+    assertEquals(new PermissionDecision(expected, decision.reason(), Optional.empty()), decision);
   }
 
   @Test
@@ -312,32 +390,34 @@ final class DefaultPermissionEvaluatorTest {
 
   @Test
   void bypassPermissionsKeepsAnExplicitDeny() {
-    var deny = PermissionRule.any(PermissionEffect.DENY, "Execute");
+    var deny = PermissionRule.any("Execute");
     var e =
         evaluator(
             rules(PermissionMode.BYPASS_PERMISSIONS, List.of(), List.of(), List.of(deny)),
             tools(binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(
-        PermissionDecision.byRule(deny, "deny rule Execute matched Execute"),
+        byRule(PermissionEffect.DENY, deny, "deny rule Execute matched Execute"),
         e.authorize(call("Execute")));
   }
 
   @Test
   void anAllowRuleOverridesTheCategoryDefault() {
-    var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
+    var allow = PermissionRule.of("Write", "/workspace/**");
     var e =
         evaluator(
             rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
-        PermissionDecision.byRule(
-            allow, "allow rule Write(/workspace/**) matched Write(/workspace/a.txt)"),
+        byRule(
+            PermissionEffect.ALLOW,
+            allow,
+            "allow rule Write(/workspace/**) matched Write(/workspace/a.txt)"),
         e.authorize(writeCall("/workspace/a.txt")));
   }
 
   @Test
   void aCallTheAllowGlobMissesFallsToTheCategoryDefault() {
-    var allow = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/workspace/**");
+    var allow = PermissionRule.of("Write", "/workspace/**");
     var e =
         evaluator(
             rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
@@ -360,13 +440,13 @@ final class DefaultPermissionEvaluatorTest {
 
   @Test
   void anAskRuleOverridesAnAllowingCategoryDefault() {
-    var ask = PermissionRule.any(PermissionEffect.ASK, "Read");
+    var ask = PermissionRule.any("Read");
     var e =
         evaluator(
             rules(PermissionMode.DEFAULT, List.of(), List.of(ask), List.of()),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
-        PermissionDecision.byRule(ask, "ask rule Read matched Read"),
+        byRule(PermissionEffect.ASK, ask, "ask rule Read matched Read"),
         e.evaluate(ToolPermissionKey.of("Read"), ToolCategory.READ));
   }
 
@@ -380,14 +460,11 @@ final class DefaultPermissionEvaluatorTest {
     assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
   }
 
-  // ── decidingRule ─────────────────────────────────────────────────────────
+  // ── ruleDecision ─────────────────────────────────────────────────────────
 
-  private static final PermissionRule DENY_SECRETS =
-      PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**");
-  private static final PermissionRule ALLOW_PUBLIC =
-      PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./docs/public/**");
-  private static final PermissionRule ASK_DOCS =
-      PermissionRule.withGlob(PermissionEffect.ASK, "Grep", "./docs/**");
+  private static final PermissionRule DENY_SECRETS = PermissionRule.of("Grep", "./secrets/**");
+  private static final PermissionRule ALLOW_PUBLIC = PermissionRule.of("Grep", "./docs/public/**");
+  private static final PermissionRule ASK_DOCS = PermissionRule.of("Grep", "./docs/**");
 
   private static DefaultPermissionEvaluator grepRules(PermissionMode mode) {
     return evaluator(
@@ -399,30 +476,46 @@ final class DefaultPermissionEvaluatorTest {
     return new ToolPermissionKey("Grep", path);
   }
 
+  private static Optional<PermissionRule> decidingRule(
+      DefaultPermissionEvaluator e, ToolPermissionKey key) {
+    return e.ruleDecision(key).flatMap(PermissionDecision::rule);
+  }
+
   @Test
   void theDecidingRuleIsTheRuleEvaluateDecidesBy() {
     var e = grepRules(PermissionMode.DEFAULT);
 
-    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
-    assertEquals(Optional.of(ALLOW_PUBLIC), e.decidingRule(grep("./docs/public/a.txt")));
-    assertEquals(Optional.of(ASK_DOCS), e.decidingRule(grep("./docs/a.txt")));
-    assertEquals(Optional.empty(), e.decidingRule(grep("./src/a.txt")));
-    assertEquals(Optional.empty(), e.decidingRule(new ToolPermissionKey("Read", "./secrets/key")));
+    assertEquals(Optional.of(DENY_SECRETS), decidingRule(e, grep("./secrets/key")));
+    assertEquals(Optional.of(ASK_DOCS), decidingRule(e, grep("./docs/public/a.txt")));
+    assertEquals(Optional.of(ASK_DOCS), decidingRule(e, grep("./docs/a.txt")));
+    assertEquals(Optional.empty(), decidingRule(e, grep("./src/a.txt")));
+    assertEquals(Optional.empty(), decidingRule(e, new ToolPermissionKey("Read", "./secrets/key")));
   }
 
   @Test
-  void underBypassPermissionsOnlyADenyRuleDecides() {
+  void theRuleDecisionIsTheDecisionEvaluateReturns() {
+    var e = grepRules(PermissionMode.DEFAULT);
+
+    for (var path : List.of("./secrets/key", "./docs/public/a.txt", "./docs/a.txt")) {
+      assertEquals(
+          Optional.of(e.evaluate(grep(path), ToolCategory.SEARCH)), e.ruleDecision(grep(path)));
+    }
+  }
+
+  @Test
+  void underBypassPermissionsDenyAndAskRulesDecide() {
     var e = grepRules(PermissionMode.BYPASS_PERMISSIONS);
 
-    assertEquals(Optional.of(DENY_SECRETS), e.decidingRule(grep("./secrets/key")));
-    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/public/a.txt")));
-    assertEquals(Optional.empty(), e.decidingRule(grep("./docs/a.txt")));
+    assertEquals(Optional.of(DENY_SECRETS), decidingRule(e, grep("./secrets/key")));
+    assertEquals(Optional.of(ASK_DOCS), decidingRule(e, grep("./docs/public/a.txt")));
+    assertEquals(Optional.of(ASK_DOCS), decidingRule(e, grep("./docs/a.txt")));
+    assertEquals(Optional.empty(), decidingRule(e, grep("./src/a.txt")));
   }
 
   @Test
-  void decidingRuleRejectsANullKey() {
+  void ruleDecisionRejectsANullKey() {
     var e = evaluator(Permission.defaultInWorkspace(), tools());
-    assertThrows(NullPointerException.class, () -> e.decidingRule(null));
+    assertThrows(NullPointerException.class, () -> e.ruleDecision(null));
   }
 
   // ── category defaults per mode ───────────────────────────────────────────

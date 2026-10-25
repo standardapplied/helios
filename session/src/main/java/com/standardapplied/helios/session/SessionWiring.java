@@ -17,30 +17,21 @@ import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
-import com.standardapplied.helios.session.permissions.PermissionDecision;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
-import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Function;
 
 /**
  * Builds one session's agent loop from its options: the tool registry with the built-in tools, the
  * tool dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
  * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
- * questions, with the rules that decide a key withholding what walking tools return; with no
- * permission it admits every call and withholds nothing. It acquires nothing, so a failure here
- * leaves only what the caller acquired to release.
+ * questions, with the rules that decide a key withholding what walking tools return. It acquires
+ * nothing, so a failure here leaves only what the caller acquired to release.
  */
 final class SessionWiring {
-
-  private static final PermissionDecision NO_POLICY =
-      PermissionDecision.allow("no permission policy");
 
   private SessionWiring() {}
 
@@ -60,15 +51,8 @@ final class SessionWiring {
         LoopCollaborators.newBuilder()
             .withHooks(new HookRegistry(options.hooks(), sessionContext.secrets()))
             .withToolDispatch(toolDispatch)
-            .withAuthorization(
-                evaluator
-                    .<Function<ToolBinding.CanonicalCall, PermissionDecision>>map(e -> e::authorize)
-                    .orElse(canonical -> NO_POLICY))
-            .withDecidingRule(
-                evaluator
-                    .<Function<ToolPermissionKey, Optional<PermissionRule>>>map(
-                        e -> e::decidingRule)
-                    .orElse(key -> Optional.empty()))
+            .withAuthorization(evaluator::authorize)
+            .withRuleDecision(evaluator::ruleDecision)
             .withSteeringQueue(steeringQueue)
             .withEventSink(events::emit)
             .withHookContextFactory(
@@ -92,20 +76,13 @@ final class SessionWiring {
         options.contextCompactor());
   }
 
-  /**
-   * The evaluator of the session's permission, empty without one; building it refuses a rule no
-   * canonical path can match.
-   */
-  private static Optional<DefaultPermissionEvaluator> evaluator(
+  /** The evaluator of the session's permission; building it refuses a rule no path can match. */
+  private static DefaultPermissionEvaluator evaluator(
       SessionOptions options, ToolRegistry tools, QuestionGateway gateway, SecretRegistry secrets) {
-    return options
-        .permission()
-        .map(
-            permission ->
-                DefaultPermissionEvaluator.newBuilder(permission, tools)
-                    .withApprover(ToolApprover.askingUser(gateway))
-                    .withSecretRegistry(secrets)
-                    .build());
+    return DefaultPermissionEvaluator.newBuilder(options.permission(), tools)
+        .withApprover(ToolApprover.askingUser(gateway))
+        .withSecretRegistry(secrets)
+        .build();
   }
 
   private static ToolRegistry withBuiltins(

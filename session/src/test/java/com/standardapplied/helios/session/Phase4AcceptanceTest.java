@@ -17,7 +17,6 @@ import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -46,7 +45,7 @@ final class Phase4AcceptanceTest {
   }
 
   private static PermissionRule allowUnderMemories(String tool) {
-    return PermissionRule.withGlob(PermissionEffect.ALLOW, tool, "/memories/**");
+    return PermissionRule.of(tool, "/memories/**");
   }
 
   private static SessionOptions options(

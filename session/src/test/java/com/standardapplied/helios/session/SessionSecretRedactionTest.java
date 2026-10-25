@@ -30,6 +30,8 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -310,6 +312,7 @@ final class SessionSecretRedactionTest {
     var options =
         SessionOptions.newBuilder()
             .withSecretRegistry(secrets)
+            .withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withTools(
                 new ToolRegistry(
                     List.of(

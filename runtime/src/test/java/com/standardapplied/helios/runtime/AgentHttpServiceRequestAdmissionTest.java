@@ -249,7 +249,6 @@ final class AgentHttpServiceRequestAdmissionTest {
               + Integer.toHexString(max + 1)
               + "\r\n");
       connection.write(textBody(max + 1));
-      connection.write("\r\n");
 
       var refused = connection.response();
 

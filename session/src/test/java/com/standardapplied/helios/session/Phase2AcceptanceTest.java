@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -86,8 +85,7 @@ final class Phase2AcceptanceTest {
             PermissionMode.DEFAULT,
             List.of(),
             List.of(),
-            List.of(
-                new PermissionRule(PermissionEffect.DENY, "Read", Optional.of("./sensitive.txt"))));
+            List.of(new PermissionRule("Read", Optional.of("./sensitive.txt"))));
 
     // Five-turn script: Grep → Read(allowed) → Read(denied) → AskUserQuestion → final STOP.
     var grepCall = new ToolCall("c1", GrepTool.NAME, Map.of("pattern", "TARGET"));
