@@ -151,9 +151,10 @@ final class RuleMatcherTest {
 
   @Test
   void firstMatchReturnsEarliestRule() {
-    var first = PermissionRule.any("Read");
+    var first = PermissionRule.of("Read", "./**");
     var second = PermissionRule.any("Read");
-    var match = matcher.firstMatch(ToolPermissionKey.of("Read"), List.of(first, second));
+    var key = new ToolPermissionKey("Read", "./src/a.txt");
+    var match = matcher.firstMatch(key, List.of(first, second));
     assertEquals(first, match.orElseThrow());
   }
 
