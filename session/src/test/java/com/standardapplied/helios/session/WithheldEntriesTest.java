@@ -178,6 +178,24 @@ final class WithheldEntriesTest {
   }
 
   @Test
+  void allowRulesBelowTheWalkWithholdNothing() {
+    var permission =
+        policy(
+            PermissionMode.DEFAULT,
+            rule(PermissionEffect.ALLOW, GrepTool.NAME, "./secrets/**"),
+            rule(PermissionEffect.ALLOW, ReadTool.NAME, "./secrets/**"));
+
+    var grep = runTool(permission, GrepTool.NAME, grepTop());
+
+    assertEquals(
+        List.of(
+            "secrets/b.txt:1:TOPSECRET",
+            "secrets/key:1:TOPSECRET",
+            "secrets/sub/c.txt:1:TOPSECRET"),
+        grep.lines().sorted().toList());
+  }
+
+  @Test
   void aDenyRuleWithholdsUnderBypassPermissions() {
     var out =
         withheldRun(
