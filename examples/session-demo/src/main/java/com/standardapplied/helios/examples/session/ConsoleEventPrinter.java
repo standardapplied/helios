@@ -2,8 +2,9 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.session;
+package com.standardapplied.helios.examples.session;
 
+import com.standardapplied.helios.session.QueryEvent;
 import java.io.PrintStream;
 import java.util.Objects;
 import java.util.concurrent.Flow;

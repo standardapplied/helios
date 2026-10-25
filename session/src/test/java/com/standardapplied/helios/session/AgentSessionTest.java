@@ -6,7 +6,6 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
@@ -81,6 +80,11 @@ final class AgentSessionTest {
     public List<AskUserQuestionRequest> pendingQuestions() {
       return List.of();
     }
+
+    @Override
+    public <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
+      throw new UnsupportedOperationException("not exercised by these interface-level tests");
+    }
   }
 
   @Test
@@ -101,26 +105,5 @@ final class AgentSessionTest {
     var result = s.runBlocking(UserMessage.text("hi"));
     assertSame(expected, result);
     assertEquals("hi", s.sent.get(0).text());
-  }
-
-  /** Trivial record used to build an OutputSchema for the typed-runBlocking tests. */
-  public record StubOutput(String answer) {}
-
-  @Test
-  void typedRunBlockingRejectsNullMessage() {
-    var s = new StubSession();
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> s.runBlocking(null, OutputSchema.of(StubOutput.class)));
-    assertEquals("message must not be null", ex.getMessage());
-  }
-
-  @Test
-  void typedRunBlockingRejectsNullSchema() {
-    var s = new StubSession();
-    var ex =
-        assertThrows(NullPointerException.class, () -> s.runBlocking(UserMessage.text("hi"), null));
-    assertEquals("schema must not be null", ex.getMessage());
   }
 }

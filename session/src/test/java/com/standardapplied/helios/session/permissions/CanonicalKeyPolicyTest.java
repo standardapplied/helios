@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -50,7 +49,7 @@ final class CanonicalKeyPolicyTest {
     tools =
         new ToolRegistry(
             List.of(
-                ReadTool.binding(workspace, InMemoryFileTracker.create()),
+                ReadTool.binding(workspace),
                 LsTool.binding(workspace),
                 GlobTool.binding(workspace),
                 GrepTool.binding(workspace),

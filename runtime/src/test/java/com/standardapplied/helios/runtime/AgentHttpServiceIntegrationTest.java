@@ -119,6 +119,9 @@ final class AgentHttpServiceIntegrationTest {
       assertTrue(
           collected.stream().anyMatch(e -> e.event.equals("AssistantText")),
           "stream must include AssistantText");
+      var turnEnded =
+          collected.stream().filter(e -> e.event.equals("TurnEnded")).findFirst().orElseThrow();
+      assertTrue(turnEnded.data.contains("\"reason\":\"STOP\""), turnEnded.data);
       var loopEnded =
           collected.stream().filter(e -> e.event.equals("LoopEnded")).findFirst().orElseThrow();
       assertTrue(loopEnded.data.contains("hello back"));

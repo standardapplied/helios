@@ -112,7 +112,7 @@ final class TurnSubscriberTest {
     var turn = subscriber.awaitDone(new CancellationToken());
 
     assertEquals(
-        new StreamedTurn("Hel", List.of(), List.of(), FinishReason.STOP, USAGE, Map.of(), null),
+        new TurnOutcome(FinishReason.STOP, "Hel", List.of(), List.of(), USAGE, Map.of(), null, 1),
         turn);
     assertEquals(List.of("Hel"), assistantTexts());
     assertEquals(1, events.size());
@@ -135,9 +135,9 @@ final class TurnSubscriberTest {
 
     assertEquals(1, subscription.cancels);
     assertEquals(List.of(Long.MAX_VALUE), subscription.requests);
-    assertInstanceOf(TimeoutException.class, turn.error());
+    assertInstanceOf(TimeoutException.class, turn.streamError());
     assertEquals(FinishReason.ERROR, turn.finishReason());
-    assertEquals("Hel", turn.content());
+    assertEquals("Hel", turn.assistantContent());
     assertEquals(List.of(), turn.toolCalls());
     assertEquals(Response.Usage.of(0, 0), turn.usage());
     assertEquals(List.of("Hel"), assistantTexts());
@@ -152,7 +152,7 @@ final class TurnSubscriberTest {
     var turn = subscriber.awaitDone(token);
     subscriber.onComplete();
 
-    assertInstanceOf(CancellationException.class, turn.error());
+    assertInstanceOf(CancellationException.class, turn.streamError());
     assertEquals(1, subscription.cancels);
     assertEquals(0, token.activeCallbackCountForTests());
   }
@@ -174,7 +174,7 @@ final class TurnSubscriberTest {
 
     token.cancelAsync("session closed", error -> {});
 
-    assertInstanceOf(CancellationException.class, Await.value("the turn", waiting).error());
+    assertInstanceOf(CancellationException.class, Await.value("the turn", waiting).streamError());
   }
 
   @Test
@@ -188,8 +188,8 @@ final class TurnSubscriberTest {
     }
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertInstanceOf(TimeoutException.class, turn.error());
-    assertEquals(0, turn.error().getSuppressed().length);
+    assertInstanceOf(TimeoutException.class, turn.streamError());
+    assertEquals(0, turn.streamError().getSuppressed().length);
     assertEquals(
         List.of(Level.WARNING, cleanup),
         List.of(logged.getFirst().getLevel(), logged.getFirst().getThrown()));
@@ -204,7 +204,7 @@ final class TurnSubscriberTest {
     scheduler.fireLatest();
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertInstanceOf(TimeoutException.class, turn.error());
+    assertInstanceOf(TimeoutException.class, turn.streamError());
     assertTrue(state.cancellation().isCancelled(), "a host Error ends the session");
     assertSame(cleanup, state.ending().seal().orElseThrow());
   }
@@ -218,7 +218,7 @@ final class TurnSubscriberTest {
     subscriber.end(failure, true);
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertSame(failure, turn.error());
+    assertSame(failure, turn.streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
     assertEquals(List.of(cleanup), List.of(failure.getSuppressed()));
   }
@@ -231,14 +231,14 @@ final class TurnSubscriberTest {
     var stalled = newSubscriber(events::add, SHORT_GRACE);
     stalled.onSubscribe(cancelling(untilInterrupted(interrupted)));
 
-    StreamedTurn turn;
+    TurnOutcome turn;
     try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
       turn =
           Await.value(
               "the turn released", CompletableFuture.supplyAsync(() -> stalled.awaitDone(token)));
     }
 
-    assertInstanceOf(CancellationException.class, turn.error());
+    assertInstanceOf(CancellationException.class, turn.streamError());
     Await.latch("the cancel interrupted", interrupted);
     assertEquals(
         List.of(
@@ -267,7 +267,7 @@ final class TurnSubscriberTest {
     released.countDown();
     Await.termination("the cancel to throw", Await.value("the cancel to start", cancelling));
 
-    assertInstanceOf(CancellationException.class, turn.error());
+    assertInstanceOf(CancellationException.class, turn.streamError());
     assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
@@ -293,7 +293,7 @@ final class TurnSubscriberTest {
     subscriber.onSubscribe(cancelling(throwing(cleanup)));
     var turn = subscriber.awaitDone(state.cancellation());
 
-    assertInstanceOf(CancellationException.class, turn.error());
+    assertInstanceOf(CancellationException.class, turn.streamError());
     assertEquals(1, subscription.cancels);
     assertSame(cleanup, state.ending().seal().orElseThrow());
   }
@@ -320,7 +320,7 @@ final class TurnSubscriberTest {
     var turn = subscriber.awaitDone(new CancellationToken());
 
     assertTrue(Thread.interrupted());
-    assertInstanceOf(InterruptedException.class, turn.error());
+    assertInstanceOf(InterruptedException.class, turn.streamError());
     assertEquals(1, subscription.cancels);
   }
 
@@ -346,7 +346,7 @@ final class TurnSubscriberTest {
     released.countDown();
 
     var ended = Await.value("the turn", turn);
-    assertInstanceOf(TimeoutException.class, ended.getKey().error());
+    assertInstanceOf(TimeoutException.class, ended.getKey().streamError());
     assertTrue(ended.getValue(), "the interrupt stays set");
   }
 
@@ -370,7 +370,7 @@ final class TurnSubscriberTest {
     assertSame(failure, assertThrows(AssertionError.class, () -> subscriber.onSubscribe(failing)));
 
     var turn = CompletableFuture.supplyAsync(() -> subscriber.awaitDone(new CancellationToken()));
-    assertSame(failure, Await.value("the turn", turn).error());
+    assertSame(failure, Await.value("the turn", turn).streamError());
     assertEquals(1, cancels.get());
   }
 
@@ -396,7 +396,7 @@ final class TurnSubscriberTest {
     throwing.countDown();
 
     assertSame(failure, Await.failure("the subscription delivered", delivery));
-    assertInstanceOf(CancellationException.class, turn.error());
+    assertInstanceOf(CancellationException.class, turn.streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
@@ -408,7 +408,7 @@ final class TurnSubscriberTest {
     subscriber.onError(new CompletionException(failure));
 
     assertInstanceOf(
-        CompletionException.class, subscriber.awaitDone(new CancellationToken()).error());
+        CompletionException.class, subscriber.awaitDone(new CancellationToken()).streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
@@ -434,7 +434,7 @@ final class TurnSubscriberTest {
     subscriber.onError(failure);
 
     assertInstanceOf(
-        CancellationException.class, subscriber.awaitDone(new CancellationToken()).error());
+        CancellationException.class, subscriber.awaitDone(new CancellationToken()).streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
@@ -453,7 +453,7 @@ final class TurnSubscriberTest {
         assertThrows(AssertionError.class, () -> failing.onNext(new ModelChunk.TextDelta("Hel"))));
 
     var turn = failing.awaitDone(new CancellationToken());
-    assertSame(failure, turn.error());
+    assertSame(failure, turn.streamError());
     assertEquals(1, subscription.cancels);
     assertSame(failure, state.ending().seal().orElseThrow());
   }
@@ -479,7 +479,8 @@ final class TurnSubscriberTest {
     release.countDown();
 
     assertSame(failure, Await.failure("the chunk delivered", delivery));
-    assertInstanceOf(TimeoutException.class, stalled.awaitDone(new CancellationToken()).error());
+    assertInstanceOf(
+        TimeoutException.class, stalled.awaitDone(new CancellationToken()).streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
@@ -491,7 +492,7 @@ final class TurnSubscriberTest {
     subscriber.end(failure, true);
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertSame(failure, turn.error());
+    assertSame(failure, turn.streamError());
     assertEquals(1, subscription.cancels);
   }
 
@@ -501,7 +502,7 @@ final class TurnSubscriberTest {
 
     subscriber.end(failure, true);
 
-    assertSame(failure, subscriber.awaitDone(new CancellationToken()).error());
+    assertSame(failure, subscriber.awaitDone(new CancellationToken()).streamError());
   }
 
   @Test
@@ -524,8 +525,8 @@ final class TurnSubscriberTest {
 
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertInstanceOf(IllegalStateException.class, turn.error());
-    assertEquals("", turn.content());
+    assertInstanceOf(IllegalStateException.class, turn.streamError());
+    assertEquals("", turn.assistantContent());
     assertEquals(List.of(), events);
   }
 
@@ -537,9 +538,9 @@ final class TurnSubscriberTest {
     subscriber.onComplete();
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertInstanceOf(IllegalStateException.class, turn.error());
+    assertInstanceOf(IllegalStateException.class, turn.streamError());
     assertEquals(FinishReason.ERROR, turn.finishReason());
-    assertEquals("Hel", turn.content());
+    assertEquals("Hel", turn.assistantContent());
   }
 
   @Test
@@ -571,8 +572,8 @@ final class TurnSubscriberTest {
     subscriber.onComplete();
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertNull(turn.error());
-    assertEquals("Checking.", turn.content());
+    assertNull(turn.streamError());
+    assertEquals("Checking.", turn.assistantContent());
     assertEquals(List.of(call), turn.toolCalls());
     assertEquals(FinishReason.TOOL_CALLS, turn.finishReason());
     assertEquals(USAGE, turn.usage());
@@ -596,7 +597,7 @@ final class TurnSubscriberTest {
     subscriber.onError(refused);
     var turn = subscriber.awaitDone(new CancellationToken());
 
-    assertSame(refused, turn.error());
+    assertSame(refused, turn.streamError());
     assertEquals(FinishReason.ERROR, turn.finishReason());
     assertEquals(USAGE, turn.usage());
     assertEquals(0, subscription.cancels);

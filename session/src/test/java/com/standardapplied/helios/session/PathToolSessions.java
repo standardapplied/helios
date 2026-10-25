@@ -8,7 +8,6 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -60,7 +59,7 @@ final class PathToolSessions {
   ToolRegistry tools(WorkspaceRoot on) {
     return new ToolRegistry(
         List.of(
-            countingRuns(ReadTool.binding(on, InMemoryFileTracker.create())),
+            countingRuns(ReadTool.binding(on)),
             LsTool.binding(on),
             GlobTool.binding(on),
             GrepTool.binding(on)));
