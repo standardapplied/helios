@@ -8,6 +8,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
 /**
@@ -16,8 +17,9 @@ import java.util.function.Supplier;
  * interrupt the stream keeps like any other of the reading thread; a stream closed, or a reading
  * thread interrupted, before that never runs it. A call that ends after a close, or that throws on
  * an interrupt of the reading thread, ends the stream in a {@link CancellationException}, as does a
- * close or an interrupt between the chunks of its answer; an {@link Error} the call throws is
- * thrown as itself. Whatever ends the stream, it never runs the call again.
+ * close or an interrupt between the chunks of its answer; an {@link Error} the call throws, or a
+ * {@link CompletionException} carrying one, is thrown as itself. Whatever ends the stream, it never
+ * runs the call again.
  */
 final class BlockingStream implements CloseableIterator<ModelChunk> {
 
@@ -79,7 +81,7 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
     } finally {
       cutShort = finish();
     }
-    if (cutShort && !(failure instanceof CancellationException)) {
+    if (cutShort && !thrownAsItself(failure)) {
       throw cancelled(failure);
     }
     if (failure != null) {
@@ -108,6 +110,16 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
       }
     }
     return Thread.currentThread().isInterrupted();
+  }
+
+  /**
+   * A cancellation, and a {@link CompletionException} carrying an {@link Error}, such as a {@code
+   * join} of a failed future throws, are thrown as themselves, so whoever reads the stream sees the
+   * host {@code Error}.
+   */
+  private static boolean thrownAsItself(RuntimeException failure) {
+    return failure instanceof CancellationException
+        || failure instanceof CompletionException && failure.getCause() instanceof Error;
   }
 
   private static CancellationException cancelled(RuntimeException cause) {

@@ -66,7 +66,8 @@ final class ModelCall {
    * com.standardapplied.helios.core.fault.Backoff#maxDelay()}, or else the policy's {@link
    * StreamRetryPolicy#nextDelay(int)}; the back-off sleep honours the session's {@link
    * CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly without burning
-   * the full delay. The caller maps a still-failing transient error to {@link
+   * the full delay. A cancelled session or an interrupted thread starts no further attempt. The
+   * caller maps a still-failing transient error to {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
@@ -86,7 +87,8 @@ final class ModelCall {
       var turn = streamOnce(state, limits, visibleTools);
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
-          || state.cancellation().isCancelled()) {
+          || state.cancellation().isCancelled()
+          || Thread.currentThread().isInterrupted()) {
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
