@@ -810,7 +810,6 @@ evaluate to `ALLOW`.
 | `SessionOptions.permission()` → `Optional<Permission>`; `withPermission(null)` cleared it | `Permission`, non-null; `withPermission(null)` throws `NullPointerException` |
 | Rule order deny → BYPASS → allow → ask → default; an allow overrode a matching ask, and `BYPASS_PERMISSIONS` ignored ask rules | deny > ask > allow > default in every mode; ask rules apply, and withhold from `Grep`, under `BYPASS_PERMISSIONS` |
 | `PermissionRule(effect, toolName, argPattern)`, `PermissionRule.withGlob(effect, tool, glob)` / `any(effect, tool)`, `PermissionRule.effect()` | `PermissionRule(toolName, argPattern)`, `PermissionRule.of(tool, glob)` / `any(tool)`; the list a rule sits in is its effect |
-| `PermissionDecision.byRule(rule, reason)` | `new PermissionDecision(effect, reason, Optional.of(rule))` |
 | `Permission.firstRuleFor(tool)` | removed: it ignored globs; inspect `allow()`, `ask()` and `deny()` |
 | `Permission.planMode()` allowed `Read`, `LS`, `Glob`, `Grep` on `./**` | `Permission.empty(PLAN)`, deciding every call as before |
 | `Permission.defaultInWorkspace()` allowed the read tools, `MemoryRead` and `MemoryWrite`, and asked for `Write`, `Edit`, `MultiEdit` and `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask's `ApprovalRequest.rule()` is empty (the category default asks) |
