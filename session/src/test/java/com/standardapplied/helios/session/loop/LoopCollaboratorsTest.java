@@ -110,7 +110,7 @@ final class LoopCollaboratorsTest {
                     events::add,
                     contextFactory,
                     CLOCK));
-    assertEquals("decidingRule must not be null", ex.getMessage());
+    assertEquals("ruleDecision must not be null", ex.getMessage());
   }
 
   @Test
@@ -192,7 +192,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
-            .withDecidingRule(Authorizations.NO_RULE)
+            .withRuleDecision(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)
@@ -202,7 +202,7 @@ final class LoopCollaboratorsTest {
     assertSame(hooks, collaborators.hooks());
     assertSame(dispatch, collaborators.toolDispatch());
     assertSame(Authorizations.ADMIT_ALL, collaborators.authorization());
-    assertSame(Authorizations.NO_RULE, collaborators.decidingRule());
+    assertSame(Authorizations.NO_RULE, collaborators.ruleDecision());
     assertSame(queue, collaborators.steeringQueue());
     assertSame(contextFactory, collaborators.hookContextFactory());
     assertSame(CLOCK, collaborators.clock());
@@ -215,7 +215,7 @@ final class LoopCollaboratorsTest {
             .withHooks(hooks)
             .withToolDispatch(dispatch)
             .withAuthorization(Authorizations.ADMIT_ALL)
-            .withDecidingRule(Authorizations.NO_RULE)
+            .withRuleDecision(Authorizations.NO_RULE)
             .withSteeringQueue(queue)
             .withEventSink(events::add)
             .withHookContextFactory(contextFactory)

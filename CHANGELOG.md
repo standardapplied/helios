@@ -647,7 +647,7 @@ canonical call is the one keyed, announced, dispatched and shown to `PostToolUse
 |---|---|
 | `ToolBinding.permissionKey(Map)` | `ToolBinding.canonicalize(ToolCall)` → `CanonicalCall(call, key)` |
 | `DefaultPermissionEvaluator.authorize(ToolCall)` | `authorize(ToolBinding.CanonicalCall)`, deciding on the canonical call's key |
-| `LoopCollaborators(hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock)`, `authorization` a `Function<ToolCall, PermissionDecision>` | `authorization` is a `Function<ToolBinding.CanonicalCall, PermissionDecision>`, followed by the required `Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule`, set with `Builder.withDecidingRule` |
+| `LoopCollaborators(hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock)`, `authorization` a `Function<ToolCall, PermissionDecision>` | `authorization` is a `Function<ToolBinding.CanonicalCall, PermissionDecision>`, followed by the required `Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision`, set with `Builder.withRuleDecision` |
 | Path tools key on the raw `path` argument | keys are canonical: `.`, `./a/b`, `/memories/a/b`; a trusted workspace's outside target by its absolute real path |
 | A rule glob is matched as written, whatever it could match | a rule for a path tool whose glob can never match a canonical key fails `AgentSession.create` |
 | `X/**` does not match `X`; `/**/` needs one segment | `X/**` matches `X`; `/**/` and a leading `**/` match zero segments |
@@ -791,6 +791,34 @@ event carried it. An `AgentSession` implemented outside Helios must add it.
 |---|---|
 | A host learned of an open question only from the `QuestionAsked` event | `AgentSession.pendingQuestions()` → `List<AskUserQuestionRequest>`; implementations add it |
 
+**Permissions are safe by default and the most restrictive matching rule wins.** Every session has
+a permission policy; one built without `withPermission` gets `Permission.empty(DEFAULT)`, which
+allows reads and asks before every write, execution and network call. **Headless hosts**, where no
+one answers questions, set `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or
+allow rules for the tools their runs need; otherwise a run waits on its first ask until
+`maxWallClock` (1 h by default). Over HTTP, list and answer the asks with
+`GET /sessions/{id}/questions` and `POST /sessions/{id}/questions/{questionId}`. A call is decided
+by the first matching deny rule, else ask rule, else allow rule, in every mode, else by the mode's
+default for the tool's category. So "ask broadly, allow a narrow exception" (`ASK
+Read(./secrets/**)` with `ALLOW Read(./secrets/README.md)`) now asks for the exception too: where
+the mode already asks for the category (`WRITE`, `EXECUTION`, `NETWORK` under `DEFAULT`), drop the
+broad ask and keep the allow; for a `READ` or `CONTROL` tool, or under `LOCKED_DOWN`, list the
+exception's siblings as asks instead. The presets lose the rules that changed no decision but
+overrode a user's own: a user's `ASK Read(./secrets/**)` added to `defaultInWorkspace()` used to
+evaluate to `ALLOW`.
+
+| 2.x | 3.0 |
+|---|---|
+| No permission set → every call admitted | `Permission.empty(DEFAULT)`: writes, execution and network ask; headless hosts set `Permission.empty(PermissionMode.BYPASS_PERMISSIONS)` or allow rules |
+| `SessionOptions.permission()` → `Optional<Permission>`; `withPermission(null)` cleared it | `Permission`, non-null; `withPermission(null)` throws `NullPointerException` |
+| Rule order deny → BYPASS → allow → ask → default; an allow overrode a matching ask, and `BYPASS_PERMISSIONS` ignored ask rules | deny > ask > allow > default in every mode; ask rules apply, and withhold from `Grep`, under `BYPASS_PERMISSIONS` |
+| `PermissionRule(effect, toolName, argPattern)`, `PermissionRule.withGlob(effect, tool, glob)` / `any(effect, tool)`, `PermissionRule.effect()` | `PermissionRule(toolName, argPattern)`, `PermissionRule.of(tool, glob)` / `any(tool)`; the list a rule sits in is its effect |
+| `Permission`'s constructor rejected a rule whose effect was not its list's | no such check: a rule has no effect of its own |
+| `PermissionDecision.byRule(rule, reason)` | `new PermissionDecision(effect, reason, Optional.of(rule))` |
+| `Permission.firstRuleFor(tool)` | removed: it ignored globs; inspect `allow()`, `ask()` and `deny()` |
+| `Permission.planMode()` allowed `Read`, `LS`, `Glob`, `Grep` on `./**` | `Permission.empty(PLAN)`, deciding every call as before |
+| `Permission.defaultInWorkspace()` allowed the read tools and `MemoryRead`, asked for `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask's `ApprovalRequest.rule()` is empty (the category default asks) |
+
 ### Added
 
 - **`GET /sessions/{id}/questions` and `POST /sessions/{id}/questions/{questionId}`.** An HTTP
@@ -904,7 +932,7 @@ event carried it. An `AgentSession` implemented outside Helios must add it.
   characters, never inside a surrogate pair, then appends `note` formatted with how many were cut.
   Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
   reason, an approval's arguments and the approval prompt's key and reason are bounded through it.
-- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()`, `PermissionDecision.byRule` and
+- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()` and
   `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
   policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`
   for the final immutable call, whose `rule` is the ask rule that matched (empty when a mode or
@@ -915,14 +943,15 @@ event carried it. An `AgentSession` implemented outside Helios must add it.
   registry that redacts an approval's reason and arguments.
 - **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
   `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
-  `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.decidingRule`,
-  `ToolBinding.PathArgument.withContentRulesOf`, `LoopCollaborators.decidingRule`,
-  `LoopCollaborators.Builder.withDecidingRule`.** A `PathSpace` defines a path argument's canonical
+  `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.ruleDecision`,
+  `ToolBinding.PathArgument.withContentRulesOf`, `LoopCollaborators.ruleDecision`,
+  `LoopCollaborators.Builder.withRuleDecision`.** A `PathSpace` defines a path argument's canonical
   spelling (`canonical`), says whether a rule glob can match one (`admits`) and gives a sample
   (`example`); `WorkspaceRoot` is the workspace's, and memory has its own. A binding declares its
   path argument with `PathArgument.required(name, space)` or `optional(name, default, space)`.
   `Withholding` is the one filter a walking tool applies to each entry, through the call's
-  `ToolContext.withholds`; `decidingRule` is the rule that decides a key in `evaluate`'s order, and
+  `ToolContext.withholds`; `ruleDecision` is the decision of the rule that decides a key in
+  `evaluate`'s order, and
   `withContentRulesOf` names the tools whose content a walk returns (`Read` for `Grep`), whose DENY
   and ASK rules then withhold its entries.
 

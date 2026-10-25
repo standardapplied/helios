@@ -27,7 +27,6 @@ import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -162,7 +161,7 @@ final class SessionDemoIntegrationTest {
     var permission =
         new Permission(
             PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**")),
+            List.of(PermissionRule.of("MemoryRead", "/memories/**")),
             List.of(),
             List.of());
     CollectingSubscriber events;

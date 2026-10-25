@@ -17,8 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 final class PermissionTypesTest {
 
@@ -46,26 +44,15 @@ final class PermissionTypesTest {
 
   @Test
   void ruleCanonicalConstructorRetainsFields() {
-    var r = new PermissionRule(PermissionEffect.ALLOW, "Read", Optional.of("/x/**"));
-    assertEquals(PermissionEffect.ALLOW, r.effect());
+    var r = new PermissionRule("Read", Optional.of("/x/**"));
     assertEquals("Read", r.toolName());
     assertEquals(Optional.of("/x/**"), r.argPattern());
   }
 
   @Test
-  void ruleRejectsNullEffect() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> new PermissionRule(null, "Read", Optional.empty()));
-    assertEquals("effect must not be null", ex.getMessage());
-  }
-
-  @Test
   void ruleRejectsNullToolName() {
     var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new PermissionRule(PermissionEffect.ALLOW, null, Optional.empty()));
+        assertThrows(NullPointerException.class, () -> new PermissionRule(null, Optional.empty()));
     assertEquals("toolName must not be null", ex.getMessage());
   }
 
@@ -73,17 +60,13 @@ final class PermissionTypesTest {
   void ruleRejectsBlankToolName() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new PermissionRule(PermissionEffect.ALLOW, "  ", Optional.empty()));
+            IllegalArgumentException.class, () -> new PermissionRule("  ", Optional.empty()));
     assertEquals("toolName must not be blank", ex.getMessage());
   }
 
   @Test
   void ruleRejectsNullArgPattern() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new PermissionRule(PermissionEffect.ALLOW, "Read", null));
+    var ex = assertThrows(NullPointerException.class, () -> new PermissionRule("Read", null));
     assertEquals("argPattern must not be null", ex.getMessage());
   }
 
@@ -91,21 +74,26 @@ final class PermissionTypesTest {
   void ruleRejectsBlankArgPatternWhenPresent() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new PermissionRule(PermissionEffect.ALLOW, "Read", Optional.of("  ")));
+            IllegalArgumentException.class, () -> new PermissionRule("Read", Optional.of("  ")));
     assertEquals("argPattern must not be blank when present", ex.getMessage());
   }
 
   @Test
   void anyFactoryProducesEmptyArgPattern() {
-    var r = PermissionRule.any(PermissionEffect.DENY, "Execute");
-    assertTrue(r.argPattern().isEmpty());
+    assertEquals(new PermissionRule("Execute", Optional.empty()), PermissionRule.any("Execute"));
   }
 
   @Test
-  void withGlobFactoryProducesPresentArgPattern() {
-    var r = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "./**");
-    assertEquals("./**", r.argPattern().orElseThrow());
+  void ofFactoryProducesPresentArgPattern() {
+    assertEquals(
+        new PermissionRule("Read", Optional.of("./src/**")), PermissionRule.of("Read", "./src/**"));
+  }
+
+  @Test
+  void factoriesRejectBlankNamesAndGlobs() {
+    assertThrows(IllegalArgumentException.class, () -> PermissionRule.any(" "));
+    assertThrows(IllegalArgumentException.class, () -> PermissionRule.of(" ", "./**"));
+    assertThrows(IllegalArgumentException.class, () -> PermissionRule.of("Read", " "));
   }
 
   // ── Permission ───────────────────────────────────────────────────────────
@@ -113,9 +101,9 @@ final class PermissionTypesTest {
   @Test
   void permissionCanonicalConstructorDefensivelyCopiesLists() {
     var allow = new ArrayList<PermissionRule>();
-    allow.add(PermissionRule.any(PermissionEffect.ALLOW, "Read"));
+    allow.add(PermissionRule.any("Read"));
     var p = new Permission(PermissionMode.DEFAULT, allow, List.of(), List.of());
-    allow.add(PermissionRule.any(PermissionEffect.DENY, "Sneaky"));
+    allow.add(PermissionRule.any("Sneaky"));
     assertEquals(1, p.allow().size(), "allow list must be defensively copied");
   }
 
@@ -155,41 +143,30 @@ final class PermissionTypesTest {
     assertEquals("deny must not be null", ex.getMessage());
   }
 
-  @ParameterizedTest(name = "{0} in the {1} list")
-  @CsvSource({"DENY, allow", "ASK, allow", "ALLOW, ask", "DENY, ask", "ALLOW, deny", "ASK, deny"})
-  void permissionRejectsARuleWhoseEffectIsNotItsLists(PermissionEffect effect, String list) {
-    var rule = List.of(PermissionRule.any(effect, "Write"));
-    List<PermissionRule> none = List.of();
+  @Test
+  void permissionRejectsANullRule() {
+    var rules = new ArrayList<PermissionRule>();
+    rules.add(null);
 
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new Permission(
-                    PermissionMode.LOCKED_DOWN,
-                    list.equals("allow") ? rule : none,
-                    list.equals("ask") ? rule : none,
-                    list.equals("deny") ? rule : none));
+    assertThrows(
+        NullPointerException.class,
+        () -> new Permission(PermissionMode.DEFAULT, List.of(), rules, List.of()));
+  }
+
+  @Test
+  void defaultInWorkspaceOnlyAllowsMemoryWrites() {
     assertEquals(
-        "the " + list + " list holds a rule for Write whose effect is " + effect, ex.getMessage());
+        new Permission(
+            PermissionMode.DEFAULT,
+            List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
+            List.of(),
+            List.of()),
+        Permission.defaultInWorkspace());
   }
 
   @Test
-  void defaultInWorkspaceExposesExpectedRules() {
-    var p = Permission.defaultInWorkspace();
-    assertEquals(PermissionMode.DEFAULT, p.mode());
-    assertEquals(6, p.allow().size());
-    assertEquals(List.of(PermissionRule.any(PermissionEffect.ASK, "Execute")), p.ask());
-    assertTrue(p.deny().isEmpty());
-  }
-
-  @Test
-  void planModeExposesExpectedRules() {
-    var p = Permission.planMode();
-    assertEquals(PermissionMode.PLAN, p.mode());
-    assertEquals(4, p.allow().size());
-    assertTrue(p.ask().isEmpty());
-    assertTrue(p.deny().isEmpty());
+  void planModeIsTheEmptyPlanPolicy() {
+    assertEquals(Permission.empty(PermissionMode.PLAN), Permission.planMode());
   }
 
   @Test
@@ -205,32 +182,10 @@ final class PermissionTypesTest {
   void lockedDownAllowsOnlyExecuteAndAskUserQuestion() {
     var p = Permission.lockedDown();
     assertEquals(PermissionMode.LOCKED_DOWN, p.mode());
-    assertEquals(2, p.allow().size());
+    assertEquals(
+        List.of(PermissionRule.any("Execute"), PermissionRule.any("AskUserQuestion")), p.allow());
     assertTrue(p.ask().isEmpty());
     assertTrue(p.deny().isEmpty());
-    assertEquals(PermissionEffect.ALLOW, p.firstRuleFor("Execute").orElseThrow().effect());
-    assertEquals(PermissionEffect.ALLOW, p.firstRuleFor("AskUserQuestion").orElseThrow().effect());
-    assertTrue(p.firstRuleFor("Read").isEmpty(), "Read is not an explicit allow under lockedDown");
-  }
-
-  @Test
-  void firstRuleForLooksUpAcrossLists() {
-    var p =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read")),
-            List.of(PermissionRule.any(PermissionEffect.ASK, "Write")),
-            List.of(PermissionRule.any(PermissionEffect.DENY, "Execute")));
-    assertEquals(PermissionEffect.ALLOW, p.firstRuleFor("Read").orElseThrow().effect());
-    assertEquals(PermissionEffect.ASK, p.firstRuleFor("Write").orElseThrow().effect());
-    assertEquals(PermissionEffect.DENY, p.firstRuleFor("Execute").orElseThrow().effect());
-    assertTrue(p.firstRuleFor("Unknown").isEmpty());
-  }
-
-  @Test
-  void firstRuleForRejectsNullName() {
-    var p = Permission.defaultInWorkspace();
-    assertThrows(NullPointerException.class, () -> p.firstRuleFor(null));
   }
 
   // ── PermissionDecision ───────────────────────────────────────────────────
@@ -247,20 +202,6 @@ final class PermissionTypesTest {
     assertEquals(Optional.empty(), PermissionDecision.allow("ok").rule());
     assertEquals(Optional.empty(), PermissionDecision.ask("confirm").rule());
     assertEquals(Optional.empty(), PermissionDecision.deny("nope").rule());
-  }
-
-  @Test
-  void aDecisionByARuleTakesTheRulesEffect() {
-    var rule = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "/tmp/**");
-    assertEquals(
-        new PermissionDecision(PermissionEffect.ASK, "asked", Optional.of(rule)),
-        PermissionDecision.byRule(rule, "asked"));
-  }
-
-  @Test
-  void aDecisionByARuleRejectsANullRule() {
-    var ex = assertThrows(NullPointerException.class, () -> PermissionDecision.byRule(null, "r"));
-    assertEquals("rule must not be null", ex.getMessage());
   }
 
   @Test

@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -82,9 +81,9 @@ final class HookAndEventRedactionTest {
   }
 
   private SessionOptions.Builder options() {
-    return SessionOptions.newBuilder()
-        .withSecretRegistry(secrets())
-        .withTools(new ToolRegistry(List.of(sessions.writeTool())));
+    return sessions
+        .options(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
+        .withSecretRegistry(secrets());
   }
 
   /** The one {@code WARNING} the hook registry logged while {@code options} ran a write. */
@@ -239,7 +238,7 @@ final class HookAndEventRedactionTest {
 
   @Test
   void aDeniedCallsBlockedEventCarriesRedactedArguments() {
-    var deny = PermissionRule.withGlob(PermissionEffect.DENY, "Write", "/etc/**");
+    var deny = PermissionRule.of("Write", "/etc/**");
     var permission = new Permission(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny));
     var options = sessions.options(permission).withSecretRegistry(secrets());
 

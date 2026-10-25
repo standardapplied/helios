@@ -35,18 +35,6 @@ public record PermissionDecision(
   }
 
   /**
-   * A decision made by {@code rule}, with the rule's effect.
-   *
-   * @param rule the rule that decided; non-null
-   * @param reason non-blank reason
-   * @return a fresh decision
-   */
-  public static PermissionDecision byRule(PermissionRule rule, String reason) {
-    Objects.requireNonNull(rule, "rule must not be null");
-    return new PermissionDecision(rule.effect(), reason, Optional.of(rule));
-  }
-
-  /**
    * Convenience: an {@link PermissionEffect#ALLOW} decision by a mode or category default.
    *
    * @param reason non-blank reason

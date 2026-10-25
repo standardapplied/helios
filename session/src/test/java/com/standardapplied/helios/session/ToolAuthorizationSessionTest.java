@@ -18,7 +18,6 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -42,19 +41,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 final class ToolAuthorizationSessionTest {
 
   private static final String SECRET = "test-registered-secret-123";
-  private static final PermissionRule ALLOW_TMP =
-      PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/tmp/**");
-  private static final PermissionRule DENY_ETC =
-      PermissionRule.withGlob(PermissionEffect.DENY, "Write", "/etc/**");
+  private static final PermissionRule ALLOW_TMP = PermissionRule.of("Write", "/tmp/**");
+  private static final PermissionRule DENY_ETC = PermissionRule.of("Write", "/etc/**");
 
   private final WriteToolSessions sessions = new WriteToolSessions();
   private final List<Map<String, Object>> executed = sessions.executed;
 
-  private static Permission policy(PermissionMode mode, List<PermissionRule> rules) {
-    var allow = rules.stream().filter(r -> r.effect() == PermissionEffect.ALLOW).toList();
-    var ask = rules.stream().filter(r -> r.effect() == PermissionEffect.ASK).toList();
-    var deny = rules.stream().filter(r -> r.effect() == PermissionEffect.DENY).toList();
-    return new Permission(mode, allow, ask, deny);
+  private static Permission allowAndDeny(
+      PermissionMode mode, List<PermissionRule> allow, List<PermissionRule> deny) {
+    return new Permission(mode, allow, List.of(), deny);
   }
 
   private SessionOptions.Builder options(Permission permission) {
@@ -85,11 +80,11 @@ final class ToolAuthorizationSessionTest {
 
   @Test
   void anExplicitDenyAlongsideAnAllowRefusesTheCall() {
-    var allowEtc = PermissionRule.withGlob(PermissionEffect.ALLOW, "Write", "/etc/**");
+    var allowEtc = PermissionRule.of("Write", "/etc/**");
 
     var run =
         run(
-            options(policy(PermissionMode.DEFAULT, List.of(allowEtc, DENY_ETC))),
+            options(allowAndDeny(PermissionMode.DEFAULT, List.of(allowEtc), List.of(DENY_ETC))),
             write("/etc/passwd"));
 
     assertEquals(
@@ -103,7 +98,7 @@ final class ToolAuthorizationSessionTest {
   void aDenyRuleCoversATargetWhoseKeyHoldsALineTerminator() {
     var run =
         run(
-            options(policy(PermissionMode.ACCEPT_EDITS, List.of(DENY_ETC))),
+            options(allowAndDeny(PermissionMode.ACCEPT_EDITS, List.of(), List.of(DENY_ETC))),
             write("/etc/cron.d/x\ny"));
 
     assertEquals(
@@ -228,7 +223,8 @@ final class ToolAuthorizationSessionTest {
         named(
             "Redirect", priority, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/etc/x")));
     var options =
-        options(policy(PermissionMode.DEFAULT, List.of(ALLOW_TMP, DENY_ETC))).withHook(redirect);
+        options(allowAndDeny(PermissionMode.DEFAULT, List.of(ALLOW_TMP), List.of(DENY_ETC)))
+            .withHook(redirect);
 
     var run = run(options, write("/tmp/a"));
 
@@ -243,7 +239,8 @@ final class ToolAuthorizationSessionTest {
     var retarget =
         named("Retarget", 90, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/tmp/b")));
     var options =
-        options(policy(PermissionMode.DEFAULT, List.of(ALLOW_TMP, DENY_ETC))).withHook(retarget);
+        options(allowAndDeny(PermissionMode.DEFAULT, List.of(ALLOW_TMP), List.of(DENY_ETC)))
+            .withHook(retarget);
 
     var run = run(options, write("/tmp/a"));
 

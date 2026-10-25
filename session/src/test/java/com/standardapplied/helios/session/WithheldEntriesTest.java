@@ -7,11 +7,13 @@ import static com.standardapplied.helios.session.PathToolSessions.assertNoSecret
 import static com.standardapplied.helios.session.PathToolSessions.call;
 import static com.standardapplied.helios.session.PathToolSessions.output;
 import static com.standardapplied.helios.session.PathToolSessions.policy;
+import static com.standardapplied.helios.session.PathToolSessions.rule;
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.session.PathToolSessions.ListedRule;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.LsTool;
@@ -20,7 +22,6 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +41,7 @@ final class WithheldEntriesTest {
 
   private static final String ONE_WITHHELD = "[withheld by permission policy: 1]\n";
   private static final String TWO_WITHHELD = "[withheld by permission policy: 2]\n";
+  private static final String THREE_WITHHELD = "[withheld by permission policy: 3]\n";
 
   @TempDir Path tmp;
 
@@ -54,8 +56,8 @@ final class WithheldEntriesTest {
     Files.createSymbolicLink(sessions.root.resolve("docs/sec"), Path.of("../secrets"));
   }
 
-  private static PermissionRule denySecrets(String tool) {
-    return PermissionRule.withGlob(PermissionEffect.DENY, tool, "./secrets/**");
+  private static ListedRule denySecrets(String tool) {
+    return rule(PermissionEffect.DENY, tool, "./secrets/**");
   }
 
   private String runTool(Permission permission, String tool, Map<String, Object> args) {
@@ -137,8 +139,7 @@ final class WithheldEntriesTest {
   void aLinkIsSkippedBeforeTheCheckSoItsOwnDeniedPathIsNotCounted() {
     var permission =
         policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, GlobTool.NAME, "./docs/leak.txt"));
+            PermissionMode.DEFAULT, rule(PermissionEffect.DENY, GlobTool.NAME, "./docs/leak.txt"));
 
     var glob = runTool(permission, GlobTool.NAME, Map.of("pattern", "**"));
 
@@ -154,8 +155,7 @@ final class WithheldEntriesTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(
-                PermissionEffect.DENY, MemoryReadTool.NAME, "/memories/locked/**"));
+            rule(PermissionEffect.DENY, MemoryReadTool.NAME, "/memories/locked/**"));
 
     var out =
         withheldRun(permission, MemoryReadTool.NAME, Map.of("path", "/memories/", "list", true));
@@ -168,9 +168,7 @@ final class WithheldEntriesTest {
   @Test
   void anAskRuleBelowTheWalkFiltersNothingAndAsksNothing() {
     var permission =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.ASK, GrepTool.NAME, "./secrets/**"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.ASK, GrepTool.NAME, "./secrets/**"));
 
     var run = run(sessions.options(permission), call(GrepTool.NAME, grepTop()));
 
@@ -191,8 +189,8 @@ final class WithheldEntriesTest {
   }
 
   @Test
-  void aSessionWithoutAPolicyWithholdsNothing() {
-    var grep = output(run(sessions.withoutPolicy(), call(GrepTool.NAME, grepTop())));
+  void theDefaultPolicyWithholdsNothing() {
+    var grep = output(run(sessions.withDefaultPolicy(), call(GrepTool.NAME, grepTop())));
 
     assertEquals(
         List.of(
@@ -224,8 +222,7 @@ final class WithheldEntriesTest {
     var options =
         sessions.options(
             policy(
-                PermissionMode.DEFAULT,
-                PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**")));
+                PermissionMode.DEFAULT, rule(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**")));
 
     var grep = run(options, call(GrepTool.NAME, grepTop()));
     var ls = run(options, call(LsTool.NAME, Map.of()));
@@ -239,28 +236,29 @@ final class WithheldEntriesTest {
   }
 
   @Test
-  void grepReturnsWhatReadWouldReadWithoutAsking() {
+  void grepWithholdsAnEntryReadsAskRuleMatchesDespiteANarrowerAllow() {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.ALLOW, ReadTool.NAME, "./secrets/b.txt"),
-            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/*"));
+            rule(PermissionEffect.ALLOW, ReadTool.NAME, "./secrets/b.txt"),
+            rule(PermissionEffect.ASK, ReadTool.NAME, "./secrets/*"));
 
     var out = runTool(permission, GrepTool.NAME, grepTop());
 
-    assertEquals("secrets/b.txt:1:" + SECRET + "\n" + TWO_WITHHELD, out);
+    assertEquals(THREE_WITHHELD, out);
   }
 
   @Test
-  void readsAskRulesWithholdNothingUnderBypassPermissions() {
+  void readsAskRulesWithholdUnderBypassPermissions() {
     var permission =
         policy(
             PermissionMode.BYPASS_PERMISSIONS,
-            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**"));
+            rule(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**"));
 
-    var out = runTool(permission, GrepTool.NAME, grepTop());
+    var run = run(sessions.options(permission), call(GrepTool.NAME, grepTop()));
 
-    assertEquals(3, out.lines().filter(line -> line.endsWith(SECRET)).count());
-    assertFalse(out.contains("withheld"), out);
+    assertEquals(ONE_WITHHELD, output(run));
+    assertNoSecretEmitted(run);
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
   }
 }

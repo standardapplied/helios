@@ -16,6 +16,7 @@ import com.standardapplied.helios.session.execution.NoopExecutionProvider;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.InstantSource;
@@ -51,10 +52,11 @@ import java.util.Optional;
  *     defaults to {@link ToolRegistry#empty()}
  * @param hooks the hooks fired at lifecycle phases (pre/post-model-turn, pre/post-tool-use,
  *     pre-stop, on-user-message, on-stream-event); non-null, defaults to {@link List#of()}
- * @param permission optional permission policy; when present, an internal {@code
- *     DefaultPermissionEvaluator} authorizes every tool call as a fixed stage after every {@code
- *     PreToolUseHook}, on the exact call that runs, asking the user through {@link
- *     AgentSession#answer} when the policy asks; when absent, every call is admitted
+ * @param permission the permission policy; an internal {@code DefaultPermissionEvaluator}
+ *     authorizes every tool call as a fixed stage after every {@code PreToolUseHook}, on the exact
+ *     call that runs, asking the user through {@link AgentSession#answer} when the policy asks.
+ *     Non-null, defaults to {@link Permission#empty} in {@link PermissionMode#DEFAULT}, which asks
+ *     before every write, execution and network call
  * @param memoryBackend optional persistent memory backend; when present, the session auto-registers
  *     the {@code MemoryRead} tool so the model can view {@code /memories/...} files
  * @param costCalculator per-model {@code Usage → CostEstimate} lookup. Each completed model turn's
@@ -101,7 +103,7 @@ public record SessionOptions(
     InstantSource clock,
     ToolRegistry tools,
     List<Hook> hooks,
-    Optional<Permission> permission,
+    Permission permission,
     Optional<MemoryBackend> memoryBackend,
     CostCalculator costCalculator,
     ExecutionProvider executionProvider,
@@ -173,7 +175,7 @@ public record SessionOptions(
         .withClock(clock)
         .withTools(tools)
         .withHooks(hooks)
-        .withPermission(permission.orElse(null))
+        .withPermission(permission)
         .withMemoryBackend(memoryBackend.orElse(null))
         .withCostCalculator(costCalculator)
         .withExecutionProvider(executionProvider)
@@ -198,7 +200,7 @@ public record SessionOptions(
     private InstantSource clock = Clock.systemUTC();
     private ToolRegistry tools = ToolRegistry.empty();
     private final ArrayList<Hook> hooks = new ArrayList<>();
-    private Permission permission;
+    private Permission permission = Permission.empty(PermissionMode.DEFAULT);
     private MemoryBackend memoryBackend;
     private CostCalculator costCalculator = CostCalculator.ZERO;
     private ExecutionProvider executionProvider = NoopExecutionProvider.INSTANCE;
@@ -321,15 +323,18 @@ public record SessionOptions(
     }
 
     /**
-     * Set (or clear) the permission policy. Pass {@code null} to clear. When non-null, an internal
-     * {@code DefaultPermissionEvaluator} authorizes every tool call as a fixed stage after every
-     * {@code PreToolUseHook}, on the exact call that runs; no hook priority moves a hook past it.
+     * Set the permission policy. An internal {@code DefaultPermissionEvaluator} authorizes every
+     * tool call as a fixed stage after every {@code PreToolUseHook}, on the exact call that runs;
+     * no hook priority moves a hook past it. Defaults to {@link Permission#empty} in {@link
+     * PermissionMode#DEFAULT}; a host where no one answers questions sets {@link
+     * PermissionMode#BYPASS_PERMISSIONS} or allow rules for the tools its runs need.
      *
-     * @param permission nullable policy
+     * @param permission non-null policy
      * @return this builder
+     * @throws NullPointerException if {@code permission} is null
      */
     public Builder withPermission(Permission permission) {
-      this.permission = permission;
+      this.permission = Objects.requireNonNull(permission, "permission must not be null");
       return this;
     }
 
@@ -491,7 +496,7 @@ public record SessionOptions(
           clock,
           tools,
           hooks,
-          Optional.ofNullable(permission),
+          permission,
           Optional.ofNullable(memoryBackend),
           costCalculator,
           executionProvider,
