@@ -32,6 +32,7 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -132,16 +133,11 @@ final class ToolAuthorizationSessionTest {
     assertEquals(List.of(), executed);
   }
 
-  @ParameterizedTest(name = "under a policy: {0}")
-  @ValueSource(booleans = {true, false})
-  void aCallNamingNoRegisteredToolIsNotFoundWithOrWithoutAPolicy(boolean policed) {
-    var options =
-        SessionOptions.newBuilder().withTools(new ToolRegistry(List.of(sessions.writeTool())));
-    if (policed) {
-      options.withPermission(Permission.empty(PermissionMode.LOCKED_DOWN));
-    }
-
-    var run = run(options, new ToolCall("c1", "Missing", Map.of()));
+  @ParameterizedTest
+  @EnumSource(PermissionMode.class)
+  void aCallNamingNoRegisteredToolIsNotFoundInEveryMode(PermissionMode mode) {
+    var run =
+        run(sessions.options(Permission.empty(mode)), new ToolCall("c1", "Missing", Map.of()));
 
     assertEquals(
         new ToolResult(new ToolOutcome.NotFound(), "tool not found: Missing", List.of()),
