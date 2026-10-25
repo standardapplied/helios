@@ -314,12 +314,14 @@ class StreamingModelTest {
 
   @Test
   void aCancellationTheEventsThrowAfterTheCloseIsThrownAsItself() {
+    var awaiting = new CountDownLatch(1);
     var closing = new CountDownLatch(1);
     var cancelled = new CancellationException("closed while awaiting the headers");
     CloseableIterator<StreamEvent> awaitingHeaders =
         new CloseableIterator<>() {
           @Override
           public boolean hasNext() {
+            awaiting.countDown();
             Await.latch("the close", closing);
             throw cancelled;
           }
@@ -339,10 +341,63 @@ class StreamingModelTest {
             .withExchange(request -> awaitingHeaders)
             .build()
             .chatStream(MESSAGES, List.of());
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read = reader.submit(stream::hasNext);
+      Await.latch("the read awaits the headers", awaiting);
+
+      stream.close();
+
+      assertSame(cancelled, Await.failure("the read", read));
+    }
+  }
+
+  @Test
+  void anInterruptAfterAChunkWasReadAheadEndsTheStreamClosesItsEventsAndKeepsTheInterrupt() {
+    events = List.of(new StreamEvent.TextDelta("first"));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    assertTrue(stream.hasNext());
+
+    Thread.currentThread().interrupt();
+    boolean interruptKept;
+    try {
+      assertThrows(CancellationException.class, stream::hasNext);
+    } finally {
+      interruptKept = Thread.interrupted();
+    }
+
+    assertTrue(interruptKept);
+    assertTrue(opened.closed());
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void aCloseAfterAChunkWasReadAheadEndsTheStream() {
+    events = List.of(new StreamEvent.TextDelta("first"));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    assertTrue(stream.hasNext());
 
     stream.close();
 
-    assertSame(cancelled, assertThrows(CancellationException.class, stream::hasNext));
+    assertThrows(CancellationException.class, stream::next);
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void anInterruptOnceTheMessageStopWasReadLeavesTheStreamEnded() {
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    while (stream.hasNext()) {
+      stream.next();
+    }
+
+    Thread.currentThread().interrupt();
+    boolean ended;
+    try {
+      ended = !stream.hasNext();
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertTrue(ended);
   }
 
   @Test

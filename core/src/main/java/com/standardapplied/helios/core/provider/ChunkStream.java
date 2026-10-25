@@ -18,7 +18,8 @@ import java.util.function.Consumer;
  * exception it ends in, and events that end without a {@code Done} throw as unterminated; either
  * closes the events first. Closing closes the events, from any thread: what the events yield or
  * throw after it, save an {@link Error}, is thrown as a {@link CancellationException}, an event a
- * read that was blocked yields included.
+ * read that was blocked yields and a chunk already read ahead included. An interrupt of the reading
+ * thread does the same, with the interrupt kept.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -46,11 +47,17 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
 
   @Override
   public boolean hasNext() {
+    if (ended && next == null) {
+      return false;
+    }
+    if (closed || Thread.currentThread().isInterrupted()) {
+      next = null;
+      ended = true;
+      close();
+      throw cancelled(null);
+    }
     if (next != null) {
       return true;
-    }
-    if (ended) {
-      return false;
     }
     try {
       if (!events.hasNext()) {
@@ -91,7 +98,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
   }
 
   private static CancellationException cancelled(RuntimeException cause) {
-    var cancelled = new CancellationException("the model's stream was closed");
+    var cancelled = new CancellationException("the model's stream was closed or interrupted");
     cancelled.initCause(cause);
     return cancelled;
   }
