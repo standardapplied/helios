@@ -163,7 +163,7 @@ final class ModelCall {
             .onCancel(
                 () -> {
                   reader.end(new CancellationException(CANCELLED));
-                  stream.close();
+                  closeAside(state, reader, stream);
                 });
     var thread =
         Thread.ofVirtual()
@@ -175,9 +175,7 @@ final class ModelCall {
     } catch (InterruptedException e) {
       interrupted = true;
       reader.end(e);
-      Thread.ofVirtual()
-          .name("helios-model-stream-close-" + state.sessionId())
-          .start(() -> reader.close(stream));
+      closeAside(state, reader, stream);
     } finally {
       registration.remove();
     }
@@ -186,6 +184,18 @@ final class ModelCall {
       Thread.currentThread().interrupt();
     }
     return reader.outcome();
+  }
+
+  /**
+   * Closes {@code stream} on a thread of its own, so a close that blocks holds up no caller: not
+   * the loop thread, which registers its cancel callback after the session may already be cancelled
+   * and then runs it itself.
+   */
+  private static void closeAside(
+      SessionState state, TurnReader reader, CloseableIterator<ModelChunk> stream) {
+    Thread.ofVirtual()
+        .name("helios-model-stream-close-" + state.sessionId())
+        .start(() -> reader.close(stream));
   }
 
   private static void awaitReader(String sessionId, Thread reader, Duration grace) {

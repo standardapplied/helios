@@ -32,6 +32,7 @@ import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -837,6 +838,59 @@ class SseReaderTest {
 
     assertThrows(CancellationException.class, reader::hasNext);
     assertTrue(body.closed);
+  }
+
+  @Test
+  void aResponseThatArrivesAsItsWaitIsInterruptedIsClosedAndTheReadThrowsCancellation() {
+    var body = new Closing(stream("data: a\n\n"));
+    var client =
+        FakeHttpClient.sendingAsync(
+            request ->
+                new CompletableFuture<>() {
+                  @Override
+                  public HttpResponse<InputStream> get() throws InterruptedException {
+                    complete(new FakeHttpResponse(request, 200, Map.of(), () -> body));
+                    throw new InterruptedException("interrupted as the headers arrived");
+                  }
+                });
+    var reader = lazy(client, post(URI.create("http://example.invalid")));
+
+    try {
+      assertThrows(CancellationException.class, reader::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertTrue(body.closed);
+    assertFalse(reader.hasNext());
+  }
+
+  @Test
+  void anInterruptWhileReadingTheBodyOfARefusalThrowsCancellationAndStaysSet() {
+    var refusal =
+        new Closing(
+            new InputStream() {
+              @Override
+              public int read() throws IOException {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted while reading the error body");
+              }
+            });
+    var client =
+        FakeHttpClient.sendingAsync(
+            request ->
+                CompletableFuture.completedFuture(
+                    new FakeHttpResponse(request, 503, Map.of(), () -> refusal)));
+    var reader = lazy(client, post(URI.create("http://example.invalid")));
+
+    CancellationException cancelled;
+    try {
+      cancelled = assertThrows(CancellationException.class, reader::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertEquals("interrupted while reading the error body", cancelled.getCause().getMessage());
+    assertTrue(refusal.closed);
+    assertFalse(reader.hasNext());
   }
 
   @Test

@@ -3,6 +3,7 @@
 package com.standardapplied.helios.core.model;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -10,10 +11,12 @@ import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 /**
- * The chunk stream of {@link BlockingModel#streamOf}: runs its call at the first {@code hasNext()}
- * on the reading thread, which {@code close()} interrupts while the call runs. A call that ends
- * after a close, or that throws on an interrupt of the reading thread, ends the stream in a {@link
- * CancellationException}; an {@link Error} the call throws is thrown as itself.
+ * The chunk stream of {@link BlockingModel#streamOf}: runs its call once, at the first {@code
+ * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs. A call
+ * that ends after a close, or that throws on an interrupt of the reading thread, ends the stream in
+ * a {@link CancellationException}, as does a close or an interrupt between the chunks of its
+ * answer; an {@link Error} the call throws is thrown as itself. Whatever ends the stream, it never
+ * runs the call again.
  */
 final class BlockingStream implements CloseableIterator<ModelChunk> {
 
@@ -30,7 +33,12 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
   @Override
   public boolean hasNext() {
     if (chunks == null) {
+      chunks = Collections.emptyIterator();
       chunks = chunksOf(run()).iterator();
+    }
+    if (chunks.hasNext() && cutShort()) {
+      chunks = Collections.emptyIterator();
+      throw cancelled(null);
     }
     return chunks.hasNext();
   }
@@ -80,14 +88,23 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
   }
 
   /**
-   * Ends the call and says whether it was cut short: by a close, whose interrupt is cleared now
-   * that the call no longer runs, or by an interrupt of the reading thread, which is kept.
+   * Ends the call, clearing the interrupt of a close now that the call no longer runs, and says
+   * whether it was {@linkplain #cutShort() cut short}.
    */
   private boolean finish() {
     synchronized (lock) {
       running = null;
       if (closed) {
         Thread.interrupted();
+      }
+    }
+    return cutShort();
+  }
+
+  /** Whether the stream was closed or the reading thread, whose interrupt is kept, interrupted. */
+  private boolean cutShort() {
+    synchronized (lock) {
+      if (closed) {
         return true;
       }
     }
