@@ -24,9 +24,9 @@ import java.util.logging.Logger;
 
 /**
  * Helidon {@link HttpService} that exposes one {@link SessionRegistry}'s sessions over HTTP. The
- * six routes mirror the spec §15.1 sketch and are mounted by the caller under whatever prefix fits
- * the deployment ({@code routing.register("/v1", new AgentHttpService(...))}). {@link
- * RuntimeServer} is the embedding that does this for you.
+ * routes mirror the spec §15.1 sketch and are mounted by the caller under whatever prefix fits the
+ * deployment ({@code routing.register("/v1", new AgentHttpService(...))}). {@link RuntimeServer} is
+ * the embedding that does this for you.
  *
  * <ul>
  *   <li>{@code POST /sessions} — create a fresh session; returns {@code {sessionId, eventsUrl}}
@@ -36,6 +36,17 @@ import java.util.logging.Logger;
  *       full.
  *   <li>{@code POST /sessions/{sessionId}/interrupt} — body {@code {reason: "..."}}; queues a
  *       synthetic interrupt message and returns {@code 202 Accepted}.
+ *   <li>{@code GET /sessions/{sessionId}/questions} — returns {@code 200 OK} with a JSON array of
+ *       the session's {@linkplain AgentSession#pendingQuestions() pending questions}, each as its
+ *       {@code QuestionAsked} event carried it: {@code questionId}, {@code header}, {@code
+ *       question}, {@code options} ({@code label}, {@code description}) and {@code multiSelect}. A
+ *       {@code questionId} starting {@code perm-} asks to approve a tool call; one starting {@code
+ *       q-} is the model's own {@code AskUserQuestion}. The header does not tell them apart: the
+ *       model chooses its own question's header and labels.
+ *   <li>{@code POST /sessions/{sessionId}/questions/{questionId}} — body {@code {selectedLabels:
+ *       ["Allow"], customText: "..."}}, {@code customText} optional; answers that question and
+ *       returns {@code 202 Accepted}; {@code 404} when it is not pending, already answered or
+ *       unknown. The answer names no tool or arguments, so it cannot widen what an approval covers.
  *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s. The
  *       handler blocks the request thread until the publisher signals {@code onComplete}, the
  *       client disconnects, or the caller's identity ends.
@@ -72,8 +83,8 @@ import java.util.logging.Logger;
  * share these slots with every other route, so size them above a principal's peak open streams.
  * {@code POST /sessions} then reserves capacity in the {@link SessionRegistry} before the {@code
  * optionsFactory} runs: a full cap of the caller's own is {@code 429}, the registry's {@code 503}.
- * A message or interrupt body over {@link RequestLimits#maxRequestBytes()} is {@code 413}; one
- * refused by a full steering queue is {@code 429}. Each of these {@code 429} and {@code 503}
+ * A message, interrupt or answer body over {@link RequestLimits#maxRequestBytes()} is {@code 413};
+ * one refused by a full steering queue is {@code 429}. Each of these {@code 429} and {@code 503}
  * answers has a fixed body and a {@code Retry-After} header. Across principals, bound the requests
  * in flight with Helidon's own {@code maxConcurrentRequests} on the {@link
  * io.helidon.webserver.WebServer}, as {@link RuntimeServer} does.
@@ -108,7 +119,7 @@ import java.util.logging.Logger;
  * tenant or subject, and produces a fully-populated {@link SessionOptions} for exactly that id;
  * options for any other id are refused, so a factory can never attach a request to another session.
  * A {@code 500} body carries a fixed message, never an exception's; a {@code 409} tells the owner
- * why its own session, closed or terminal, refused a message or interrupt.
+ * why its own session, closed or terminal, refused a message, interrupt or answer.
  *
  * <h2>Thread-safety</h2>
  *
@@ -128,6 +139,7 @@ public final class AgentHttpService implements HttpService {
   private final SessionCreation creation;
   private final AuthenticationGate gate;
   private final SteeringInput steering;
+  private final OpenQuestions questions;
   private final KeyedSlots<Principal> inFlight;
 
   /**
@@ -160,6 +172,7 @@ public final class AgentHttpService implements HttpService {
     this.gate = new AuthenticationGate(authenticator);
     Objects.requireNonNull(limits, "limits must not be null");
     this.steering = new SteeringInput(limits.maxRequestBytes(), JsonBody.MAPPER);
+    this.questions = new OpenQuestions(limits.maxRequestBytes());
     this.inFlight = new KeyedSlots<>(limits.maxConcurrentRequestsPerPrincipal());
   }
 
@@ -168,6 +181,9 @@ public final class AgentHttpService implements HttpService {
     rules.post("/sessions", authenticated((caller, req, resp) -> creation.respond(caller, resp)));
     rules.post("/sessions/{sessionId}/messages", authenticated(owned(steering::send)));
     rules.post("/sessions/{sessionId}/interrupt", authenticated(owned(steering::interrupt)));
+    rules.get("/sessions/{sessionId}/questions", authenticated(owned(questions::list)));
+    rules.post(
+        "/sessions/{sessionId}/questions/{questionId}", authenticated(owned(questions::answer)));
     rules.get(
         "/sessions/{sessionId}/events",
         authenticated(

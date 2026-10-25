@@ -8,6 +8,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.QuestionGateway;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.InstantSource;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -16,8 +17,8 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * The session's open {@code AskUserQuestion} questions: the gateway the tool asks through, which
- * emits {@link QueryEvent.QuestionAsked} and blocks on a future keyed by question id, and the
- * answer and cancellation that complete those futures.
+ * emits {@link QueryEvent.QuestionAsked} and blocks on a future keyed by question id, the listing
+ * of the questions still open, and the answer and cancellation that complete those futures.
  *
  * <p>Cancellation is wired via {@link CancellationToken#onCancel(Runnable)} — when the session
  * cancels, the registered callback completes the pending future with a {@link
@@ -35,8 +36,7 @@ final class PendingQuestions implements QuestionGateway {
   private final SessionState state;
   private final SessionEventPublisher events;
   private final InstantSource clock;
-  private final ConcurrentHashMap<String, CompletableFuture<AskUserQuestionResponse>> pending =
-      new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
 
   PendingQuestions(SessionState state, SessionEventPublisher events, InstantSource clock) {
     this.state = state;
@@ -49,7 +49,7 @@ final class PendingQuestions implements QuestionGateway {
       throws InterruptedException, CancellationException {
     Objects.requireNonNull(request, "request must not be null");
     var future = new CompletableFuture<AskUserQuestionResponse>();
-    pending.put(request.questionId(), future);
+    pending.put(request.questionId(), new Pending(request, future));
     // Capture the Registration so we can remove the callback in finally. Without this every
     // AskUserQuestion call accumulates a permanent closure on the session's long-lived
     // CancellationToken — a session with N questions over its life leaks N callbacks (each
@@ -81,17 +81,26 @@ final class PendingQuestions implements QuestionGateway {
     }
   }
 
+  /** The requests of the questions asked and neither answered nor ended yet. */
+  List<AskUserQuestionRequest> requests() {
+    return pending.values().stream().map(Pending::request).toList();
+  }
+
   /**
    * Complete the pending question with {@code response}.
    *
    * @throws IllegalArgumentException if no question with {@code questionId} is pending
    */
   void answer(String questionId, AskUserQuestionResponse response) {
-    var future = pending.remove(questionId);
-    if (future == null) {
+    var question = pending.remove(questionId);
+    if (question == null) {
       throw new IllegalArgumentException(
           "no pending question with id '" + questionId + "' — already answered or unknown");
     }
-    future.complete(response);
+    question.future().complete(response);
   }
+
+  /** An open question and the future its asking thread waits on. */
+  private record Pending(
+      AskUserQuestionRequest request, CompletableFuture<AskUserQuestionResponse> future) {}
 }
