@@ -19,7 +19,8 @@ import java.util.function.Consumer;
  * closes the events first. Closing closes the events, from any thread: what the events yield or
  * throw after it, save an {@link Error}, is thrown as a {@link CancellationException}, an event a
  * read that was blocked yields and a chunk already read ahead included. An interrupt of the reading
- * thread does the same, with the interrupt kept.
+ * thread, one that arrives while an event is read included, does the same with the interrupt kept,
+ * so a retryable failure read after it is never retried.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -50,7 +51,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
     if (ended && next == null) {
       return false;
     }
-    if (closed || Thread.currentThread().isInterrupted()) {
+    if (stopped()) {
       next = null;
       ended = true;
       close();
@@ -68,15 +69,14 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
         throw failures.unterminated();
       }
       var chunk = chunkOf(events.next());
-      if (closed) {
+      if (stopped()) {
         throw cancelled(null);
       }
       return chunk;
     } catch (RuntimeException failure) {
       ended = true;
-      var cancelled = closed && !(failure instanceof CancellationException);
       events.close();
-      throw cancelled ? cancelled(failure) : failure;
+      throw stopped() && !(failure instanceof CancellationException) ? cancelled(failure) : failure;
     } catch (Error error) {
       ended = true;
       events.close();
@@ -92,6 +92,10 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
     var chunk = next;
     next = null;
     return chunk;
+  }
+
+  private boolean stopped() {
+    return closed || Thread.currentThread().isInterrupted();
   }
 
   @Override
