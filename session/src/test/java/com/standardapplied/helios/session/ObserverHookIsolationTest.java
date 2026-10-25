@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import java.util.List;
@@ -74,7 +73,7 @@ final class ObserverHookIsolationTest {
             .options(
                 new Permission(
                     PermissionMode.DEFAULT,
-                    List.of(PermissionRule.any(PermissionEffect.ALLOW, "Write")),
+                    List.of(PermissionRule.any("Write")),
                     List.of(),
                     List.of()))
             .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100).build())

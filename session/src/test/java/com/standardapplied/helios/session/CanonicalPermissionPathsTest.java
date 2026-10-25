@@ -7,6 +7,7 @@ import static com.standardapplied.helios.session.PathToolSessions.call;
 import static com.standardapplied.helios.session.PathToolSessions.output;
 import static com.standardapplied.helios.session.PathToolSessions.policy;
 import static com.standardapplied.helios.session.PathToolSessions.read;
+import static com.standardapplied.helios.session.PathToolSessions.rule;
 import static com.standardapplied.helios.session.WriteToolSessions.answering;
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolOutcome;
+import com.standardapplied.helios.session.PathToolSessions.ListedRule;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -54,8 +56,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 final class CanonicalPermissionPathsTest {
 
-  private static final PermissionRule DENY_READ_SECRETS =
-      PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, "./secrets/**");
+  private static final ListedRule DENY_READ_SECRETS =
+      rule(PermissionEffect.DENY, ReadTool.NAME, "./secrets/**");
 
   @TempDir Path tmp;
 
@@ -105,7 +107,7 @@ final class CanonicalPermissionPathsTest {
   void aDenyRuleBindsAdjacentRecursiveWildcardsAndSupplementaryCharacters(String glob, String path)
       throws IOException {
     sessions.write("🔒/key", PathToolSessions.SECRET);
-    var deny = PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, glob);
+    var deny = rule(PermissionEffect.DENY, ReadTool.NAME, glob);
 
     var run = run(sessions.options(policy(PermissionMode.DEFAULT, deny)), read(path));
 
@@ -128,8 +130,8 @@ final class CanonicalPermissionPathsTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, "LS", "./secrets/**"),
-            PermissionRule.withGlob(PermissionEffect.DENY, "Grep", "./secrets/**"));
+            rule(PermissionEffect.DENY, "LS", "./secrets/**"),
+            rule(PermissionEffect.DENY, "Grep", "./secrets/**"));
 
     var run = run(sessions.options(permission), call(tool, Map.of("pattern", "TOP", "path", path)));
 
@@ -147,7 +149,7 @@ final class CanonicalPermissionPathsTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "/memories/locked/**"));
+            rule(PermissionEffect.DENY, "MemoryRead", "/memories/locked/**"));
 
     var run = run(sessions.options(permission), call("MemoryRead", Map.of("path", path)));
 
@@ -185,8 +187,7 @@ final class CanonicalPermissionPathsTest {
   @ParameterizedTest(name = "Read {0}")
   @MethodSource("unresolvablePaths")
   void anUnresolvablePathIsRefusedBeforeTheApproverIsAsked(Object path, String message) {
-    var askEveryRead =
-        policy(PermissionMode.DEFAULT, PermissionRule.any(PermissionEffect.ASK, ReadTool.NAME));
+    var askEveryRead = policy(PermissionMode.DEFAULT, rule(PermissionEffect.ASK, ReadTool.NAME));
 
     var run =
         run(
@@ -201,8 +202,8 @@ final class CanonicalPermissionPathsTest {
 
   @ParameterizedTest(name = "Read {0}")
   @MethodSource("unresolvablePaths")
-  void anUnresolvablePathIsRefusedWithNoPolicySet(Object path, String message) {
-    var run = run(sessions.withoutPolicy(), call(ReadTool.NAME, Map.of("path", spelled(path))));
+  void anUnresolvablePathIsRefusedUnderTheDefaultPolicy(Object path, String message) {
+    var run = run(sessions.withDefaultPolicy(), call(ReadTool.NAME, Map.of("path", spelled(path))));
 
     assertRefusedWith((String) spelled(message), run);
     assertEquals(0, sessions.readRuns.get());
@@ -225,8 +226,8 @@ final class CanonicalPermissionPathsTest {
   }
 
   @Test
-  void withNoPolicyTheCanonicalCallIsAnnouncedAndRun() {
-    var run = run(sessions.withoutPolicy(), read("docs/../docs/a.txt"));
+  void underTheDefaultPolicyTheCanonicalCallIsAnnouncedAndRun() {
+    var run = run(sessions.withDefaultPolicy(), read("docs/../docs/a.txt"));
 
     var announced = run.events().eventsOf(QueryEvent.ToolUse.class).getFirst().call();
     assertEquals(new ToolCall("c1", ReadTool.NAME, Map.of("path", "./docs/a.txt")), announced);
@@ -248,7 +249,7 @@ final class CanonicalPermissionPathsTest {
           return HookOutcome.cont();
         };
 
-    run(sessions.withoutPolicy().withHook(before).withHook(after), read("docs/../docs/a.txt"));
+    run(sessions.withDefaultPolicy().withHook(before).withHook(after), read("docs/../docs/a.txt"));
 
     assertEquals(List.of(read("docs/../docs/a.txt"), read("./docs/a.txt")), seen);
   }
@@ -258,20 +259,21 @@ final class CanonicalPermissionPathsTest {
     var secrets = new SecretRegistry();
     secrets.register("DIR", "s3cr3t-dir-name");
 
-    var run = run(sessions.withoutPolicy().withSecretRegistry(secrets), read("s3cr3t-dir-name/x"));
+    var run =
+        run(sessions.withDefaultPolicy().withSecretRegistry(secrets), read("s3cr3t-dir-name/x"));
 
     assertEquals(
         "Read: parent directory does not exist: ./<redacted:DIR>/x", run.onlyBlock().reason());
   }
 
   @Test
-  void aCanonicalPathCarryingASecretIsRefusedWithNoPolicySet() throws IOException {
+  void aCanonicalPathCarryingASecretIsRefusedUnderTheDefaultPolicy() throws IOException {
     sessions.write("s3cr3t-dir-name/f", "hidden");
     Files.createSymbolicLink(sessions.root.resolve("docs/l"), Path.of("../s3cr3t-dir-name"));
     var secrets = new SecretRegistry();
     secrets.register("DIR", "s3cr3t-dir-name");
 
-    var run = run(sessions.withoutPolicy().withSecretRegistry(secrets), read("docs/l/f"));
+    var run = run(sessions.withDefaultPolicy().withSecretRegistry(secrets), read("docs/l/f"));
 
     assertEquals(
         new ToolOutcome.Rejected("Permission", "permission key of Read carries a secret"),
@@ -281,15 +283,34 @@ final class CanonicalPermissionPathsTest {
     assertEquals(0, sessions.readRuns.get());
   }
 
+  // ── a user's ask added to a preset ───────────────────────────────────────
+
+  @Test
+  void aUsersAskRuleAddedToTheWorkspacePresetAsksBeforeTheRead() {
+    var preset = Permission.defaultInWorkspace();
+    var permission =
+        new Permission(
+            preset.mode(),
+            preset.allow(),
+            List.of(PermissionRule.of(ReadTool.NAME, "./secrets/**")),
+            preset.deny());
+
+    var run = run(sessions.options(permission), denyingQuestions(), read("secrets/key"));
+
+    assertEquals(1, run.events().eventsOf(QueryEvent.QuestionAsked.class).size());
+    assertEquals(
+        new ToolOutcome.Rejected("Permission", "user denied Read(./secrets/key)"),
+        run.onlyResult().outcome());
+    assertEquals(0, sessions.readRuns.get());
+  }
+
   // ── a target swapped after approval ──────────────────────────────────────
 
   @Test
   void aSymlinkSwappedInWhileTheCallAwaitsApprovalIsRefusedWhenTheToolRuns() throws IOException {
     sessions.write("secrets/a.txt", PathToolSessions.SECRET);
     var permission =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./docs/**"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.ASK, ReadTool.NAME, "./docs/**"));
     var root = sessions.root;
     Function<AgentSession, Consumer<QueryEvent>> swapThenAllow =
         session -> {
@@ -338,19 +359,19 @@ final class CanonicalPermissionPathsTest {
   static Stream<Arguments> unmatchableRules() {
     return Stream.of(
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.DENY, "Read", "secrets/**"),
+            rule(PermissionEffect.DENY, "Read", "secrets/**"),
             "rule Read(secrets/**) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./a/../b"),
+            rule(PermissionEffect.ALLOW, "Read", "./a/../b"),
             "rule Read(./a/../b) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.ASK, "Read", "./docs/"),
+            rule(PermissionEffect.ASK, "Read", "./docs/"),
             "rule Read(./docs/) can never match: Read keys are canonical paths such as"
                 + " ./src/Main.java"),
         Arguments.of(
-            PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "memories/**"),
+            rule(PermissionEffect.DENY, "MemoryRead", "memories/**"),
             "rule MemoryRead(memories/**) can never match: MemoryRead keys are canonical paths"
                 + " such as /memories/notes.md"));
   }
@@ -362,7 +383,7 @@ final class CanonicalPermissionPathsTest {
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("unmatchableRules")
-  void aRuleThatCanNeverMatchFailsTheSessionsCreation(PermissionRule rule, String message) {
+  void aRuleThatCanNeverMatchFailsTheSessionsCreation(ListedRule rule, String message) {
     var options = sessions.options(policy(PermissionMode.DEFAULT, rule));
 
     assertEquals(
@@ -375,9 +396,9 @@ final class CanonicalPermissionPathsTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
-            PermissionRule.withGlob(PermissionEffect.DENY, "Unregistered", "secrets/**"),
-            PermissionRule.withGlob(PermissionEffect.DENY, "Read", "/etc/**"));
+            rule(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
+            rule(PermissionEffect.DENY, "Unregistered", "secrets/**"),
+            rule(PermissionEffect.DENY, "Read", "/etc/**"));
     var options =
         SessionOptions.newBuilder().withTools(sessions.tools(trusted)).withPermission(permission);
 
@@ -412,9 +433,7 @@ final class CanonicalPermissionPathsTest {
   @Test
   void anInRootAllowRuleDoesNotOpenAnOutsideTargetUnderLockedDown() throws IOException {
     var permission =
-        policy(
-            PermissionMode.LOCKED_DOWN,
-            PermissionRule.withGlob(PermissionEffect.ALLOW, ReadTool.NAME, "./**"));
+        policy(PermissionMode.LOCKED_DOWN, rule(PermissionEffect.ALLOW, ReadTool.NAME, "./**"));
 
     var run = run(trustedWithExternalLink(permission), read("ext/f"));
 

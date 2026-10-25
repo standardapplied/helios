@@ -28,6 +28,7 @@ import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -104,7 +105,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -132,7 +133,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -158,7 +159,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -184,7 +185,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -210,7 +211,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -237,7 +238,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -263,7 +264,7 @@ final class SessionOptionsTest {
                     null,
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -289,7 +290,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     null,
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -315,7 +316,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     null,
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -367,7 +368,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     null,
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -393,7 +394,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     null,
                     NoopExecutionProvider.INSTANCE,
@@ -419,7 +420,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     null,
@@ -445,7 +446,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -471,7 +472,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -497,7 +498,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -523,7 +524,7 @@ final class SessionOptionsTest {
                     Clock.systemUTC(),
                     ToolRegistry.empty(),
                     List.of(),
-                    Optional.empty(),
+                    Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     NoopExecutionProvider.INSTANCE,
@@ -706,27 +707,24 @@ final class SessionOptionsTest {
   }
 
   @Test
-  void builderDefaultsPermissionToEmptyOptional() {
+  void builderDefaultsPermissionToTheDefaultMode() {
     var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
-    assertTrue(opts.permission().isEmpty());
+    assertEquals(Permission.empty(PermissionMode.DEFAULT), opts.permission());
   }
 
   @Test
-  void withPermissionAcceptsNullAsClear() {
-    var opts =
-        SessionOptions.newBuilder()
-            .withModel(stubModel())
-            .withPermission(Permission.defaultInWorkspace())
-            .withPermission(null)
-            .build();
-    assertTrue(opts.permission().isEmpty());
+  void withPermissionRejectsNull() {
+    var builder = SessionOptions.newBuilder();
+    var ex = assertThrows(NullPointerException.class, () -> builder.withPermission(null));
+    assertEquals("permission must not be null", ex.getMessage());
   }
 
   @Test
-  void withPermissionRetainsValue() {
+  void withPermissionIsThreadedThroughBuildAndToBuilder() {
     var perm = Permission.defaultInWorkspace();
     var opts = SessionOptions.newBuilder().withModel(stubModel()).withPermission(perm).build();
-    assertSame(perm, opts.permission().orElseThrow());
+    assertSame(perm, opts.permission());
+    assertSame(perm, opts.toBuilder().build().permission());
   }
 
   // ── builder happy path ────────────────────────────────────────────────────

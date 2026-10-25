@@ -3,7 +3,6 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.session.permissions.PermissionDecision;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.Optional;
@@ -17,7 +16,7 @@ final class Authorizations {
       canonical -> PermissionDecision.allow("admitted by the test");
 
   /** A policy no rule of which decides any key. */
-  static final Function<ToolPermissionKey, Optional<PermissionRule>> NO_RULE =
+  static final Function<ToolPermissionKey, Optional<PermissionDecision>> NO_RULE =
       key -> Optional.empty();
 
   private Authorizations() {}

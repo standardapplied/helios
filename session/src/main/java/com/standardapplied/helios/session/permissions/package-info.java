@@ -9,10 +9,11 @@
  *
  * <p>{@link com.standardapplied.helios.session.permissions.Permission} is the immutable policy
  * record: a {@link com.standardapplied.helios.session.permissions.PermissionMode} ({@code DEFAULT}
- * / {@code PLAN} / {@code ACCEPT_EDITS} / {@code BYPASS_PERMISSIONS}) plus three lists of {@link
- * com.standardapplied.helios.session.permissions.PermissionRule} (allow / ask / deny). Each rule
- * names a tool + optional path glob and maps to a {@link
- * com.standardapplied.helios.session.permissions.PermissionEffect}; the {@link
+ * / {@code PLAN} / {@code ACCEPT_EDITS} / {@code BYPASS_PERMISSIONS} / {@code LOCKED_DOWN}) plus
+ * three lists of {@link com.standardapplied.helios.session.permissions.PermissionRule} (allow / ask
+ * / deny). Each rule names a tool + optional glob; the list it sits in is its effect, and the most
+ * restrictive matching rule decides (deny, then ask, then allow), else the mode's default for the
+ * tool's category. A session with no policy set gets {@code Permission.empty(DEFAULT)}. The {@link
  * com.standardapplied.helios.session.permissions.RuleMatcher} translates globs to anchored regexes
  * once at construction.
  *
@@ -27,8 +28,7 @@
  * with {@code DefaultPermissionEvaluator.newBuilder(perm, tools).withApprover(approver) .build()}.
  *
  * <p>Two curated policies live as static factories on {@code Permission}: {@code
- * defaultInWorkspace()} (reads + memory allowed, writes / edit / execute asked) and {@code
- * planMode()} (reads only, writes denied) — the {@link
- * com.standardapplied.helios.session.SessionPresets} use them.
+ * defaultInWorkspace()} ({@code DEFAULT} plus memory writes allowed) and {@code planMode()} (reads
+ * only, writes denied) — the {@link com.standardapplied.helios.session.SessionPresets} use them.
  */
 package com.standardapplied.helios.session.permissions;

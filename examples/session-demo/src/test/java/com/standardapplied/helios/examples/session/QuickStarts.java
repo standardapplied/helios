@@ -17,7 +17,6 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import java.nio.file.Path;
@@ -93,9 +92,9 @@ final class QuickStarts {
     var policy =
         new Permission(
             PermissionMode.DEFAULT,
-            List.of(PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./src/**")),
-            List.of(PermissionRule.withGlob(PermissionEffect.ASK, "MemoryWrite", "/memories/**")),
-            List.of(PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*")));
+            List.of(PermissionRule.of("Read", "./src/**")),
+            List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
+            List.of(PermissionRule.of("Read", "**/secrets.*")));
 
     try (var session =
         AgentSession.create(SessionPresets.workspace(model, root).withPermission(policy).build())) {

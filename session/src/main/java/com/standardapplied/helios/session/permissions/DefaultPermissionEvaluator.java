@@ -26,32 +26,31 @@ import java.util.stream.Stream;
  * PreToolUse} hook, on the exact call that runs if it is admitted; it is not a hook, so no hook
  * priority, outcome or failure moves, skips or follows it.
  *
- * <p>Evaluation order per spec §12.4:
+ * <p>Evaluation order, the most restrictive matching rule first, in every mode:
  *
  * <ol>
  *   <li>Take the canonical call's key, which {@link ToolBinding#canonicalize} computed.
  *   <li>If any {@code deny} rule matches → {@link PermissionEffect#DENY}.
- *   <li>If {@link PermissionMode#BYPASS_PERMISSIONS} → {@link PermissionEffect#ALLOW}.
- *   <li>If any {@code allow} rule matches → {@link PermissionEffect#ALLOW}.
  *   <li>If any {@code ask} rule matches → {@link PermissionEffect#ASK}.
+ *   <li>If any {@code allow} rule matches → {@link PermissionEffect#ALLOW}.
  *   <li>Default-by-category: {@link ToolCategory#READ} / {@link ToolCategory#SEARCH} → Allow;
  *       {@link ToolCategory#WRITE} / {@link ToolCategory#EXECUTION} / {@link ToolCategory#NETWORK}
  *       → Ask (Deny for writes and execution under {@link PermissionMode#PLAN}, Allow for writes
  *       under {@link PermissionMode#ACCEPT_EDITS}); {@link ToolCategory#CONTROL} / {@link
- *       ToolCategory#DELEGATION} → Allow. {@link PermissionMode#LOCKED_DOWN} denies every category.
+ *       ToolCategory#DELEGATION} → Allow. {@link PermissionMode#LOCKED_DOWN} denies every category,
+ *       {@link PermissionMode#BYPASS_PERMISSIONS} allows every category.
  * </ol>
  *
  * <p>{@link #authorize} decides on the key it is handed, never on one recomputed from the call's
  * arguments, and fails closed: a call naming no registered tool, a key that names another tool, and
  * an ASK with no {@link ToolApprover} are each denied. A key carrying a session secret never
- * reaches it: the session's permission stage refuses that call first, with or without a policy. An
- * ASK goes to the approver with an {@link ApprovalRequest} for this call, its reason redacted
- * through the {@link SecretRegistry} since a rule's pattern may hold a secret the key does not, and
- * its arguments as compact JSON ({@link JsonSnapshot#write}), redacted, escaped and cut after 1024
- * characters (see {@link ApprovalRequest#arguments}); see {@link ToolApprover} for how its answer
- * is read.
+ * reaches it: the session's permission stage refuses that call first. An ASK goes to the approver
+ * with an {@link ApprovalRequest} for this call, its reason redacted through the {@link
+ * SecretRegistry} since a rule's pattern may hold a secret the key does not, and its arguments as
+ * compact JSON ({@link JsonSnapshot#write}), redacted, escaped and cut after 1024 characters (see
+ * {@link ApprovalRequest#arguments}); see {@link ToolApprover} for how its answer is read.
  *
- * <p>{@link #decidingRule} answers which rule decides a key alone, if one does; tools that walk
+ * <p>{@link #ruleDecision} answers how a rule decides a key alone, if one does; tools that walk
  * below their authorised path withhold every entry their own DENY rules, or the DENY and ASK rules
  * of a tool whose content they return, decide.
  *
@@ -176,23 +175,18 @@ public final class DefaultPermissionEvaluator {
   }
 
   /**
-   * The rule that decides {@code key}, in {@link #evaluate}'s order: the first matching DENY rule
-   * in any mode, then, unless the mode is {@link PermissionMode#BYPASS_PERMISSIONS}, the first
-   * matching ALLOW rule, then the first matching ASK rule. Empty when a mode or category default
-   * decides.
+   * The decision of the rule that decides {@code key}, in {@link #evaluate}'s order: the first
+   * matching DENY rule, then the first matching ASK rule, then the first matching ALLOW rule, each
+   * with the effect of its list. Empty when a mode or category default decides.
    *
    * @param key a permission key; non-null
-   * @return the deciding rule, or empty
+   * @return the deciding rule's decision, or empty
    * @throws NullPointerException if {@code key} is null
    */
-  public Optional<PermissionRule> decidingRule(ToolPermissionKey key) {
-    var denied = matcher.firstMatch(key, permission.deny());
-    if (denied.isPresent() || permission.mode() == PermissionMode.BYPASS_PERMISSIONS) {
-      return denied;
-    }
-    return matcher
-        .firstMatch(key, permission.allow())
-        .or(() -> matcher.firstMatch(key, permission.ask()));
+  public Optional<PermissionDecision> ruleDecision(ToolPermissionKey key) {
+    return firstMatch(PermissionEffect.DENY, permission.deny(), key)
+        .or(() -> firstMatch(PermissionEffect.ASK, permission.ask(), key))
+        .or(() -> firstMatch(PermissionEffect.ALLOW, permission.allow(), key));
   }
 
   /**
@@ -206,14 +200,8 @@ public final class DefaultPermissionEvaluator {
     Objects.requireNonNull(key, "key must not be null");
     Objects.requireNonNull(category, "category must not be null");
 
-    var rule = decidingRule(key);
-    if (rule.isPresent()) {
-      return byRule(rule.orElseThrow(), key);
-    }
-    if (permission.mode() == PermissionMode.BYPASS_PERMISSIONS) {
-      return PermissionDecision.allow("BYPASS_PERMISSIONS allows " + describe(key));
-    }
-    return defaultForCategory(category, permission.mode(), describe(key));
+    return ruleDecision(key)
+        .orElseGet(() -> defaultForCategory(category, permission.mode(), describe(key)));
   }
 
   /** The {@code <tool>(<canonical args>)} form of a key, without parentheses for empty args. */
@@ -231,20 +219,30 @@ public final class DefaultPermissionEvaluator {
     return cause == null ? e.getMessage() : cause.getMessage();
   }
 
-  private static PermissionDecision byRule(PermissionRule rule, ToolPermissionKey key) {
-    var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
-    return PermissionDecision.byRule(
-        rule,
-        rule.effect().name().toLowerCase(Locale.ROOT)
-            + " rule "
-            + rule.toolName()
-            + pattern
-            + " matched "
-            + describe(key));
+  /** The decision of the first of {@code rules} that matches {@code key}, with {@code effect}. */
+  private Optional<PermissionDecision> firstMatch(
+      PermissionEffect effect, List<PermissionRule> rules, ToolPermissionKey key) {
+    return matcher
+        .firstMatch(key, rules)
+        .map(
+            rule -> {
+              var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
+              var reason =
+                  effect.name().toLowerCase(Locale.ROOT)
+                      + " rule "
+                      + rule.toolName()
+                      + pattern
+                      + " matched "
+                      + describe(key);
+              return new PermissionDecision(effect, reason, Optional.of(rule));
+            });
   }
 
   private static PermissionDecision defaultForCategory(
       ToolCategory category, PermissionMode mode, String call) {
+    if (mode == PermissionMode.BYPASS_PERMISSIONS) {
+      return PermissionDecision.allow("BYPASS_PERMISSIONS allows " + call);
+    }
     if (mode == PermissionMode.LOCKED_DOWN) {
       return PermissionDecision.deny(
           "LOCKED_DOWN mode forbids "

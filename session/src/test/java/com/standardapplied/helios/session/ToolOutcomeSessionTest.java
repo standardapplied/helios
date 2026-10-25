@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -217,7 +216,7 @@ final class ToolOutcomeSessionTest {
                     PermissionMode.DEFAULT,
                     List.of(),
                     List.of(),
-                    List.of(PermissionRule.any(PermissionEffect.DENY, "t"))));
+                    List.of(PermissionRule.any("t"))));
 
     assertEquals(
         expected(

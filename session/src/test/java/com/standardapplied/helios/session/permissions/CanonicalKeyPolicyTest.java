@@ -15,6 +15,8 @@ import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,13 +29,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The policy over canonical path keys: the presets' own rules decide every in-root target however
- * it is spelled, and building an evaluator accepts every rule a canonical key can match or that
- * names no path tool.
+ * The policy over canonical path keys: each preset decides every tool as before, and building an
+ * evaluator accepts every rule a canonical key can match or that names no path tool.
  */
 final class CanonicalKeyPolicyTest {
 
@@ -61,85 +62,68 @@ final class CanonicalKeyPolicyTest {
     return tools.get(tool).orElseThrow().canonicalize(new ToolCall("c1", tool, args));
   }
 
-  private PermissionDecision decide(Permission permission, String tool, Map<String, Object> args) {
-    var canonical = canonical(tool, args);
-    return DefaultPermissionEvaluator.newBuilder(permission, tools)
-        .build()
-        .evaluate(canonical.key(), tools.get(tool).orElseThrow().category());
-  }
-
-  private static PermissionRule allowRule(Permission permission, String tool) {
-    return permission.allow().stream()
-        .filter(rule -> rule.toolName().equals(tool))
-        .findFirst()
-        .orElseThrow();
+  private PermissionDecision evaluate(
+      Permission permission, ToolPermissionKey key, ToolCategory category) {
+    return DefaultPermissionEvaluator.newBuilder(permission, tools).build().evaluate(key, category);
   }
 
   // ── presets ──────────────────────────────────────────────────────────────
 
-  static Stream<Arguments> workspaceCalls() {
-    return Stream.of(
-        Arguments.of("Read", Map.of("path", "src/Foo.java")),
-        Arguments.of("Read", Map.of("path", "./src/Foo.java")),
-        Arguments.of("LS", Map.of()),
-        Arguments.of("Grep", Map.of("pattern", "x", "path", ".")));
-  }
-
-  @ParameterizedTest(name = "defaultInWorkspace: {0} {1}")
-  @MethodSource("workspaceCalls")
-  void defaultInWorkspaceAllowsEveryInRootTargetByItsOwnRule(
-      String tool, Map<String, Object> args) {
-    var preset = Permission.defaultInWorkspace();
-    assertEquals(
-        Optional.of(allowRule(preset, tool)), decide(preset, tool, args).rule(), tool + args);
-  }
-
-  @ParameterizedTest(name = "planMode: {0} {1}")
-  @MethodSource("workspaceCalls")
-  void planModeAllowsEveryInRootTargetByItsOwnRule(String tool, Map<String, Object> args) {
-    var preset = Permission.planMode();
-    assertEquals(
-        Optional.of(allowRule(preset, tool)), decide(preset, tool, args).rule(), tool + args);
-  }
-
   @Test
-  void defaultInWorkspaceAllowsAMemoryReadByItsOwnRule() {
+  void defaultInWorkspaceAllowsAMemoryWriteByItsOwnRule() {
     var preset = Permission.defaultInWorkspace();
+    var key = canonical("MemoryWrite", Map.of("path", "/memories/notes.md")).key();
     assertEquals(
-        Optional.of(allowRule(preset, "MemoryRead")),
-        decide(preset, "MemoryRead", Map.of("path", "/memories/notes.md")).rule());
+        Optional.of(preset.allow().getFirst()), evaluate(preset, key, ToolCategory.WRITE).rule());
+  }
+
+  @ParameterizedTest(name = "{0}({2}): planMode {3}, defaultInWorkspace {4}")
+  @CsvSource({
+    "Read, READ, ./src/Foo.java, ALLOW, ALLOW",
+    "LS, READ, ., ALLOW, ALLOW",
+    "Glob, SEARCH, ., ALLOW, ALLOW",
+    "Grep, SEARCH, ., ALLOW, ALLOW",
+    "MemoryRead, READ, /memories/notes.md, ALLOW, ALLOW",
+    "MemoryWrite, WRITE, /memories/notes.md, DENY, ALLOW",
+    "Execute, EXECUTION, BASH/ls, DENY, ASK",
+    "Fetch, NETWORK, '', ASK, ASK",
+    "AskUserQuestion, CONTROL, '', ALLOW, ALLOW"
+  })
+  void eachPresetDecidesEveryToolAsBefore(
+      String tool,
+      ToolCategory category,
+      String canonicalArgs,
+      PermissionEffect planMode,
+      PermissionEffect defaultInWorkspace) {
+    var key = new ToolPermissionKey(tool, canonicalArgs);
+    assertEquals(planMode, evaluate(Permission.planMode(), key, category).effect());
+    assertEquals(
+        defaultInWorkspace, evaluate(Permission.defaultInWorkspace(), key, category).effect());
   }
 
   // ── rules that can match ─────────────────────────────────────────────────
 
   private DefaultPermissionEvaluator.Builder builderWith(PermissionRule rule) {
-    var rules = List.of(rule);
-    var none = List.<PermissionRule>of();
     return DefaultPermissionEvaluator.newBuilder(
-        new Permission(
-            PermissionMode.DEFAULT,
-            rule.effect() == PermissionEffect.ALLOW ? rules : none,
-            rule.effect() == PermissionEffect.ASK ? rules : none,
-            rule.effect() == PermissionEffect.DENY ? rules : none),
-        tools);
+        new Permission(PermissionMode.DEFAULT, List.of(), List.of(), List.of(rule)), tools);
   }
 
   static Stream<PermissionRule> matchableRules() {
     return Stream.of(
-        PermissionRule.withGlob(PermissionEffect.DENY, "Read", "./secrets/**"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "Read", "**/secrets.*"),
-        PermissionRule.withGlob(PermissionEffect.ALLOW, "LS", "."),
-        PermissionRule.any(PermissionEffect.DENY, "Read"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "/memories/"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "MemoryRead", "**"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
-        PermissionRule.withGlob(PermissionEffect.DENY, "Unregistered", "anything"));
+        PermissionRule.of("Read", "./secrets/**"),
+        PermissionRule.of("Read", "**/secrets.*"),
+        PermissionRule.of("LS", "."),
+        PermissionRule.any("Read"),
+        PermissionRule.of("MemoryRead", "/memories/"),
+        PermissionRule.of("MemoryRead", "**"),
+        PermissionRule.of("Execute", "BASH/**rm **"),
+        PermissionRule.of("Unregistered", "anything"));
   }
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("matchableRules")
   void aRuleThatCanMatchOrNamesNoPathToolBuilds(PermissionRule rule) {
     var evaluator = builderWith(rule).build();
-    assertEquals(rule, evaluator.permission().firstRuleFor(rule.toolName()).orElseThrow());
+    assertEquals(List.of(rule), evaluator.permission().deny());
   }
 }

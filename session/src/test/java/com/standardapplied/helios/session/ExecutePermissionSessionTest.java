@@ -11,7 +11,6 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.QuestionAnswers;
@@ -21,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -65,7 +65,7 @@ final class ExecutePermissionSessionTest {
 
   @Test
   void aDenyRuleMatchesACommandAfterTheFirstOne() {
-    var deny = PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/**rm **");
+    var deny = PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **");
     var permission =
         new Permission(PermissionMode.ACCEPT_EDITS, List.of(), List.of(), List.of(deny));
 
@@ -80,6 +80,30 @@ final class ExecutePermissionSessionTest {
             "Permission", "deny rule Execute(BASH/**rm **) matched Execute(BASH/ls; rm -rf ~/)"),
         run.onlyResult().outcome());
     assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aUsersAllowRuleAddedToTheWorkspacePresetRunsWithoutAQuestion() {
+    var preset = Permission.defaultInWorkspace();
+    var permission =
+        new Permission(
+            preset.mode(),
+            Stream.concat(
+                    preset.allow().stream(),
+                    Stream.of(PermissionRule.of(ExecuteTool.NAME, "BASH/ls")))
+                .toList(),
+            preset.ask(),
+            preset.deny());
+
+    var run =
+        run(
+            options(permission),
+            session -> QuestionAnswers.selecting(session, "Deny"),
+            execute("runtime", "bash", "script", "ls"));
+
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
+    assertEquals(1, provider.executed.size());
   }
 
   @Test

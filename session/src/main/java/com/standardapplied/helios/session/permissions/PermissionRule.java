@@ -9,8 +9,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * One row of a permission table. Matches if the tool name equals {@code toolName} AND, when {@code
- * argPattern} is present, the canonical args (from {@link
+ * One row of a permission table; the list of {@link Permission} it sits in decides its effect.
+ * Matches if the tool name equals {@code toolName} AND, when {@code argPattern} is present, the
+ * canonical args (from {@link
  * com.standardapplied.helios.session.tools.ToolPermissionKey#canonicalArgs()}) match the glob.
  *
  * <p>A path tool's canonical args are its canonical path: {@code .} or {@code ./a/b} in a workspace
@@ -23,22 +24,19 @@ import java.util.Optional;
  * path can match, such as {@code secrets/**} or {@code ./docs/}, fails the session's creation. An
  * absent {@code argPattern} means "any args."
  *
- * @param effect ALLOW / ASK / DENY decision applied if the rule matches; non-null
  * @param toolName the tool's stable name; non-blank
  * @param argPattern optional glob over the tool's canonical args; non-null Optional
  */
-public record PermissionRule(
-    PermissionEffect effect, String toolName, Optional<String> argPattern) {
+public record PermissionRule(String toolName, Optional<String> argPattern) {
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if {@code effect}, {@code toolName}, or {@code argPattern} is null
+   * @throws NullPointerException if {@code toolName} or {@code argPattern} is null
    * @throws IllegalArgumentException if {@code toolName} is blank or {@code argPattern} contains a
    *     blank string
    */
   public PermissionRule {
-    Objects.requireNonNull(effect, "effect must not be null");
     Objects.requireNonNull(toolName, "toolName must not be null");
     if (Strings.isBlank(toolName)) {
       throw new IllegalArgumentException("toolName must not be blank");
@@ -50,25 +48,24 @@ public record PermissionRule(
   }
 
   /**
-   * Factory for an "any-args" rule.
+   * A rule that matches every call of a tool.
    *
-   * @param effect ALLOW / ASK / DENY
    * @param toolName the tool's stable name; non-blank
    * @return a fresh rule with {@code argPattern == Optional.empty()}
    */
-  public static PermissionRule any(PermissionEffect effect, String toolName) {
-    return new PermissionRule(effect, toolName, Optional.empty());
+  public static PermissionRule any(String toolName) {
+    return new PermissionRule(toolName, Optional.empty());
   }
 
   /**
-   * Factory for a rule that matches a specific glob.
+   * A rule that matches the calls of a tool whose canonical args match a glob.
    *
-   * @param effect ALLOW / ASK / DENY
    * @param toolName the tool's stable name; non-blank
-   * @param glob the path glob; non-blank
+   * @param glob the glob; non-blank
    * @return a fresh rule
+   * @throws NullPointerException if {@code glob} is null
    */
-  public static PermissionRule withGlob(PermissionEffect effect, String toolName, String glob) {
-    return new PermissionRule(effect, toolName, Optional.of(glob));
+  public static PermissionRule of(String toolName, String glob) {
+    return new PermissionRule(toolName, Optional.of(glob));
   }
 }
