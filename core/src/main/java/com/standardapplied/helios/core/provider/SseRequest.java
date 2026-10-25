@@ -117,16 +117,21 @@ final class SseRequest {
     try (var errorBody = response.body()) {
       text = HttpClientFactory.readBoundedErrorBody(errorBody);
     } catch (IOException e) {
-      if (Thread.currentThread().isInterrupted()) {
-        throw interrupted("interrupted while reading the body of a refused response", e);
-      }
+      throwIfInterrupted(e);
       throw e;
     }
+    throwIfInterrupted(null);
     var exception = failure.create("API error (status " + status + "): " + text, status, null);
     return exception.isRetryable()
         ? new TransientStreamException(
             exception.getMessage(), exception, providerName, RetryAfter.of(response.headers()))
         : exception;
+  }
+
+  private static void throwIfInterrupted(IOException cause) {
+    if (Thread.currentThread().isInterrupted()) {
+      throw interrupted("interrupted while reading the body of a refused response", cause);
+    }
   }
 
   private static CancellationException interrupted(String message, Exception cause) {

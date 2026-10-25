@@ -12,11 +12,12 @@ import java.util.function.Supplier;
 
 /**
  * The chunk stream of {@link BlockingModel#streamOf}: runs its call once, at the first {@code
- * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs. A call
- * that ends after a close, or that throws on an interrupt of the reading thread, ends the stream in
- * a {@link CancellationException}, as does a close or an interrupt between the chunks of its
- * answer; an {@link Error} the call throws is thrown as itself. Whatever ends the stream, it never
- * runs the call again.
+ * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs; a stream
+ * closed, or a reading thread interrupted, before that never runs it. A call that ends after a
+ * close, or that throws on an interrupt of the reading thread, ends the stream in a {@link
+ * CancellationException}, as does a close or an interrupt between the chunks of its answer; an
+ * {@link Error} the call throws is thrown as itself. Whatever ends the stream, it never runs the
+ * call again.
  */
 final class BlockingStream implements CloseableIterator<ModelChunk> {
 
@@ -63,8 +64,8 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
 
   private Response<?> run() {
     synchronized (lock) {
-      if (closed) {
-        throw new CancellationException("the model's stream was closed");
+      if (closed || Thread.currentThread().isInterrupted()) {
+        throw cancelled(null);
       }
       running = Thread.currentThread();
     }
