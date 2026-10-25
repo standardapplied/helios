@@ -86,6 +86,19 @@ public record TurnOutcome(
     this(finishReason, assistantContent, List.of(), List.of(), usage, Map.of(), null, 1);
   }
 
+  /** This outcome with {@code finishReason} in place of its own. */
+  TurnOutcome withFinishReason(FinishReason finishReason) {
+    return new TurnOutcome(
+        finishReason,
+        assistantContent,
+        toolCalls,
+        citations,
+        usage,
+        metadata,
+        streamError,
+        streamAttempts);
+  }
+
   /** This outcome as the result of {@code streamAttempts} attempts. */
   TurnOutcome withStreamAttempts(int streamAttempts) {
     return new TurnOutcome(
