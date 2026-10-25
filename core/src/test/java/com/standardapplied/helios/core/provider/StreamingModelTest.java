@@ -35,9 +35,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 class StreamingModelTest {
@@ -345,6 +347,32 @@ class StreamingModelTest {
     assertFalse(stream.hasNext());
   }
 
+  @Test
+  void aFailedFuturesErrorReadWhileTheReaderIsInterruptedIsThrownInItsCompletionException() {
+    var fatal = new AssertionError("host");
+    var interrupting =
+        new InterruptingEvents(
+            () -> {
+              throw new CompletionException(fatal);
+            });
+    var stream =
+        parts(config())
+            .withExchange(request -> interrupting)
+            .build()
+            .chatStream(MESSAGES, List.of());
+
+    CompletionException thrown;
+    try {
+      thrown = assertThrows(CompletionException.class, stream::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+
+    assertSame(fatal, thrown.getCause());
+    assertTrue(interrupting.closed());
+    assertFalse(stream.hasNext());
+  }
+
   /** Reads {@code stream}, which ends interrupted, and asserts the read kept the interrupt. */
   private static CancellationException interruptedRead(CloseableIterator<ModelChunk> stream) {
     CancellationException cancelled;
@@ -360,11 +388,15 @@ class StreamingModelTest {
 
   /** Events whose one read is interrupted while it parses, as another thread's interrupt would. */
   private static final class InterruptingEvents implements CloseableIterator<StreamEvent> {
-    private final StreamEvent event;
+    private final Supplier<StreamEvent> event;
     private boolean read;
     private volatile boolean closed;
 
     InterruptingEvents(StreamEvent event) {
+      this(() -> event);
+    }
+
+    InterruptingEvents(Supplier<StreamEvent> event) {
       this.event = event;
     }
 
@@ -377,7 +409,7 @@ class StreamingModelTest {
     public StreamEvent next() {
       read = true;
       Thread.currentThread().interrupt();
-      return event;
+      return event.get();
     }
 
     @Override

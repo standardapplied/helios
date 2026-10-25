@@ -435,6 +435,52 @@ final class ModelCallTest {
   }
 
   @Test
+  void anInterruptWhileTheReaderOfAFailedAttemptClosesStartsNoFurtherAttemptAndStaysSet() {
+    var failure = transientFailure(Duration.ZERO);
+    var model =
+        new StreamModel(
+            cancellation -> {
+              var caller = Thread.currentThread();
+              return new CloseableIterator<>() {
+                @Override
+                public boolean hasNext() {
+                  throw failure;
+                }
+
+                @Override
+                public ModelChunk next() {
+                  throw new NoSuchElementException();
+                }
+
+                @Override
+                public void close() {
+                  caller.interrupt();
+                }
+              };
+            });
+    var call = modelCall(model);
+    var interruptKept = new AtomicBoolean();
+
+    var turn =
+        Await.value(
+            "the call",
+            run(
+                () -> {
+                  try {
+                    return call.stream(state, SLOW_RETRY, List.of());
+                  } finally {
+                    interruptKept.set(Thread.interrupted());
+                  }
+                }));
+
+    assertSame(failure, turn.streamError());
+    assertEquals(1, turn.streamAttempts());
+    assertEquals(1, model.calls.get());
+    assertTrue(interruptKept.get());
+    assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.TurnRetried));
+  }
+
+  @Test
   void anInterruptOfTheWaitingThreadClosesTheStreamAndEndsTheTurnKeepingTheInterrupt() {
     var pulled = new CountDownLatch(1);
 

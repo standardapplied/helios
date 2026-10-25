@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 /**
@@ -17,10 +18,11 @@ import java.util.function.Consumer;
  * which ends the stream. A {@link StreamEvent.Error} is thrown from {@code hasNext()} as the
  * exception it ends in, and events that end without a {@code Done} throw as unterminated; either
  * closes the events first. Closing closes the events, from any thread: what the events yield or
- * throw after it, save an {@link Error}, is thrown as a {@link CancellationException}, an event a
- * read that was blocked yields and a chunk already read ahead included. An interrupt of the reading
- * thread, one that arrives while an event is read included, does the same with the interrupt kept,
- * so a retryable failure read after it is never retried.
+ * throw after it, save an {@link Error} or a {@link CompletionException} carrying one, is thrown as
+ * a {@link CancellationException}, an event a read that was blocked yields and a chunk already read
+ * ahead included. An interrupt of the reading thread, one that arrives while an event is read
+ * included, does the same with the interrupt kept, so a retryable failure read after it is never
+ * retried.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -76,7 +78,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
     } catch (RuntimeException failure) {
       ended = true;
       events.close();
-      throw stopped() && !(failure instanceof CancellationException) ? cancelled(failure) : failure;
+      throw stopped() && !thrownAsItself(failure) ? cancelled(failure) : failure;
     } catch (Error error) {
       ended = true;
       events.close();
@@ -102,6 +104,16 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
   public void close() {
     closed = true;
     events.close();
+  }
+
+  /**
+   * A cancellation, and a {@link CompletionException} carrying an {@link Error}, such as a {@code
+   * join} of a failed future throws, are thrown as themselves, so whoever reads the stream sees the
+   * host {@code Error}.
+   */
+  private static boolean thrownAsItself(RuntimeException failure) {
+    return failure instanceof CancellationException
+        || failure instanceof CompletionException && failure.getCause() instanceof Error;
   }
 
   private static CancellationException cancelled(RuntimeException cause) {

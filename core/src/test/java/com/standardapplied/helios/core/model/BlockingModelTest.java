@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -163,6 +165,28 @@ class BlockingModelTest {
     } finally {
       assertTrue(Thread.interrupted());
     }
+  }
+
+  @Test
+  void aFailedFuturesErrorTheCallThrowsOnceInterruptedIsThrownInItsCompletionException() {
+    var fatal = new AssertionError("host");
+    var future = new CompletableFuture<Response<Void>>();
+    future.completeExceptionally(fatal);
+    var stream =
+        answering(
+                () -> {
+                  Thread.currentThread().interrupt();
+                  return future.join();
+                })
+            .chatStream(List.of(), List.of());
+
+    CompletionException thrown;
+    try {
+      thrown = assertThrows(CompletionException.class, stream::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertSame(fatal, thrown.getCause());
   }
 
   @Test
