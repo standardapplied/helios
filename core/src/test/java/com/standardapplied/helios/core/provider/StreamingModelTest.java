@@ -3,6 +3,7 @@
 package com.standardapplied.helios.core.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -11,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
-import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -21,25 +22,22 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.test.RecordingSubscriber;
+import com.standardapplied.helios.core.test.StreamRead;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
 class StreamingModelTest {
@@ -64,18 +62,19 @@ class StreamingModelTest {
   private final List<Request> chatted = new CopyOnWriteArrayList<>();
   private Response<Void> reply = done("{\"summary\":\"ok\"}");
   private List<StreamEvent> events;
-  private Flow.Publisher<StreamEvent> publisher;
-  private volatile ChatExchangeTest.Recorded opened;
+  private RuntimeException failure;
+  private Error fatal;
+  private StreamEvent afterClose;
   private boolean blockAtEnd;
+  private volatile Recorded opened;
 
   @Test
-  void chatDrainsTheBuiltRequestsStreamToItsCompletionsResponse() {
-    events = List.of(new StreamEvent.TextDelta("{"), new StreamEvent.Done(reply));
-
+  void chatDrainsTheBuiltRequestsStreamToTheResponseOfItsCompletion() {
     var response = model(config()).chat(MESSAGES, List.of());
 
-    assertSame(reply, response);
+    assertEquals(reply, response);
     assertEquals(List.of(new Request(MESSAGES, List.of(), null)), chatted);
+    assertTrue(opened.closed());
   }
 
   @Test
@@ -86,33 +85,17 @@ class StreamingModelTest {
   }
 
   @Test
-  void chatThrowsATransientFailureFromAnErrorEvent() {
-    var transientFailure = new TransientStreamException("overloaded", null, "acme");
-
-    assertSame(
-        transientFailure,
-        assertThrows(TransientStreamException.class, () -> chatOn(error("x", transientFailure))));
-  }
-
-  @Test
-  void aTransientFailureToOpenTheStreamIsWhatChatThrowsAndWhatChatStreamEndsIn() {
+  void aTransientFailureIsWhatChatThrowsAndWhatChatStreamThrows() {
     var status = "API error (status 529): busy";
     var overloaded =
         new TransientStreamException(status, new AcmeException(status, 529, null), "acme");
-    var model =
-        parts(config())
-            .withExchange(
-                new ChatExchange<Request>(
-                    "Acme API",
-                    request -> {
-                      throw overloaded;
-                    }))
-            .build();
+    events = List.of(error(status, overloaded));
 
     assertSame(
         overloaded,
-        assertThrows(TransientStreamException.class, () -> model.chat(MESSAGES, List.of())));
-    assertSame(overloaded, streamed(model).awaitFailure());
+        assertThrows(
+            TransientStreamException.class, () -> model(config()).chat(MESSAGES, List.of())));
+    assertSame(overloaded, streamed().failure());
   }
 
   @Test
@@ -146,139 +129,29 @@ class StreamingModelTest {
     var thrown = assertThrows(AcmeException.class, () -> chatOn(new StreamEvent.TextDelta("x")));
 
     assertEquals("Stream ended without completion event", thrown.getMessage());
+    assertTrue(opened.closed());
   }
 
   @Test
-  void chatThrowsAnUncheckedOrErrorFailureOfTheStreamAsItCame() {
+  void chatThrowsAnUncheckedOrErrorFailureOfTheStreamAsItCameAndClosesIt() {
     var cancelled = new CancellationException("stop");
-    var fatal = new StackOverflowError();
+    var overflow = new StackOverflowError();
 
-    publisher = failingWith(cancelled);
+    failure = cancelled;
     var unchecked = assertThrows(CancellationException.class, () -> chatOn());
-    publisher = failingWith(fatal);
+    var uncheckedStream = opened;
+    failure = null;
+    fatal = overflow;
     var error = assertThrows(StackOverflowError.class, () -> chatOn());
 
     assertSame(cancelled, unchecked);
-    assertSame(fatal, error);
+    assertSame(overflow, error);
+    assertTrue(uncheckedStream.closed());
+    assertTrue(opened.closed());
   }
 
   @Test
-  void chatWrapsACheckedFailureOfTheStreamInTheProvidersException() {
-    var checked = new IOException("closed");
-    publisher = failingWith(checked);
-
-    var thrown = assertThrows(AcmeException.class, () -> chatOn());
-
-    assertEquals("Stream failed", thrown.getMessage());
-    assertSame(checked, thrown.getCause());
-  }
-
-  @Test
-  void anInterruptWhileChattingCancelsTheStreamAndRestoresTheInterrupt() {
-    events = List.of();
-    blockAtEnd = true;
-    var model = model(config());
-    var interruptRestored = new boolean[1];
-    var chat =
-        new FutureTask<>(
-            () -> {
-              try {
-                return model.chat(MESSAGES, List.of());
-              } finally {
-                interruptRestored[0] = Thread.currentThread().isInterrupted();
-              }
-            });
-    var caller = Thread.ofPlatform().start(chat);
-    Await.until("the stream opened", () -> opened != null);
-    Await.latch("the read blocked", opened.blocked);
-    caller.interrupt();
-
-    var thrown = assertInstanceOf(AcmeException.class, Await.failure("the chat", chat));
-    assertEquals("Request interrupted", thrown.getMessage());
-    Await.latch("the stream closed", opened.closed);
-    assertTrue(interruptRestored[0]);
-  }
-
-  @Test
-  void anInterruptBeforeTheStreamSubscribesCancelsTheLateSubscriptionWithoutARequest() {
-    var subscribers = new LinkedBlockingQueue<Flow.Subscriber<? super StreamEvent>>();
-    publisher = subscribers::add;
-    var model = model(config());
-    var interruptRestored = new boolean[1];
-    var chat =
-        new FutureTask<>(
-            () -> {
-              try {
-                return model.chat(MESSAGES, List.of());
-              } finally {
-                interruptRestored[0] = Thread.currentThread().isInterrupted();
-              }
-            });
-    var caller = Thread.ofPlatform().start(chat);
-    var late = Await.next("the chat subscribed", subscribers);
-    caller.interrupt();
-    var thrown = assertInstanceOf(AcmeException.class, Await.failure("the chat", chat));
-    assertEquals("Request interrupted", thrown.getMessage());
-    assertTrue(interruptRestored[0]);
-
-    var requests = new AtomicInteger();
-    var cancels = new AtomicInteger();
-    late.onSubscribe(
-        new Flow.Subscription() {
-          @Override
-          public void request(long n) {
-            requests.incrementAndGet();
-          }
-
-          @Override
-          public void cancel() {
-            cancels.incrementAndGet();
-          }
-        });
-
-    assertEquals(0, requests.get());
-    assertEquals(1, cancels.get());
-  }
-
-  @Test
-  void anInterruptWhoseCancelFailsStillRestoresTheInterrupt() {
-    var subscribed = new CountDownLatch(1);
-    publisher =
-        subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    subscribed.countDown();
-                  }
-
-                  @Override
-                  public void cancel() {
-                    throw new IllegalStateException("close failed");
-                  }
-                });
-    var model = model(config());
-    var interruptRestored = new boolean[1];
-    var chat =
-        new FutureTask<>(
-            () -> {
-              try {
-                return model.chat(MESSAGES, List.of());
-              } finally {
-                interruptRestored[0] = Thread.currentThread().isInterrupted();
-              }
-            });
-    var caller = Thread.ofPlatform().start(chat);
-    Await.latch("the chat subscribed", subscribed);
-    caller.interrupt();
-
-    var thrown = assertInstanceOf(IllegalStateException.class, Await.failure("the chat", chat));
-    assertEquals("close failed", thrown.getMessage());
-    assertTrue(interruptRestored[0]);
-  }
-
-  @Test
-  void chatStreamPublishesEachEventAsItsChunkWithinDemand() {
+  void chatStreamYieldsEachEventAsItsChunk() {
     var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
     var cite = Citation.of("https://example.com", "snippet");
     reply =
@@ -293,41 +166,45 @@ class StreamingModelTest {
     events =
         List.of(
             new StreamEvent.ThinkingDelta("hm"),
-            new StreamEvent.ThinkingComplete("hm", "sig"),
             new StreamEvent.KeepAlive(),
             new StreamEvent.TextDelta("Hi"),
-            new StreamEvent.KeepAlive(),
             new StreamEvent.ToolCallStart("c1", "lookup"),
             new StreamEvent.ToolCallDelta("c1", "{}"),
             new StreamEvent.ToolCallComplete(call),
             new StreamEvent.Done(reply));
-    var subscriber = new RecordingSubscriber<ModelChunk>(1);
 
-    model(config()).chatStream(MESSAGES, List.of(), new CancellationToken()).subscribe(subscriber);
-    for (var i = 0; i < 9; i++) {
-      subscriber.next();
-      subscriber.request(1);
-    }
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    var sentBeforeRead = List.copyOf(chatted);
+    var chunks = StreamRead.of(stream).items();
 
     assertEquals(
         List.of(
             new ModelChunk.ThinkingDelta("hm"),
             new ModelChunk.KeepAlive(),
-            new ModelChunk.KeepAlive(),
             new ModelChunk.TextDelta("Hi"),
-            new ModelChunk.KeepAlive(),
             new ModelChunk.ToolUseStart("c1", "lookup"),
             new ModelChunk.ToolUseDelta("c1", "{}"),
             new ModelChunk.ToolUseStop(call),
             new ModelChunk.MessageStop(
                 "TOOL_CALLS", Response.Usage.of(3, 2), Map.of("k", "v"), List.of(cite))),
-        subscriber.awaitCompletion());
-    assertEquals(0, subscriber.violations());
-    assertEquals(List.of(new Request(MESSAGES, List.of(), null)), chatted);
+        chunks);
+    assertEquals(List.of(new Request(MESSAGES, List.of(), null)), sentBeforeRead);
   }
 
   @Test
-  void chatStreamEndsAFailedTurnWithItsExceptionAndIgnoresWhatFollows() {
+  void theMessageStopEndsTheStreamAndClosesTheEvents() {
+    events = List.of(new StreamEvent.Done(reply), new StreamEvent.TextDelta("late"));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+
+    assertInstanceOf(ModelChunk.MessageStop.class, stream.next());
+
+    assertFalse(stream.hasNext());
+    assertThrows(NoSuchElementException.class, stream::next);
+    assertTrue(opened.closed());
+  }
+
+  @Test
+  void chatStreamThrowsAFailedTurnsExceptionAfterWhatStreamedAndClosesTheEvents() {
     var reset = new IOException("reset");
     events =
         List.of(
@@ -335,131 +212,121 @@ class StreamingModelTest {
             error("Stream read error", reset),
             new StreamEvent.TextDelta("lo"));
 
-    var subscriber = streamed(model(config()));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
 
-    var thrown = assertInstanceOf(TransientStreamException.class, subscriber.awaitFailure());
+    assertEquals(new ModelChunk.TextDelta("Hel"), stream.next());
+    var thrown = assertThrows(TransientStreamException.class, stream::hasNext);
     assertSame(reset, thrown.getCause());
-    assertEquals(List.of(new ModelChunk.TextDelta("Hel")), subscriber.items());
-    Await.latch("the stream closed", opened.closed);
-    assertEquals(0, subscriber.violations());
+    assertFalse(stream.hasNext());
+    assertTrue(opened.closed());
   }
 
   @Test
-  void chatStreamIgnoresWhatAnEventStreamSendsAfterItFailedTheTurn() {
-    var reset = new IOException("reset");
-    publisher =
-        subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    subscriber.onNext(error("Stream read error", reset));
-                    subscriber.onNext(new StreamEvent.TextDelta("late"));
-                    subscriber.onError(new IllegalStateException("late"));
-                    subscriber.onComplete();
-                  }
-
-                  @Override
-                  public void cancel() {}
-                });
-
-    var subscriber = streamed(model(config()));
-
-    assertSame(reset, subscriber.awaitFailure().getCause());
-    assertEquals(List.of(), subscriber.items());
-    assertEquals(0, subscriber.violations());
-  }
-
-  @Test
-  void chatStreamEndsAFailedTurnWithItsExceptionEvenWhenCancellingTheStreamThrows() {
-    var reset = new IOException("reset");
-    var escaped = new CompletableFuture<Throwable>();
-    publisher =
-        subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    Thread.ofVirtual()
-                        .start(
-                            () -> {
-                              try {
-                                subscriber.onNext(error("Stream read error", reset));
-                              } catch (IllegalStateException thrown) {
-                                escaped.complete(thrown);
-                              }
-                            });
-                  }
-
-                  @Override
-                  public void cancel() {
-                    throw new IllegalStateException("close failed");
-                  }
-                });
-
-    var subscriber = streamed(model(config()));
-
-    var thrown = assertInstanceOf(TransientStreamException.class, subscriber.awaitFailure());
-    assertSame(reset, thrown.getCause());
-    assertEquals("close failed", Await.value("the cancel's failure", escaped).getMessage());
-    assertEquals(0, subscriber.violations());
-  }
-
-  @Test
-  void chatStreamFailsAStreamThatCompletesWithoutItsTerminalEvent() {
+  void chatStreamFailsAStreamThatEndsWithoutItsTerminalEvent() {
     events = List.of(new StreamEvent.TextDelta("Hel"));
 
-    var thrown = assertInstanceOf(AcmeException.class, streamed(model(config())).awaitFailure());
+    var thrown = assertInstanceOf(AcmeException.class, streamed().failure());
 
     assertEquals("Stream ended without completion event", thrown.getMessage());
   }
 
   @Test
-  void chatStreamFailsAnEventItCannotTurnIntoAChunkAndCancelsTheStream() {
+  void chatStreamFailsAnEventItCannotTurnIntoAChunkAndClosesTheEvents() {
     events = List.of(new StreamEvent.ToolCallStart(" ", "lookup"));
-    blockAtEnd = true;
 
-    var subscriber = streamed(model(config()));
-
-    assertInstanceOf(IllegalArgumentException.class, subscriber.awaitFailure());
-    Await.latch("the stream closed", blockedStream().closed);
+    assertInstanceOf(IllegalArgumentException.class, streamed().failure());
+    assertTrue(opened.closed());
   }
 
   @Test
   void chatStreamPassesTheStreamsOwnFailureThrough() {
     var cancelled = new CancellationException("stop");
-    publisher = failingWith(cancelled);
+    events = List.of();
+    failure = cancelled;
 
-    assertSame(cancelled, streamed(model(config())).awaitFailure());
+    assertSame(cancelled, streamed().failure());
   }
 
   @Test
-  void cancellingTheChunkSubscriptionCancelsTheEventStream() {
+  void closingTheChunkStreamClosesTheEventsAndABlockedReadThrowsCancellation() {
     events = List.of(new StreamEvent.TextDelta("Hel"));
     blockAtEnd = true;
-    var subscriber = new RecordingSubscriber<ModelChunk>();
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    stream.next();
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read = reader.submit(stream::hasNext);
+      Await.latch("the read blocked", opened.blocked);
 
-    model(config()).chatStream(MESSAGES, List.of(), new CancellationToken()).subscribe(subscriber);
-    subscriber.next();
-    Await.latch("the read blocked", blockedStream().blocked);
-    subscriber.cancel();
+      stream.close();
 
-    Await.latch("the stream closed", opened.closed);
+      var cancelled =
+          assertInstanceOf(CancellationException.class, Await.failure("the read", read));
+      assertEquals("Stream ended without completion event", cancelled.getCause().getMessage());
+      assertTrue(opened.closed());
+    }
   }
 
   @Test
-  void aStructuredStreamAsksForTheSchemaAndChecksTheCompletedTurn() {
+  void anErrorEventTheEventsYieldAfterTheCloseIsThrownAsCancellation() {
+    events = List.of();
+    blockAtEnd = true;
+    afterClose = error("Stream read error", new IOException("Stream closed"));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read = reader.submit(stream::hasNext);
+      Await.until("the stream opened", () -> opened != null);
+      Await.latch("the read blocked", opened.blocked);
+
+      stream.close();
+
+      var cancelled =
+          assertInstanceOf(CancellationException.class, Await.failure("the read", read));
+      assertInstanceOf(TransientStreamException.class, cancelled.getCause());
+    }
+  }
+
+  @Test
+  void aCancellationTheEventsThrowAfterTheCloseIsThrownAsItself() {
+    var closing = new CountDownLatch(1);
+    var cancelled = new CancellationException("closed while awaiting the headers");
+    CloseableIterator<StreamEvent> awaitingHeaders =
+        new CloseableIterator<>() {
+          @Override
+          public boolean hasNext() {
+            Await.latch("the close", closing);
+            throw cancelled;
+          }
+
+          @Override
+          public StreamEvent next() {
+            throw new NoSuchElementException();
+          }
+
+          @Override
+          public void close() {
+            closing.countDown();
+          }
+        };
+    var stream =
+        parts(config())
+            .withExchange(request -> awaitingHeaders)
+            .build()
+            .chatStream(MESSAGES, List.of());
+
+    stream.close();
+
+    assertSame(cancelled, assertThrows(CancellationException.class, stream::hasNext));
+  }
+
+  @Test
+  void aStructuredStreamAsksForTheSchemaAndThrowsAMismatchAfterTheText() {
     var schema = OutputSchema.of(Answer.class);
     reply = done("not json");
-    events = List.of(new StreamEvent.TextDelta("not json"), new StreamEvent.Done(reply));
-    var subscriber = new RecordingSubscriber<ModelChunk>();
 
-    model(config())
-        .chatStream(MESSAGES, List.of(), schema, new CancellationToken())
-        .subscribe(subscriber);
+    var read = StreamRead.of(model(config()).chatStream(MESSAGES, List.of(), schema));
 
-    assertInstanceOf(StructuredOutputParseException.class, subscriber.awaitFailure());
-    assertEquals(List.of(new ModelChunk.TextDelta("not json")), subscriber.items());
+    assertInstanceOf(StructuredOutputParseException.class, read.failure());
+    assertEquals(List.of(new ModelChunk.TextDelta("not json")), read.items());
     assertEquals(schema.schema().toMap(), chatted.getFirst().outputSchema());
   }
 
@@ -474,29 +341,12 @@ class StreamingModelTest {
             .withFinishReason(FinishReason.TOOL_CALLS)
             .build();
 
-    events = List.of(new StreamEvent.Done(reply));
-    var matching = new RecordingSubscriber<ModelChunk>();
-    model(config())
-        .chatStream(MESSAGES, List.of(), schema, new CancellationToken())
-        .subscribe(matching);
-    events = List.of(new StreamEvent.Done(calling));
-    var toolTurn = new RecordingSubscriber<ModelChunk>();
-    model(config())
-        .chatStream(MESSAGES, List.of(), schema, new CancellationToken())
-        .subscribe(toolTurn);
+    var matching = StreamRead.of(model(config()).chatStream(MESSAGES, List.of(), schema));
+    reply = calling;
+    var toolTurn = StreamRead.of(model(config()).chatStream(MESSAGES, List.of(), schema));
 
-    assertInstanceOf(ModelChunk.MessageStop.class, matching.awaitCompletion().getLast());
-    assertInstanceOf(ModelChunk.MessageStop.class, toolTurn.awaitCompletion().getLast());
-  }
-
-  @Test
-  void chatStreamRejectsANullToken() {
-    var model = model(config());
-    var schema = OutputSchema.of(Answer.class);
-
-    assertThrows(NullPointerException.class, () -> model.chatStream(MESSAGES, List.of(), null));
-    assertThrows(
-        NullPointerException.class, () -> model.chatStream(MESSAGES, List.of(), schema, null));
+    assertInstanceOf(ModelChunk.MessageStop.class, matching.items().getLast());
+    assertInstanceOf(ModelChunk.MessageStop.class, toolTurn.items().getLast());
   }
 
   @Test
@@ -650,7 +500,11 @@ class StreamingModelTest {
   }
 
   private static Response<Void> done(String content) {
-    return Response.newBuilder().withContent(content).withFinishReason(FinishReason.STOP).build();
+    return Response.newBuilder()
+        .withContent(content)
+        .withFinishReason(FinishReason.STOP)
+        .withUsage(Response.Usage.of(2, 1))
+        .build();
   }
 
   private void chatOn(StreamEvent... turn) {
@@ -658,15 +512,8 @@ class StreamingModelTest {
     model(config()).chat(MESSAGES, List.of());
   }
 
-  private RecordingSubscriber<ModelChunk> streamed(StreamingModel<Request> model) {
-    var subscriber = new RecordingSubscriber<ModelChunk>();
-    model.chatStream(MESSAGES, List.of(), new CancellationToken()).subscribe(subscriber);
-    return subscriber;
-  }
-
-  private ChatExchangeTest.Recorded blockedStream() {
-    Await.until("the stream opened", () -> opened != null);
-    return opened;
+  private StreamRead<ModelChunk> streamed() {
+    return StreamRead.of(model(config()).chatStream(MESSAGES, List.of()));
   }
 
   private static StreamEvent.Error error(String message, Exception cause) {
@@ -674,19 +521,15 @@ class StreamingModelTest {
         message, cause, Response.newBuilder().withFinishReason(FinishReason.ERROR).build());
   }
 
-  private static Flow.Publisher<StreamEvent> failingWith(Throwable failure) {
-    return subscriber -> {
-      subscriber.onSubscribe(
-          new Flow.Subscription() {
-            @Override
-            public void request(long n) {
-              subscriber.onError(failure);
-            }
-
-            @Override
-            public void cancel() {}
-          });
-    };
+  /** The events of a completed {@code response}: its text, its tool calls, then its completion. */
+  private static List<StreamEvent> turn(Response<Void> response) {
+    var turn = new ArrayList<StreamEvent>();
+    if (!response.content().isEmpty()) {
+      turn.add(new StreamEvent.TextDelta(response.content()));
+    }
+    response.toolCalls().forEach(call -> turn.add(new StreamEvent.ToolCallComplete(call)));
+    turn.add(new StreamEvent.Done(response));
+    return turn;
   }
 
   /** The exception a test provider throws, so a pass-through is told apart from a wrap. */
@@ -697,27 +540,79 @@ class StreamingModelTest {
   }
 
   /**
-   * Answers each request with {@link #publisher} when set, else with {@link #events} (or the
-   * reply's completion), read from a stream that blocks once its events run out when {@link
-   * #blockAtEnd}.
+   * Recorded events, then the configured failure; a stream that blocks at its end until closed, and
+   * then yields {@code afterClose} if set.
    */
+  private static final class Recorded implements CloseableIterator<StreamEvent> {
+    private final List<StreamEvent> events;
+    private final RuntimeException failure;
+    private final Error fatal;
+    private final boolean blocks;
+    private StreamEvent afterClose;
+    private final CountDownLatch blocked = new CountDownLatch(1);
+    private final CountDownLatch closing = new CountDownLatch(1);
+    private int next;
+
+    Recorded(
+        List<StreamEvent> events,
+        RuntimeException failure,
+        Error fatal,
+        boolean blocks,
+        StreamEvent afterClose) {
+      this.events = events;
+      this.failure = failure;
+      this.fatal = fatal;
+      this.blocks = blocks;
+      this.afterClose = afterClose;
+    }
+
+    @Override
+    public boolean hasNext() {
+      if (next < events.size()) {
+        return true;
+      }
+      if (failure != null) {
+        throw failure;
+      }
+      if (fatal != null) {
+        throw fatal;
+      }
+      if (blocks) {
+        blocked.countDown();
+        Await.latch("the stream closed", closing);
+      }
+      return afterClose != null;
+    }
+
+    @Override
+    public StreamEvent next() {
+      if (next < events.size()) {
+        return events.get(next++);
+      }
+      var last = afterClose;
+      afterClose = null;
+      return last;
+    }
+
+    @Override
+    public void close() {
+      closing.countDown();
+    }
+
+    boolean closed() {
+      return closing.getCount() == 0;
+    }
+  }
+
+  /** Records each request and answers it with the configured events, or else the reply's turn. */
   private final class RecordingExchange implements Exchange<Request> {
 
     @Override
-    public Flow.Publisher<StreamEvent> stream(Request request, CancellationToken cancellation) {
+    public CloseableIterator<StreamEvent> stream(Request request) {
       chatted.add(request);
-      if (publisher != null) {
-        return publisher;
-      }
-      var turn = events != null ? events : List.<StreamEvent>of(new StreamEvent.Done(reply));
-      return new IteratorPublisher<>(
-          () -> {
-            var stream = new ChatExchangeTest.Recorded(turn);
-            stream.blocks = blockAtEnd;
-            opened = stream;
-            return stream;
-          },
-          cancellation);
+      var turn = events != null ? events : turn(reply);
+      opened = new Recorded(turn, failure, fatal, blockAtEnd, afterClose);
+      return opened;
     }
   }
 }

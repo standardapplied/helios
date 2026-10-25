@@ -15,16 +15,14 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ConversationFixture;
+import com.standardapplied.helios.core.test.FakeHttpClient;
+import com.standardapplied.helios.core.test.FakeHttpResponse;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.Authenticator;
-import java.net.CookieHandler;
-import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
@@ -39,14 +37,9 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -876,7 +869,7 @@ class GeminiFilesClientTest {
   }
 
   /**
-   * The responses a {@link StubHttpClient} answers with, in order, and the requests it received.
+   * The responses a {@link FakeHttpClient} answers with, in order, and the requests it received.
    */
   private static final class StubExchanges {
     private final Deque<StubResponse> responses = new ArrayDeque<>();
@@ -889,7 +882,7 @@ class GeminiFilesClientTest {
     }
 
     HttpClient client() {
-      return new StubHttpClient(this);
+      return FakeHttpClient.sending(this::answer);
     }
 
     HttpResponse<InputStream> answer(HttpRequest request) throws IOException, InterruptedException {
@@ -907,124 +900,13 @@ class GeminiFilesClientTest {
     }
   }
 
-  private static final class StubHttpClient extends HttpClient {
-    private final StubExchanges exchanges;
-
-    StubHttpClient(StubExchanges exchanges) {
-      this.exchanges = exchanges;
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
-        throws IOException, InterruptedException {
-      return (HttpResponse<T>) exchanges.answer(request);
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request,
-        HttpResponse.BodyHandler<T> responseBodyHandler,
-        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Optional<CookieHandler> cookieHandler() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<Duration> connectTimeout() {
-      return Optional.of(Duration.ofSeconds(1));
-    }
-
-    @Override
-    public Redirect followRedirects() {
-      return Redirect.NEVER;
-    }
-
-    @Override
-    public Optional<ProxySelector> proxy() {
-      return Optional.empty();
-    }
-
-    @Override
-    public SSLContext sslContext() {
-      return null;
-    }
-
-    @Override
-    public SSLParameters sslParameters() {
-      return new SSLParameters();
-    }
-
-    @Override
-    public Optional<Authenticator> authenticator() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_2;
-    }
-
-    @Override
-    public Optional<Executor> executor() {
-      return Optional.empty();
-    }
-  }
-
   private record StubResponse(int status, Map<String, List<String>> headers, String body) {
     HttpResponse<InputStream> toResponse(HttpRequest request) {
-      return new HttpResponse<>() {
-        @Override
-        public int statusCode() {
-          return status;
-        }
-
-        @Override
-        public HttpHeaders headers() {
-          return HttpHeaders.of(headers, (name, value) -> true);
-        }
-
-        @Override
-        public InputStream body() {
-          return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
-        }
-
-        @Override
-        public Optional<HttpResponse<InputStream>> previousResponse() {
-          return Optional.empty();
-        }
-
-        @Override
-        public HttpRequest request() {
-          return request;
-        }
-
-        @Override
-        public Optional<SSLSession> sslSession() {
-          return Optional.empty();
-        }
-
-        @Override
-        public URI uri() {
-          return request.uri();
-        }
-
-        @Override
-        public HttpClient.Version version() {
-          return HttpClient.Version.HTTP_2;
-        }
-      };
+      return new FakeHttpResponse(
+          request,
+          status,
+          headers,
+          () -> new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
     }
   }
 }

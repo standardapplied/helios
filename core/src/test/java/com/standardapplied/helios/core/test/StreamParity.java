@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -38,17 +37,11 @@ public final class StreamParity {
    */
   public static void assertAgrees(String fixture, Function<URI, Model> modelAt) {
     var replies = ModelHarness.replies(fixture);
-    var recorder = new RecordingSubscriber<ModelChunk>();
-    var streamFailure = new AtomicReference<Throwable>();
+    var streamed = new AtomicReference<StreamRead<ModelChunk>>();
     ModelHarness.exchange(
         replies,
         modelAt,
-        model -> {
-          model
-              .chatStream(ModelHarness.PROMPT, List.of(), new CancellationToken())
-              .subscribe(recorder);
-          streamFailure.set(recorder.awaitEnd());
-        });
+        model -> streamed.set(StreamRead.of(model.chatStream(ModelHarness.PROMPT, List.of()))));
     var response = new AtomicReference<Response<Void>>();
     var chatFailure = new AtomicReference<RuntimeException>();
     ModelHarness.exchange(
@@ -61,17 +54,17 @@ public final class StreamParity {
             chatFailure.set(failure);
           }
         });
-    var chunks = recorder.items();
-    assertEquals(0, recorder.violations(), "publisher protocol violations");
+    var chunks = streamed.get().items();
+    var streamFailure = streamed.get().failure();
     assertToolUseOrder(chunks);
     if (chatFailure.get() != null) {
       var render = new Transcript();
-      assertNotNull(streamFailure.get(), "chat threw but the chunk stream completed");
-      assertEquals(render.render(chatFailure.get()), render.render(streamFailure.get()));
+      assertNotNull(streamFailure, "chat threw but the chunk stream completed");
+      assertEquals(render.render(chatFailure.get()), render.render(streamFailure));
       assertFalse(chunks.stream().anyMatch(ModelChunk.MessageStop.class::isInstance));
       return;
     }
-    assertNull(streamFailure.get(), "chat returned but the chunk stream failed");
+    assertNull(streamFailure, "chat returned but the chunk stream failed");
     assertAgreesWith(response.get(), chunks);
   }
 

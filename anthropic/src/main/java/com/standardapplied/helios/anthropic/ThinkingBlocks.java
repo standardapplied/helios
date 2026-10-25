@@ -2,7 +2,6 @@
 
 package com.standardapplied.helios.anthropic;
 
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.StreamEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -53,17 +52,6 @@ final class ThinkingBlocks implements RawContentEcho.Source {
   /** Signature streamed into the block at {@code index}. */
   void sign(int index, String signature) {
     at(index).signature().append(signature);
-  }
-
-  /** The closing of the block at {@code index}: its whole text and signature, unless blank. */
-  StreamEvent complete(int index) {
-    var thinking = blocks.get(index);
-    var text = thinking.text().toString();
-    if (Strings.isBlank(text)) {
-      return null;
-    }
-    var signature = thinking.signature().isEmpty() ? null : thinking.signature().toString();
-    return new StreamEvent.ThinkingComplete(text, signature);
   }
 
   /**

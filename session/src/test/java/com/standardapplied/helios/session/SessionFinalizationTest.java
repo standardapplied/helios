@@ -12,7 +12,7 @@ import static com.standardapplied.helios.session.EndingSessions.grace;
 import static com.standardapplied.helios.session.EndingSessions.model;
 import static com.standardapplied.helios.session.EndingSessions.options;
 import static com.standardapplied.helios.session.EndingSessions.slowGrace;
-import static com.standardapplied.helios.session.EndingSessions.subscription;
+import static com.standardapplied.helios.session.EndingSessions.stream;
 import static com.standardapplied.helios.session.EndingSessions.withProvider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +65,7 @@ import org.junit.jupiter.api.Test;
 final class SessionFinalizationTest {
 
   private final CountDownLatch released = new CountDownLatch(1);
+  private final CountDownLatch streamClosed = new CountDownLatch(1);
   private final List<String> order = new CopyOnWriteArrayList<>();
   private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
 
@@ -74,29 +75,41 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void aStreamCancelThatNeverReturnsCannotKeepAClosedSessionFromSettling() {
-    var requested = new CountDownLatch(1);
+  void aModelStreamThatIgnoresItsCloseCannotKeepAClosedSessionFromSettling() {
+    var reader = new CompletableFuture<Thread>();
     var model =
         model(
-            token ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        subscription(requested::countDown, () -> Uninterruptible.await(released))));
+            () ->
+                stream(
+                    () -> {
+                      reader.complete(Thread.currentThread());
+                      Uninterruptible.await(released);
+                      return false;
+                    },
+                    () -> {}));
+    var events = new CollectingSubscriber();
     var session = AgentSession.create(options(model).withLimits(grace()).build());
+    session.events().subscribe(events);
     session.send("go");
-    Await.latch("the stream requested", requested);
+    var reading = Await.value("the stream read", reader);
 
     try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
       session.close();
 
       assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     }
+    events.awaitDone();
+    var emitted = events.events();
+    released.countDown();
+    Await.termination("the stream's reader", reading);
+
     assertEquals(
         List.of(
-            "cancelling the model stream of session "
+            "the model stream of session "
                 + SID
-                + " did not return within PT0.05S; the stream is not known to be closed"),
+                + " did not end within PT0.05S of its close; it is not known to be closed"),
         logged.stream().map(LogRecord::getMessage).toList());
+    assertEquals(emitted, events.events());
   }
 
   @Test
@@ -211,6 +224,7 @@ final class SessionFinalizationTest {
     session.close();
 
     assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    Await.latch("the stalled stream closed", streamClosed);
   }
 
   @Test
@@ -225,8 +239,17 @@ final class SessionFinalizationTest {
 
   private AgentSession streamingBehindACallbackThatNeverReturns(RecordingProvider provider) {
     var entered = new CountDownLatch(1);
+    var stalled = ModelStreams.stalled(entered::countDown);
     var model =
-        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                stream(
+                    stalled::hasNext,
+                    () -> {
+                      stalled.close();
+                      streamClosed.countDown();
+                    }))
+            .build();
     var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
     var token = provider.context.cancellation();
     token.onCancel(() -> Uninterruptible.await(released));
@@ -371,11 +394,7 @@ final class SessionFinalizationTest {
           Uninterruptible.await(proceed);
         };
     var limits =
-        SessionLimits.newBuilder()
-            .withMaxWallClock(SHORT_GRACE)
-            .withStreamIdleTimeout(NOT_REACHED)
-            .withStopGrace(NOT_REACHED)
-            .build();
+        SessionLimits.newBuilder().withMaxWallClock(SHORT_GRACE).withStopGrace(NOT_REACHED).build();
 
     try (var session =
         AgentSession.create(withProvider(provider, model).withLimits(limits).build())) {
@@ -579,7 +598,7 @@ final class SessionFinalizationTest {
     var failure = new Unprintable();
     var model =
         model(
-            token -> {
+            () -> {
               throw failure;
             });
 

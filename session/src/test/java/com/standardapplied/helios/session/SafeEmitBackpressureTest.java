@@ -8,21 +8,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
-import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.testing.ScriptedModel;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -33,10 +30,10 @@ import org.junit.jupiter.api.Test;
  * the fix, {@code publisher.submit(...)} blocked the loop indefinitely when any subscriber filled
  * its 256-item buffer — a slow SSE client could pin the producer forever.
  *
- * <p>The tests drive a real session whose model streams a burst of text chunks on the loop thread.
- * A subscriber that stalls in its first {@code onNext} holds one event and lets the buffer fill, so
- * the next event can only be dropped; a subscriber that never stalls receives a burst that fits the
- * buffer whole.
+ * <p>The tests drive a real session whose model streams a burst of text chunks to the turn's
+ * reader. A subscriber that stalls in its first {@code onNext} holds one event and lets the buffer
+ * fill, so the next event can only be dropped; a subscriber that never stalls receives a burst that
+ * fits the buffer whole.
  */
 final class SafeEmitBackpressureTest {
 
@@ -125,49 +122,37 @@ final class SafeEmitBackpressureTest {
   }
 
   /**
-   * Model whose stream emits {@code count} text chunks on the caller's thread — the agent loop —
-   * running {@code beforeBurst} ahead of the first chunk and {@code afterBurst} behind the last.
+   * Model whose stream yields {@code count} text chunks to the turn's reader, running {@code
+   * beforeBurst} ahead of the first chunk and {@code afterBurst} behind the last.
    */
   private static Model burstModel(int count, Runnable beforeBurst, Runnable afterBurst) {
-    return new BlockingModel() {
-      @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        throw new UnsupportedOperationException("chat() not used by the streaming loop");
-      }
+    var burst = new ArrayList<ModelChunk>();
+    chunks(count).forEach(text -> burst.add(new ModelChunk.TextDelta(text)));
+    burst.add(new ModelChunk.MessageStop(FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
+    var stream =
+        new CloseableIterator<ModelChunk>() {
+          private int next;
 
-      @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {
-                    beforeBurst.run();
-                    chunks(count)
-                        .forEach(text -> subscriber.onNext(new ModelChunk.TextDelta(text)));
-                    afterBurst.run();
-                    subscriber.onNext(
-                        new ModelChunk.MessageStop(
-                            FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
-                    subscriber.onComplete();
-                  }
+          @Override
+          public boolean hasNext() {
+            if (next == 0) {
+              beforeBurst.run();
+            }
+            if (next == count) {
+              afterBurst.run();
+            }
+            return next < burst.size();
+          }
 
-                  @Override
-                  public void cancel() {}
-                });
-      }
+          @Override
+          public ModelChunk next() {
+            return burst.get(next++);
+          }
 
-      @Override
-      public String id() {
-        return "test-burst";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
+          @Override
+          public void close() {}
+        };
+    return ScriptedModel.newBuilder().withStreamTurn(stream).build();
   }
 
   private static void awaitCompletion(CollectingSubscriber subscriber) {

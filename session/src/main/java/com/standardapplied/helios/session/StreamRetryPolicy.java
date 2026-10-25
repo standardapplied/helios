@@ -28,8 +28,7 @@ import java.util.Objects;
  *
  * <p>Production defaults (see {@link #defaults()}): three attempts (initial plus two retries), 1 s
  * initial back-off with multiplier 4 capped at 30 s, ±25% jitter. Conservative enough that one
- * transient blip is masked; aggressive enough that a real outage terminates well inside {@link
- * SessionLimits#streamIdleTimeout()} multiplied by the attempt count.
+ * transient blip is masked.
  *
  * @param maxAttempts total attempts including the initial one; must be {@code >= 1}. {@code 1}
  *     means retry is disabled

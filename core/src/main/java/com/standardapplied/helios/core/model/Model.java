@@ -5,17 +5,15 @@
 
 package com.standardapplied.helios.core.model;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
-import java.util.concurrent.Flow;
 
 /**
  * Interface for LLM providers. Implementations provide the actual integration with model APIs
  * (Gemini, Anthropic, etc.). The one way to call a model is its chunk stream, {@link
- * #chatStream(List, List, CancellationToken)}; the blocking {@code chat} waits for it.
+ * #chatStream(List, List)}; the blocking {@code chat} drains it.
  *
  * <p>Models may hold long-lived resources (HTTP connection pools, file descriptors). Long-running
  * hosts that build and discard models should call {@link #close()} to release them. Implementations
@@ -24,73 +22,71 @@ import java.util.concurrent.Flow;
 public interface Model extends AutoCloseable {
 
   /**
-   * Stream the model's answer to {@code messages} as a {@link Flow.Publisher} of normalized {@link
-   * ModelChunk}s: text, thinking, tool-call fragments and completions as they arrive, then one
-   * {@link ModelChunk.MessageStop} carrying the finish reason, usage, metadata and citations, then
-   * {@code onComplete}. A failed turn ends in {@code onError} instead. Between them the stream may
-   * publish {@link ModelChunk.KeepAlive}s, one for each part of the provider's stream that carries
-   * nothing for the turn: they prove the stream is alive, and a subscriber adds nothing for them.
-   *
-   * <p>The contract every implementation keeps:
+   * Stream the model's answer to {@code messages} as normalized {@link ModelChunk}s, read with
+   * {@code hasNext()} / {@code next()} by one reader in one pass: text, thinking, tool-call
+   * fragments and completions as the provider streams them, ending with one {@link
+   * ModelChunk.MessageStop} carrying the finish reason, usage, metadata and citations. A {@link
+   * ModelChunk.KeepAlive} is published for each part of the provider's stream that carries nothing,
+   * as proof of life only.
    *
    * <ul>
-   *   <li><b>Lazy.</b> Calling this method does no provider I/O and runs no model work; the work
-   *       starts on the subscriber's first request.
-   *   <li><b>One subscriber, bounded by demand.</b> A second subscriber is refused with {@code
-   *       onError}; no chunk is delivered beyond what was requested.
-   *   <li><b>Cancellable.</b> Cancelling the subscription releases the request, its response body
-   *       and any thread working for it, and ends the signals. Cancelling {@code cancellation} does
-   *       the same and ends the stream with {@code onError} carrying a {@link
-   *       java.util.concurrent.CancellationException} with the token's reason. Neither closes this
-   *       model, which other callers may share.
+   *   <li><b>Lazy.</b> This method sends nothing and runs no model work; the work starts at the
+   *       first {@code hasNext()}. What building the provider's request throws is thrown here.
+   *   <li><b>Failures are thrown where the caller reads.</b> A failed turn throws its exception
+   *       from {@code hasNext()}: the provider's exception, a {@link TransientStreamException}, or
+   *       a {@link com.standardapplied.helios.core.schema.StructuredOutputParseException} after the
+   *       text has streamed. A stream that ends without its {@code MessageStop} throws.
+   *   <li><b>{@code close()} is the only cancel.</b> From any thread, at any time, idempotent and
+   *       never throwing, it aborts the request, whether it waits for its headers or reads its
+   *       body, releases any thread working for it, and never closes this model, which other
+   *       callers may share. A {@code hasNext()} blocked on another thread then throws {@link
+   *       java.util.concurrent.CancellationException}.
+   *   <li><b>Interrupt.</b> An interrupt of the reading thread ends the stream as {@code close()}
+   *       does: {@code hasNext()} throws {@code CancellationException} with the interrupt status
+   *       kept, never a {@code TransientStreamException}, so nothing retries an interrupt.
    * </ul>
    *
-   * <p>A model that can only answer blockingly implements {@link BlockingModel}, which runs the
-   * blocking call as work the subscription owns, started on the first request.
+   * <p>A model that can only answer blockingly implements {@link BlockingModel}.
    *
    * @param messages the conversation history
    * @param tools the tools the model may call
-   * @param cancellation ends the stream once cancelled
-   * @return a single-subscriber publisher of the turn's chunks
+   * @return the turn's chunks, which the caller closes
    */
-  Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages, List<Tool> tools, CancellationToken cancellation);
+  CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools);
 
   /**
-   * {@link #chatStream(List, List, CancellationToken)} with the answer constrained to {@code
-   * outputSchema} through the provider's native structured-output channel. The chunks have the same
-   * shape; a text-only turn whose content does not match the schema ends in {@code onError} with a
-   * {@link com.standardapplied.helios.core.schema.StructuredOutputParseException} after its text
-   * has streamed. A turn that calls tools is not checked: it is intermediate, and a later text-only
-   * turn delivers the structured answer. The default throws, for a model without structured output.
+   * {@link #chatStream(List, List)} with the answer constrained to {@code outputSchema} through the
+   * provider's native structured-output channel. The chunks have the same shape; a text-only turn
+   * whose content does not match the schema throws a {@link
+   * com.standardapplied.helios.core.schema.StructuredOutputParseException} from {@code hasNext()}
+   * after its text has streamed. A turn that calls tools is not checked: it is intermediate, and a
+   * later text-only turn delivers the structured answer. The default throws, for a model without
+   * structured output.
    *
    * @param messages the conversation history
    * @param tools the tools the model may call
    * @param outputSchema the schema the answer must match
-   * @param cancellation ends the stream once cancelled
-   * @return a single-subscriber publisher of the turn's chunks
+   * @return the turn's chunks, which the caller closes
    * @throws UnsupportedOperationException if this model has no structured output
    */
-  default Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages,
-      List<Tool> tools,
-      OutputSchema<?> outputSchema,
-      CancellationToken cancellation) {
+  default CloseableIterator<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, OutputSchema<?> outputSchema) {
     throw new UnsupportedOperationException("Structured output not supported by this model");
   }
 
   /**
    * The model's answer to {@code messages}, waited for. The default drains {@link #chatStream(List,
-   * List, CancellationToken)}; an interrupt while waiting cancels the stream and throws a {@link
-   * java.util.concurrent.CancellationException} with the interrupt restored, and a stream that
-   * completes without its {@link ModelChunk.MessageStop} throws {@link IllegalStateException}.
+   * List)} with {@link ChunkDrain#drain}: what the stream throws is thrown as itself, and a stream
+   * that ends without its {@link ModelChunk.MessageStop} throws {@link IllegalStateException}.
    *
    * @param messages the conversation history
    * @param tools the tools the model may call
    * @return the model's response
    */
   default Response<Void> chat(List<Message> messages, List<Tool> tools) {
-    return ChunkDrain.drain(chatStream(messages, tools, new CancellationToken()));
+    try (var stream = chatStream(messages, tools)) {
+      return ChunkDrain.drain(stream);
+    }
   }
 
   /**

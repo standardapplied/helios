@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -40,10 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -62,11 +61,6 @@ final class TurnOutcomesTest {
   private final AtomicInteger invocations = new AtomicInteger();
   private final List<Response> modelTurns = new CopyOnWriteArrayList<>();
   private final SessionState state = fixture.state();
-
-  @AfterEach
-  void closeFixture() {
-    fixture.close();
-  }
 
   @Test
   void aStreamErrorAfterAToolCallRunsNoToolAndEndsWithThatError() {
@@ -114,7 +108,7 @@ final class TurnOutcomesTest {
     var terminal = run(streaming(unterminated), SessionLimits.defaults());
 
     var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal);
-    assertEquals("model stream completed without its MessageStop", error.error().message());
+    assertEquals("model stream ended without its MessageStop", error.error().message());
     assertToolNeverRan();
   }
 
@@ -252,7 +246,7 @@ final class TurnOutcomesTest {
     return SessionLimits.newBuilder().withMaxTurns(turns).build();
   }
 
-  private static Model streaming(Flow.Publisher<ModelChunk> stream) {
+  private static Model streaming(CloseableIterator<ModelChunk> stream) {
     return ScriptedModel.newBuilder().withStreamTurn(stream).build();
   }
 
@@ -260,22 +254,33 @@ final class TurnOutcomesTest {
     return streaming(ModelStreams.failing(failure, new ModelChunk.ToolUseStop(CALL)));
   }
 
-  /** A stream that delivers the tool call, counts {@code delivered} down and then stays open. */
-  private static Flow.Publisher<ModelChunk> openAfterCall(CountDownLatch delivered) {
-    var sent = new AtomicInteger();
-    return subscriber ->
-        subscriber.onSubscribe(
-            new Flow.Subscription() {
-              @Override
-              public void request(long n) {
-                if (sent.getAndIncrement() == 0) {
-                  subscriber.onNext(new ModelChunk.ToolUseStop(CALL));
-                  delivered.countDown();
-                }
-              }
+  /**
+   * A stream that yields the tool call, counts {@code delivered} down at the next read and then
+   * stays open until closed.
+   */
+  private static CloseableIterator<ModelChunk> openAfterCall(CountDownLatch delivered) {
+    var open = ModelStreams.stalled(delivered::countDown);
+    return new CloseableIterator<>() {
+      private boolean sent;
 
-              @Override
-              public void cancel() {}
-            });
+      @Override
+      public boolean hasNext() {
+        return !sent || open.hasNext();
+      }
+
+      @Override
+      public ModelChunk next() {
+        if (sent) {
+          return open.next();
+        }
+        sent = true;
+        return new ModelChunk.ToolUseStop(CALL);
+      }
+
+      @Override
+      public void close() {
+        open.close();
+      }
+    };
   }
 }

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -34,9 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class TurnRunnerTest {
@@ -49,11 +48,6 @@ final class TurnRunnerTest {
   private final SteeringQueue queue = new SteeringQueue(8);
   private final ToolDispatch dispatch = fixture.dispatch(ToolRegistry.empty());
 
-  @AfterEach
-  void closeFixture() {
-    fixture.close();
-  }
-
   private SessionState freshState() {
     var s = fixture.state();
     s.history().append(Message.user("hello"));
@@ -65,7 +59,7 @@ final class TurnRunnerTest {
     return LoopModels.answering(content, finishReason, usage);
   }
 
-  private static Model streaming(Flow.Publisher<ModelChunk> stream) {
+  private static Model streaming(CloseableIterator<ModelChunk> stream) {
     return ScriptedModel.newBuilder().withStreamTurn(stream).build();
   }
 
@@ -79,7 +73,7 @@ final class TurnRunnerTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new TurnRunner(null, model, CostCalculator.ZERO, null, fixture.scheduler()));
+            () -> new TurnRunner(null, model, CostCalculator.ZERO, null));
     assertEquals("collaborators must not be null", ex.getMessage());
   }
 
@@ -93,8 +87,7 @@ final class TurnRunnerTest {
                     fixture.collaborators(hooks, dispatch, queue),
                     null,
                     CostCalculator.ZERO,
-                    null,
-                    fixture.scheduler()));
+                    null));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -104,30 +97,8 @@ final class TurnRunnerTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    fixture.collaborators(hooks, dispatch, queue),
-                    model,
-                    null,
-                    null,
-                    fixture.scheduler()));
+            () -> new TurnRunner(fixture.collaborators(hooks, dispatch, queue), model, null, null));
     assertEquals("costCalculator must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullSchedulerRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    fixture.collaborators(hooks, dispatch, queue),
-                    model,
-                    CostCalculator.ZERO,
-                    null,
-                    null));
-    assertEquals("scheduler must not be null", ex.getMessage());
   }
 
   @Test
@@ -247,7 +218,6 @@ final class TurnRunnerTest {
             .findFirst()
             .orElseThrow();
     assertEquals("planning...", thinking.text());
-    assertEquals("", thinking.signature());
   }
 
   @Test
@@ -331,20 +301,16 @@ final class TurnRunnerTest {
   }
 
   /**
-   * A model whose stream never delivers a chunk or a terminal signal. {@code onRequest} runs on the
-   * runner's thread once it has requested the stream, just before it starts waiting on it.
+   * A model whose stream never yields a chunk or ends. {@code onRequest} runs on the stream's
+   * reader thread at its first read.
    */
   private static Model stalledModel(Runnable onRequest) {
     return streaming(ModelStreams.stalled(onRequest));
   }
 
-  /**
-   * Runs one turn against {@link #stalledModel}. The stream-idle watchdog is set beyond the hang
-   * guard, so only an interrupt can end the turn.
-   */
+  /** Runs one turn against {@link #stalledModel}, which only an interrupt can end. */
   private TurnOutcome runStalledTurn(Runnable onRequest) {
-    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofMinutes(10)).build();
-    return runner(stalledModel(onRequest)).runTurn(freshState(), limits);
+    return runner(stalledModel(onRequest)).runTurn(freshState(), SessionLimits.defaults());
   }
 
   private void assertTurnEndedByInterrupt(TurnOutcome outcome) {
@@ -373,7 +339,12 @@ final class TurnRunnerTest {
 
   @Test
   void interruptPendingBeforeAwaitPropagatesAsErrorOutcome() {
-    var turn = new FutureTask<>(() -> runStalledTurn(() -> Thread.currentThread().interrupt()));
+    var turn =
+        new FutureTask<>(
+            () -> {
+              Thread.currentThread().interrupt();
+              return runStalledTurn(() -> {});
+            });
     Thread.ofVirtual().start(turn);
 
     assertTurnEndedByInterrupt(Await.value("the interrupted turn to return", turn));

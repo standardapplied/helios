@@ -33,7 +33,6 @@ final class SessionLimitsTest {
             Duration.ofSeconds(45),
             Duration.ofSeconds(3),
             32_000L,
-            Duration.ofSeconds(30),
             StreamRetryPolicy.defaults(),
             Duration.ofSeconds(7));
     assertEquals(50, l.maxTurns());
@@ -42,7 +41,6 @@ final class SessionLimitsTest {
     assertEquals(Duration.ofSeconds(45), l.toolTimeoutDefault());
     assertEquals(Duration.ofSeconds(3), l.stopGrace());
     assertEquals(32_000L, l.maxContextTokens());
-    assertEquals(Duration.ofSeconds(30), l.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(7), l.startTimeout());
   }
@@ -56,7 +54,6 @@ final class SessionLimitsTest {
     assertEquals(Duration.ofMinutes(2), d.toolTimeoutDefault());
     assertEquals(Duration.ofSeconds(5), d.stopGrace());
     assertEquals(0L, d.maxContextTokens());
-    assertEquals(Duration.ofSeconds(60), d.streamIdleTimeout());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(60), d.startTimeout());
   }
@@ -287,7 +284,6 @@ final class SessionLimitsTest {
         toolTimeoutDefault,
         fiveSec(),
         maxContextTokens,
-        Duration.ofSeconds(60),
         StreamRetryPolicy.defaults(),
         fiveSec());
   }
@@ -302,67 +298,6 @@ final class SessionLimitsTest {
 
   private static Duration fiveSec() {
     return Duration.ofSeconds(5);
-  }
-
-  // ── streamIdleTimeout ─────────────────────────────────────────────────────
-
-  @Test
-  void streamIdleTimeoutZeroRejected() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new SessionLimits(
-                    100,
-                    OptionalLong.empty(),
-                    oneHour(),
-                    twoMin(),
-                    fiveSec(),
-                    1_000L,
-                    Duration.ZERO,
-                    StreamRetryPolicy.defaults(),
-                    fiveSec()));
-    assertEquals("streamIdleTimeout must be strictly positive, got PT0S", ex.getMessage());
-  }
-
-  @Test
-  void streamIdleTimeoutNegativeRejected() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SessionLimits(
-                100,
-                OptionalLong.empty(),
-                oneHour(),
-                twoMin(),
-                fiveSec(),
-                1_000L,
-                Duration.ofSeconds(-1),
-                StreamRetryPolicy.defaults(),
-                fiveSec()));
-  }
-
-  @Test
-  void streamIdleTimeoutNullRejected() {
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new SessionLimits(
-                100,
-                OptionalLong.empty(),
-                oneHour(),
-                twoMin(),
-                fiveSec(),
-                1_000L,
-                null,
-                StreamRetryPolicy.defaults(),
-                fiveSec()));
-  }
-
-  @Test
-  void builderWithStreamIdleTimeout() {
-    var l = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofSeconds(15)).build();
-    assertEquals(Duration.ofSeconds(15), l.streamIdleTimeout());
   }
 
   // ── streamRetryPolicy ─────────────────────────────────────────────────────
@@ -380,7 +315,6 @@ final class SessionLimitsTest {
                     twoMin(),
                     fiveSec(),
                     1_000L,
-                    Duration.ofSeconds(60),
                     null,
                     fiveSec()));
     assertEquals("streamRetryPolicy must not be null", ex.getMessage());
@@ -429,10 +363,6 @@ final class SessionLimitsTest {
             SessionLimits.Builder::withToolTimeoutDefault,
             SessionLimits::toolTimeoutDefault),
         duration("stopGrace", SessionLimits.Builder::withStopGrace, SessionLimits::stopGrace),
-        duration(
-            "streamIdleTimeout",
-            SessionLimits.Builder::withStreamIdleTimeout,
-            SessionLimits::streamIdleTimeout),
         duration(
             "startTimeout", SessionLimits.Builder::withStartTimeout, SessionLimits::startTimeout));
   }

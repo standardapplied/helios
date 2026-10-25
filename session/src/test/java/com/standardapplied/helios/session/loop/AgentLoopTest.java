@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class AgentLoopTest {
@@ -52,11 +51,6 @@ final class AgentLoopTest {
   private final List<QueryEvent> events = fixture.events;
   private final HookRegistry hooks = HookRegistry.empty();
   private final ToolDispatch dispatch = fixture.dispatch(ToolRegistry.empty());
-
-  @AfterEach
-  void closeFixture() {
-    fixture.close();
-  }
 
   private SessionState freshState() {
     return fixture.state();

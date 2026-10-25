@@ -3,19 +3,23 @@
 package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.test.RecordingSubscriber;
+import com.standardapplied.helios.core.test.StreamRead;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -29,26 +33,22 @@ class BlockingModelTest {
   private final AtomicInteger calls = new AtomicInteger();
 
   @Test
-  void theBlockingCallRunsOnTheFirstRequestNotBefore() {
+  void theBlockingCallRunsOnTheFirstHasNextNotBefore() {
     var model = answering(() -> reply("hi").build());
-    var subscriber = new RecordingSubscriber<ModelChunk>(0);
 
-    var publisher = model.chatStream(List.of(), List.of(), new CancellationToken());
-    publisher.subscribe(subscriber);
-    subscriber.subscription();
-    var callsBeforeRequest = calls.get();
-    subscriber.request(Long.MAX_VALUE);
+    var stream = model.chatStream(List.of(), List.of());
+    var callsBeforeRead = calls.get();
 
-    assertEquals(0, callsBeforeRequest);
+    assertEquals(0, callsBeforeRead);
     assertEquals(
         List.of(
             new ModelChunk.TextDelta("hi"), new ModelChunk.MessageStop("STOP", USAGE, Map.of())),
-        subscriber.awaitCompletion());
+        StreamRead.of(stream).items());
     assertEquals(1, calls.get());
   }
 
   @Test
-  void theResponseIsPublishedAsThinkingTextToolPairsThenTheStop() {
+  void theResponseIsYieldedAsThinkingTextToolPairsThenTheStop() {
     var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
     var cite = Citation.of("https://example.com", "snippet");
     var model =
@@ -113,67 +113,161 @@ class BlockingModelTest {
             return "test";
           }
         };
-    var subscriber = new RecordingSubscriber<ModelChunk>();
 
-    model
-        .chatStream(List.of(), List.of(), OutputSchema.of(Answer.class), new CancellationToken())
-        .subscribe(subscriber);
+    var chunks =
+        StreamRead.of(model.chatStream(List.of(), List.of(), OutputSchema.of(Answer.class)))
+            .items();
 
-    assertEquals(
-        new ModelChunk.TextDelta("{\"answer\":\"42\"}"), subscriber.awaitCompletion().getFirst());
-    assertThrows(
-        NullPointerException.class,
-        () -> model.chatStream(List.of(), List.of(), null, new CancellationToken()));
+    assertEquals(new ModelChunk.TextDelta("{\"answer\":\"42\"}"), chunks.getFirst());
+    assertThrows(NullPointerException.class, () -> model.chatStream(List.of(), List.of(), null));
   }
 
   @Test
-  void aThrowingCallEndsTheStreamWithItsException() {
+  void whatTheCallThrowsIsThrownFromHasNextAsItself() {
     var refused = new IllegalStateException("refused");
-    var subscriber = new RecordingSubscriber<ModelChunk>();
+    var fatal = new OutOfMemoryError("host");
 
-    answering(
-            () -> {
-              throw refused;
-            })
-        .chatStream(List.of(), List.of(), new CancellationToken())
-        .subscribe(subscriber);
+    var stream =
+        answering(
+                () -> {
+                  throw refused;
+                })
+            .chatStream(List.of(), List.of());
 
-    assertSame(refused, subscriber.awaitFailure());
+    assertSame(refused, assertThrows(IllegalStateException.class, stream::hasNext));
+    assertSame(
+        fatal,
+        assertThrows(
+            OutOfMemoryError.class,
+            answering(
+                        () -> {
+                          throw fatal;
+                        })
+                    .chatStream(List.of(), List.of())
+                ::hasNext));
   }
 
   @Test
-  void cancellingTheTokenInterruptsTheBlockingCall() {
+  void aCancellationTheCallThrowsIsThrownAsItself() {
+    var cancelled = new CancellationException("upstream");
+    Thread.currentThread().interrupt();
+    try {
+      var stream =
+          answering(
+                  () -> {
+                    throw cancelled;
+                  })
+              .chatStream(List.of(), List.of());
+
+      assertSame(cancelled, assertThrows(CancellationException.class, stream::hasNext));
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+  }
+
+  @Test
+  void closingBeforeTheFirstHasNextMeansTheCallNeverRuns() {
+    var stream = answering(() -> reply("never").build()).chatStream(List.of(), List.of());
+
+    stream.close();
+
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertEquals(0, calls.get());
+  }
+
+  @Test
+  void closingDuringTheCallInterruptsItAndHasNextThrowsCancellation() {
     var running = new CountDownLatch(1);
     var interrupted = new CountDownLatch(1);
-    var token = new CancellationToken();
-    var subscriber = new RecordingSubscriber<ModelChunk>();
+    var stream =
+        answering(
+                () -> {
+                  running.countDown();
+                  try {
+                    new CountDownLatch(1).await();
+                  } catch (InterruptedException e) {
+                    interrupted.countDown();
+                  }
+                  return reply("too late").build();
+                })
+            .chatStream(List.of(), List.of());
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read =
+          reader.submit(
+              () -> {
+                try {
+                  return stream.hasNext();
+                } finally {
+                  assertFalse(Thread.currentThread().isInterrupted(), "the close's interrupt");
+                }
+              });
+      Await.latch("the call running", running);
 
-    answering(
-            () -> {
-              running.countDown();
-              try {
-                new CountDownLatch(1).await();
-              } catch (InterruptedException e) {
-                interrupted.countDown();
-              }
-              return reply("too late").build();
-            })
-        .chatStream(List.of(), List.of(), token)
-        .subscribe(subscriber);
-    Await.latch("the call running", running);
-    token.cancel("session closed");
+      stream.close();
 
-    Await.latch("the call interrupted", interrupted);
-    var failure = assertInstanceOf(CancellationException.class, subscriber.awaitFailure());
-    assertEquals("session closed", failure.getMessage());
-    assertEquals(List.of(), subscriber.items());
+      Await.latch("the call interrupted", interrupted);
+      assertInstanceOf(CancellationException.class, Await.failure("the read", read));
+    }
+  }
+
+  @Test
+  void aCallThatIgnoresTheInterruptHasItsAnswerDropped() {
+    var running = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var stream =
+        answering(
+                () -> {
+                  running.countDown();
+                  Uninterruptible.await(release);
+                  return reply("dropped").build();
+                })
+            .chatStream(List.of(), List.of());
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read = reader.submit(stream::hasNext);
+      Await.latch("the call running", running);
+
+      stream.close();
+      release.countDown();
+
+      assertInstanceOf(CancellationException.class, Await.failure("the read", read));
+    }
+  }
+
+  @Test
+  void anInterruptOfTheReadingThreadEndsTheStreamInCancellationAndStaysSet() {
+    var refused = new IllegalStateException("interrupted call");
+    Thread.currentThread().interrupt();
+    try {
+      var answered = answering(() -> reply("ignored the interrupt").build());
+      var failing =
+          answering(
+              () -> {
+                throw refused;
+              });
+
+      assertThrows(CancellationException.class, answered.chatStream(List.of(), List.of())::hasNext);
+      var cancelled =
+          assertThrows(
+              CancellationException.class, failing.chatStream(List.of(), List.of())::hasNext);
+      assertSame(refused, cancelled.getCause());
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+  }
+
+  @Test
+  void nextAfterTheStopThrows() {
+    var stream = answering(() -> reply("hi").build()).chatStream(List.of(), List.of());
+    stream.next();
+    stream.next();
+
+    assertFalse(stream.hasNext());
+    assertThrows(NoSuchElementException.class, stream::next);
   }
 
   @Test
   void aNullCallIsRejected() {
-    var token = new CancellationToken();
-
-    assertThrows(NullPointerException.class, () -> BlockingModel.publisherOf(null, token));
+    assertThrows(NullPointerException.class, () -> BlockingModel.streamOf(null));
   }
 
   private BlockingModel answering(Supplier<Response<Void>> answer) {
@@ -204,8 +298,6 @@ class BlockingModelTest {
   }
 
   private static List<ModelChunk> drain(Model model) {
-    var subscriber = new RecordingSubscriber<ModelChunk>();
-    model.chatStream(List.of(), List.of(), new CancellationToken()).subscribe(subscriber);
-    return subscriber.awaitCompletion();
+    return StreamRead.of(model.chatStream(List.of(), List.of())).items();
   }
 }

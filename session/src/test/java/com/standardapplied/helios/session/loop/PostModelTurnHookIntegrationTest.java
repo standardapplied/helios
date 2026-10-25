@@ -12,18 +12,12 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link PostModelTurnHook} outcomes wired through AgentLoop + TurnRunner. */
 final class PostModelTurnHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   @Test
   void postModelTurnInjectQueuesAndContinues() {

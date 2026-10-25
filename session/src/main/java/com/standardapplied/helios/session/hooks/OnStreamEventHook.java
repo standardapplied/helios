@@ -14,8 +14,9 @@ import com.standardapplied.helios.session.QueryEvent;
  * block its delivery, or terminate the session. Misbehaving stream-event hooks must not be able to
  * corrupt the SSE stream.
  *
- * <p>Stream-event hooks run synchronously on the loop's emit thread. Long-running work should be
- * dispatched to a hook-owned executor.
+ * <p>Stream-event hooks run synchronously on the thread that emits the event: the loop's, or for
+ * the text, thinking and citations of a model turn the turn's stream reader. Long-running work
+ * should be dispatched to a hook-owned executor.
  */
 @FunctionalInterface
 public non-sealed interface OnStreamEventHook extends Hook {

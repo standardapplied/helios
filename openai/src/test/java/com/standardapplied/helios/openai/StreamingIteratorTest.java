@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -155,11 +156,9 @@ class StreamingIteratorTest {
         List.of(
             new StreamEvent.ThinkingDelta("Let me think"),
             new StreamEvent.ThinkingDelta(" about this."),
-            new StreamEvent.ThinkingComplete("Let me think about this.", null),
             new StreamEvent.ThinkingDelta("\n\nThen answer."),
-            new StreamEvent.ThinkingComplete("Then answer.", null),
             new StreamEvent.TextDelta("Hello")),
-        events.subList(0, 6));
+        events.subList(0, 4));
     var done = (StreamEvent.Done) events.getLast();
     assertEquals("Let me think about this.\n\nThen answer.", done.response().thinking());
     assertEquals(
@@ -202,7 +201,7 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void reasoningSummaryDoneWithoutTextCompletesWhatStreamed() {
+  void aSummaryPartThatStreamedDeltasYieldsNothingMoreAtItsDoneEvent() {
     var reasoningDone =
         "data: {\"type\":\"response.reasoning_summary_text.done\","
             + "\"item_id\":\"rs_1\",\"summary_index\":0}\n\n";
@@ -212,14 +211,12 @@ class StreamingIteratorTest {
             + TEXT_DELTA
             + RESPONSE_COMPLETED;
 
-    var events = drain(sse);
-    var complete =
-        events.stream()
-            .filter(StreamEvent.ThinkingComplete.class::isInstance)
-            .map(StreamEvent.ThinkingComplete.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("Done thinking.", complete.fullThinking());
+    var events = SseEvents.drain(reader(SseEvents.body(sse)));
+
+    assertEquals(new StreamEvent.ThinkingDelta("Done thinking."), events.get(0));
+    assertEquals(new StreamEvent.KeepAlive(), events.get(1));
+    assertEquals(new StreamEvent.TextDelta("Hello"), events.get(2));
+    assertEquals("Done thinking.", ((StreamEvent.Done) events.getLast()).response().thinking());
   }
 
   @Test
@@ -718,11 +715,9 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void interruptedThreadEmitsErrorEvent() {
-    var events = SseEvents.drainInterrupted(StreamingIteratorTest::reader);
-
-    assertFalse(events.isEmpty());
-    assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+  void interruptOfTheReadingThreadCancelsTheRead() {
+    assertInstanceOf(
+        CancellationException.class, SseEvents.readInterrupted(StreamingIteratorTest::reader));
   }
 
   @Test

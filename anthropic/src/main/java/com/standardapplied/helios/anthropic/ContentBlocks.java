@@ -74,15 +74,12 @@ final class ContentBlocks {
   }
 
   /**
-   * A {@code content_block_stop} for the block at {@code index}: the tool call or completed
-   * thinking it yields, if any.
+   * A {@code content_block_stop} for the block at {@code index}: the tool call it completes, if
+   * any; a thinking block's stop yields nothing, its text and signature being in the response.
    */
   StreamEvent stop(Integer index) {
-    if (index == null || verbatim.stop(index)) {
+    if (index == null || verbatim.stop(index) || thinking.indices().contains(index)) {
       return null;
-    }
-    if (thinking.indices().contains(index)) {
-      return thinking.complete(index);
     }
     return toolUses.stop(index);
   }

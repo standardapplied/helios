@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
@@ -15,7 +16,6 @@ import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Set;
-import java.util.concurrent.Flow;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Assumptions;
 
@@ -85,15 +85,17 @@ public final class Accepted {
   }
 
   /**
-   * Subscribes to {@code chunks} and waits for them, asserting that the stream completes without an
-   * error and ends in exactly one {@link ModelChunk.MessageStop}; returns the response the chunks
-   * add up to: the text deltas joined, the completed tool calls, and the stop's finish reason,
-   * usage, metadata and citations.
+   * Reads {@code chunks} to their end, asserting that the stream ends without an error and in
+   * exactly one {@link ModelChunk.MessageStop}; returns the response the chunks add up to: the text
+   * deltas joined, the completed tool calls, and the stop's finish reason, usage, metadata and
+   * citations.
    */
-  public static Response<Void> stream(Flow.Publisher<ModelChunk> chunks) {
-    var recorder = new RecordingSubscriber<ModelChunk>();
-    chunks.subscribe(recorder);
-    var received = recorder.awaitCompletion();
+  public static Response<Void> stream(CloseableIterator<ModelChunk> chunks) {
+    var read = StreamRead.of(chunks);
+    if (read.failure() != null) {
+      throw new AssertionError("the chunk stream failed", read.failure());
+    }
+    var received = read.items();
     var stops = received.stream().filter(ModelChunk.MessageStop.class::isInstance).toList();
     assertEquals(1, stops.size(), () -> "message stops in " + received);
     var stop = assertInstanceOf(ModelChunk.MessageStop.class, received.getLast(), "last chunk");

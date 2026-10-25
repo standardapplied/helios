@@ -27,23 +27,6 @@ public sealed interface StreamEvent {
   record ThinkingDelta(String text) implements StreamEvent {}
 
   /**
-   * A complete thinking / reasoning block. {@code signature} carries the provider-side replay
-   * signature (e.g. Anthropic's thought signature) when available, so subsequent turns can
-   * round-trip the block verbatim for prefix-cache reuse. {@code signature} is {@code null} for
-   * providers that don't expose one.
-   *
-   * @param fullThinking the complete thinking text aggregated from {@link ThinkingDelta}s
-   * @param signature provider replay signature when available; {@code null} otherwise
-   */
-  record ThinkingComplete(String fullThinking, String signature) implements StreamEvent {
-
-    /** Convenience for providers that don't surface a signature. */
-    public ThinkingComplete(String fullThinking) {
-      this(fullThinking, null);
-    }
-  }
-
-  /**
    * A tool call has started.
    *
    * @param callId provider-assigned identifier correlating subsequent deltas to this call

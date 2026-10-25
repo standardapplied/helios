@@ -3,8 +3,10 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -18,8 +20,8 @@ import com.standardapplied.helios.session.UserMessage;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -29,31 +31,32 @@ import java.util.logging.Logger;
  * TransientStreamException}, and recovers a structured-output parse failure by putting the wrong
  * attempt in history and asking the model to correct it.
  *
- * <p>When the session has an {@link OutputSchema}, every call goes through {@link
- * Model#chatStream(List, List, OutputSchema, CancellationToken)} so the schema rides the provider's
- * native channel; it is dormant on tool-calling turns and activates on text-output turns.
+ * <p>Each attempt reads the turn's stream on a virtual thread of its own, {@code
+ * helios-model-stream-<sessionId>}, while the loop thread waits for it; the session's cancellation
+ * closes the stream. When the session has an {@link OutputSchema}, every call goes through {@link
+ * Model#chatStream(List, List, OutputSchema)} so the schema rides the provider's native channel; it
+ * is dormant on tool-calling turns and activates on text-output turns.
  */
 final class ModelCall {
 
   private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
 
+  private static final String CANCELLED = "session cancelled while waiting for model stream";
+
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
   private final Model model;
   private final OutputSchema<?> outputSchema;
-  private final ScheduledExecutorService scheduler;
 
   ModelCall(
       LoopCollaborators collaborators,
       EventEmitter emitter,
       Model model,
-      OutputSchema<?> outputSchema,
-      ScheduledExecutorService scheduler) {
+      OutputSchema<?> outputSchema) {
     this.collaborators = collaborators;
     this.emitter = emitter;
     this.model = model;
     this.outputSchema = outputSchema;
-    this.scheduler = scheduler;
   }
 
   /**
@@ -67,10 +70,10 @@ final class ModelCall {
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Non-transient throwables ({@link StructuredOutputParseException}, {@code
-   * java.util.concurrent.TimeoutException} from the stream-idle watchdog, or any other unchecked
-   * exception escaping the subscribe call) end the attempts immediately — only the type guard on
-   * {@code TransientStreamException} triggers a retry.
+   * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
+   * of an idle stream, or any other unchecked exception opening or reading the stream) end the
+   * attempts immediately — only the type guard on {@code TransientStreamException} triggers a
+   * retry.
    *
    * @return the final attempt's outcome, carrying the number of attempts made
    * @throws Error an {@link Error} the turn ended with, as itself
@@ -113,34 +116,93 @@ final class ModelCall {
   }
 
   /**
-   * One attempt. What opening or subscribing to the stream throws ends the turn; an {@link Error}
-   * also ends the session ({@link TurnSubscriber}), and one the turn ended with is thrown as
-   * itself, so it leaves the loop as a tool's or a hook's does.
+   * One attempt. What opening the stream throws ends the turn; an {@link Error} also ends the
+   * session ({@link TurnReader}), and one the turn ended with is thrown as itself, so it leaves the
+   * loop as a tool's or a hook's does.
    */
   private TurnOutcome streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
-    var subscriber =
-        new TurnSubscriber(
-            state,
-            emitter,
-            collaborators.clock(),
-            scheduler,
-            limits.streamIdleTimeout(),
-            limits.stopGrace());
+    var reader = new TurnReader(state, emitter, collaborators.clock());
+    CloseableIterator<ModelChunk> stream;
     try {
-      var publisher =
+      var history = state.history().snapshot();
+      stream =
           outputSchema != null
-              ? model.chatStream(
-                  state.history().snapshot(), tools, outputSchema, state.cancellation())
-              : model.chatStream(state.history().snapshot(), tools, state.cancellation());
-      publisher.subscribe(subscriber);
+              ? model.chatStream(history, tools, outputSchema)
+              : model.chatStream(history, tools);
     } catch (Throwable t) {
-      subscriber.end(t, true);
+      reader.end(t);
+      return thrownIfError(reader.outcome());
     }
-    var turn = subscriber.awaitDone(state.cancellation());
+    return thrownIfError(read(state, limits, reader, stream));
+  }
+
+  private static TurnOutcome thrownIfError(TurnOutcome turn) {
     if (turn.streamError() instanceof Error error) {
       throw error;
     }
     return turn;
+  }
+
+  /**
+   * Reads {@code stream} on a virtual thread of its own while this thread waits for the turn. When
+   * the session is cancelled the turn ends and the stream is closed; when this thread is
+   * interrupted the same, with the interrupt kept. Either close runs on a thread of its own, so a
+   * close that blocks holds up nothing. Once the turn ended the reader, which closes the stream as
+   * it ends, is waited for at most {@link SessionLimits#stopGrace()}, so what its close throws is
+   * recorded before the turn's outcome is acted on; one still running then is logged and left
+   * behind.
+   */
+  private TurnOutcome read(
+      SessionState state,
+      SessionLimits limits,
+      TurnReader reader,
+      CloseableIterator<ModelChunk> stream) {
+    var registration =
+        state
+            .cancellation()
+            .onCancel(
+                () -> {
+                  reader.end(new CancellationException(CANCELLED));
+                  stream.close();
+                });
+    var thread =
+        Thread.ofVirtual()
+            .name("helios-model-stream-" + state.sessionId())
+            .start(() -> reader.read(stream));
+    var interrupted = false;
+    try {
+      reader.await();
+    } catch (InterruptedException e) {
+      interrupted = true;
+      reader.end(e);
+      Thread.ofVirtual()
+          .name("helios-model-stream-close-" + state.sessionId())
+          .start(() -> reader.close(stream));
+    } finally {
+      registration.remove();
+    }
+    awaitReader(state.sessionId(), thread, limits.stopGrace());
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
+    return reader.outcome();
+  }
+
+  private static void awaitReader(String sessionId, Thread reader, Duration grace) {
+    try {
+      if (reader.join(grace)) {
+        return;
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    LOGGER.warning(
+        () ->
+            "the model stream of session "
+                + sessionId
+                + " did not end within "
+                + grace
+                + " of its close; it is not known to be closed");
   }
 
   /**
@@ -170,7 +232,7 @@ final class ModelCall {
     }
     var wrongAttempt = parseFailure.rawContent();
     if (Strings.isEmpty(wrongAttempt)) {
-      // Real streaming providers may surface text deltas before the error fires; the subscriber
+      // Real streaming providers may surface text deltas before the error fires; the reader
       // has accumulated them even when the exception itself didn't carry rawContent.
       wrongAttempt = turn.assistantContent();
     }
