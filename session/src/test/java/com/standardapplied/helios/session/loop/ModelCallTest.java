@@ -384,6 +384,57 @@ final class ModelCallTest {
   }
 
   @Test
+  void theReaderWaitsForTheCloseTheCancellationStartedSoTheErrorItThrowsIsRecordedFirst() {
+    var pulled = new CountDownLatch(1);
+    var readable = new CountDownLatch(1);
+    var reader = new AtomicReference<Thread>();
+    var closes = new AtomicInteger();
+    var readerStateAtTheThrow = new AtomicReference<Thread.State>();
+    var fatal = new AssertionError("close");
+    var stream =
+        new CloseableIterator<ModelChunk>() {
+          @Override
+          public boolean hasNext() {
+            reader.set(Thread.currentThread());
+            pulled.countDown();
+            Uninterruptible.await(readable);
+            return false;
+          }
+
+          @Override
+          public ModelChunk next() {
+            throw new NoSuchElementException();
+          }
+
+          @Override
+          public void close() {
+            closes.incrementAndGet();
+            readable.countDown();
+            Await.until(
+                "the reader waits for this close or has ended",
+                () -> readerHasStopped(reader.get().getState()));
+            readerStateAtTheThrow.set(reader.get().getState());
+            throw fatal;
+          }
+        };
+    var call = modelCall(new StreamModel(cancellation -> stream));
+
+    var streaming = run(() -> call.stream(state, SessionLimits.defaults(), List.of()));
+    Await.latch("the first read", pulled);
+    state.cancellation().cancel("closed");
+    var turn = Await.value("the call", streaming);
+
+    assertInstanceOf(CancellationException.class, turn.streamError());
+    assertEquals(Thread.State.BLOCKED, readerStateAtTheThrow.get());
+    assertSame(fatal, state.ending().seal().orElseThrow());
+    assertEquals(1, closes.get());
+  }
+
+  private static boolean readerHasStopped(Thread.State state) {
+    return state == Thread.State.BLOCKED || state == Thread.State.TERMINATED;
+  }
+
+  @Test
   void anInterruptOfTheWaitingThreadClosesTheStreamAndEndsTheTurnKeepingTheInterrupt() {
     var pulled = new CountDownLatch(1);
 

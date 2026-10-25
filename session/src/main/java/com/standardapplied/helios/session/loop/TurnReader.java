@@ -53,6 +53,7 @@ final class TurnReader {
   private ModelChunk.MessageStop stop;
   private boolean emitting;
   private TurnOutcome outcome;
+  private boolean closed;
 
   TurnReader(SessionState state, EventEmitter emitter, InstantSource clock) {
     this.state = state;
@@ -180,8 +181,16 @@ final class TurnReader {
     }
   }
 
-  /** Close {@code stream}; what closing it throws goes where any of the turn's failures go. */
-  void close(CloseableIterator<ModelChunk> stream) {
+  /**
+   * Close {@code stream} once; what closing it throws goes where any of the turn's failures go. A
+   * second close waits for the first to finish, so the reader, which closes the stream as it ends,
+   * ends only once a close the session's cancellation started has recorded what it threw.
+   */
+  synchronized void close(CloseableIterator<ModelChunk> stream) {
+    if (closed) {
+      return;
+    }
+    closed = true;
     try {
       stream.close();
     } catch (Throwable failure) {
