@@ -129,12 +129,8 @@ public final class AgentLoop {
 
   private ResultMessage crashTerminate(SessionState state, Exception e) {
     var failure =
-        new ResultMessage.ErrorDuringExecution(
-            state.sessionId(),
-            SerializedError.of(e).redactedBy(collaborators.secrets().redactor()),
-            state.totals().usage(),
-            state.totals().cost(),
-            state.elapsed());
+        StopClassifier.errorDuringExecution(
+            state, SerializedError.of(e).redactedBy(collaborators.secrets().redactor()));
     state.setTerminal(failure);
     return failure;
   }
@@ -197,15 +193,12 @@ public final class AgentLoop {
   }
 
   private static ResultMessage emptyHistoryError(SessionState state) {
-    return new ResultMessage.ErrorDuringExecution(
-        state.sessionId(),
+    return StopClassifier.errorDuringExecution(
+        state,
         SerializedError.of(
             "EmptyHistory",
             "AgentLoop.run requires at least one user message in the steering queue before "
-                + "starting"),
-        state.totals().usage(),
-        state.totals().cost(),
-        state.elapsed());
+                + "starting"));
   }
 
   /** The context watermark and compaction step, exposed so tests can drive its resolver. */

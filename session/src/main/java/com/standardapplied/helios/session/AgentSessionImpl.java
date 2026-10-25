@@ -8,7 +8,9 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.hooks.HookRegistry;
@@ -64,6 +66,7 @@ public final class AgentSessionImpl implements AgentSession {
   private final AtomicBoolean closed = new AtomicBoolean(false);
   private final PendingQuestions pendingQuestions;
   private final RawOutputCapturePolicy rawOutputCapturePolicy;
+  private final OutputSchema<?> outputSchema;
 
   /**
    * Build a session from a composition record.
@@ -75,6 +78,7 @@ public final class AgentSessionImpl implements AgentSession {
     Objects.requireNonNull(options, "options must not be null");
     this.sessionId = options.sessionId();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
+    this.outputSchema = options.outputSchema().orElse(null);
     var clock = options.clock();
     var cancellation = new CancellationToken();
     this.state = new SessionState(sessionId, cancellation, clock);
@@ -102,11 +106,6 @@ public final class AgentSessionImpl implements AgentSession {
       throw e;
     }
     lifecycle.open(loop);
-  }
-
-  @Override
-  public RawOutputCapturePolicy rawOutputCapturePolicy() {
-    return rawOutputCapturePolicy;
   }
 
   @Override
@@ -145,6 +144,35 @@ public final class AgentSessionImpl implements AgentSession {
               + " — cannot enqueue interrupt");
     }
     lifecycle.startIfNeeded();
+  }
+
+  @Override
+  public <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
+    Objects.requireNonNull(message, "message must not be null");
+    Objects.requireNonNull(schema, "schema must not be null");
+    if (outputSchema != null
+        && (!outputSchema.type().equals(schema.type())
+            || !outputSchema.schema().equals(schema.schema()))) {
+      throw new IllegalArgumentException(
+          "runBlocking schema "
+              + schema.type().getName()
+              + " differs from the session's output schema "
+              + outputSchema.type().getName());
+    }
+    var terminal = runBlocking(message);
+    if (!(terminal instanceof ResultMessage.Success success)) {
+      throw new IllegalStateException(
+          "session terminated as "
+              + terminal.getClass().getSimpleName()
+              + "; cannot parse a typed result from a non-Success terminal");
+    }
+    if (Strings.isBlank(success.result())) {
+      throw new IllegalStateException(
+          "session ended with Success but produced no result to parse as "
+              + schema.type().getSimpleName());
+    }
+    return StructuredContentParser.parse(
+        success.result(), schema, SessionJson.STRUCTURED, rawOutputCapturePolicy);
   }
 
   @Override

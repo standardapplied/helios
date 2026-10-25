@@ -33,7 +33,6 @@ import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -290,9 +289,7 @@ final class RecordedSessionTest {
     var workspace = WorkspaceRoot.of(corpus);
     return new ToolRegistry(
         List.of(
-            ReadTool.binding(workspace, InMemoryFileTracker.create()),
-            GrepTool.binding(workspace),
-            GlobTool.binding(workspace)));
+            ReadTool.binding(workspace), GrepTool.binding(workspace), GlobTool.binding(workspace)));
   }
 
   private static void seed(Path corpus) throws IOException {

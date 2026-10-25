@@ -28,13 +28,6 @@ import java.util.Optional;
 /**
  * Composition record bundling everything needed to construct an {@link AgentSession}.
  *
- * <p>Phase 1 carries the minimum set of fields the agent loop actually wires: the model, the
- * session id, the limits, the steering queue's capacity, and the clock. Subsequent phases extend
- * the record as their subsystems land — Phase 2 adds {@code tools} and {@code hooks}; Phase 3 adds
- * {@code workspace}; Phase 4 adds {@code memory}; Phase 5 adds {@code execution}; Phase 7 adds
- * {@code audit}; etc. Because v2 is clean-slate (no backwards-compat shims), the record's shape
- * evolves with the phases.
- *
  * <p>Build via {@link #newBuilder()} or one of the {@link SessionPresets} factories — every
  * optional field has a sensible default, and {@code model} is the only required input. The
  * canonical record constructor is preserved for serialization and framework internals; library
@@ -72,9 +65,9 @@ import java.util.Optional;
  *     schema rides every model turn via the provider's native structured-output channel — Gemini
  *     {@code response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
  *     system_instruction} text. The schema is dormant on tool-calling turns and activates on
- *     text-output turns, so the model produces conforming JSON exactly when it produces text. The
- *     post-hoc validator inside {@link AgentSession#runBlocking(UserMessage, OutputSchema)} takes
- *     its schema per-call and is independent of this field
+ *     text-output turns, so the model produces conforming JSON exactly when it produces text.
+ *     {@link AgentSession#runBlocking(UserMessage, OutputSchema)} on such a session accepts only
+ *     this schema
  * @param systemPrompt optional system-role message prepended to the conversation history before the
  *     first user message. Presets supply their strategy text here so the agent loop carries it to
  *     every model turn through the standard system-role channel
@@ -281,7 +274,7 @@ public record SessionOptions(
 
     /**
      * Set the tool registry the loop advertises to the model and dispatches against. Defaults to an
-     * empty registry — Phase 2 text-only sessions leave this alone.
+     * empty registry, which leaves the session text-only.
      *
      * @param tools non-null registry
      * @return this builder
@@ -395,11 +388,8 @@ public record SessionOptions(
      * terminal text-output turn, it activates and the model emits conforming JSON.
      *
      * <p>The schema is per-session config, not per-turn. The agent loop does not switch the schema
-     * on and off across turns — every model dispatch carries it.
-     *
-     * <p>The post-hoc validator inside {@link AgentSession#runBlocking(UserMessage, OutputSchema)}
-     * takes its schema per-call and is independent of this field; passing the same schema in both
-     * places is the common shape but not required.
+     * on and off across turns — every model dispatch carries it, and {@link
+     * AgentSession#runBlocking(UserMessage, OutputSchema)} accepts only this schema.
      *
      * @param outputSchema nullable schema
      * @return this builder

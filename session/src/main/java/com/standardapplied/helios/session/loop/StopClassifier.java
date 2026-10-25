@@ -123,6 +123,37 @@ public final class StopClassifier {
    * The terminal a turn's own ending implies, or empty when the turn would continue the loop: a
    * {@link FinishReason#TOOL_CALLS} turn, or a {@link FinishReason#STOP} turn with messages queued.
    */
+  /**
+   * The {@link ResultMessage.Success} that ends the session with {@code result} and its totals.
+   *
+   * @param state the session state
+   * @param result the session's final text
+   * @return the terminal
+   */
+  static ResultMessage.Success success(SessionState state, String result) {
+    return new ResultMessage.Success(
+        state.sessionId(),
+        result,
+        state.totals().usage(),
+        state.totals().cost(),
+        state.elapsed(),
+        state.totals().citations());
+  }
+
+  /**
+   * The {@link ResultMessage.ErrorDuringExecution} that ends the session with {@code error} and its
+   * totals.
+   *
+   * @param state the session state
+   * @param error the failure, already redacted where it carries model or tool text
+   * @return the terminal
+   */
+  static ResultMessage.ErrorDuringExecution errorDuringExecution(
+      SessionState state, SerializedError error) {
+    return new ResultMessage.ErrorDuringExecution(
+        state.sessionId(), error, state.totals().usage(), state.totals().cost(), state.elapsed());
+  }
+
   private Optional<ResultMessage> byFinishReason(
       SessionState state, TurnOutcome outcome, boolean hasPendingMessages) {
     var assistantContent = outcome.assistantContent();
@@ -133,30 +164,18 @@ public final class StopClassifier {
               buildErrorTerminal(
                   state, assistantContent, outcome.streamError(), outcome.streamAttempts()));
       case STOP ->
-          hasPendingMessages
-              ? Optional.empty()
-              : Optional.of(
-                  new ResultMessage.Success(
-                      state.sessionId(),
-                      assistantContent,
-                      state.totals().usage(),
-                      state.totals().cost(),
-                      state.elapsed(),
-                      state.totals().citations()));
+          hasPendingMessages ? Optional.empty() : Optional.of(success(state, assistantContent));
       case LENGTH ->
           Optional.of(
-              new ResultMessage.ErrorDuringExecution(
-                  state.sessionId(),
+              errorDuringExecution(
+                  state,
                   redacted(
                       SerializedError.of(
                           "max-tokens",
                           "response truncated at provider max_output_tokens cap"
                               + (Strings.isBlank(assistantContent)
                                   ? ""
-                                  : "; partial content: " + assistantContent))),
-                  state.totals().usage(),
-                  state.totals().cost(),
-                  state.elapsed()));
+                                  : "; partial content: " + assistantContent)))));
       case TOOL_CALLS -> Optional.empty();
     };
   }
@@ -227,22 +246,14 @@ public final class StopClassifier {
           state.elapsed());
     }
     if (streamError != null) {
-      return new ResultMessage.ErrorDuringExecution(
-          state.sessionId(),
-          redacted(SerializedError.of(streamError)),
-          state.totals().usage(),
-          state.totals().cost(),
-          state.elapsed());
+      return errorDuringExecution(state, redacted(SerializedError.of(streamError)));
     }
-    return new ResultMessage.ErrorDuringExecution(
-        state.sessionId(),
+    return errorDuringExecution(
+        state,
         redacted(
             SerializedError.of(
                 "ProviderError",
-                Strings.isBlank(assistantContent) ? "provider reported ERROR" : assistantContent)),
-        state.totals().usage(),
-        state.totals().cost(),
-        state.elapsed());
+                Strings.isBlank(assistantContent) ? "provider reported ERROR" : assistantContent)));
   }
 
   private SerializedError redacted(SerializedError error) {

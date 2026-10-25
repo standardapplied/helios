@@ -22,7 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Translates a model's {@link ModelChunk} stream into per-turn {@link QueryEvent}s and accumulates
- * what the stream produced into a {@link StreamedTurn}.
+ * what the stream produced into a {@link TurnOutcome}.
  *
  * <p>Created once per model turn by {@link TurnRunner}. It owns the turn's {@link
  * Flow.Subscription}: it requests every chunk on subscribe, and cancels the stream when the {@link
@@ -37,7 +37,7 @@ import java.util.concurrent.ScheduledExecutorService;
  * <h2>One terminal transition</h2>
  *
  * The first ending wins: it snapshots what the stream produced into an immutable {@link
- * StreamedTurn}, under the same lock that guards every accumulation, and releases the runner. A
+ * TurnOutcome}, under the same lock that guards every accumulation, and releases the runner. A
  * signal that arrives after it, a second {@code onSubscribe}, or a chunk sent before {@code
  * onSubscribe} changes nothing and emits nothing; a late {@code onSubscribe} has its subscription
  * cancelled, and a chunk before {@code onSubscribe} ends the stream with an {@link
@@ -78,7 +78,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
   private ModelChunk.MessageStop stop;
   private Flow.Subscription subscription;
   private boolean emitting;
-  private StreamedTurn outcome;
+  private TurnOutcome outcome;
 
   TurnSubscriber(
       SessionState state,
@@ -224,7 +224,7 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
    * not accumulate one stale registration per turn (see the {@code CancellationToken.onCancel}
    * cleanup contract).
    */
-  StreamedTurn awaitDone(CancellationToken cancellation) {
+  TurnOutcome awaitDone(CancellationToken cancellation) {
     var registration = cancellation.onCancel(() -> end(new CancellationException(CANCELLED), true));
     try {
       done.await();
@@ -275,19 +275,20 @@ final class TurnSubscriber implements Flow.Subscriber<ModelChunk> {
     }
   }
 
-  private StreamedTurn snapshot(Throwable error) {
+  private TurnOutcome snapshot(Throwable error) {
     var stopped = stop != null;
     var failure =
         stopped || error != null
             ? error
             : new IllegalStateException("model stream completed without its MessageStop");
-    return new StreamedTurn(
-        content.toString(),
-        List.copyOf(toolCalls),
-        stopped ? stop.citations() : List.of(),
+    return new TurnOutcome(
         failure != null ? FinishReason.ERROR : stop.finishReason(),
+        content.toString(),
+        toolCalls,
+        stopped ? stop.citations() : List.of(),
         stopped ? stop.usage() : Usage.of(0, 0),
         stopped ? stop.metadata() : Map.of(),
-        failure);
+        failure,
+        1);
   }
 }

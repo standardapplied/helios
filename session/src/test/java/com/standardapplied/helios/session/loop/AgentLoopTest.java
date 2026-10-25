@@ -388,7 +388,7 @@ final class AgentLoopTest {
   }
 
   @Test
-  void contextWatermarkResetAllowsReFire() {
+  void aHistoryReplacementReArmsTheContextWarning() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     var state = freshState();
@@ -401,9 +401,9 @@ final class AgentLoopTest {
                 // watermark fires for the first time.
                 queue.offer(UserMessage.text("again"));
               } else if (n == 2) {
-                // Turn 2 simulates the Day-2 compactor clearing the flag before the
-                // watermark check fires again for this turn.
-                state.contextWatermark().reset();
+                // Turn 2 replaces the history, as a compaction does, before the watermark
+                // check fires again for this turn.
+                state.history().replace(state.history().snapshot());
               }
             });
     TokenCounter alwaysOver = msgs -> 90L;
@@ -412,7 +412,7 @@ final class AgentLoopTest {
     assertEquals(
         2,
         events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count(),
-        "reset must re-arm the watermark");
+        "a history replacement must re-arm the watermark");
   }
 
   @Test

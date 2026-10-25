@@ -253,7 +253,7 @@ final class LoopStagesTest {
     var records = new CopyOnWriteArrayList<LogRecord>();
 
     ResultMessage result;
-    try (var ignored = LogCapture.of(AgentLoop.class, records)) {
+    try (var ignored = LogCapture.of(TurnRunner.class, records)) {
       result = loop(model, filler).run(state, SessionLimits.defaults());
     }
 
@@ -262,9 +262,9 @@ final class LoopStagesTest {
     var warning = records.getFirst();
     assertEquals(Level.WARNING, warning.getLevel());
     assertEquals(
-        "PreStopHook ''{0}'' Inject was dropped: steering queue full; session will continue"
-            + " without the injected message",
+        "{0} hook ''{1}'' Inject was dropped: steering queue full; session continues without"
+            + " the injected message",
         warning.getMessage());
-    assertEquals(List.of("filler"), List.of(warning.getParameters()));
+    assertEquals(List.of("PreStopHook", "filler"), List.of(warning.getParameters()));
   }
 }

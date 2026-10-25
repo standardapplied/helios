@@ -14,7 +14,6 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -66,7 +65,6 @@ final class Phase2AcceptanceTest {
         StandardCharsets.UTF_8);
 
     var workspace = WorkspaceRoot.of(tmp);
-    var tracker = InMemoryFileTracker.create();
     var memoryBackend = FileSystemMemoryBackend.of(workspace);
 
     // User tools: Read, LS, Glob, Grep. MemoryRead + AskUserQuestion are auto-registered by the
@@ -74,7 +72,7 @@ final class Phase2AcceptanceTest {
     var tools =
         new ToolRegistry(
             List.of(
-                ReadTool.binding(workspace, tracker),
+                ReadTool.binding(workspace),
                 LsTool.binding(workspace),
                 GlobTool.binding(workspace),
                 GrepTool.binding(workspace)));

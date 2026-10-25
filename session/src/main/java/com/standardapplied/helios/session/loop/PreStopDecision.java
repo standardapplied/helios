@@ -4,11 +4,8 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.session.ResultMessage;
-import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.Optional;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Applies the pre-stop hooks to the {@link StopClassifier}'s terminal verdict. Only a {@link
@@ -19,15 +16,16 @@ import java.util.logging.Logger;
  */
 final class PreStopDecision {
 
-  private static final Logger LOGGER = Logger.getLogger(AgentLoop.class.getName());
   private static final String PHASE = "PreStopHook";
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
+  private final HookEffects effects;
 
   PreStopDecision(LoopCollaborators collaborators, EventEmitter emitter) {
     this.collaborators = collaborators;
     this.emitter = emitter;
+    this.effects = new HookEffects(emitter, collaborators.steeringQueue());
   }
 
   /**
@@ -51,24 +49,13 @@ final class PreStopDecision {
     return switch (decision.outcome()) {
       case HookOutcome.Stop stop -> {
         emitter.emitHookFired(state, hookName, PHASE, "Stop");
-        yield Optional.of(HookEffects.success(state, stop.result()));
+        yield Optional.of(StopClassifier.success(state, stop.result()));
       }
       case HookOutcome.Inject inject -> {
-        emitter.emitHookFired(state, hookName, PHASE, "Inject");
-        offerOrLogDrop(inject.userMessage(), hookName);
+        effects.inject(state, hookName, PHASE, inject);
         yield Optional.empty();
       }
       default -> Optional.of(classifierVerdict);
     };
-  }
-
-  private void offerOrLogDrop(String text, String hookName) {
-    if (!collaborators.steeringQueue().offer(UserMessage.text(text))) {
-      LOGGER.log(
-          Level.WARNING,
-          "PreStopHook ''{0}'' Inject was dropped: steering queue full; session will continue"
-              + " without the injected message",
-          hookName);
-    }
   }
 }

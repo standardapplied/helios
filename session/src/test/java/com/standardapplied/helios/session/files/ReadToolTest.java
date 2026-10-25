@@ -41,9 +41,8 @@ final class ReadToolTest {
     var file = tmp.resolve("hello.txt");
     Files.writeString(file, "alpha\nbeta\ngamma", StandardCharsets.UTF_8);
     var ws = WorkspaceRoot.of(tmp);
-    var tracker = InMemoryFileTracker.create();
 
-    var binding = ReadTool.binding(ws, tracker);
+    var binding = ReadTool.binding(ws);
     var result = binding.tool().execute(Map.of("path", "hello.txt"), ToolContext.noop());
 
     assertTrue(result.succeeded(), result.output());
@@ -53,7 +52,6 @@ final class ReadToolTest {
     assertTrue(out.contains("     3\tgamma\n"), out);
     assertEquals(ToolCategory.READ, binding.category());
     assertEquals("./hello.txt", keyOf(binding, Map.of("path", "hello.txt")).canonicalArgs());
-    assertTrue(tracker.hasReadInSession(file));
   }
 
   @Test
@@ -61,7 +59,7 @@ final class ReadToolTest {
     var file = tmp.resolve("nums.txt");
     Files.writeString(file, "one\ntwo\nthree\nfour\nfive\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "nums.txt", "offset", 2, "limit", 2), ToolContext.noop());
 
@@ -81,7 +79,7 @@ final class ReadToolTest {
   void acceptsLongOffsetAndLimit(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("nums.txt"), "a\nb\nc\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "nums.txt", "offset", 1L, "limit", 1L), ToolContext.noop());
     assertTrue(result.succeeded());
@@ -92,7 +90,7 @@ final class ReadToolTest {
   void acceptsNumericOffsetAndLimit(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("nums.txt"), "a\nb\nc\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(
                 Map.of("path", "nums.txt", "offset", (short) 2, "limit", (short) 1),
@@ -104,9 +102,7 @@ final class ReadToolTest {
   @Test
   void missingPathArgFails(@TempDir Path tmp) {
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
-            .tool()
-            .execute(Map.of(), ToolContext.noop());
+        ReadTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of(), ToolContext.noop());
     assertFalse(result.succeeded());
     assertTrue(result.output().contains("missing required 'path'"), result.output());
   }
@@ -115,7 +111,7 @@ final class ReadToolTest {
   void invalidOffsetFails(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("x.txt"), "a\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "x.txt", "offset", 0), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -126,7 +122,7 @@ final class ReadToolTest {
   void invalidLimitFails(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("x.txt"), "a\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "x.txt", "limit", 0), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -137,7 +133,7 @@ final class ReadToolTest {
   void notARegularFileFails(@TempDir Path tmp) throws IOException {
     Files.createDirectory(tmp.resolve("dir"));
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "dir"), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -147,7 +143,7 @@ final class ReadToolTest {
   @Test
   void escapingWorkspaceFails(@TempDir Path tmp) {
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "../escape.txt"), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -157,7 +153,7 @@ final class ReadToolTest {
   @Test
   void readingMissingFileFails(@TempDir Path tmp) {
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "nope.txt"), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -166,20 +162,30 @@ final class ReadToolTest {
 
   @Test
   void nameConstantMatchesBinding(@TempDir Path tmp) {
-    var binding = ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create());
+    var binding = ReadTool.binding(WorkspaceRoot.of(tmp));
     assertEquals("Read", binding.name());
     assertEquals("Read", ReadTool.NAME);
   }
 
   @Test
   void rejectsNullWorkspace() {
-    assertThrows(
-        NullPointerException.class, () -> ReadTool.binding(null, InMemoryFileTracker.create()));
+    assertThrows(NullPointerException.class, () -> ReadTool.binding(null));
   }
 
   @Test
-  void rejectsNullTracker(@TempDir Path tmp) {
-    assertThrows(NullPointerException.class, () -> ReadTool.binding(WorkspaceRoot.of(tmp), null));
+  void aFileReplacedBetweenTwoReadsComesBackWithItsNewContent(@TempDir Path tmp)
+      throws IOException {
+    var file = tmp.resolve("notes.txt");
+    Files.writeString(file, "first\n", StandardCharsets.UTF_8);
+    var tool = ReadTool.binding(WorkspaceRoot.of(tmp)).tool();
+
+    var before = tool.execute(Map.of("path", "./notes.txt"), ToolContext.noop());
+    Files.delete(file);
+    Files.writeString(file, "second\n", StandardCharsets.UTF_8);
+    var after = tool.execute(Map.of("path", "./notes.txt"), ToolContext.noop());
+
+    assertEquals("     1\tfirst\n", before.output());
+    assertEquals("     1\tsecond\n", after.output());
   }
 
   // ── Layer 1: bounded text reading (file size, byte budget, binary detect) ──
@@ -197,7 +203,7 @@ final class ReadToolTest {
       }
     }
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "huge.txt"), ToolContext.noop());
     assertFalse(result.succeeded(), result.output());
@@ -214,7 +220,7 @@ final class ReadToolTest {
     var file = tmp.resolve("long-line.txt");
     Files.writeString(file, "a".repeat(1024 * 1024 + 100) + "\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "long-line.txt"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -239,7 +245,7 @@ final class ReadToolTest {
       }
     }
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(
                 Map.of("path", "many-lines.txt", "limit", 1_000_000),
@@ -256,7 +262,7 @@ final class ReadToolTest {
     var file = tmp.resolve("blob.dat");
     Files.write(file, new byte[] {0x7f, 'E', 'L', 'F', 0x00, 0x01, 0x02, 0x03, 0x04});
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "blob.dat"), ToolContext.noop());
     assertFalse(result.succeeded(), result.output());
@@ -294,7 +300,7 @@ final class ReadToolTest {
         };
     Files.write(file, pngHeader);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "chart.png"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -311,7 +317,7 @@ final class ReadToolTest {
     var file = tmp.resolve("paper.pdf");
     Files.write(file, "%PDF-1.4\n%a\n".getBytes(StandardCharsets.UTF_8));
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "paper.pdf"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -365,7 +371,7 @@ final class ReadToolTest {
     var file = tmp.resolve("borderline.png");
     Files.write(file, png((int) ReadTool.MAX_IMAGE_BYTES));
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "borderline.png"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -383,7 +389,7 @@ final class ReadToolTest {
     Files.write(tmp.resolve("real.png"), pngBytes);
 
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "real.png"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -411,7 +417,7 @@ final class ReadToolTest {
     var pdfBytes = SampleDocuments.helloWorldPdf();
     Files.write(tmp.resolve("paper.pdf"), pdfBytes);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "paper.pdf"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -435,7 +441,7 @@ final class ReadToolTest {
     // path returns text/markdown / application/json without throwing.
     Files.writeString(tmp.resolve("notes.md"), "# title\n", StandardCharsets.UTF_8);
     Files.writeString(tmp.resolve("data.json"), "{\"x\":1}", StandardCharsets.UTF_8);
-    var binding = ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create());
+    var binding = ReadTool.binding(WorkspaceRoot.of(tmp));
 
     var md = binding.tool().execute(Map.of("path", "notes.md"), ToolContext.noop());
     assertTrue(md.succeeded(), md.output());
@@ -455,7 +461,7 @@ final class ReadToolTest {
         "FROM alpine\nRUN apk add --no-cache foo\n",
         StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "Dockerfile_no_extension"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -466,7 +472,7 @@ final class ReadToolTest {
   void successResultHasNoAttachmentsForPlainText(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("note.txt"), "hello\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "note.txt"), ToolContext.noop());
     assertTrue(result.succeeded());
@@ -518,7 +524,7 @@ final class ReadToolTest {
       var file = tmp.resolve("file." + ext);
       Files.writeString(file, "content\n", StandardCharsets.UTF_8);
       var result =
-          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+          ReadTool.binding(WorkspaceRoot.of(tmp))
               .tool()
               .execute(Map.of("path", "file." + ext), ToolContext.noop());
       assertTrue(result.succeeded(), ext + " should be text-readable: " + result.output());
@@ -537,7 +543,7 @@ final class ReadToolTest {
       var file = tmp.resolve("img." + ext);
       Files.write(file, bytes);
       var result =
-          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+          ReadTool.binding(WorkspaceRoot.of(tmp))
               .tool()
               .execute(Map.of("path", "img." + ext), ToolContext.noop());
       assertTrue(result.succeeded(), ext + ": " + result.output());
@@ -554,7 +560,7 @@ final class ReadToolTest {
     // NUL-sniff fallback recognises it as text.
     Files.writeString(tmp.resolve("config.unknown"), "key=value\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "config.unknown"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -568,7 +574,7 @@ final class ReadToolTest {
     var file = tmp.resolve("empty.txt");
     Files.createFile(file);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "empty.txt"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
@@ -581,7 +587,7 @@ final class ReadToolTest {
     // the limit logic; off-by-one here used to add a spurious marker pre-refactor.
     Files.writeString(tmp.resolve("five.txt"), "a\nb\nc\nd\ne\n", StandardCharsets.UTF_8);
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "five.txt", "limit", 5), ToolContext.noop());
     assertTrue(result.succeeded());
@@ -606,9 +612,7 @@ final class ReadToolTest {
             key -> false);
 
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
-            .tool()
-            .execute(Map.of("path", "long.txt"), ctx);
+        ReadTool.binding(WorkspaceRoot.of(tmp)).tool().execute(Map.of("path", "long.txt"), ctx);
 
     assertTrue(result.succeeded(), result.output());
     var lines = result.output().split("\n");
@@ -642,8 +646,7 @@ final class ReadToolTest {
     Files.createSymbolicLink(root.resolve("leak.txt"), outside.resolve("secret.txt"));
     Files.createSymbolicLink(root.resolve("alias.txt"), root.resolve("inside.txt"));
     Files.createSymbolicLink(root.resolve("dangling.txt"), root.resolve("gone.txt"));
-    var tracker = InMemoryFileTracker.create();
-    var tool = ReadTool.binding(WorkspaceRoot.of(root), tracker).tool();
+    var tool = ReadTool.binding(WorkspaceRoot.of(root)).tool();
 
     var leak = tool.execute(Map.of("path", "leak.txt"), ToolContext.noop());
     assertFalse(leak.succeeded());
@@ -663,7 +666,6 @@ final class ReadToolTest {
             Map.of("path", WorkspaceRoot.of(root).canonical("alias.txt")), ToolContext.noop());
     assertTrue(alias.succeeded(), alias.output());
     assertTrue(alias.output().contains("inside"), alias.output());
-    assertTrue(tracker.fingerprintAtLastRead(root.toRealPath().resolve("inside.txt")).isPresent());
   }
 
   @Test
@@ -671,7 +673,7 @@ final class ReadToolTest {
   void specialFileIsRefusedBeforeOpen(@TempDir Path tmp) {
     Assumptions.assumeTrue(SpecialFiles.mkfifo(tmp.resolve("pipe.txt")));
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "pipe.txt"), ToolContext.noop());
     assertFalse(result.succeeded());
@@ -687,7 +689,7 @@ final class ReadToolTest {
     try {
       Assumptions.assumeFalse(Files.isExecutable(dir), "permissions are not enforced (root)");
       var result =
-          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+          ReadTool.binding(WorkspaceRoot.of(tmp))
               .tool()
               .execute(Map.of("path", "locked/a.txt"), ToolContext.noop());
       assertFalse(result.succeeded());
@@ -699,17 +701,17 @@ final class ReadToolTest {
 
   @Test
   @DisabledOnOs(OS.WINDOWS)
-  void unreadableFileIsAnIoErrorFingerprintingIt(@TempDir Path tmp) throws IOException {
+  void anUnreadableFileIsAnIoErrorReadingIt(@TempDir Path tmp) throws IOException {
     var locked = Files.writeString(tmp.resolve("a.txt"), "x", StandardCharsets.UTF_8);
     Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
     try {
       Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
       var result =
-          ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+          ReadTool.binding(WorkspaceRoot.of(tmp))
               .tool()
               .execute(Map.of("path", "a.txt"), ToolContext.noop());
       assertFalse(result.succeeded());
-      assertTrue(result.output().startsWith("Read: I/O error fingerprinting: "), result.output());
+      assertTrue(result.output().startsWith("Read: I/O error reading file: "), result.output());
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rw-------"));
     }
@@ -722,7 +724,7 @@ final class ReadToolTest {
     Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
     try {
       Assumptions.assumeFalse(Files.isReadable(locked), "permissions are not enforced (root)");
-      var tool = ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create()).tool();
+      var tool = ReadTool.binding(WorkspaceRoot.of(tmp)).tool();
 
       var offset = tool.execute(Map.of("path", "a.txt", "offset", 0), ToolContext.noop());
       var limit = tool.execute(Map.of("path", "a.txt", "limit", 0), ToolContext.noop());
@@ -779,9 +781,7 @@ final class ReadToolTest {
   private static ToolResult read(Path root, String path, Map<String, Object> page) {
     var args = new HashMap<String, Object>(page);
     args.put("path", path);
-    return ReadTool.binding(WorkspaceRoot.of(root), InMemoryFileTracker.create())
-        .tool()
-        .execute(args, ToolContext.noop());
+    return ReadTool.binding(WorkspaceRoot.of(root)).tool().execute(args, ToolContext.noop());
   }
 
   private static byte[] png(int size) {

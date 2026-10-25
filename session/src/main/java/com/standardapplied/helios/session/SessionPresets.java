@@ -9,7 +9,6 @@ import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -106,7 +105,7 @@ public final class SessionPresets {
   private static ToolRegistry tools(WorkspaceRoot workspace, ToolBinding... extraTools) {
     var readTools =
         Stream.of(
-            ReadTool.binding(workspace, InMemoryFileTracker.create()),
+            ReadTool.binding(workspace),
             GlobTool.binding(workspace),
             GrepTool.binding(workspace),
             LsTool.binding(workspace));

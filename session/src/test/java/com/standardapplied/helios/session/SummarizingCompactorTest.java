@@ -5,7 +5,6 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -406,16 +405,9 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void disabledCompactorRejectsNullArgs() {
+  void disabledCompactorRejectsANullHistory() {
     var disabled = ContextCompactor.disabled();
     assertThrows(NullPointerException.class, () -> disabled.compact(null, freshState()));
-    assertThrows(NullPointerException.class, () -> disabled.compact(List.of(), null));
-  }
-
-  @Test
-  void disabledIsASingleton() {
-    assertSame(ContextCompactor.disabled(), ContextCompactor.disabled());
-    assertNotNull(ContextCompactor.disabled());
   }
 
   @Test

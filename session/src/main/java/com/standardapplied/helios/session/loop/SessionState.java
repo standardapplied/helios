@@ -19,10 +19,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * Mutable per-session state owned by the agent loop.
  *
  * <p>Carries the running turn index, the wall clock, the cancellation token and the first-wins
- * terminal {@link ResultMessage}, and is composed of the {@link ConversationHistory}, the {@link
- * SessionTotals} and the context watermark flag. Built by {@code AgentSessionImpl} at session start
- * and threaded through every loop collaborator (the loop itself, the turn runner, the stop
- * classifier, the hook runner). One instance per session.
+ * terminal {@link ResultMessage}, and is composed of the {@link ConversationHistory} and the {@link
+ * SessionTotals}. Built by {@code AgentSessionImpl} at session start and threaded through every
+ * loop collaborator (the loop itself, the turn runner, the stop classifier, the hook runner). One
+ * instance per session.
  *
  * <h2>Thread-safety</h2>
  *
@@ -41,7 +41,6 @@ public final class SessionState {
   private final Instant startedAt;
   private final ConversationHistory history = new ConversationHistory();
   private final SessionTotals totals = new SessionTotals();
-  private final ContextWatermark contextWatermark = new ContextWatermark();
   private final SessionEnding ending;
   private final AtomicLong turnIndex = new AtomicLong(0);
   private final AtomicReference<Optional<ResultMessage>> terminal =
@@ -122,10 +121,6 @@ public final class SessionState {
    */
   public SessionTotals totals() {
     return totals;
-  }
-
-  ContextWatermark contextWatermark() {
-    return contextWatermark;
   }
 
   /**

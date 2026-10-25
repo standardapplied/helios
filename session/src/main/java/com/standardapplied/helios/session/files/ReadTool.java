@@ -55,8 +55,8 @@ import java.util.Objects;
  * </ul>
  *
  * Text rendering streams through {@link java.io.BufferedReader} and stops at the first output cap
- * hit; fingerprinting separately reads the bounded source. The truncation marker names the {@code
- * offset} to continue from. {@code offset} and {@code limit} are validated before the file is read.
+ * hit. The truncation marker names the {@code offset} to continue from. {@code offset} and {@code
+ * limit} are validated before the file is read.
  *
  * <h2>Multimodal dispatch</h2>
  *
@@ -74,8 +74,7 @@ import java.util.Objects;
  * </ul>
  *
  * <p>The output format for text matches Claude Code's Read: 6-digit right-padded line numbers
- * separated by a tab. Edits made by downstream edit tools can detect stale reads via {@link
- * FileTracker}'s fingerprint check.
+ * separated by a tab.
  */
 public final class ReadTool {
 
@@ -121,19 +120,17 @@ public final class ReadTool {
   private ReadTool() {}
 
   /**
-   * Build a tool binding bound to the given workspace + tracker. The session redacts the text the
-   * tool returns against its secret registry; attachments (images, PDFs) pass through unredacted. A
-   * line cut at {@link #MAX_LINE_CHARS} loses the start of a registered secret the cut went
-   * through, so the session's redaction cannot miss it.
+   * Build a tool binding bound to the given workspace. The session redacts the text the tool
+   * returns against its secret registry; attachments (images, PDFs) pass through unredacted. A line
+   * cut at {@link #MAX_LINE_CHARS} loses the start of a registered secret the cut went through, so
+   * the session's redaction cannot miss it.
    *
    * @param workspace the path-jail workspace; non-null
-   * @param tracker per-session read/write ledger; non-null
    * @return a ready-to-register binding
-   * @throws NullPointerException if either argument is null
+   * @throws NullPointerException if {@code workspace} is null
    */
-  public static ToolBinding binding(WorkspaceRoot workspace, FileTracker tracker) {
+  public static ToolBinding binding(WorkspaceRoot workspace) {
     Objects.requireNonNull(workspace, "workspace must not be null");
-    Objects.requireNonNull(tracker, "tracker must not be null");
     var tool =
         Tool.newBuilder()
             .withName(NAME)
@@ -167,7 +164,7 @@ public final class ReadTool {
                         .withRequired(false)
                         .build()))
             .withIdempotent(true)
-            .withExecutor((args, ctx) -> execute(ctx, workspace, tracker, args))
+            .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)
         .withCategory(ToolCategory.READ)
@@ -176,17 +173,17 @@ public final class ReadTool {
   }
 
   private static ToolResult execute(
-      ToolContext ctx, WorkspaceRoot workspace, FileTracker tracker, Map<String, Object> args) {
+      ToolContext ctx, WorkspaceRoot workspace, Map<String, Object> args) {
     ctx.cancellation().throwIfCancelled();
     return switch (ReadRequest.parse(args)) {
       case Result.Failure<ReadRequest> failure -> ToolResult.failure(failure.error());
       case Result.Success<ReadRequest> request ->
-          resolve(workspace, tracker, ctx.sessionContext().secrets(), request.value());
+          resolve(workspace, ctx.sessionContext().secrets(), request.value());
     };
   }
 
   private static ToolResult resolve(
-      WorkspaceRoot workspace, FileTracker tracker, SecretRegistry secrets, ReadRequest request) {
+      WorkspaceRoot workspace, SecretRegistry secrets, ReadRequest request) {
     Path resolved;
     try {
       resolved = workspace.resolveCanonical(request.path());
@@ -195,8 +192,7 @@ public final class ReadTool {
     }
     return switch (regularFileSize(workspace, resolved)) {
       case Result.Failure<Long> failure -> ToolResult.failure(failure.error());
-      case Result.Success<Long> size ->
-          read(workspace, tracker, secrets, request, resolved, size.value());
+      case Result.Success<Long> size -> read(workspace, secrets, request, resolved, size.value());
     };
   }
 
@@ -216,7 +212,6 @@ public final class ReadTool {
 
   private static ToolResult read(
       WorkspaceRoot workspace,
-      FileTracker tracker,
       SecretRegistry secrets,
       ReadRequest request,
       Path resolved,
@@ -228,12 +223,6 @@ public final class ReadTool {
               + " bytes (was "
               + size
               + "). Use a Grep over the relevant pattern or split the file before reading.");
-    }
-    try {
-      var fingerprint = FileFingerprint.of(workspace, resolved, MAX_FILE_SIZE_BYTES);
-      tracker.recordRead(resolved, fingerprint);
-    } catch (IOException e) {
-      return ToolResult.failure("Read: I/O error fingerprinting: " + e.getMessage());
     }
     var mimeType = MimeTypes.detect(resolved);
     if (mimeType.isPresent()) {

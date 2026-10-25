@@ -96,14 +96,14 @@ final class ContextCompaction {
   /**
    * Count tokens in the current history, fire {@link QueryEvent.ContextWarning} on the first
    * crossing of {@link #CONTEXT_WARNING_WATERMARK}, and invoke the {@link ContextCompactor} on
-   * crossings of {@link #CONTEXT_COMPACT_WATERMARK}. Successful compaction clears the warning flag
-   * so a future re-climb fires the watermark again.
+   * crossings of {@link #CONTEXT_COMPACT_WATERMARK}. Successful compaction replaces the history,
+   * which re-arms the warning so a future re-climb fires it again.
    */
   void check(SessionState state, SessionLimits limits) {
     var maxTokens = effectiveMaxContextTokens(limits);
     var tokens = tokenCounter.count(state.history().snapshot());
     var usagePct = (double) tokens / (double) maxTokens;
-    if (usagePct >= CONTEXT_WARNING_WATERMARK && state.contextWatermark().tryFire()) {
+    if (usagePct >= CONTEXT_WARNING_WATERMARK && state.history().tryFireContextWarning()) {
       emitter.emit(
           state,
           new QueryEvent.ContextWarning(
@@ -192,7 +192,6 @@ final class ContextCompaction {
     state.history().replace(historyAfter);
     var tokensAfter = tokenCounter.count(state.history().snapshot());
     var removedBlocks = historyBefore.size() - historyAfter.size();
-    state.contextWatermark().reset();
     var payload =
         new CompactionPayload(
             historyBefore, historyAfter, tokensBefore, tokensAfter, removedBlocks);

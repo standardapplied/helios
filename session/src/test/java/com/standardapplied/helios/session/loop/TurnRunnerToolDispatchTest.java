@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -120,6 +121,25 @@ final class TurnRunnerToolDispatchTest {
     assertEquals("echoed: hello", toolMsg.content());
     assertEquals("call-1", toolMsg.toolCallId());
     assertEquals("echo", toolMsg.toolName());
+  }
+
+  @Test
+  void aToolTurnThatStopsReturnsToolCallsWithItsCallsAndCitations() {
+    var dispatch = fixture.dispatch(new ToolRegistry(List.of(echoBinding())));
+    var call = new ToolCall("call-1", "echo", Map.of("v", "hello"));
+    var citation = Citation.of("doc-1", "grounding");
+    var model =
+        fixedChunkModel(
+            List.of(
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop("STOP", Usage.of(5, 2), Map.of(), List.of(citation))));
+
+    var outcome = runner(model, dispatch).runTurn(freshState(), SessionLimits.defaults());
+
+    assertEquals(FinishReason.TOOL_CALLS, outcome.finishReason());
+    assertEquals(List.of(call), outcome.toolCalls());
+    assertEquals(List.of(citation), outcome.citations());
+    assertEquals(Usage.of(5, 2), outcome.usage());
   }
 
   @Test

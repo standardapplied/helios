@@ -109,7 +109,7 @@ final class ModelCallTest {
 
     var attempts = call.stream(state, SessionLimits.defaults(), List.of());
 
-    assertTrue(call.selfCorrectSchema(state, attempts.turn()));
+    assertTrue(call.selfCorrectSchema(state, attempts));
     assertEquals(1, state.history().snapshot().size());
     assertEquals(parseFailure.correctionMessage(), queue.drain().getFirst().text());
   }
@@ -125,7 +125,7 @@ final class ModelCallTest {
 
     var attempts = modelCall(model).stream(state, SLOW_RETRY, List.of());
 
-    assertEquals(1, attempts.count());
+    assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.TurnRetried));
   }
@@ -143,7 +143,7 @@ final class ModelCallTest {
 
     var attempts = Await.value("the call", run(() -> call.stream(state, SLOW_RETRY, List.of())));
 
-    assertEquals(1, attempts.count());
+    assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
   }
 
@@ -153,7 +153,7 @@ final class ModelCallTest {
 
     var attempts = cancelledDuringTheBackOff(model);
 
-    assertEquals(1, attempts.count());
+    assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
   }
 
@@ -173,7 +173,7 @@ final class ModelCallTest {
     var attempts = Await.value("the call", run(() -> call.stream(state, SLOW_RETRY, List.of())));
 
     assertEquals(Duration.ofSeconds(2), firstRetry().backoff());
-    assertEquals(1, attempts.count());
+    assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
   }
 
@@ -185,7 +185,7 @@ final class ModelCallTest {
     var attempts = Await.value("the call", run(() -> call.stream(state, SLOW_RETRY, List.of())));
 
     assertEquals(Duration.ZERO, firstRetry().backoff());
-    assertEquals(3, attempts.count());
+    assertEquals(3, attempts.streamAttempts());
     assertEquals(3, model.calls.get());
   }
 
@@ -200,7 +200,7 @@ final class ModelCallTest {
             run(() -> call.stream(state, retrying(2, Duration.ofMillis(1)), List.of())));
 
     assertEquals(Duration.ofMillis(1), firstRetry().backoff());
-    assertEquals(2, attempts.count());
+    assertEquals(2, attempts.streamAttempts());
     assertEquals(2, model.calls.get());
   }
 
@@ -225,7 +225,7 @@ final class ModelCallTest {
         () -> state.cancellation().activeCallbackCountForTests() == 2);
     state.cancellation().cancelAsync("cancelled during the back-off", error -> {});
 
-    assertEquals(1, Await.value("the call", streaming).count());
+    assertEquals(1, Await.value("the call", streaming).streamAttempts());
   }
 
   @Test
@@ -267,7 +267,7 @@ final class ModelCallTest {
         Await.value(
             "the call", run(() -> call.stream(state, retrying(2, Duration.ofHours(1)), List.of())));
 
-    assertEquals(1, attempts.count());
+    assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
   }
 
@@ -282,13 +282,13 @@ final class ModelCallTest {
             run(() -> call.stream(state, retrying(2, Duration.ofMillis(50)), List.of())));
 
     assertEquals(Duration.ofMillis(50), firstRetry().backoff());
-    assertEquals(2, attempts.count());
+    assertEquals(2, attempts.streamAttempts());
     assertEquals(2, model.calls.get());
     assertEquals(0, state.cancellation().activeCallbackCountForTests());
   }
 
   /** The attempts of a call under {@link #SLOW_RETRY} cancelled once its first back-off waits. */
-  private ModelCall.Attempts cancelledDuringTheBackOff(FailingModel model) {
+  private TurnOutcome cancelledDuringTheBackOff(FailingModel model) {
     var retried = new CountDownLatch(1);
     var call =
         modelCall(

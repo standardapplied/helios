@@ -247,7 +247,7 @@ final class ToolRound {
       case HookOutcome.Stop stop -> {
         emitter.emitHookFired(state, hookName, POST_TOOL_USE, "Stop");
         append(state, call, result);
-        state.setTerminal(HookEffects.success(state, stop.result()));
+        state.setTerminal(StopClassifier.success(state, stop.result()));
         return true;
       }
       default -> {}
