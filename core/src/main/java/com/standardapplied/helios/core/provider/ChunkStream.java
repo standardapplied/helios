@@ -56,9 +56,13 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       close();
       throw cancelled(null);
     }
-    if (next != null) {
-      return true;
+    if (next == null) {
+      next = read();
     }
+    return true;
+  }
+
+  private ModelChunk read() {
     try {
       if (!events.hasNext()) {
         throw failures.unterminated();
@@ -67,8 +71,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       if (closed) {
         throw cancelled(null);
       }
-      next = chunk;
-      return true;
+      return chunk;
     } catch (RuntimeException failure) {
       ended = true;
       var cancelled = closed && !(failure instanceof CancellationException);
