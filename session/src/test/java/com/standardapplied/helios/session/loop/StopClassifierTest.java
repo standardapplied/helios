@@ -24,6 +24,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -52,12 +53,21 @@ final class StopClassifierTest {
   private ResultMessage classifyError(Throwable streamError, int streamAttempts, String content) {
     var outcome =
         new TurnOutcome(
-            FinishReason.ERROR, content, Usage.of(0, 0), Map.of(), streamError, streamAttempts);
+            FinishReason.ERROR,
+            content,
+            List.of(),
+            List.of(),
+            Usage.of(0, 0),
+            Map.of(),
+            streamError,
+            streamAttempts);
     return classifier.classify(state(), defaults(), outcome, false).orElseThrow();
   }
 
   private ResultMessage.Refusal classifyRefusal(String content, Map<String, String> metadata) {
-    var outcome = new TurnOutcome(FinishReason.REFUSAL, content, Usage.of(0, 0), metadata);
+    var outcome =
+        new TurnOutcome(
+            FinishReason.REFUSAL, content, List.of(), List.of(), Usage.of(0, 0), metadata, null, 1);
     return assertInstanceOf(
         ResultMessage.Refusal.class,
         classifier.classify(state(), defaults(), outcome, false).orElseThrow());
@@ -370,7 +380,16 @@ final class StopClassifierTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new TurnOutcome(FinishReason.STOP, "x", Usage.of(0, 0), Map.of(), null, 0));
+            () ->
+                new TurnOutcome(
+                    FinishReason.STOP,
+                    "x",
+                    List.of(),
+                    List.of(),
+                    Usage.of(0, 0),
+                    Map.of(),
+                    null,
+                    0));
     assertTrue(ex.getMessage().contains("streamAttempts"));
   }
 
@@ -440,7 +459,14 @@ final class StopClassifierTest {
                     state(),
                     defaults(),
                     new TurnOutcome(
-                        FinishReason.ERROR, "", Usage.of(0, 0), Map.of(), transientError, 3),
+                        FinishReason.ERROR,
+                        "",
+                        List.of(),
+                        List.of(),
+                        Usage.of(0, 0),
+                        Map.of(),
+                        transientError,
+                        3),
                     false)
                 .orElseThrow());
     var streamTerminal =
@@ -453,6 +479,8 @@ final class StopClassifierTest {
                     new TurnOutcome(
                         FinishReason.ERROR,
                         "",
+                        List.of(),
+                        List.of(),
                         Usage.of(0, 0),
                         Map.of(),
                         new IllegalStateException("broke " + secret),

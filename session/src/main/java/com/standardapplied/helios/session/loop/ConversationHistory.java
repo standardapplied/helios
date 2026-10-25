@@ -7,11 +7,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The conversation history of one session: the messages sent to the model on every turn, appended
  * by the session and the loop and replaced wholesale only by the loop (compaction, or a {@code
- * PreModelTurnHook} returning {@code MutateHistory}).
+ * PreModelTurnHook} returning {@code MutateHistory}). It also records whether the session's {@code
+ * ContextWarning} has fired for this history: at most once, until a replacement re-arms it.
  *
  * <h2>Thread-safety</h2>
  *
@@ -20,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class ConversationHistory {
 
   private final CopyOnWriteArrayList<Message> messages = new CopyOnWriteArrayList<>();
+  private final AtomicBoolean contextWarningFired = new AtomicBoolean(false);
 
   ConversationHistory() {}
 
@@ -46,7 +49,8 @@ public final class ConversationHistory {
 
   /**
    * Replace the entire history with the given list, defensively copied so subsequent caller
-   * mutations don't leak in.
+   * mutations don't leak in, and re-arm the context warning so a climb of the new history back
+   * through the watermark fires it again.
    *
    * @throws NullPointerException if {@code newHistory} or any element is null
    */
@@ -58,5 +62,16 @@ public final class ConversationHistory {
     }
     messages.clear();
     messages.addAll(copy);
+    contextWarningFired.set(false);
+  }
+
+  /**
+   * Mark the context warning as fired for this history.
+   *
+   * @return {@code true} if this call fired it (the caller emits the event); {@code false} if it
+   *     already fired since the last {@link #replace(List)}
+   */
+  boolean tryFireContextWarning() {
+    return contextWarningFired.compareAndSet(false, true);
   }
 }

@@ -23,7 +23,6 @@ import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -221,11 +220,10 @@ final class CompactionIntegrationTest {
   private static Run runNotesTask(Path tmp, List<Hook> hooks) throws IOException {
     seedFiles(tmp);
     var ws = WorkspaceRoot.of(tmp);
-    var tracker = InMemoryFileTracker.create();
     var tools =
         new ToolRegistry(
             List.of(
-                ReadTool.binding(ws, tracker),
+                ReadTool.binding(ws),
                 LsTool.binding(ws),
                 GlobTool.binding(ws),
                 GrepTool.binding(ws)));

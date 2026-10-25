@@ -285,7 +285,7 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 `AgentSession.create(SessionOptions)` returns a session that drives an agent loop on a virtual thread the first time you `send`. Key surfaces:
 
 - `send(UserMessage)` — queue a message (steering queue, drained per-iteration).
-- `events()` — `Flow.Publisher<QueryEvent>` for streaming subscribers (15 event subtypes: text, thinking, tool use, hook fired, context warning/edited, etc.).
+- `events()` — `Flow.Publisher<QueryEvent>` for streaming subscribers (text, thinking, citations, tool use and results, hooks, context warning/edited, questions, retries, turn and loop ends, errors).
 - `result()` — `CompletableFuture<ResultMessage>` for blocking await.
 - `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
 - `interrupt(reason)` — queue a synthetic mid-run user message.
@@ -334,7 +334,7 @@ The agent loop estimates context fill through a pluggable `TokenCounter` (defaul
 
 The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.1, Opus 5.5, Sonnet 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. The summary call runs on a virtual thread under a configurable timeout (default 60s) and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
 
-Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, opt out with `ContextCompactor.disabled()`, or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
+Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, turn compaction off with `ContextCompactor.disabled()` (it leaves the history unchanged, so a long session overflows and the provider's error ends it), or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
 
 ## Resource Lifecycle
 
@@ -374,6 +374,10 @@ var weatherTool = Tool.newBuilder()
 `CommandGrant` produces a `Tool` that lets the model invoke a single CLI binary under tight controls. It must be built with the registry of the sessions that run it; `build()` registers every `withEnv(...)` value there, and the session redacts the tool's output against it:
 
 ```java
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.session.tools.ToolRegistry;
+
 var registry = new SecretRegistry();
 var gh = CommandGrant.builder("gh")
     .withSecretRegistry(registry)                     // required: the sessions' registry
@@ -389,7 +393,8 @@ var gh = CommandGrant.builder("gh")
 var options = SessionOptions.newBuilder()
     .withModel(model)
     .withSecretRegistry(registry)                     // the same instance
-    .withTools(new ToolRegistry(List.of(ToolBinding.newBuilder(gh.toTool()).build())))
+    .withTools(new ToolRegistry(List.of(
+        ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())))
     .build();
 ```
 
@@ -402,7 +407,7 @@ The session's `Read` / `Grep` / `Glob` tools accept any `WorkspaceRoot`, not jus
 ```java
 var corpus  = WorkspaceRoot.of(Path.of("/var/kb/support"));
 var tools   = new ToolRegistry(List.of(
-    ReadTool.binding(corpus, InMemoryFileTracker.create()),
+    ReadTool.binding(corpus),
     GrepTool.binding(corpus),
     GlobTool.binding(corpus)));
 var options = SessionOptions.newBuilder()
@@ -413,7 +418,7 @@ var options = SessionOptions.newBuilder()
     .build();
 ```
 
-Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable.
+Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable. To track what the agent read, register a `PostToolUseHook` on `Read`.
 
 ## Structured Output
 
@@ -486,7 +491,7 @@ var result = ft.execute(() -> model.chat(messages, List.of()));   // checked exc
 
 ## Observability
 
-The session's `events()` publisher is the primary observability surface. Subscribe a `Flow.Subscriber<QueryEvent>` (or a per-phase `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the 15-subtype sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
+The session's `events()` publisher is the primary observability surface. Subscribe a `Flow.Subscriber<QueryEvent>` (or a per-phase `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
 
 ```java
 session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
@@ -687,7 +692,7 @@ Every filesystem boundary in the framework refuses traversal. Lexical normalise 
 - `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
 - `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
 
-`WorkspaceRoot` is the confinement contract for `Read`, `Grep`, `Glob`, `Ls`, file fingerprints and filesystem memory. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix, rejecting outside, dangling and looping links even for a not-yet-existing leaf. Explicitly configured root aliases and requests through legitimate in-workspace aliases remain supported; returned paths use their canonical spelling.
+`WorkspaceRoot` is the confinement contract for `Read`, `Grep`, `Glob`, `Ls` and filesystem memory. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix, rejecting outside, dangling and looping links even for a not-yet-existing leaf. Explicitly configured root aliases and requests through legitimate in-workspace aliases remain supported; returned paths use their canonical spelling.
 
 Strict I/O does not trust that earlier path check. It descends from the filesystem root using directory descriptors and single-component no-follow `openat` calls, including every ancestor of the workspace root. An `O_PATH` descriptor pins the leaf for metadata inspection without opening a FIFO or device for I/O. Only a regular file is reopened through the kernel's `/proc/self/fd` namespace, while its descriptor remains owned by the stream. Size-limited reads validate that pinned target and enforce the byte budget during reading, including concurrent growth. `Grep` sniffs and searches the same bounded content. MIME detection does not invoke platform detectors that might reopen an unconfined pathname.
 

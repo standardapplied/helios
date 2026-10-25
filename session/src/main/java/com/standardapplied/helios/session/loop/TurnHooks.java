@@ -84,7 +84,6 @@ final class TurnHooks {
       SessionState state, String hookName, Phase phase, HookOutcome.MutateHistory mutate) {
     if (phase == Phase.PRE_MODEL_TURN) {
       state.history().replace(mutate.history());
-      state.contextWatermark().reset();
       emitter.emitHookFired(state, hookName, phase.phaseName, "MutateHistory");
     }
     return Decision.CONTINUE;

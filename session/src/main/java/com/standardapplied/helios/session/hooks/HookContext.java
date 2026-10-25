@@ -12,11 +12,6 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
  * may need to make a decision — session id, current turn index, cancellation token, and the model
  * itself (for hooks that want to call out for judgment).
  *
- * <p>Phase 2 ships the minimum field set the existing subsystems provide. Subsequent phases extend
- * the contract: Phase 3 adds {@code workspaceRoot()}, Phase 4 adds {@code memory()}, Phase 5 adds
- * {@code execution()}, Phase 7 adds {@code audit()}. Internal users only, so additions break the
- * interface freely.
- *
  * <h2>Thread-safety</h2>
  *
  * Implementations are immutable; safe to pass to arbitrary hook code without defensive copying.

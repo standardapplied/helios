@@ -4,6 +4,7 @@ package com.standardapplied.helios.runtime;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
@@ -143,5 +144,10 @@ final class StubSession implements AgentSession {
   @Override
   public List<AskUserQuestionRequest> pendingQuestions() {
     return List.of();
+  }
+
+  @Override
+  public <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
+    throw new UnsupportedOperationException("the runtime never runs a session blocking");
   }
 }

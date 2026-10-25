@@ -13,7 +13,6 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionPresets;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -67,7 +66,7 @@ abstract class ReadToolMultimodalContract {
   }
 
   private void readAndAttach(Path workspace, String file) {
-    var read = ReadTool.binding(WorkspaceRoot.of(workspace), InMemoryFileTracker.create());
+    var read = ReadTool.binding(WorkspaceRoot.of(workspace));
     try (var model = createModel(ToolChoice.any());
         var session =
             AgentSession.create(

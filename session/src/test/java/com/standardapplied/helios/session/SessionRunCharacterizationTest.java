@@ -170,7 +170,7 @@ class SessionRunCharacterizationTest {
       List.of(
           "UserMessageReceived turn=0 start files=1",
           "HookFired turn=1 SessionRunCharacterizationTest$Run PreModelTurnHook Inject",
-          "TurnEnded turn=1 TOOL_USE",
+          "TurnEnded turn=1 TOOL_CALLS",
           "UserMessageReceived turn=1 pre-model inject files=0",
           "TurnRetried turn=2 attempt=1 delay=PT0S test",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook MutateArgs",
@@ -182,19 +182,19 @@ class SessionRunCharacterizationTest {
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook Block",
           "ToolBlocked turn=2 c2 SessionRunCharacterizationTest$Run not allowed",
           "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
-          "TurnEnded turn=2 TOOL_USE",
+          "TurnEnded turn=2 TOOL_CALLS",
           "ContextWarning turn=2 0.96",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreCompactHook MutateHistory",
           "ContextEdited turn=2 removed=4 96->10",
           "AssistantText turn=3 not json",
-          "TurnEnded turn=3 TOOL_USE",
+          "TurnEnded turn=3 TOOL_CALLS",
           "UserMessageReceived turn=3 Your structured output did not match the schema. Fix the listed fields and re-emit the structured output:\\n  - answer is required but missing\\n files=0",
           "AssistantText turn=4 {\"answer\":\"draft\"}",
-          "TurnEnded turn=4 END_TURN",
+          "TurnEnded turn=4 STOP",
           "HookFired turn=4 SessionRunCharacterizationTest$Run PreStopHook Inject",
           "UserMessageReceived turn=4 pre-stop inject files=0",
           "AssistantText turn=5 {\"answer\":\"final\"}",
-          "TurnEnded turn=5 END_TURN",
+          "TurnEnded turn=5 STOP",
           "LoopEnded turn=5 Success");
 
   private static final List<String> EXPECTED_FINAL_MODEL_INPUT =

@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
@@ -282,9 +283,9 @@ public sealed interface QueryEvent
    * @param sessionId the session id
    * @param turnIndex the turn index that ended
    * @param timestamp the event timestamp
-   * @param reason why this turn ended
+   * @param reason the turn's finish reason
    */
-  record TurnEnded(String sessionId, long turnIndex, Instant timestamp, StopReason reason)
+  record TurnEnded(String sessionId, long turnIndex, Instant timestamp, FinishReason reason)
       implements QueryEvent {
 
     public TurnEnded {

@@ -70,7 +70,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * while the call waits for a permit ends the wait the same way. A request's timeout is clamped to
  * {@link Builder#withMaxTimeout(Duration)}.
  *
- * <h2>Phase 5 scope</h2>
+ * <h2>Runtimes</h2>
  *
  * The default factory {@link #defaultPosix()} wires {@link Runtime#BASH} (to {@code bash}) and
  * {@link Runtime#PYTHON} (to {@code python3}). Other {@link Runtime} values stay declared but
@@ -116,8 +116,7 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   /**
    * Curated POSIX factory: registers {@link Runtime#BASH} to {@code bash} and {@link
-   * Runtime#PYTHON} to {@code python3} using {@code -c} script dispatch. Mirrors the binaries the
-   * spec calls out as the Phase 5 acceptance baseline.
+   * Runtime#PYTHON} to {@code python3} using {@code -c} script dispatch.
    *
    * @return a fresh provider
    * @throws IllegalStateException if either binary cannot be resolved on the host {@code PATH}

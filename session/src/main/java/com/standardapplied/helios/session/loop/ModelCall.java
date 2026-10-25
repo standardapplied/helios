@@ -37,9 +37,6 @@ final class ModelCall {
 
   private static final Logger LOGGER = Logger.getLogger(TurnRunner.class.getName());
 
-  /** The final attempt's stream and the total number of attempts made. */
-  record Attempts(StreamedTurn turn, int count) {}
-
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
   private final Model model;
@@ -75,18 +72,19 @@ final class ModelCall {
    * exception escaping the subscribe call) end the attempts immediately — only the type guard on
    * {@code TransientStreamException} triggers a retry.
    *
+   * @return the final attempt's outcome, carrying the number of attempts made
    * @throws Error an {@link Error} the turn ended with, as itself
    */
-  Attempts stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
+  TurnOutcome stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
     var attempt = 0;
     while (true) {
       attempt++;
       var turn = streamOnce(state, limits, visibleTools);
-      if (!(turn.error() instanceof TransientStreamException transientErr)
+      if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
           || state.cancellation().isCancelled()) {
-        return new Attempts(turn, attempt);
+        return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
       emitter.emit(
@@ -100,7 +98,7 @@ final class ModelCall {
               transientErr.providerName(),
               SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
       if (!sleepHonouringCancellation(backoff, state.cancellation())) {
-        return new Attempts(turn, attempt);
+        return turn.withStreamAttempts(attempt);
       }
     }
   }
@@ -119,7 +117,7 @@ final class ModelCall {
    * also ends the session ({@link TurnSubscriber}), and one the turn ended with is thrown as
    * itself, so it leaves the loop as a tool's or a hook's does.
    */
-  private StreamedTurn streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
+  private TurnOutcome streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
     var subscriber =
         new TurnSubscriber(
             state,
@@ -139,7 +137,7 @@ final class ModelCall {
       subscriber.end(t, true);
     }
     var turn = subscriber.awaitDone(state.cancellation());
-    if (turn.error() instanceof Error error) {
+    if (turn.streamError() instanceof Error error) {
       throw error;
     }
     return turn;
@@ -166,15 +164,15 @@ final class ModelCall {
    *     correction message), so the underlying error surfaces as {@link
    *     com.standardapplied.helios.session.ResultMessage.ErrorDuringExecution}
    */
-  boolean selfCorrectSchema(SessionState state, StreamedTurn turn) {
-    if (!(turn.error() instanceof StructuredOutputParseException parseFailure)) {
+  boolean selfCorrectSchema(SessionState state, TurnOutcome turn) {
+    if (!(turn.streamError() instanceof StructuredOutputParseException parseFailure)) {
       return false;
     }
     var wrongAttempt = parseFailure.rawContent();
     if (Strings.isEmpty(wrongAttempt)) {
       // Real streaming providers may surface text deltas before the error fires; the subscriber
       // has accumulated them even when the exception itself didn't carry rawContent.
-      wrongAttempt = turn.content();
+      wrongAttempt = turn.assistantContent();
     }
     if (!wrongAttempt.isEmpty()) {
       state.history().append(Message.assistant(wrongAttempt, List.of(), Map.of()));

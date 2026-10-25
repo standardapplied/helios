@@ -15,25 +15,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
 /**
- * Stop-gate hook that refuses termination until every configured {@link Signature} has been
- * observed at least once in the session's tool-call history. A single instance satisfies both the
- * {@link PostToolUseHook} (recording) and {@link PreStopHook} (checking) contracts so the
- * orchestrator wires recording and checking through one registration.
+ * A {@link PostToolUseHook} and {@link PreStopHook} that keeps the session from stopping until
+ * every configured {@link Signature} has matched a tool call. After each tool call it records the
+ * signatures the call matched; at the stop, while any signature is unmatched, it answers with
+ * {@link HookOutcome.Inject Inject} and a corrective user message listing the missing signatures'
+ * {@link Signature#description() descriptions}, so the model gets another turn, within the
+ * session's turn budget, to make the calls. Once every signature has matched it answers {@link
+ * HookOutcome.Continue Continue}.
  *
- * <p>The replacement for v1's {@code RequiredPredictSignature} / {@code SignatureMatchers}
- * machinery: instead of a global flag set by the RLM harness, the agent loop's hook system carries
- * the requirement, and any preset can stack additional signatures via {@link
- * Builder#withSignature}.
- *
- * <p>Outcome on unmet requirements: {@link HookOutcome.Inject Inject} with a corrective user
- * message that lists every missing signature's {@link Signature#description() description}. {@code
- * Inject} treats the stop as not-terminal and queues the message so the model receives it as the
- * next user turn — the model self-corrects within the existing iteration budget. The orchestrator
- * already treats {@link HookOutcome.Block Block} at {@code PreStop} as a Continue, so {@code
- * Inject} is the right shape here.
- *
- * <p>Thread-safety: signature observations are stored in a {@link ConcurrentHashMap}-backed set so
- * concurrent {@code afterTool} fires from parallel tool dispatches don't lose updates.
+ * <p>The observations are the session's: register one instance per session, as both hooks. They are
+ * held in a concurrent set, so the instance is safe to read from any thread.
  */
 public final class RequireSignatureHook implements PostToolUseHook, PreStopHook {
 

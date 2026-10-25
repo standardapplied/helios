@@ -106,7 +106,7 @@ final class MimeTypesTest {
     Files.write(tmp.resolve("blob.bin"), new byte[] {1, 0, 2});
 
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "blob.bin"), ToolContext.noop());
 
@@ -124,7 +124,7 @@ final class MimeTypesTest {
     Files.write(tmp.resolve("odd.json"), new byte[] {'{', 0, '}'});
 
     var result =
-        ReadTool.binding(WorkspaceRoot.of(tmp), InMemoryFileTracker.create())
+        ReadTool.binding(WorkspaceRoot.of(tmp))
             .tool()
             .execute(Map.of("path", "odd.json"), ToolContext.noop());
 

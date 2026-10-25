@@ -29,26 +29,6 @@ public interface MemoryBackend {
   String PREFIX = "/memories/";
 
   /**
-   * Sentinel "memory is intentionally off" backend that refuses every operation with a clear
-   * message. Returned by presets that want to surface a deliberate "no memory" stance — applying
-   * the sentinel via {@link
-   * com.standardapplied.helios.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)}
-   * causes any {@code MemoryRead} / {@code MemoryWrite} tool call to fail loudly instead of
-   * silently succeeding or NPE-ing.
-   *
-   * <p>{@link
-   * com.standardapplied.helios.session.SessionOptions.Builder#withMemoryBackend(MemoryBackend)}
-   * accepts {@code null} to mean "no backend configured" — for sessions that want a permanent
-   * stance against memory, prefer the sentinel because it communicates intent and produces a
-   * descriptive failure if the model bypasses the permission policy.
-   *
-   * @return a process-wide singleton sentinel
-   */
-  static MemoryBackend disabled() {
-    return DisabledMemoryBackend.INSTANCE;
-  }
-
-  /**
    * Read the text content at {@code path}.
    *
    * @param path the memory path; non-null, non-blank, must begin with {@link #PREFIX}

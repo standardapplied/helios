@@ -4,10 +4,7 @@
  */
 package com.standardapplied.helios.session;
 
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
-import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.util.List;
@@ -211,25 +208,29 @@ public interface AgentSession extends AutoCloseable {
 
   /**
    * Typed blocking convenience: send the message, await termination, parse the final assistant text
-   * as JSON against {@code schema}, return the typed result.
+   * as JSON against {@code schema}, return the typed result. Markdown fences and prose prefixes
+   * around the JSON are tolerated.
    *
-   * <p>The session is driven exactly as {@link #runBlocking(UserMessage)} — there is no structured-
-   * output handshake with the provider, which keeps the streaming/steering shape intact. Models are
-   * expected to honor the schema's shape in their final answer; markdown fences and prose prefixes
-   * are tolerated via {@link StructuredContentParser}'s existing recovery passes.
-   *
-   * <p>When the session was built with the same {@code schema} (see {@code
-   * SessionOptions.Builder#withOutputSchema}), the loop has already self-corrected schema
-   * mismatches and {@link com.standardapplied.helios.core.common.SubmitValidator} rejections within
-   * {@code SessionLimits.maxTurns()}, so a returned value always satisfies both; a model that never
-   * converges terminates as {@link ResultMessage.ErrorMaxTurns} and this method throws rather than
-   * returning a rejected value.
+   * <ul>
+   *   <li>A session built with an output schema (see {@code
+   *       SessionOptions.Builder#withOutputSchema}) accepts only that schema here: a {@code schema}
+   *       whose {@link OutputSchema#type() type} or {@link OutputSchema#schema() JSON schema}
+   *       differs is refused before the message is sent. The loop has already self-corrected schema
+   *       mismatches and {@link com.standardapplied.helios.core.common.SubmitValidator} rejections
+   *       within {@code SessionLimits.maxTurns()}, so a returned value satisfies both; a model that
+   *       never converges terminates as {@link ResultMessage.ErrorMaxTurns} and this method throws
+   *       rather than returning a rejected value.
+   *   <li>A session built without one parses the final answer against {@code schema} after the
+   *       fact, with no structured-output handshake with the provider.
+   * </ul>
    *
    * @param message the message; non-null
    * @param schema the output schema; non-null
    * @param <T> the parsed output type
    * @return the parsed final assistant message
    * @throws NullPointerException if {@code message} or {@code schema} is null
+   * @throws IllegalArgumentException if the session has an output schema and {@code schema} differs
+   *     from it; nothing is sent
    * @throws IllegalStateException if the session terminated without a {@link ResultMessage.Success}
    *     — the caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
    *     ResultMessage.ErrorDuringExecution} / etc., or terminated as a {@link
@@ -239,27 +240,5 @@ public interface AgentSession extends AutoCloseable {
    *     com.standardapplied.helios.core.schema.SubmitValidationException}, fails the schema's
    *     submit validator
    */
-  default <T> T runBlocking(UserMessage message, OutputSchema<T> schema) {
-    Objects.requireNonNull(message, "message must not be null");
-    Objects.requireNonNull(schema, "schema must not be null");
-    var terminal = runBlocking(message);
-    if (!(terminal instanceof ResultMessage.Success success)) {
-      throw new IllegalStateException(
-          "session terminated as "
-              + terminal.getClass().getSimpleName()
-              + "; cannot parse a typed result from a non-Success terminal");
-    }
-    if (Strings.isBlank(success.result())) {
-      throw new IllegalStateException(
-          "session ended with Success but produced no result to parse as "
-              + schema.type().getSimpleName());
-    }
-    return StructuredContentParser.parse(
-        success.result(), schema, SessionJson.STRUCTURED, rawOutputCapturePolicy());
-  }
-
-  /** Structured-output retention policy inherited from the session model. */
-  default RawOutputCapturePolicy rawOutputCapturePolicy() {
-    return RawOutputCapturePolicy.ENABLED;
-  }
+  <T> T runBlocking(UserMessage message, OutputSchema<T> schema);
 }

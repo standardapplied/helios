@@ -16,7 +16,6 @@ import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -106,7 +105,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
 
     var result =
         call(
-            ReadTool.binding(WorkspaceRoot.of(corpus), InMemoryFileTracker.create()),
+            ReadTool.binding(WorkspaceRoot.of(corpus)),
             registry,
             "Use Read to read 'config.yaml' from the workspace.",
             Map.of("path", "config.yaml"));

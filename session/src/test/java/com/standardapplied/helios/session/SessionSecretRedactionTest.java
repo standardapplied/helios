@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
@@ -364,12 +365,14 @@ final class SessionSecretRedactionTest {
   }
 
   @Test
-  void aFailedStreamsErrorTextReachesThePostModelTurnHookRedacted() {
+  void aFailedTurnShowsThePostModelTurnHookItsPartialTextAndEndsWithTheErrorRedacted() {
     var postModelTurn = new CopyOnWriteArrayList<String>();
     var model =
         ScriptedModel.newBuilder()
             .withStreamTurn(
-                ModelStreams.failing(new IllegalStateException("stream broke on " + SECRET)))
+                ModelStreams.failing(
+                    new RuntimeException("stream broke on " + SECRET),
+                    new ModelChunk.TextDelta("partial")))
             .build();
     var options =
         SessionOptions.newBuilder()
@@ -377,14 +380,15 @@ final class SessionSecretRedactionTest {
             .withHook(
                 (PostModelTurnHook)
                     (response, ctx) -> {
-                      postModelTurn.add(response.content());
+                      postModelTurn.add(response.finishReason() + " " + response.content());
                       return new HookOutcome.Continue();
                     });
 
     var run = run(options, model);
 
-    assertInstanceOf(ResultMessage.ErrorDuringExecution.class, run.result());
-    assertEquals(List.of("stream broke on " + MARKER), postModelTurn);
+    var failed = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, run.result());
+    assertEquals(List.of("ERROR partial"), postModelTurn);
+    assertEquals("stream broke on " + MARKER, failed.error().message());
   }
 
   @Test
