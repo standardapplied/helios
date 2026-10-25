@@ -65,14 +65,15 @@ public interface ContextCompactor {
   CompactionResult compact(List<Message> history, SessionState state);
 
   /**
-   * A no-op compactor. The agent loop will still emit {@code ContextWarning} at the 0.85 watermark
-   * but will not invoke a compactor at 0.95 — sessions overflow naturally and surface {@code
-   * ErrorDuringExecution} via the provider. Useful for tests, demos, and deployments that
-   * intentionally want to fail-loud on overflow rather than introduce summarisation drift.
+   * A compactor that leaves the history unchanged. The agent loop still emits {@code
+   * ContextWarning} at the 0.85 watermark and still calls this compactor at 0.95, which returns the
+   * history as it was, so no {@code ContextEdited} fires; a long session overflows the model's
+   * window and the provider's error ends it. Useful for tests and for deployments that would rather
+   * fail on overflow than summarise, or that rewrite history in a {@code PreModelTurnHook}.
    *
-   * @return a shared, thread-safe disabled compactor; never null
+   * @return a thread-safe compactor that never compacts; never null
    */
   static ContextCompactor disabled() {
-    return DisabledContextCompactor.INSTANCE;
+    return (history, state) -> CompactionResult.noOp(history);
   }
 }

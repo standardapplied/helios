@@ -116,7 +116,7 @@ final class TurnSubscriberRaceTest {
 
     // After awaitDone returns, no task should still be holding the scheduler — the prior task
     // was cancelled by onComplete, and awaitDone's finally clause cancels any successor.
-    assertNull(streamed.error(), "normal completion records no error");
+    assertNull(streamed.streamError(), "normal completion records no error");
     assertEquals(0, scheduler.outstandingCount(), "no scheduled task should outlive the turn");
   }
 

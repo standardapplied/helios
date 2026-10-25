@@ -2,16 +2,19 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.session;
+package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -55,7 +58,7 @@ final class ConsoleEventPrinterTest {
     printer.onNext(
         new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
     printer.onNext(new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "perm", "denied"));
-    printer.onNext(new QueryEvent.TurnEnded(SID, TURN, TS, StopReason.END_TURN));
+    printer.onNext(new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP));
     printer.onNext(
         new QueryEvent.LoopEnded(
             SID,
@@ -76,7 +79,7 @@ final class ConsoleEventPrinterTest {
             + nl
             + "[blocked] Read: denied"
             + nl
-            + "\n[turn-ended] END_TURN"
+            + "\n[turn-ended] STOP"
             + nl
             + "[loop-ended] Success"
             + nl,

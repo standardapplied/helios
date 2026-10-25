@@ -115,7 +115,7 @@ session.send("Refactor the loop module's package-info comments.");
 var terminal = session.result().join();
 ```
 
-The 15-subtype `QueryEvent` sealed interface — see the [package
+The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `LoopEnded`, `Error`; see the [package
 Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — covers everything the loop emits.
 
 ## Cost tracking + budget cap
@@ -229,7 +229,7 @@ Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
 - `withMaxBudgetMicroUsd(long)` — USD spend cap (default unset; opt-in)
 - `withMaxWallClock(Duration)` — wall-clock ceiling (default 1h)
 - `withToolTimeoutDefault(Duration)` — per-tool execution timeout (default 2 min)
-- `withMaxContextTokens(long)` — soft trigger for compaction (default 180_000)
+- `withMaxContextTokens(long)` — soft trigger for compaction (default 0 = auto: the model's window minus the output reserve)
 
 Each cap maps to its own terminal `ResultMessage` subtype (`ErrorMaxTurns`,
 `ErrorMaxBudgetUsd`, `ErrorMaxWallClock`, etc.).

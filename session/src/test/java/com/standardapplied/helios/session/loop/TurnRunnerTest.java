@@ -23,7 +23,6 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
-import com.standardapplied.helios.session.StopReason;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -164,7 +163,7 @@ final class TurnRunnerTest {
     assertEquals(state.currentTurnIndex(), text.turnIndex());
 
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(1));
-    assertEquals(StopReason.END_TURN, ended.reason());
+    assertEquals(FinishReason.STOP, ended.reason());
   }
 
   @Test
@@ -200,30 +199,30 @@ final class TurnRunnerTest {
   }
 
   @Test
-  void toolCallsFinishReasonProducesToolUseStopReason() {
+  void aToolCallsTurnEndsWithToolCalls() {
     var state = freshState();
     var outcome =
         runner(textModel("calling tool", FinishReason.TOOL_CALLS, Usage.of(3, 2)))
             .runTurn(state, SessionLimits.defaults());
     assertEquals(FinishReason.TOOL_CALLS, outcome.finishReason());
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
-    assertEquals(StopReason.TOOL_USE, ended.reason());
+    assertEquals(FinishReason.TOOL_CALLS, ended.reason());
   }
 
   @Test
-  void lengthFinishReasonMapsToMaxTokens() {
+  void aLengthTurnEndsWithLength() {
     runner(textModel("partial", FinishReason.LENGTH, Usage.of(3, 100)))
         .runTurn(freshState(), SessionLimits.defaults());
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
-    assertEquals(StopReason.MAX_TOKENS, ended.reason());
+    assertEquals(FinishReason.LENGTH, ended.reason());
   }
 
   @Test
-  void contentFilterFinishReasonMapsToRefusal() {
+  void aContentFilterTurnEndsWithContentFilterNotRefusal() {
     runner(textModel("I cannot help", FinishReason.CONTENT_FILTER, Usage.of(3, 2)))
         .runTurn(freshState(), SessionLimits.defaults());
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
-    assertEquals(StopReason.REFUSAL, ended.reason());
+    assertEquals(FinishReason.CONTENT_FILTER, ended.reason());
   }
 
   /** A model whose one turn streams {@code chunks}, then completes. */
@@ -303,18 +302,12 @@ final class TurnRunnerTest {
     var state = freshState();
     var outcome = runner(model).runTurn(state, SessionLimits.defaults());
     assertEquals(FinishReason.ERROR, outcome.finishReason());
-    assertEquals("upstream boom", outcome.assistantContent());
+    assertEquals("", outcome.assistantContent());
+    assertEquals("upstream boom", outcome.streamError().getMessage());
     assertEquals(
         1, state.history().snapshot().size(), "error turn does not append assistant message");
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
-    assertEquals(StopReason.ERROR, ended.reason());
-  }
-
-  @Test
-  void onErrorWithNullMessageFallsBackToExceptionClassName() {
-    var model = streaming(ModelStreams.failing(new RuntimeException()));
-    var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
-    assertEquals("RuntimeException", outcome.assistantContent());
+    assertEquals(FinishReason.ERROR, ended.reason());
   }
 
   @Test
@@ -358,7 +351,7 @@ final class TurnRunnerTest {
     assertEquals(FinishReason.ERROR, outcome.finishReason());
     assertInstanceOf(InterruptedException.class, outcome.streamError());
     var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(events.size() - 1));
-    assertEquals(StopReason.ERROR, ended.reason());
+    assertEquals(FinishReason.ERROR, ended.reason());
   }
 
   @Test

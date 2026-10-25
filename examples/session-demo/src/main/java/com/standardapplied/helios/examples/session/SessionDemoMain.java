@@ -6,13 +6,11 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
-import com.standardapplied.helios.session.ConsoleEventPrinter;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
-import com.standardapplied.helios.session.files.InMemoryFileTracker;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
@@ -109,7 +107,7 @@ public final class SessionDemoMain {
     var tools =
         new ToolRegistry(
             List.of(
-                ReadTool.binding(ws, InMemoryFileTracker.create()),
+                ReadTool.binding(ws),
                 LsTool.binding(ws),
                 GlobTool.binding(ws),
                 GrepTool.binding(ws)));

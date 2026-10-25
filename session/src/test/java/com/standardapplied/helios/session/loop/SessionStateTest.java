@@ -285,26 +285,12 @@ final class SessionStateTest {
   }
 
   @Test
-  void contextWarningFlagStartsClear() {
-    var state = build();
-    assertFalse(state.contextWatermark().fired());
-  }
+  void theContextWarningFiresOncePerHistoryAndAReplacementReArmsIt() {
+    var history = build().history();
 
-  @Test
-  void tryFireContextWarningIsFirstWins() {
-    var state = build();
-    assertTrue(state.contextWatermark().tryFire());
-    assertTrue(state.contextWatermark().fired());
-    assertFalse(state.contextWatermark().tryFire(), "second call must return false");
-    assertTrue(state.contextWatermark().fired());
-  }
-
-  @Test
-  void resetContextWarningFlagReArms() {
-    var state = build();
-    state.contextWatermark().tryFire();
-    state.contextWatermark().reset();
-    assertFalse(state.contextWatermark().fired());
-    assertTrue(state.contextWatermark().tryFire(), "post-reset try must succeed again");
+    assertTrue(history.tryFireContextWarning());
+    assertFalse(history.tryFireContextWarning(), "a second fire on the same history is refused");
+    history.replace(List.of(Message.user("summary")));
+    assertTrue(history.tryFireContextWarning(), "the replaced history fires again");
   }
 }

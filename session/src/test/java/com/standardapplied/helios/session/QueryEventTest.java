@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.Instant;
@@ -265,8 +266,8 @@ final class QueryEventTest {
 
   @Test
   void turnEndedConstructsAndExposesFields() {
-    var e = new QueryEvent.TurnEnded(SID, TURN, TS, StopReason.END_TURN);
-    assertSame(StopReason.END_TURN, e.reason());
+    var e = new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP);
+    assertSame(FinishReason.STOP, e.reason());
   }
 
   @Test
@@ -443,7 +444,7 @@ final class QueryEventTest {
                 SID, TURN, TS, UserMessage.text("nope"), "MyHook", "policy violation"),
             new QueryEvent.ContextWarning(SID, TURN, TS, 0.5),
             new QueryEvent.ContextEdited(SID, TURN, TS, 1, 100L, 50L),
-            new QueryEvent.TurnEnded(SID, TURN, TS, StopReason.END_TURN),
+            new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP),
             new QueryEvent.TurnRetried(
                 SID,
                 TURN,

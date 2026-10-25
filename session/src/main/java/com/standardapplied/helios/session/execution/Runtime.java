@@ -19,19 +19,16 @@ public enum Runtime {
   BASH,
   /** Python 3 — script passed via {@code -c} or a temporary file. */
   PYTHON,
-  /**
-   * SQL via a provider-configured JDBC handler. Phase 5 declares the enum value but ships no
-   * built-in handler — a follow-up slice adds the JDBC allowlist plumbing.
-   */
+  /** SQL via a provider-configured JDBC handler. No built-in handler serves it. */
   SQL,
   /**
    * JShell — JDK 25 Java REPL, served by {@code helios-repl}'s {@code JShellExecutionProvider} over
    * the {@code JvmSandbox} / {@code ReplSession} substrate.
    */
   JSHELL,
-  /** R — for statistical / analytics workloads. No built-in handler in Phase 5. */
+  /** R — for statistical / analytics workloads. No built-in handler serves it. */
   R,
-  /** Node.js — for JavaScript workloads. No built-in handler in Phase 5. */
+  /** Node.js — for JavaScript workloads. No built-in handler serves it. */
   NODE,
   /**
    * Custom runtime — for provider-specific languages declared by name (e.g. {@code "groovy"},

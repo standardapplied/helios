@@ -411,7 +411,6 @@ drift.
 | `ToolDispatch.dispatch` accepted a zero timeout | the timeout must be positive, like `SessionLimits.toolTimeoutDefault` |
 | SSE `ToolResult` event: `"result":{"success":true,...}` | `"result":{"outcome":{"kind":"Succeeded"},...}`; the outcome object carries `kind` (the record's simple name) and the record's components, e.g. `{"kind":"TimedOut","limit":"PT1M"}`. The runtime adds the serializer to whatever `ObjectMapper` it is given |
 | JSONL `ToolCallCompleted`: `success` | `success` plus `"outcome":"<kind>"` |
-| `ConsoleEventPrinter`: `[result] <tool> FAILED: <output>` | `[result] <tool> <kind>: <output>` |
 
 **The dispatcher owns a tool call until its work actually ends.** The loop runs tool calls one at a
 time, and each runs on a virtual thread of its own with its own cancellation token, linked to the
@@ -685,7 +684,7 @@ argument. The presets no longer register `MemoryWrite` themselves; the session r
 |---|---|
 | `withPreset(SessionPresets.minimal())` | `SessionPresets.minimal(model)`, or `SessionOptions.newBuilder().withModel(model)` |
 | `withModel(model).withPreset(SessionPresets.readOnly(path))`, `workspace(path)`, `openEnded(path, provider)` | `SessionPresets.readOnly(model, path)`, `workspace(model, path)`, `openEnded(model, path, provider)` |
-| `SessionPresets.readOnly(WorkspaceRoot)`, for a trusted root (`new WorkspaceRoot(path, false)`) or another curated root | `SessionOptions.newBuilder().withModel(model).withTools(new ToolRegistry(List.of(ReadTool.binding(root, InMemoryFileTracker.create()), GlobTool.binding(root), GrepTool.binding(root), LsTool.binding(root)))).withPermission(Permission.planMode())` |
+| `SessionPresets.readOnly(WorkspaceRoot)`, for a trusted root (`new WorkspaceRoot(path, false)`) or another curated root | `SessionOptions.newBuilder().withModel(model).withTools(new ToolRegistry(List.of(ReadTool.binding(root), GlobTool.binding(root), GrepTool.binding(root), LsTool.binding(root)))).withPermission(Permission.planMode())` |
 | `SessionPresets.workspace(WorkspaceRoot)` | the same four bindings, `.withPermission(Permission.defaultInWorkspace()).withMemoryBackend(FileSystemMemoryBackend.of(root))` |
 | `SessionPresets.openEnded(WorkspaceRoot, ExecutionProvider)` | the `workspace` wiring above with `ExecuteTool.binding(provider)` added to the bindings, plus `.withExecutionProvider(provider)` |
 | A custom `SessionPreset` (`b -> b.withHook(hook)`) | an ordinary method that takes and returns a `SessionOptions.Builder` |
@@ -814,6 +813,23 @@ evaluate to `ALLOW`.
 | `Permission.planMode()` allowed `Read`, `LS`, `Glob`, `Grep` on `./**` | `Permission.empty(PLAN)`, deciding every call as before |
 | `Permission.defaultInWorkspace()` allowed the read tools, `MemoryRead` and `MemoryWrite`, and asked for `Write`, `Edit`, `MultiEdit` and `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask's `ApprovalRequest.rule()` is empty (the category default asks) |
 
+**The session drops its dead layers.** The file tracker, `StopReason`, the second "off"
+implementations and an implementation detail on `AgentSession` are gone. A typed `runBlocking` on
+a session built with an output schema accepts only that schema, and a `PostModelTurn` hook sees
+what a failed turn streamed rather than its error. To keep a read ledger, register a
+`PostToolUseHook` on `Read`: it receives each call's path and result.
+
+| 2.x | 3.0 |
+|---|---|
+| `FileTracker`, `InMemoryFileTracker`, `FileFingerprint`, `FileSnapshot` | removed; to keep a read ledger, register a `PostToolUseHook` on `Read` |
+| `ReadTool.binding(WorkspaceRoot, FileTracker)` | `ReadTool.binding(WorkspaceRoot)`; `Read` no longer hashes the file it reads, nor fails with `Read: I/O error fingerprinting` |
+| `QueryEvent.TurnEnded.reason()` → `StopReason` | the turn's `FinishReason`; SSE values change `END_TURN` → `STOP`, `TOOL_USE` → `TOOL_CALLS`, `MAX_TOKENS` → `LENGTH`, and `REFUSAL` splits into `REFUSAL` and `CONTENT_FILTER`; `StopReason` is removed |
+| `MemoryBackend.disabled()` | removed: do not set a memory backend |
+| `AgentSession.rawOutputCapturePolicy()` | removed; `runBlocking(msg, schema)` is now abstract, so an `AgentSession` implemented outside Helios implements it |
+| `runBlocking(msg, schema)` on a session built with a different schema parsed against the given one | throws `IllegalArgumentException` naming both types, before sending; pass the session's schema, or build the session without one |
+| A `PostModelTurn` hook on a failed turn saw the redacted error message as the response content | it sees the text the model streamed before the failure (empty when none); the error is in the terminal, redacted |
+| `ContextCompactor.disabled()` was documented as skipped by the loop | the loop calls it at the 0.95 watermark and it leaves the history unchanged, so a long session overflows and the provider's error ends it |
+
 ### Added
 
 - **`GET /sessions/{id}/questions` and `POST /sessions/{id}/questions/{questionId}`.** An HTTP
@@ -907,11 +923,6 @@ evaluate to `ALLOW`.
   stop that ends a turn's chunk stream from its response (finish reason `STOP` and zero usage when
   unset) and read its stop reason back as a `FinishReason` (`STOP` for a spelling that names none).
 - **`RedactionResult.mergeCounts(other)`** sums two streams' per-secret counts in encounter order.
-- **`session.ConsoleEventPrinter`** prints a session's event stream for a command-line host:
-  `session.events().subscribe(new ConsoleEventPrinter(System.out))`. Assistant text is written as
-  it streams and flushed at once; citations, tool use, tool results, blocked tools, turn ends, the
-  loop end and a stream error are written one line each. It writes only to the `PrintStream` it is
-  given. The session demo uses it in place of its own copy.
 - **`HttpClientFactory.createForDownloads()`**, the one factory client that follows redirects, for
   unauthenticated downloads such as Hugging Face files served from its CDN. It uses
   `Redirect.NORMAL`, which never follows `https` to `http`, and the 10-second connect timeout of

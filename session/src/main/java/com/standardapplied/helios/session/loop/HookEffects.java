@@ -2,7 +2,6 @@
 
 package com.standardapplied.helios.session.loop;
 
-import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -26,21 +25,10 @@ final class HookEffects {
     this.steeringQueue = steeringQueue;
   }
 
-  /** The {@link ResultMessage.Success} that ends the session with {@code text}. */
-  static ResultMessage.Success success(SessionState state, String text) {
-    return new ResultMessage.Success(
-        state.sessionId(),
-        text,
-        state.totals().usage(),
-        state.totals().cost(),
-        state.elapsed(),
-        state.totals().citations());
-  }
-
   /** Announce the {@code Stop} and record its {@link ResultMessage.Success} as the terminal. */
   void stop(SessionState state, String hookName, String phase, HookOutcome.Stop stop) {
     emitter.emitHookFired(state, hookName, phase, "Stop");
-    state.setTerminal(success(state, stop.result()));
+    state.setTerminal(StopClassifier.success(state, stop.result()));
   }
 
   /**

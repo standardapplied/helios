@@ -21,8 +21,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The session's default compactor through the loop: the history crosses the compaction watermark
- * after the first tool round, and the next model request carries no earlier assistant turn.
+ * The session's compactor through the loop: the history crosses the compaction watermark after the
+ * first tool round. The default compactor leaves the next model request with no earlier assistant
+ * turn; the disabled one leaves the whole conversation.
  */
 class DefaultCompactionSessionTest {
 
@@ -34,25 +35,8 @@ class DefaultCompactionSessionTest {
             .withTextTurn("the gist")
             .withTextTurn("done")
             .build();
-    var events = new CollectingSubscriber();
-    var options =
-        SessionOptions.newBuilder()
-            .withModel(model)
-            .withSystemPrompt("sys")
-            .withTools(new ToolRegistry(List.of(echo())))
-            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100L).build())
-            .withTokenCounter(
-                messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L)
-            .build();
 
-    try (var session = AgentSession.create(options)) {
-      session.events().subscribe(events);
-      session.send(UserMessage.text("go"));
-
-      assertInstanceOf(
-          ResultMessage.Success.class, Await.value("the session's result", session.result()));
-    }
-    events.awaitDone();
+    var events = runToSuccess(compactingAfterTheFirstToolResult(model));
 
     assertEquals(
         List.of(
@@ -60,6 +44,51 @@ class DefaultCompactionSessionTest {
         model.calls().getLast());
     assertEquals(3, model.calls().size());
     assertEquals(1, events.eventsOf(QueryEvent.ContextEdited.class).size());
+  }
+
+  @Test
+  void aDisabledCompactorWarnsOnceAndKeepsTheWholeHistory() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withToolCallsTurn(new ToolCall("c2", "echo", Map.of()))
+            .withTextTurn("done")
+            .build();
+
+    var events =
+        runToSuccess(
+            compactingAfterTheFirstToolResult(model)
+                .withContextCompactor(ContextCompactor.disabled()));
+
+    assertEquals(
+        List.of(Role.SYSTEM, Role.USER, Role.ASSISTANT, Role.TOOL, Role.ASSISTANT, Role.TOOL),
+        model.calls().getLast().stream().map(Message::role).toList());
+    assertEquals(1, events.eventsOf(QueryEvent.ContextWarning.class).size());
+    assertEquals(List.of(), events.eventsOf(QueryEvent.ContextEdited.class));
+  }
+
+  /** A session whose history crosses the compaction watermark once it holds a tool result. */
+  private static SessionOptions.Builder compactingAfterTheFirstToolResult(ScriptedModel model) {
+    return SessionOptions.newBuilder()
+        .withModel(model)
+        .withSystemPrompt("sys")
+        .withTools(new ToolRegistry(List.of(echo())))
+        .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100L).build())
+        .withTokenCounter(
+            messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L);
+  }
+
+  private static CollectingSubscriber runToSuccess(SessionOptions.Builder options) {
+    var events = new CollectingSubscriber();
+    try (var session = AgentSession.create(options.build())) {
+      session.events().subscribe(events);
+      session.send(UserMessage.text("go"));
+
+      assertInstanceOf(
+          ResultMessage.Success.class, Await.value("the session's result", session.result()));
+    }
+    events.awaitDone();
+    return events;
   }
 
   private static ToolBinding echo() {

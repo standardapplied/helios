@@ -14,9 +14,9 @@
  * core.agent.Agent} surface has been removed.
  *
  * <p>The public surface in {@code com.standardapplied.helios.session} carries the value types
- * ({@code UserMessage}, {@code StopReason}, {@code SerializedError}), the concurrency primitives,
- * the sealed event/result hierarchies, the session API, hooks, file tools, execution providers,
- * memory, audit, and the preset surface. Subsystem-specific packages (e.g. {@code
+ * ({@code UserMessage}, {@code SerializedError}), the concurrency primitives, the sealed
+ * event/result hierarchies, the session API, hooks, file tools, execution providers, memory, audit,
+ * and the preset surface. Subsystem-specific packages (e.g. {@code
  * com.standardapplied.helios.session.loop}) are exported as their first types land.
  */
 module com.standardapplied.helios.session {

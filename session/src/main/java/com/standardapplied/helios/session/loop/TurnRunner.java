@@ -15,7 +15,6 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
-import com.standardapplied.helios.session.StopReason;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolVisibilityContext;
 import java.util.List;
@@ -122,35 +121,31 @@ public final class TurnRunner {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", Usage.of(0, 0)));
     }
 
-    var attempts = modelCall.stream(state, limits, visibleTools(state));
-    var streamed = attempts.turn();
+    var streamed = modelCall.stream(state, limits, visibleTools(state));
     if (modelCall.selfCorrectSchema(state, streamed)) {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.totals().usage()));
     }
 
-    var streamOutcome = streamed.toOutcome(attempts.count(), collaborators.secrets().redactor());
     var toolCalls =
-        endedCleanly(streamOutcome.finishReason()) ? streamed.toolCalls() : List.<ToolCall>of();
+        endedCleanly(streamed.finishReason()) ? streamed.toolCalls() : List.<ToolCall>of();
 
-    if (streamOutcome.finishReason() != FinishReason.ERROR
-        && (!toolCalls.isEmpty() || !streamOutcome.assistantContent().isEmpty())) {
+    if (streamed.finishReason() != FinishReason.ERROR
+        && (!toolCalls.isEmpty() || !streamed.assistantContent().isEmpty())) {
       state
           .history()
-          .append(
-              Message.assistant(
-                  streamOutcome.assistantContent(), toolCalls, streamOutcome.metadata()));
+          .append(Message.assistant(streamed.assistantContent(), toolCalls, streamed.metadata()));
     }
     if (!toolCalls.isEmpty() && toolRound.run(state, toolCalls, limits)) {
       return turnEnded(state, outcomeAfterTerminate(state));
     }
-    accounting.add(state, streamOutcome.usage());
+    accounting.add(state, streamed.usage());
     state.totals().accumulateCitations(streamed.citations());
 
     var response =
         Response.newBuilder()
-            .withContent(streamOutcome.assistantContent())
-            .withFinishReason(streamOutcome.finishReason())
-            .withUsage(streamOutcome.usage())
+            .withContent(streamed.assistantContent())
+            .withFinishReason(streamed.finishReason())
+            .withUsage(streamed.usage())
             .withToolCalls(toolCalls)
             .withCitations(streamed.citations())
             .build();
@@ -160,9 +155,9 @@ public final class TurnRunner {
 
     var finalOutcome =
         toolCalls.isEmpty()
-            ? streamOutcome
+            ? streamed
             : new TurnOutcome(
-                FinishReason.TOOL_CALLS, streamOutcome.assistantContent(), streamOutcome.usage());
+                FinishReason.TOOL_CALLS, streamed.assistantContent(), streamed.usage());
     return turnEnded(state, finalOutcome);
   }
 
@@ -212,17 +207,7 @@ public final class TurnRunner {
             state.sessionId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
-            stopReasonOf(outcome.finishReason())));
+            outcome.finishReason()));
     return outcome;
-  }
-
-  private static StopReason stopReasonOf(FinishReason r) {
-    return switch (r) {
-      case STOP -> StopReason.END_TURN;
-      case TOOL_CALLS -> StopReason.TOOL_USE;
-      case LENGTH -> StopReason.MAX_TOKENS;
-      case CONTENT_FILTER, REFUSAL -> StopReason.REFUSAL;
-      case ERROR -> StopReason.ERROR;
-    };
   }
 }
