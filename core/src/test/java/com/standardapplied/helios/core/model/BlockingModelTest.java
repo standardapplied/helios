@@ -150,15 +150,14 @@ class BlockingModelTest {
   @Test
   void aCancellationTheCallThrowsIsThrownAsItself() {
     var cancelled = new CancellationException("upstream");
-    Thread.currentThread().interrupt();
+    var stream =
+        answering(
+                () -> {
+                  Thread.currentThread().interrupt();
+                  throw cancelled;
+                })
+            .chatStream(List.of(), List.of());
     try {
-      var stream =
-          answering(
-                  () -> {
-                    throw cancelled;
-                  })
-              .chatStream(List.of(), List.of());
-
       assertSame(cancelled, assertThrows(CancellationException.class, stream::hasNext));
     } finally {
       assertTrue(Thread.interrupted());
@@ -234,25 +233,60 @@ class BlockingModelTest {
   }
 
   @Test
-  void anInterruptOfTheReadingThreadEndsTheStreamInCancellationAndStaysSet() {
-    var refused = new IllegalStateException("interrupted call");
+  void aReadingThreadInterruptedBeforeTheFirstHasNextNeverRunsTheCallAndStaysSet() {
+    var stream =
+        answering(
+                () -> {
+                  try {
+                    new CountDownLatch(1).await();
+                  } catch (InterruptedException e) {
+                    return reply("swallowed the interrupt").build();
+                  }
+                  return reply("never").build();
+                })
+            .chatStream(List.of(), List.of());
+
     Thread.currentThread().interrupt();
     try {
-      var answered = answering(() -> reply("ignored the interrupt").build());
-      var failing =
-          answering(
-              () -> {
-                throw refused;
-              });
-
-      assertThrows(CancellationException.class, answered.chatStream(List.of(), List.of())::hasNext);
-      var cancelled =
-          assertThrows(
-              CancellationException.class, failing.chatStream(List.of(), List.of())::hasNext);
-      assertSame(refused, cancelled.getCause());
+      assertThrows(CancellationException.class, stream::hasNext);
     } finally {
       assertTrue(Thread.interrupted());
     }
+    assertEquals(0, calls.get());
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
+  void anInterruptOfTheReadingThreadDuringTheCallEndsTheStreamInCancellationAndStaysSet() {
+    var refused = new IllegalStateException("interrupted call");
+    var answered =
+        answering(
+            () -> {
+              Thread.currentThread().interrupt();
+              return reply("ignored the interrupt").build();
+            });
+    var failing =
+        answering(
+            () -> {
+              Thread.currentThread().interrupt();
+              throw refused;
+            });
+
+    try {
+      assertThrows(CancellationException.class, answered.chatStream(List.of(), List.of())::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    CancellationException cancelled;
+    try {
+      cancelled =
+          assertThrows(
+              CancellationException.class, failing.chatStream(List.of(), List.of())::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertSame(refused, cancelled.getCause());
+    assertEquals(2, calls.get());
   }
 
   @Test

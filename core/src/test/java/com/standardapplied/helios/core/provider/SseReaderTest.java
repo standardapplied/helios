@@ -894,6 +894,35 @@ class SseReaderTest {
   }
 
   @Test
+  void anInterruptWhileTheBodyOfARetryableRefusalIsReadWholeThrowsCancellationAndStaysSet() {
+    var refusal =
+        new Closing(
+            new InputStream() {
+              @Override
+              public int read() {
+                Thread.currentThread().interrupt();
+                return -1;
+              }
+            });
+    var client =
+        FakeHttpClient.sendingAsync(
+            request ->
+                CompletableFuture.completedFuture(
+                    new FakeHttpResponse(request, 503, Map.of(), () -> refusal)));
+    var reader = lazy(client, post(URI.create("http://example.invalid")));
+
+    CancellationException cancelled;
+    try {
+      cancelled = assertThrows(CancellationException.class, reader::hasNext);
+    } finally {
+      assertTrue(Thread.interrupted());
+    }
+    assertNull(cancelled.getCause());
+    assertTrue(refusal.closed);
+    assertFalse(reader.hasNext());
+  }
+
+  @Test
   void anUncheckedOrErrorFailureOfTheRequestIsThrownAsItselfAndAnyOtherIsAFailureToCommunicate() {
     var refused = new IllegalStateException("refused");
     var fatal = new StackOverflowError();
