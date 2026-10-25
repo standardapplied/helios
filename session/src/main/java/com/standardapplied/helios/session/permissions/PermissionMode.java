@@ -13,7 +13,8 @@ package com.standardapplied.helios.session.permissions;
  *   <li>{@link #DEFAULT} — ask on writes / execution, allow reads. The standard interactive mode.
  *   <li>{@link #ACCEPT_EDITS} — allow workspace writes silently. Useful for batch edit flows where
  *       the user has pre-authorised the session.
- *   <li>{@link #BYPASS_PERMISSIONS} — allow everything. The sandbox is the real wall.
+ *   <li>{@link #BYPASS_PERMISSIONS} — allow every category by default; deny and ask rules still
+ *       apply. The sandbox is the real wall.
  *   <li>{@link #PLAN} — read-only mode. No writes, no execution; useful for an outline pass.
  *   <li>{@link #LOCKED_DOWN} — deny everything not explicitly allowed. The "sandbox is the world"
  *       mode for sessions where every capability except code execution should refuse by default.
@@ -25,7 +26,7 @@ public enum PermissionMode {
   DEFAULT,
   /** Allow workspace writes silently. */
   ACCEPT_EDITS,
-  /** Allow everything. */
+  /** Allow every category by default; deny and ask rules still apply. */
   BYPASS_PERMISSIONS,
   /** Read-only — no writes, no execution. */
   PLAN,

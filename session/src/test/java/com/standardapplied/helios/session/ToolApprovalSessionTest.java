@@ -16,7 +16,6 @@ import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -66,7 +65,7 @@ final class ToolApprovalSessionTest {
 
   @Test
   void anAskRulePatternCarryingASecretIsRedactedInTheQuestion() {
-    var askSecret = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "secret*value");
+    var askSecret = PermissionRule.of("Write", "secret*value");
     var secrets = new SecretRegistry();
     secrets.register("PASSWORD", "secret*value");
     var run =

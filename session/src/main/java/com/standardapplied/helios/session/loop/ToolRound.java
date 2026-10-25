@@ -182,7 +182,7 @@ final class ToolRound {
         ToolAuthorization.admit(
             collaborators.toolDispatch().registry(),
             collaborators.authorization(),
-            collaborators.decidingRule(),
+            collaborators.ruleDecision(),
             collaborators.secrets(),
             call);
     return switch (verdict) {

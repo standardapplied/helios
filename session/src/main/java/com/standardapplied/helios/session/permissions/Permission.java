@@ -5,27 +5,27 @@
 package com.standardapplied.helios.session.permissions;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Stream;
 
 /**
  * Per-session UX-level policy: which tool calls to allow silently, which to ask the user about, and
  * which to deny outright. Sandboxes are the real security boundary; permissions are the user-facing
  * guardrail per spec §12.
  *
- * <p>Evaluation order (see {@link DefaultPermissionEvaluator} for the implementation): DENY rules
- * win first; then {@link PermissionMode#BYPASS_PERMISSIONS} short-circuits to ALLOW; then explicit
- * ALLOW rules; then explicit ASK rules; then the category-based default policy.
+ * <p>The most restrictive matching rule decides, in every mode: the first matching {@code deny}
+ * rule, else the first matching {@code ask} rule, else the first matching {@code allow} rule, else
+ * the mode's default for the tool's category (see {@link DefaultPermissionEvaluator}). So an allow
+ * never carves an exception out of a matching ask or deny: to ask about {@code ./secrets/**} except
+ * one file, list the file's siblings as asks instead, or, where the mode already asks for the
+ * tool's category, drop the broad ask and keep the allow.
  *
  * <p>A path tool's rule matches its canonical path ({@code .} or {@code ./a/b} in a workspace,
  * {@code /memories/} or {@code /memories/a/b} in memory), however the model spelled it; see {@link
  * RuleMatcher} for the glob dialect. A DENY rule also withholds the entries a walking tool ({@code
  * Glob}, {@code Grep}, {@code LS}, a {@code MemoryRead} listing) would return below its path, and a
  * {@code Read} DENY or ASK rule that decides a file withholds it from {@code Grep}, without asking.
- * The allow that admitted a walk's start covers what it finds except what these rules withhold; a
- * mode or category default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not a rule and
+ * The decision that admitted a walk's start covers what it finds except what these rules withhold;
+ * a mode or category default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not a rule and
  * withholds nothing.
  *
  * @param mode the coarse policy lever; non-null
@@ -46,57 +46,29 @@ public record Permission(
   public static final String NAME = "Permission";
 
   /**
-   * Canonical constructor; defensively copies all three rule lists. A matched rule decides with its
-   * own effect, so each list holds only rules of its effect.
+   * Canonical constructor; defensively copies all three rule lists.
    *
    * @throws NullPointerException if any argument is null or any list contains null elements
-   * @throws IllegalArgumentException if a rule's effect is not its list's
    */
   public Permission {
     Objects.requireNonNull(mode, "mode must not be null");
-    Objects.requireNonNull(allow, "allow must not be null");
-    Objects.requireNonNull(ask, "ask must not be null");
-    Objects.requireNonNull(deny, "deny must not be null");
-    allow = rulesOf(PermissionEffect.ALLOW, allow);
-    ask = rulesOf(PermissionEffect.ASK, ask);
-    deny = rulesOf(PermissionEffect.DENY, deny);
-  }
-
-  private static List<PermissionRule> rulesOf(PermissionEffect effect, List<PermissionRule> rules) {
-    var copy = List.copyOf(rules);
-    for (var rule : copy) {
-      if (rule.effect() != effect) {
-        throw new IllegalArgumentException(
-            "the "
-                + effect.name().toLowerCase(Locale.ROOT)
-                + " list holds a rule for "
-                + rule.toolName()
-                + " whose effect is "
-                + rule.effect());
-      }
-    }
-    return copy;
+    allow = List.copyOf(Objects.requireNonNull(allow, "allow must not be null"));
+    ask = List.copyOf(Objects.requireNonNull(ask, "ask must not be null"));
+    deny = List.copyOf(Objects.requireNonNull(deny, "deny must not be null"));
   }
 
   /**
-   * The canonical "interactive workspace" preset: reads, listings and searches are allowed silently
-   * on {@code ./**}, which matches every canonical workspace path, the root {@code .} included, and
-   * memory I/O on {@code /memories/**}; execution is asked, and every other write by its category
-   * default. No explicit denies — users add their own.
+   * The canonical "interactive workspace" preset: {@link PermissionMode#DEFAULT}, which allows
+   * reads, listings and searches and asks before writes and execution, plus memory writes allowed
+   * on {@code /memories/**}. No asks or denies — users add their own.
    *
    * @return a fresh preset
    */
   public static Permission defaultInWorkspace() {
     return new Permission(
         PermissionMode.DEFAULT,
-        List.of(
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "LS", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Glob", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-        List.of(PermissionRule.any(PermissionEffect.ASK, "Execute")),
+        List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
+        List.of(),
         List.of());
   }
 
@@ -107,15 +79,7 @@ public record Permission(
    * @return a fresh preset
    */
   public static Permission planMode() {
-    return new Permission(
-        PermissionMode.PLAN,
-        List.of(
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "LS", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Glob", "./**"),
-            PermissionRule.withGlob(PermissionEffect.ALLOW, "Grep", "./**")),
-        List.of(),
-        List.of());
+    return empty(PermissionMode.PLAN);
   }
 
   /**
@@ -144,26 +108,8 @@ public record Permission(
   public static Permission lockedDown() {
     return new Permission(
         PermissionMode.LOCKED_DOWN,
-        List.of(
-            PermissionRule.any(PermissionEffect.ALLOW, "Execute"),
-            PermissionRule.any(PermissionEffect.ALLOW, "AskUserQuestion")),
+        List.of(PermissionRule.any("Execute"), PermissionRule.any("AskUserQuestion")),
         List.of(),
         List.of());
-  }
-
-  /**
-   * Look up an explicit rule for the given tool name in this permission's rule lists. Returns the
-   * first match across {@code deny}, then {@code allow}, then {@code ask} — only used by
-   * diagnostics, not by the evaluator (which inspects each list independently).
-   *
-   * @param toolName the tool name to look up; non-null
-   * @return the first matching rule, or empty
-   */
-  public Optional<PermissionRule> firstRuleFor(String toolName) {
-    Objects.requireNonNull(toolName, "toolName must not be null");
-    return Stream.of(deny, allow, ask)
-        .flatMap(List::stream)
-        .filter(r -> r.toolName().equals(toolName))
-        .findFirst();
   }
 }

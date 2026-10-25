@@ -88,27 +88,48 @@ final class PathToolSessions {
 
   /** Options of a session holding the path tools and memory under {@code permission}. */
   SessionOptions.Builder options(Permission permission) {
-    return withoutPolicy().withPermission(permission);
+    return withDefaultPolicy().withPermission(permission);
   }
 
-  /** Options of a session holding the path tools and memory with no permission policy. */
-  SessionOptions.Builder withoutPolicy() {
+  /** Options of a session holding the path tools and memory with the default permission policy. */
+  SessionOptions.Builder withDefaultPolicy() {
     return SessionOptions.newBuilder()
         .withTools(tools(workspace))
         .withMemoryBackend(FileSystemMemoryBackend.of(workspace));
   }
 
-  /** A policy of {@code mode} holding {@code rules}, each in the list of its effect. */
-  static Permission policy(PermissionMode mode, PermissionRule... rules) {
-    return new Permission(
-        mode,
-        byEffect(rules, PermissionEffect.ALLOW),
-        byEffect(rules, PermissionEffect.ASK),
-        byEffect(rules, PermissionEffect.DENY));
+  /**
+   * A rule with the list of a policy it goes in.
+   *
+   * @param effect the list: allow, ask or deny
+   * @param rule the rule
+   */
+  record ListedRule(PermissionEffect effect, PermissionRule rule) {}
+
+  /** A rule over {@code glob}, for the {@code effect} list. */
+  static ListedRule rule(PermissionEffect effect, String tool, String glob) {
+    return new ListedRule(effect, PermissionRule.of(tool, glob));
   }
 
-  private static List<PermissionRule> byEffect(PermissionRule[] rules, PermissionEffect effect) {
-    return Stream.of(rules).filter(rule -> rule.effect() == effect).toList();
+  /** A rule over every call of {@code tool}, for the {@code effect} list. */
+  static ListedRule rule(PermissionEffect effect, String tool) {
+    return new ListedRule(effect, PermissionRule.any(tool));
+  }
+
+  /** A policy of {@code mode} holding {@code rules}, each in the list of its effect. */
+  static Permission policy(PermissionMode mode, ListedRule... rules) {
+    return new Permission(
+        mode,
+        listOf(rules, PermissionEffect.ALLOW),
+        listOf(rules, PermissionEffect.ASK),
+        listOf(rules, PermissionEffect.DENY));
+  }
+
+  private static List<PermissionRule> listOf(ListedRule[] rules, PermissionEffect effect) {
+    return Stream.of(rules)
+        .filter(listed -> listed.effect() == effect)
+        .map(ListedRule::rule)
+        .toList();
   }
 
   static ToolCall call(String tool, Map<String, Object> args) {

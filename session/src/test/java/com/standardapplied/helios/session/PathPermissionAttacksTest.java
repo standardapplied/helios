@@ -8,6 +8,7 @@ import static com.standardapplied.helios.session.PathToolSessions.call;
 import static com.standardapplied.helios.session.PathToolSessions.output;
 import static com.standardapplied.helios.session.PathToolSessions.policy;
 import static com.standardapplied.helios.session.PathToolSessions.read;
+import static com.standardapplied.helios.session.PathToolSessions.rule;
 import static com.standardapplied.helios.session.WriteToolSessions.run;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ToolOutcome;
+import com.standardapplied.helios.session.PathToolSessions.ListedRule;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.LsTool;
@@ -26,7 +28,6 @@ import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -48,8 +49,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 final class PathPermissionAttacksTest {
 
-  private static final PermissionRule DENY_READ_SECRETS =
-      PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, "./secrets/**");
+  private static final ListedRule DENY_READ_SECRETS =
+      rule(PermissionEffect.DENY, ReadTool.NAME, "./secrets/**");
   private static final ToolOutcome DENIED_KEY =
       new ToolOutcome.Rejected(
           "Permission", "deny rule Read(./secrets/**) matched Read(./secrets/key)");
@@ -182,9 +183,7 @@ final class PathPermissionAttacksTest {
   @Test
   void anAskTheUserRefusedIsAskedOnTheCanonicalKeyAndNothingIsRead() {
     var askSecrets =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.ASK, ReadTool.NAME, "./secrets/**"));
 
     var run =
         run(
@@ -221,9 +220,7 @@ final class PathPermissionAttacksTest {
   @ValueSource(strings = {LsTool.NAME, GlobTool.NAME, GrepTool.NAME})
   void aWalkThroughALinkToADeniedDirectoryIsRefused(String tool) {
     var permission =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, tool, "./secrets/**"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.DENY, tool, "./secrets/**"));
 
     var run =
         run(sessions.options(permission), call(tool, Map.of("pattern", "**", "path", "docs/sec")));
@@ -237,9 +234,7 @@ final class PathPermissionAttacksTest {
   @Test
   void aGlobPatternReachingIntoADeniedDirectoryFindsNothingThere() {
     var permission =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, GlobTool.NAME, "./secrets/**"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.DENY, GlobTool.NAME, "./secrets/**"));
 
     var run =
         run(sessions.options(permission), call(GlobTool.NAME, Map.of("pattern", "secrets/*")));
@@ -262,7 +257,7 @@ final class PathPermissionAttacksTest {
             .withPermission(
                 policy(
                     PermissionMode.DEFAULT,
-                    PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, "secrets/**")));
+                    rule(PermissionEffect.DENY, ReadTool.NAME, "secrets/**")));
 
     assertEquals(
         "rule Read(secrets/**) can never match: Read keys are canonical paths such as"
@@ -279,8 +274,7 @@ final class PathPermissionAttacksTest {
             .withTools(sessions.tools(new WorkspaceRoot(sessions.root, false)))
             .withPermission(
                 policy(
-                    PermissionMode.DEFAULT,
-                    PermissionRule.withGlob(PermissionEffect.DENY, ReadTool.NAME, spelled)));
+                    PermissionMode.DEFAULT, rule(PermissionEffect.DENY, ReadTool.NAME, spelled)));
 
     assertEquals(
         "rule Read("
@@ -300,10 +294,10 @@ final class PathPermissionAttacksTest {
     Files.createSymbolicLink(memory.resolve("link"), sessions.root.resolve("secrets"));
     Files.createSymbolicLink(memory.resolve("leak"), sessions.root.resolve("secrets/key"));
 
-    var view = run(sessions.withoutPolicy(), call(MemoryReadTool.NAME, Map.of("path", path)));
+    var view = run(sessions.withDefaultPolicy(), call(MemoryReadTool.NAME, Map.of("path", path)));
     var list =
         run(
-            sessions.withoutPolicy(),
+            sessions.withDefaultPolicy(),
             call(MemoryReadTool.NAME, Map.of("path", "/memories/", "list", true)));
 
     assertNoSecretEmitted(view);
@@ -318,11 +312,11 @@ final class PathPermissionAttacksTest {
 
     var view =
         run(
-            sessions.withoutPolicy(),
+            sessions.withDefaultPolicy(),
             call(MemoryReadTool.NAME, Map.of("path", "/memories/key.md")));
     var list =
         run(
-            sessions.withoutPolicy(),
+            sessions.withDefaultPolicy(),
             call(MemoryReadTool.NAME, Map.of("path", "/memories/", "list", true)));
 
     assertNoSecretEmitted(view);
@@ -337,8 +331,7 @@ final class PathPermissionAttacksTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            PermissionRule.withGlob(
-                PermissionEffect.DENY, MemoryReadTool.NAME, "/memories/locked/*"));
+            rule(PermissionEffect.DENY, MemoryReadTool.NAME, "/memories/locked/*"));
     var options =
         SessionOptions.newBuilder()
             .withTools(new ToolRegistry(List.of()))
@@ -354,9 +347,7 @@ final class PathPermissionAttacksTest {
   @ValueSource(strings = {"/elsewhere/x.md", "/memories/../x.md"})
   void aListedEntryThatIsNoMemoryPathIsMatchedAsListed(String listed) {
     var permission =
-        policy(
-            PermissionMode.DEFAULT,
-            PermissionRule.withGlob(PermissionEffect.DENY, MemoryReadTool.NAME, "**/x.md"));
+        policy(PermissionMode.DEFAULT, rule(PermissionEffect.DENY, MemoryReadTool.NAME, "**/x.md"));
     var options =
         SessionOptions.newBuilder()
             .withTools(new ToolRegistry(List.of()))

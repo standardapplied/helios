@@ -25,7 +25,6 @@ import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
@@ -73,7 +72,7 @@ final class Phase5AcceptanceTest {
   private static Permission allowingExecute(PermissionRule... deny) {
     return new Permission(
         PermissionMode.DEFAULT,
-        List.of(PermissionRule.any(PermissionEffect.ALLOW, ExecuteTool.NAME)),
+        List.of(PermissionRule.any(ExecuteTool.NAME)),
         List.of(),
         List.of(deny));
   }
@@ -128,9 +127,7 @@ final class Phase5AcceptanceTest {
   void denyRuleBlocksBashCallToForbiddenBinary() throws Exception {
     assumeBashAvailable();
     var model = executing(Map.of("runtime", "BASH", "script", "rm -rf /tmp/should-not-happen"));
-    var permission =
-        allowingExecute(
-            PermissionRule.withGlob(PermissionEffect.DENY, ExecuteTool.NAME, "BASH/**rm **"));
+    var permission = allowingExecute(PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **"));
 
     var run = run("phase5-deny-", model, permission, "try a forbidden command");
 

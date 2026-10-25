@@ -8,7 +8,6 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -57,15 +56,15 @@ final class ToolAuthorization {
   record Refused(String reason) implements Verdict {}
 
   /**
-   * Decide {@code call}: canonicalise it through its binding, whether or not a policy is set, and
-   * authorise the canonical call. A call {@code tools} binds no tool for is admitted unchanged and
-   * dispatch answers it {@code NotFound}, policy or none. A call whose canonicalisation throws, or
-   * whose key carries a secret of {@code secrets}, is refused before {@code authorization} sees it,
-   * so no approval prompt or event shows the secret.
+   * Decide {@code call}: canonicalise it through its binding and authorise the canonical call. A
+   * call {@code tools} binds no tool for is admitted unchanged and dispatch answers it {@code
+   * NotFound}. A call whose canonicalisation throws, or whose key carries a secret of {@code
+   * secrets}, is refused before {@code authorization} sees it, so no approval prompt or event shows
+   * the secret.
    *
    * @param tools the registry dispatch looks the call up in
    * @param authorization the session's permission check of a canonical call
-   * @param decidingRule the policy rule that decides a key, if one does
+   * @param ruleDecision the decision of the policy rule that decides a key, if one does
    * @param secrets the session's secrets, which no permission key may carry
    * @param call the final call
    * @return the canonical call with what it withholds, or why it is refused
@@ -73,7 +72,7 @@ final class ToolAuthorization {
   static Verdict admit(
       ToolRegistry tools,
       Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
-      Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
+      Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision,
       SecretRegistry secrets,
       ToolCall call) {
     var registered = tools.get(call.name());
@@ -93,7 +92,7 @@ final class ToolAuthorization {
     }
     return refusal(authorization, canonical)
         .<Verdict>map(Refused::new)
-        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, decidingRule)));
+        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, ruleDecision)));
   }
 
   private static Optional<String> refusal(
@@ -125,23 +124,23 @@ final class ToolAuthorization {
    * path argument names in {@link ToolBinding.PathArgument#contentRulesOf}.
    */
   private static Predicate<String> withheld(
-      ToolBinding binding, Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule) {
+      ToolBinding binding, Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision) {
     var contentTools =
         binding.pathArgument().map(ToolBinding.PathArgument::contentRulesOf).orElse(Set.of());
     return key ->
-        decidedBy(decidingRule, binding.name(), key, OWN_RULES)
+        decidedBy(ruleDecision, binding.name(), key, OWN_RULES)
             || contentTools.stream()
-                .anyMatch(tool -> decidedBy(decidingRule, tool, key, CONTENT_RULES));
+                .anyMatch(tool -> decidedBy(ruleDecision, tool, key, CONTENT_RULES));
   }
 
   private static boolean decidedBy(
-      Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
+      Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision,
       String tool,
       String key,
       Set<PermissionEffect> effects) {
-    return decidingRule
+    return ruleDecision
         .apply(new ToolPermissionKey(tool, key))
-        .filter(rule -> effects.contains(rule.effect()))
+        .filter(decision -> effects.contains(decision.effect()))
         .isPresent();
   }
 

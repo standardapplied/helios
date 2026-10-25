@@ -23,7 +23,6 @@ import com.standardapplied.helios.session.permissions.ApprovalRequest;
 import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.permissions.ToolApprover;
@@ -52,8 +51,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 final class ToolAuthorizationTest {
 
-  private static final PermissionRule ASK_WRITE =
-      PermissionRule.withGlob(PermissionEffect.ASK, "Write", "/tmp/**");
+  private static final PermissionRule ASK_WRITE = PermissionRule.of("Write", "/tmp/**");
   private static final ToolCall WRITE = new ToolCall("c1", "Write", Map.of("path", "/tmp/a"));
 
   private final HookLoop loop = new HookLoop();
@@ -197,7 +195,7 @@ final class ToolAuthorizationTest {
                     .withPathArgument(
                         ToolBinding.PathArgument.required("path", WorkspaceRoot.of(tmp)))
                     .build()));
-    var askDocs = PermissionRule.withGlob(PermissionEffect.ASK, "Write", "./docs/**");
+    var askDocs = PermissionRule.of("Write", "./docs/**");
     var model =
         ScriptedModel.newBuilder()
             .withToolCallsTurn(new ToolCall("c1", "Write", Map.of("path", "docs/../docs/a.txt")))
@@ -327,7 +325,7 @@ final class ToolAuthorizationTest {
             canonical -> {
               throw new AssertionError("authorization must not run");
             },
-            key -> Optional.of(PermissionRule.any(PermissionEffect.DENY, key.toolName())),
+            key -> Optional.of(PermissionDecision.deny("denied by the test")),
             new SecretRegistry(),
             call);
 

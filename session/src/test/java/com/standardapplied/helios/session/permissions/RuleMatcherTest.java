@@ -23,28 +23,28 @@ final class RuleMatcherTest {
 
   @Test
   void differentToolNameDoesNotMatch() {
-    var rule = PermissionRule.any(PermissionEffect.ALLOW, "Read");
+    var rule = PermissionRule.any("Read");
     var key = ToolPermissionKey.of("Write");
     assertFalse(matcher.matches(key, rule));
   }
 
   @Test
   void sameToolNameWithAbsentPatternMatches() {
-    var rule = PermissionRule.any(PermissionEffect.ALLOW, "Read");
+    var rule = PermissionRule.any("Read");
     var key = new ToolPermissionKey("Read", "/anything");
     assertTrue(matcher.matches(key, rule));
   }
 
   @Test
   void emptyCanonicalArgsMatchAnyArgsRule() {
-    var rule = PermissionRule.any(PermissionEffect.ALLOW, "Execute");
+    var rule = PermissionRule.any("Execute");
     var key = new ToolPermissionKey("Execute", "");
     assertTrue(matcher.matches(key, rule));
   }
 
   @Test
   void matchesRejectsNullKey() {
-    var rule = PermissionRule.any(PermissionEffect.ALLOW, "Read");
+    var rule = PermissionRule.any("Read");
     assertThrows(NullPointerException.class, () -> matcher.matches(null, rule));
   }
 
@@ -58,8 +58,7 @@ final class RuleMatcherTest {
 
   private boolean globMatches(String glob, String canonical) {
     return matcher.matches(
-        new ToolPermissionKey("Read", canonical),
-        PermissionRule.withGlob(PermissionEffect.DENY, "Read", glob));
+        new ToolPermissionKey("Read", canonical), PermissionRule.of("Read", glob));
   }
 
   @ParameterizedTest(name = "{0} matches {1}: {2}")
@@ -152,22 +151,22 @@ final class RuleMatcherTest {
 
   @Test
   void firstMatchReturnsEarliestRule() {
-    var first = PermissionRule.any(PermissionEffect.ALLOW, "Read");
-    var second = PermissionRule.any(PermissionEffect.DENY, "Read");
+    var first = PermissionRule.any("Read");
+    var second = PermissionRule.any("Read");
     var match = matcher.firstMatch(ToolPermissionKey.of("Read"), List.of(first, second));
     assertEquals(first, match.orElseThrow());
   }
 
   @Test
   void firstMatchReturnsEmptyForNoMatch() {
-    var rules = List.of(PermissionRule.any(PermissionEffect.ALLOW, "Read"));
+    var rules = List.of(PermissionRule.any("Read"));
     assertTrue(matcher.firstMatch(ToolPermissionKey.of("Write"), rules).isEmpty());
   }
 
   @Test
   void firstMatchSkipsMismatchingPattern() {
-    var skip = PermissionRule.withGlob(PermissionEffect.DENY, "Read", "/private/**");
-    var hit = PermissionRule.withGlob(PermissionEffect.ALLOW, "Read", "/workspace/**");
+    var skip = PermissionRule.of("Read", "/private/**");
+    var hit = PermissionRule.of("Read", "/workspace/**");
     var match =
         matcher.firstMatch(new ToolPermissionKey("Read", "/workspace/foo.txt"), List.of(skip, hit));
     assertEquals(hit, match.orElseThrow());

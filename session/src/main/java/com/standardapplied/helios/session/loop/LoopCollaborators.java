@@ -8,7 +8,6 @@ import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.time.Clock;
@@ -29,9 +28,9 @@ import java.util.function.Function;
  *     the call the {@code PreToolUse} hooks leave once canonicalised, with its key; only an {@code
  *     ALLOW} decision runs the call, and anything else, {@code null} or a thrown exception refuses
  *     it; non-null
- * @param decidingRule the policy rule that decides a key, if one does; a tool walking below its
- *     path withholds every entry its own DENY rule decides, or a DENY or ASK rule of a tool whose
- *     content it returns; non-null
+ * @param ruleDecision the decision of the policy rule that decides a key, if one does; a tool
+ *     walking below its path withholds every entry its own DENY rule decides, or a DENY or ASK rule
+ *     of a tool whose content it returns; non-null
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages; non-null
  * @param eventSink consumer for every {@link QueryEvent} the loop emits; non-null
@@ -42,7 +41,7 @@ public record LoopCollaborators(
     HookRegistry hooks,
     ToolDispatch toolDispatch,
     Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
-    Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule,
+    Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision,
     SteeringQueue steeringQueue,
     Consumer<QueryEvent> eventSink,
     Function<SessionState, HookContext> hookContextFactory,
@@ -57,7 +56,7 @@ public record LoopCollaborators(
     Objects.requireNonNull(hooks, "hooks must not be null");
     Objects.requireNonNull(toolDispatch, "toolDispatch must not be null");
     Objects.requireNonNull(authorization, "authorization must not be null");
-    Objects.requireNonNull(decidingRule, "decidingRule must not be null");
+    Objects.requireNonNull(ruleDecision, "ruleDecision must not be null");
     Objects.requireNonNull(steeringQueue, "steeringQueue must not be null");
     Objects.requireNonNull(eventSink, "eventSink must not be null");
     Objects.requireNonNull(hookContextFactory, "hookContextFactory must not be null");
@@ -92,7 +91,7 @@ public record LoopCollaborators(
     private HookRegistry hooks;
     private ToolDispatch toolDispatch;
     private Function<ToolBinding.CanonicalCall, PermissionDecision> authorization;
-    private Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule;
+    private Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision;
     private SteeringQueue steeringQueue;
     private Consumer<QueryEvent> eventSink;
     private Function<SessionState, HookContext> hookContextFactory;
@@ -135,14 +134,15 @@ public record LoopCollaborators(
     }
 
     /**
-     * Set the policy rule that decides a key, which withholds an entry a walking tool would return.
+     * Set the decision of the policy rule that decides a key, which withholds an entry a walking
+     * tool would return.
      *
-     * @param decidingRule non-null
+     * @param ruleDecision non-null
      * @return this builder
      */
-    public Builder withDecidingRule(
-        Function<ToolPermissionKey, Optional<PermissionRule>> decidingRule) {
-      this.decidingRule = decidingRule;
+    public Builder withRuleDecision(
+        Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision) {
+      this.ruleDecision = ruleDecision;
       return this;
     }
 
@@ -201,7 +201,7 @@ public record LoopCollaborators(
           hooks,
           toolDispatch,
           authorization,
-          decidingRule,
+          ruleDecision,
           steeringQueue,
           eventSink,
           hookContextFactory,

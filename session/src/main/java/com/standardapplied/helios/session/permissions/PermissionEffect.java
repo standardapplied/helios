@@ -5,7 +5,8 @@
 package com.standardapplied.helios.session.permissions;
 
 /**
- * Decision a {@link PermissionRule} carries when it matches.
+ * The effect of a {@link PermissionDecision}: the effect of the {@link Permission} list whose rule
+ * decided, or of the mode's default for the tool's category.
  *
  * <ul>
  *   <li>{@link #ALLOW} — proceed with the call.

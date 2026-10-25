@@ -18,9 +18,6 @@ import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.permissions.PermissionEffect;
-import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -116,18 +113,10 @@ public final class SessionDemoMain {
                 LsTool.binding(ws),
                 GlobTool.binding(ws),
                 GrepTool.binding(ws)));
-    var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryRead", "/memories/**"),
-                PermissionRule.withGlob(PermissionEffect.ALLOW, "MemoryWrite", "/memories/**")),
-            List.of(),
-            List.of());
     return SessionOptions.newBuilder()
         .withModel(model)
         .withTools(tools)
-        .withPermission(permission)
+        .withPermission(Permission.defaultInWorkspace())
         .withMemoryBackend(FileSystemMemoryBackend.of(ws));
   }
 
