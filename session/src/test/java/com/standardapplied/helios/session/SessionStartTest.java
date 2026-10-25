@@ -159,9 +159,8 @@ final class SessionStartTest {
 
     var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
 
-    Await.termination(
-        "the publisher executor to end", session.lifecycleForTests().events().executor());
-    Await.termination("the scheduler to end", session.lifecycleForTests().scheduler());
+    Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+    Await.termination("the scheduler to end", session.lifecycle.scheduler());
     assertTrue(session.result().isDone(), kind + " settles the result");
     session.close();
     assertEquals(0, provider.ends.get());
@@ -181,9 +180,8 @@ final class SessionStartTest {
             ResultMessage.ErrorProviderUnavailable.class,
             Await.value("the result", session.result()));
     assertEquals("onSessionStart did not return within PT0.05S", refusal.reason());
-    Await.termination(
-        "the publisher executor to end", session.lifecycleForTests().events().executor());
-    Await.termination("the scheduler to end", session.lifecycleForTests().scheduler());
+    Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+    Await.termination("the scheduler to end", session.lifecycle.scheduler());
   }
 
   @Test

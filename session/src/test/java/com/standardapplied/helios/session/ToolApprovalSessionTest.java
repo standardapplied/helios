@@ -13,6 +13,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.ask.AskUserQuestionOption;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
@@ -94,6 +95,28 @@ final class ToolApprovalSessionTest {
 
     assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
     assertEquals(List.of(Map.<String, Object>of("path", "/tmp/a")), executed);
+  }
+
+  @Test
+  void anOpenApprovalIsAPendingQuestionUntilItIsAnswered() {
+    var listed = new CompletableFuture<List<AskUserQuestionRequest>>();
+    var afterAnswer = new CompletableFuture<List<AskUserQuestionRequest>>();
+    Function<AgentSession, Consumer<QueryEvent>> reactions =
+        session ->
+            event -> {
+              if (event instanceof QueryEvent.QuestionAsked question) {
+                var id = question.request().questionId();
+                listed.complete(session.pendingQuestions());
+                session.answer(id, AskUserQuestionResponse.single(id, "Allow"));
+                afterAnswer.complete(session.pendingQuestions());
+              }
+            };
+
+    var run = run(options(Permission.empty(PermissionMode.DEFAULT)), reactions, write("/tmp/a"));
+
+    var request = run.events().eventsOf(QueryEvent.QuestionAsked.class).getFirst().request();
+    assertEquals(List.of(request), Await.value("the listing while asked", listed));
+    assertEquals(List.of(), Await.value("the listing once answered", afterAnswer));
   }
 
   @Test
@@ -242,7 +265,7 @@ final class ToolApprovalSessionTest {
             now::get,
             session -> {
               now.set(start.plus(SessionLimits.defaults().maxWallClock()).plusSeconds(1));
-              ((AgentSessionImpl) session).lifecycleForTests().expireWallClock();
+              ((AgentSessionImpl) session).lifecycle.expireWallClock();
             });
 
     assertEquals(

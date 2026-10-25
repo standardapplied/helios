@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.loop.AgentLoop;
@@ -17,6 +18,7 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.loop.TurnRunner;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -53,7 +55,10 @@ public final class AgentSessionImpl implements AgentSession {
   private final SessionState state;
   private final SteeringQueue steeringQueue;
   private final SessionEventPublisher events;
-  private final SessionLifecycle lifecycle;
+
+  /** Package-private for tests that assert the runtime's executors shut down. */
+  final SessionLifecycle lifecycle;
+
   private final AgentLoop loop;
   private final CompletableFuture<ResultMessage> resultFuture = new CompletableFuture<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -175,11 +180,6 @@ public final class AgentSessionImpl implements AgentSession {
     lifecycle.close();
   }
 
-  /** Package-private accessor for tests that assert the runtime's executors shut down. */
-  SessionLifecycle lifecycleForTests() {
-    return lifecycle;
-  }
-
   @Override
   public void answer(String questionId, AskUserQuestionResponse response) {
     Objects.requireNonNull(questionId, "questionId must not be null");
@@ -199,5 +199,10 @@ public final class AgentSessionImpl implements AgentSession {
       throw new IllegalStateException("session is closed");
     }
     pendingQuestions.answer(questionId, response);
+  }
+
+  @Override
+  public List<AskUserQuestionRequest> pendingQuestions() {
+    return pendingQuestions.requests();
   }
 }

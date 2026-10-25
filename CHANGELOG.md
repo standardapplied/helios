@@ -783,8 +783,22 @@ question, an execution) from that wait's own callback; the 10 ms poll of the tok
 | `ProviderException.isRetryable()` was `true` for status 0 | `false`: only 408, 429 and 500 or more are retryable |
 | `SseReader.open(client, request, idleTimeout, parser, failure)` | `SseReader.open(client, request, idleTimeout, parser, failure, providerName)` |
 
+**`AgentSession` gains `pendingQuestions()`.** It returns an immutable snapshot of the questions
+the session asked and that are not yet answered, cancelled or expired, each as its `QuestionAsked`
+event carried it. An `AgentSession` implemented outside Helios must add it.
+
+| 2.x | 3.0 |
+|---|---|
+| A host learned of an open question only from the `QuestionAsked` event | `AgentSession.pendingQuestions()` → `List<AskUserQuestionRequest>`; implementations add it |
+
 ### Added
 
+- **`GET /sessions/{id}/questions` and `POST /sessions/{id}/questions/{questionId}`.** An HTTP
+  client lists a session's pending questions, permission approvals (`perm-` ids) and the model's
+  `AskUserQuestion` (`q-` ids), and answers one with `{"selectedLabels": [...], "customText":
+  "..."}`: `202` once the session accepted it, `400` for an invalid body, `404` for a question not
+  pending, `409` for a closed session. Both are authenticated and owner-scoped like every route;
+  the answer is admitted and read like `POST .../messages`.
 - **`TransientStreamException(message, cause, providerName, retryAfter)` and `retryAfter()`;
   `Backoff.maxDelay()`.** A `TransientStreamException` for a retryable status at stream open
   carries the `Retry-After` seconds of the answer; `maxDelay()` is the longest delay a back-off

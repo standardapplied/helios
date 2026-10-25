@@ -394,7 +394,7 @@ final class AgentSessionImplTest {
   @Test
   void closeBeforeAnySendShutsDownPublisherExecutor() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.lifecycleForTests().events().executor();
+    var executor = s.lifecycle.events().executor();
     assertTrue(!executor.isShutdown(), "executor live before close()");
     s.close();
     assertTrue(executor.isShutdown(), "executor shut down by close()");
@@ -404,7 +404,7 @@ final class AgentSessionImplTest {
   @Test
   void aCancelledDeadlineLeavesTheSessionSchedulerAtOnce() {
     try (var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP))) {
-      var scheduler = (ScheduledThreadPoolExecutor) s.lifecycleForTests().scheduler();
+      var scheduler = (ScheduledThreadPoolExecutor) s.lifecycle.scheduler();
 
       assertTrue(scheduler.getRemoveOnCancelPolicy(), "a cancelled deadline is not kept until due");
     }
@@ -413,7 +413,7 @@ final class AgentSessionImplTest {
   @Test
   void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.lifecycleForTests().events().executor();
+    var executor = s.lifecycle.events().executor();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
     // The teardown drains the publisher before the result settles (hv2-bug2 Issue 2 fix), so the
@@ -527,7 +527,7 @@ final class AgentSessionImplTest {
       if (event instanceof QueryEvent.LoopEnded ended) {
         Await.until(
             "the session to begin draining its publisher",
-            session.lifecycleForTests().events().executor()::isShutdown);
+            session.lifecycle.events().executor()::isShutdown);
         resultSettledFirst.set(session.result().isDone());
         captured.set(ended.result());
       }
