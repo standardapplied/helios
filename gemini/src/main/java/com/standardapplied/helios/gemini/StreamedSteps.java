@@ -115,21 +115,21 @@ final class StreamedSteps {
     };
   }
 
-  /** A {@code step.stop}: the tool call of a function call, or a completed thought. */
+  /** A {@code step.stop}: the tool call of a function call; any other step yields nothing. */
   StreamEvent stop(Integer index) {
     var state = index == null ? null : steps.remove(index);
     if (state == null) {
       return null;
     }
-    if (state.isCall()) {
-      return output.call(
-          ToolCall.newBuilder()
-              .withId(state.id)
-              .withName(state.name)
-              .withArguments(state.arguments())
-              .build());
+    if (!state.isCall()) {
+      return null;
     }
-    return "thought".equals(state.type) ? output.thinkingComplete() : null;
+    return output.call(
+        ToolCall.newBuilder()
+            .withId(state.id)
+            .withName(state.name)
+            .withArguments(state.arguments())
+            .build());
   }
 
   /** The name of a function call whose step is still open, or {@code null} when none is open. */

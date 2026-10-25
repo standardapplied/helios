@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolChoice;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -115,8 +114,7 @@ public abstract class ModelIntegrationContract {
   void streamingChat() {
     var messages = List.of(Message.user("Count from 1 to 5, one number per line."));
 
-    Accepted.textReply(
-        Accepted.stream(model().chatStream(messages, List.of(), new CancellationToken())));
+    Accepted.textReply(Accepted.stream(model().chatStream(messages, List.of())));
   }
 
   @Test

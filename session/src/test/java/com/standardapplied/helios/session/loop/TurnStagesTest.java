@@ -33,11 +33,8 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -48,16 +45,10 @@ final class TurnStagesTest {
 
   private static final InstantSource CLOCK =
       InstantSource.fixed(Instant.parse("2026-05-14T19:00:00Z"));
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
   private final SessionState state =
       new SessionState("sess-stages", new CancellationToken(), CLOCK);
-
-  @AfterEach
-  void shutDownScheduler() {
-    scheduler.shutdownNow();
-  }
 
   private TurnRunner runner(Model model, Hook... hooks) {
     var dispatch =
@@ -75,7 +66,7 @@ final class TurnStagesTest {
             CLOCK);
     state.history().append(Message.user("hello"));
     state.beginTurn();
-    return new TurnRunner(collaborators, model, CostCalculator.ZERO, null, scheduler);
+    return new TurnRunner(collaborators, model, CostCalculator.ZERO, null);
   }
 
   private static HookContext context(SessionState s) {

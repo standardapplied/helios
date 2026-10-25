@@ -10,7 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -65,21 +66,32 @@ public final class SseEvents {
   }
 
   /**
-   * Every event a reader yields from a body that never delivers, drained on its own thread, which
-   * is interrupted once the reader is blocked reading the body.
+   * What a reader over a body that never delivers throws when the thread reading it is interrupted
+   * once blocked on the body. The interrupt must stay set on that thread.
    *
    * @param reader opens the reader over the body
-   * @return the events yielded before the interrupted thread ended
+   * @return what the interrupted read threw
    */
-  public static List<StreamEvent> drainInterrupted(
+  public static Throwable readInterrupted(
       Function<InputStream, CloseableIterator<StreamEvent>> reader) {
     var neverDelivers = new FeedableInputStream();
-    var events = new CopyOnWriteArrayList<StreamEvent>();
-    var consumer =
-        Thread.ofPlatform().start(() -> events.addAll(drain(reader.apply(neverDelivers))));
+    var interruptKept = new AtomicBoolean();
+    var read =
+        new FutureTask<>(
+            () -> {
+              try {
+                return drain(reader.apply(neverDelivers));
+              } finally {
+                interruptKept.set(Thread.currentThread().isInterrupted());
+              }
+            });
+    var consumer = Thread.ofPlatform().start(read);
     neverDelivers.awaitBlockedRead();
     consumer.interrupt();
-    Await.termination("the interrupted consumer thread", consumer);
-    return List.copyOf(events);
+    var thrown = Await.failure("the interrupted read", read);
+    if (!interruptKept.get()) {
+      throw new AssertionError("the interrupt was cleared", thrown);
+    }
+    return thrown;
   }
 }

@@ -3,29 +3,32 @@ package com.standardapplied.helios.examples.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.AnthropicException;
 import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.HeldSseServer;
 import com.standardapplied.helios.core.test.ModelHarness;
-import com.standardapplied.helios.core.test.RecordingSubscriber;
 import com.standardapplied.helios.core.test.SseReplies;
 import com.standardapplied.helios.core.test.StubHttpServer;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.gemini.GeminiException;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
+import com.standardapplied.helios.openai.OpenAIException;
 import com.standardapplied.helios.openai.OpenAIModelId;
 import com.standardapplied.helios.openai.OpenAIProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -47,8 +50,9 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -71,15 +75,21 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * <p>{@code <provider>/sessions/held-tool.sse} is the first tool call of the provider's {@code
  * streams/tool-calls.sse} golden, held after its first argument fragment: argument fragments, like
- * every frame, are chunks that keep a session's {@code streamIdleTimeout} from firing while a long
+ * every frame, are lines that keep the model's {@code streamIdleTimeout} from firing while a long
  * call streams.
  *
- * <p>The idle-clock tests hold the Gemini {@code held-text.sse} reply at its headers, as Gemini
- * does while it thinks, or after its first part.
+ * <p>The idle-clock tests hold a {@code held-text.sse} reply at its headers, as Gemini does while
+ * it thinks, or after its first part.
  */
 final class StreamingSessionTest {
 
   static final String HOLD = "=== hold ===\n";
+
+  private static final Map<String, Class<? extends RuntimeException>> PROVIDER_EXCEPTIONS =
+      Map.of(
+          "anthropic", AnthropicException.class,
+          "gemini", GeminiException.class,
+          "openai", OpenAIException.class);
 
   @ParameterizedTest
   @ValueSource(strings = {"anthropic", "gemini", "openai"})
@@ -106,13 +116,13 @@ final class StreamingSessionTest {
   void toolArgumentsStreamBeforeTheirCallCompletes(String provider) throws IOException {
     var reply =
         HeldSseServer.Reply.of(Golden.read(provider + "/sessions/held-tool.sse").split(HOLD));
-    var chunks = new RecordingSubscriber<ModelChunk>();
+    var chunks = new LinkedBlockingQueue<ModelChunk>();
     try (var server = HeldSseServer.start(reply);
         var model = modelAt(provider, server.uri())) {
-      model
-          .chatStream(
-              List.of(Message.user("Weather?")), List.of(weather().tool()), new CancellationToken())
-          .subscribe(chunks);
+      var ended =
+          readInto(
+              chunks,
+              model.chatStream(List.of(Message.user("Weather?")), List.of(weather().tool())));
 
       var start = assertInstanceOf(ModelChunk.ToolUseStart.class, nextContent(chunks));
       var delta = nextContent(chunks);
@@ -121,7 +131,8 @@ final class StreamingSessionTest {
       assertEquals(new ModelChunk.ToolUseDelta(start.callId(), "{\"city\""), delta);
       assertEquals(new ModelChunk.ToolUseDelta(start.callId(), ":\"Paris\"}"), nextContent(chunks));
       assertInstanceOf(ModelChunk.ToolUseStop.class, nextContent(chunks));
-      assertInstanceOf(ModelChunk.MessageStop.class, chunks.awaitCompletion().getLast());
+      Await.value("the end of the stream", ended);
+      assertInstanceOf(ModelChunk.MessageStop.class, List.copyOf(chunks).getLast());
     }
   }
 
@@ -132,16 +143,15 @@ final class StreamingSessionTest {
         HeldSseServer.Reply.holdingHeaders(
             Golden.read("gemini/sessions/held-text.sse").split(HOLD));
     var limits =
-        SessionLimits.newBuilder()
-            .withStreamIdleTimeout(Duration.ofMillis(1))
-            .withStreamRetryPolicy(StreamRetryPolicy.disabled())
-            .build();
+        SessionLimits.newBuilder().withStreamRetryPolicy(StreamRetryPolicy.disabled()).build();
     try (var server = HeldSseServer.start(reply);
         var model =
             modelAt(
                 "gemini",
                 server.uri(),
-                ModelConfig.newBuilder().withResponseTimeout(Duration.ofMillis(200)));
+                ModelConfig.newBuilder()
+                    .withResponseTimeout(Duration.ofMillis(200))
+                    .withStreamIdleTimeout(Duration.ofMillis(1)));
         var session =
             AgentSession.create(
                 SessionOptions.newBuilder().withModel(model).withLimits(limits).build())) {
@@ -152,22 +162,26 @@ final class StreamingSessionTest {
     }
   }
 
-  @Test
-  void aStreamSilentAfterItsFirstFrameIsEndedByTheIdleClockWhichClosesTheConnection()
-      throws IOException {
-    var reply = held("gemini");
-    var limits = SessionLimits.newBuilder().withStreamIdleTimeout(Duration.ofMillis(1)).build();
+  @ParameterizedTest
+  @ValueSource(strings = {"anthropic", "gemini", "openai"})
+  void aStreamSilentAfterItsFirstPartIsEndedByTheModelsIdleClockWhichClosesTheConnection(
+      String provider) throws IOException {
+    var reply = held(provider);
     try (var server = HeldSseServer.start(reply);
-        var model = modelAt("gemini", server.uri());
-        var session =
-            AgentSession.create(
-                SessionOptions.newBuilder().withModel(model).withLimits(limits).build())) {
+        var model =
+            modelAt(
+                provider,
+                server.uri(),
+                ModelConfig.newBuilder().withStreamIdleTimeout(Duration.ofMillis(300)));
+        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
       session.send(UserMessage.text("Hi"));
 
       reply.awaitClientClosed();
 
       var failed = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result(session));
-      assertEquals(TimeoutException.class.getName(), failed.error().kind());
+      assertEquals(PROVIDER_EXCEPTIONS.get(provider).getName(), failed.error().kind());
+      assertTrue(
+          failed.error().message().contains("Stream idle timeout"), failed.error().message());
     }
   }
 
@@ -236,7 +250,7 @@ final class StreamingSessionTest {
   }
 
   @Test
-  void aSessionCancelledBeforeItsStreamIsSubscribedSendsNoRequest() throws IOException {
+  void aSessionCancelledBeforeItsModelCallSendsNoRequest() throws IOException {
     var reply = held("anthropic");
     PreModelTurnHook cancelFirst =
         (history, context) -> {
@@ -365,10 +379,28 @@ final class StreamingSessionTest {
     return Await.value("the session's result", session.result());
   }
 
-  private static ModelChunk nextContent(RecordingSubscriber<ModelChunk> chunks) {
-    var chunk = chunks.next();
+  private static CompletableFuture<Void> readInto(
+      LinkedBlockingQueue<ModelChunk> chunks, CloseableIterator<ModelChunk> stream) {
+    var ended = new CompletableFuture<Void>();
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try (stream) {
+                while (stream.hasNext()) {
+                  chunks.add(stream.next());
+                }
+                ended.complete(null);
+              } catch (RuntimeException e) {
+                ended.completeExceptionally(e);
+              }
+            });
+    return ended;
+  }
+
+  private static ModelChunk nextContent(LinkedBlockingQueue<ModelChunk> chunks) {
+    var chunk = Await.next("the next chunk", chunks);
     while (chunk instanceof ModelChunk.KeepAlive) {
-      chunk = chunks.next();
+      chunk = Await.next("the next chunk", chunks);
     }
     return chunk;
   }

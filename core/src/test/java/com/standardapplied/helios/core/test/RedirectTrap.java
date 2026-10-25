@@ -10,10 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ProviderException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
@@ -156,12 +154,9 @@ public final class RedirectTrap implements AutoCloseable {
       throws IOException {
     try (var trap = open(scenario);
         var model = provider.apply(trap.config())) {
-      var recorder = new RecordingSubscriber<ModelChunk>();
-      model
-          .chatStream(List.of(Message.user(PROMPT)), List.of(), new CancellationToken())
-          .subscribe(recorder);
-      var error = assertInstanceOf(errorType, recorder.awaitFailure());
-      assertEquals(List.of(), recorder.items(), "chunks before the error");
+      var read = StreamRead.of(model.chatStream(List.of(Message.user(PROMPT)), List.of()));
+      var error = assertInstanceOf(errorType, read.failure());
+      assertEquals(List.of(), read.items(), "chunks before the error");
       trap.assertRefused(error, error.getMessage());
     }
   }

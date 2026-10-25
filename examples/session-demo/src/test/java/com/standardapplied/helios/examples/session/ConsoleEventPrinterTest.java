@@ -130,7 +130,7 @@ final class ConsoleEventPrinterTest {
 
   @Test
   void eventsWithoutALineAreSkipped() {
-    printer.onNext(new QueryEvent.AssistantThinking(SID, TURN, TS, "hmm", ""));
+    printer.onNext(new QueryEvent.AssistantThinking(SID, TURN, TS, "hmm"));
     printer.onNext(new QueryEvent.ContextWarning(SID, TURN, TS, 0.9));
 
     assertEquals("", printed());

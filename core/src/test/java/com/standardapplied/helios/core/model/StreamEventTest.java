@@ -7,7 +7,6 @@ package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Map;
@@ -112,24 +111,6 @@ class StreamEventTest {
   }
 
   @Test
-  void thinkingCompleteWithSignature() {
-    var event = new StreamEvent.ThinkingComplete("full thinking text", "sig_abc123");
-
-    assertInstanceOf(StreamEvent.class, event);
-    assertEquals("full thinking text", event.fullThinking());
-    assertEquals("sig_abc123", event.signature());
-  }
-
-  @Test
-  void thinkingCompleteWithoutSignature() {
-    var event = new StreamEvent.ThinkingComplete("full thinking text");
-
-    assertInstanceOf(StreamEvent.class, event);
-    assertEquals("full thinking text", event.fullThinking());
-    assertNull(event.signature());
-  }
-
-  @Test
   void patternMatchingOnEvents() {
     StreamEvent textEvent = new StreamEvent.TextDelta("text");
     StreamEvent errorEvent =
@@ -150,7 +131,6 @@ class StreamEventTest {
     return switch (event) {
       case StreamEvent.TextDelta(var text) -> "text: " + text;
       case StreamEvent.ThinkingDelta(var text) -> "thinking-delta: " + text;
-      case StreamEvent.ThinkingComplete(var full, var sig) -> "thinking-complete";
       case StreamEvent.ToolCallStart(var id, var name) -> "start";
       case StreamEvent.ToolCallDelta(var id, var delta) -> "delta";
       case StreamEvent.ToolCallComplete(var tc) -> "complete";

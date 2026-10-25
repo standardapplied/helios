@@ -5,12 +5,11 @@ package com.standardapplied.helios.core.test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
-import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -52,15 +51,20 @@ class TranscriptTest {
 
   @Test
   void streamRendersOneItemPerLineThenHowTheStreamEnded() {
-    var completed =
-        new IteratorPublisher<>(
-            () -> CloseableIterator.of(List.of("hi", "!").iterator()), new CancellationToken());
+    var completed = CloseableIterator.of(List.of("hi", "!").iterator());
     var failed =
-        new IteratorPublisher<String>(
-            () -> {
-              throw new IllegalStateException("no");
-            },
-            new CancellationToken());
+        CloseableIterator.<String>of(
+            new Iterator<>() {
+              @Override
+              public boolean hasNext() {
+                throw new IllegalStateException("no");
+              }
+
+              @Override
+              public String next() {
+                throw new IllegalStateException("no");
+              }
+            });
 
     assertEquals("hi\n!\nonComplete\n", new Transcript().stream(completed));
     assertEquals("onError IllegalStateException(no)\n", new Transcript().stream(failed));

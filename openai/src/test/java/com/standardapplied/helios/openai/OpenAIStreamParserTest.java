@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.ExchangeTurns;
 import com.standardapplied.helios.core.test.SseEvents;
@@ -28,7 +27,7 @@ class OpenAIStreamParserTest {
             new OpenAIStreamParser(),
             OpenAIException::new)) {
       return ExchangeTurns.chat(
-          new ChatExchange<ResponsesRequest>("OpenAI API", request -> events),
+          (ResponsesRequest request) -> events,
           null,
           OpenAIProvider.PROVIDER_NAME,
           OpenAIException::new);

@@ -449,23 +449,23 @@ Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredO
 The session's `events()` publisher is the primary streaming surface — see [Sessions](#sessions-helios-session). For direct model use without a session:
 
 ```java
-var cancellation = new CancellationToken();
-model.chatStream(messages, tools, cancellation).subscribe(new Flow.Subscriber<ModelChunk>() {
-  public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
-  public void onNext(ModelChunk chunk) {
-    switch (chunk) {
+try (var stream = model.chatStream(messages, tools)) {
+  while (stream.hasNext()) {
+    switch (stream.next()) {
       case ModelChunk.TextDelta d -> System.out.print(d.text());
       case ModelChunk.ToolUseStop stop -> System.out.println("Called: " + stop.toolCall().name());
       case ModelChunk.MessageStop stop -> System.out.println("\n" + stop.finishReason());
       default -> {}
     }
   }
-  public void onError(Throwable failure) { failure.printStackTrace(); }
-  public void onComplete() {}
-});
+}
 ```
 
-Nothing is sent until the subscriber's first request; each chunk arrives as the provider streams it. Cancelling the subscription, or `cancellation.cancel(reason)`, aborts the request and closes its connection without closing the model. `model.chat(messages, tools)` drains the same stream. A model you write that can only answer blockingly implements `BlockingModel`.
+Nothing is sent before the first `hasNext()`; each chunk arrives as the provider streams it.
+`close()`, from any thread, aborts the request and closes its connection without closing the model.
+A failed turn throws its exception from `hasNext()`.
+`model.chat(messages, tools)` drains the same stream (`ChunkDrain.drain`).
+A model you write that can only answer blockingly implements `BlockingModel`.
 
 ## Fault Tolerance
 

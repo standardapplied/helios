@@ -12,15 +12,15 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
-import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.StreamingModel;
 
 /**
  * ModelProvider implementation for Anthropic's Messages API.
  *
  * <p>Every request streams over SSE, so a long generation never meets an HTTP read timeout; a
- * blocking chat drains the stream, and a per-line idle timeout turns a stalled stream into a
- * retryable failure. A turn the API pauses ({@code pause_turn}) is resumed until it completes.
+ * blocking chat drains the stream, and a per-line idle timeout turns a stalled stream into an
+ * {@link AnthropicException}, which is not retried. A turn the API pauses ({@code pause_turn}) is
+ * resumed until it completes.
  *
  * <p>Curated {@link AnthropicModelId} values are recognised with full metadata. Beyond those, any
  * {@code modelId} starting with {@value AnthropicModelId#CLAUDE_ID_PREFIX} is accepted against the
@@ -93,7 +93,6 @@ public class AnthropicProvider implements ModelProvider {
     var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     var httpClient = HttpClientFactory.create(config);
     var streams = new AnthropicStreams(config, httpClient, requests.betas());
-    var exchange = new ChatExchange<>("Anthropic API", streams::open);
     return StreamingModel.<MessagesRequest>newBuilder()
         .withId(wireModelId)
         .withProvider(PROVIDER_NAME)
@@ -102,7 +101,7 @@ public class AnthropicProvider implements ModelProvider {
         .withMaxOutputTokens(requests.defaultMaxTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(new PauseContinuation(exchange))
+        .withExchange(new PauseContinuation(streams::open))
         .withFailure(AnthropicException::new)
         .withJson(AnthropicJson.STRUCTURED)
         .build();

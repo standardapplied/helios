@@ -4,27 +4,27 @@ package com.standardapplied.helios.anthropic;
 
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.Exchange;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.concurrent.Flow;
+import java.util.concurrent.CancellationException;
 
 /**
  * Continues a turn across {@code pause_turn}. Anthropic pauses a long server-tool turn (web search,
  * web fetch); the turn resumes when the conversation is re-sent with the paused assistant content
  * appended unchanged. The segments' events are spliced into one stream: a paused segment's
- * completion is swallowed, the continuation is opened once that segment's stream has completed, and
- * the one terminal carries the merged turn — the completion its response, an error after a pause
- * its partial response. A caller never sees the pause; a continuation's first thinking delta
- * carries the separator the merge puts before its thinking. Demand the caller has not yet been
- * served, or a non-positive request, carries over to the next segment, and cancelling cancels the
- * segment in flight. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop
- * into a loud failure.
+ * completion is swallowed, that segment's stream closed, and the continuation opened on the next
+ * {@code hasNext()}; the one terminal carries the merged turn — the completion its response, an
+ * error after a pause its partial response. A caller never sees the pause; a continuation's first
+ * thinking delta carries the separator the merge puts before its thinking. Closing closes the
+ * segment in flight and opens no further one. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes,
+ * which turns a pause loop into a loud failure.
  */
 final class PauseContinuation implements Exchange<MessagesRequest> {
 
@@ -47,13 +47,8 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
    * the exchange's one error event, passed through.
    */
   @Override
-  public Flow.Publisher<StreamEvent> stream(
-      MessagesRequest request, CancellationToken cancellation) {
-    var first = exchange.stream(request, cancellation);
-    return subscriber -> {
-      Objects.requireNonNull(subscriber, "subscriber must not be null");
-      first.subscribe(new Turn(request, cancellation, subscriber).new Segment());
-    };
+  public CloseableIterator<StreamEvent> stream(MessagesRequest request) {
+    return new Turn(request, exchange.stream(request));
   }
 
   /** {@code merged}, the turn so far, as the partial response of a turn that failed. */
@@ -93,168 +88,140 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
   }
 
   /**
-   * One subscriber's turn: the subscription it holds, spanning every segment. Segments run one
-   * after another, so their signals never overlap; the lock guards what the subscriber's own thread
-   * shares with them, its demand and the segment in flight.
+   * One turn's events, segment after segment. The lock guards the segment in flight, which {@link
+   * #close()} may close from another thread while the reader opens the next one.
    */
-  private final class Turn implements Flow.Subscription {
+  private final class Turn implements CloseableIterator<StreamEvent> {
 
     private final MessagesRequest request;
-    private final CancellationToken cancellation;
-    private final Flow.Subscriber<? super StreamEvent> downstream;
     private final Object lock = new Object();
-    private Flow.Subscription current;
-    private long demand;
-    private boolean cancelled;
-    private Long invalidRequest;
+    private CloseableIterator<StreamEvent> segment;
+    private boolean closed;
+    private MessagesRequest continuation;
     private Response<Void> mergedSoFar;
     private int continuations;
+    private boolean thinkingStreamed;
+    private StreamEvent next;
+    private boolean ended;
 
-    Turn(
-        MessagesRequest request,
-        CancellationToken cancellation,
-        Flow.Subscriber<? super StreamEvent> downstream) {
+    Turn(MessagesRequest request, CloseableIterator<StreamEvent> first) {
       this.request = request;
-      this.cancellation = cancellation;
-      this.downstream = downstream;
+      this.segment = first;
     }
 
     @Override
-    public void request(long n) {
-      Flow.Subscription segment;
-      synchronized (lock) {
-        if (n > 0) {
-          demand = demand + n < 0 ? Long.MAX_VALUE : demand + n;
-        } else {
-          invalidRequest = n;
+    public boolean hasNext() {
+      while (next == null && !ended) {
+        if (continuation != null) {
+          openContinuation();
         }
-        segment = current;
+        if (current().hasNext()) {
+          next = relay(current().next());
+        } else {
+          ended = true;
+        }
       }
-      segment.request(n);
+      return next != null;
     }
 
     @Override
-    public void cancel() {
-      Flow.Subscription segment;
-      synchronized (lock) {
-        cancelled = true;
-        segment = current;
+    public StreamEvent next() {
+      if (!hasNext()) {
+        throw new NoSuchElementException("the turn's stream has ended");
       }
-      segment.cancel();
+      var event = next;
+      next = null;
+      return event;
     }
 
-    private void deliver(StreamEvent event) {
+    @Override
+    public void close() {
+      CloseableIterator<StreamEvent> inFlight;
       synchronized (lock) {
-        if (demand != Long.MAX_VALUE) {
-          demand--;
-        }
+        closed = true;
+        inFlight = segment;
       }
-      downstream.onNext(event);
+      inFlight.close();
     }
 
-    /** One segment's events, relayed to the turn's subscriber. */
-    private final class Segment implements Flow.Subscriber<StreamEvent> {
-
-      private MessagesRequest next;
-      private boolean thinkingStreamed;
-
-      @Override
-      public void onSubscribe(Flow.Subscription subscription) {
-        boolean first;
-        long carried;
-        Long invalid;
-        boolean stop;
-        synchronized (lock) {
-          first = current == null;
-          current = subscription;
-          carried = demand;
-          invalid = invalidRequest;
-          stop = cancelled;
-        }
-        if (first) {
-          downstream.onSubscribe(Turn.this);
-        } else if (stop) {
-          subscription.cancel();
-        } else if (invalid != null) {
-          subscription.request(invalid);
-        } else if (carried > 0) {
-          subscription.request(carried);
-        }
+    private CloseableIterator<StreamEvent> current() {
+      synchronized (lock) {
+        return segment;
       }
+    }
 
-      @Override
-      public void onNext(StreamEvent event) {
-        switch (event) {
-          case StreamEvent.Done done -> complete(done);
-          case StreamEvent.Error(var message, var cause, var partial) when mergedSoFar != null ->
-              deliver(
-                  new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
-          case StreamEvent.ThinkingDelta delta -> deliver(separated(delta));
-          default -> deliver(event);
-        }
-      }
-
-      /**
-       * {@code delta}, the segment's first thinking prefixed with the separator the merge puts
-       * between the turn's thinking so far and this segment's, so the deltas add up to the turn's.
-       */
-      private StreamEvent separated(StreamEvent.ThinkingDelta delta) {
-        var first = !thinkingStreamed;
-        thinkingStreamed = true;
-        return first && mergedSoFar != null && mergedSoFar.thinking() != null
-            ? new StreamEvent.ThinkingDelta(ThinkingBlocks.SEPARATOR + delta.text())
-            : delta;
-      }
-
-      /** Completes the turn at the end of a segment, or arranges the next segment's opening. */
-      @SuppressWarnings("unchecked")
-      private void complete(StreamEvent.Done done) {
-        var segment = (Response<Void>) done.response();
-        var merged = mergedSoFar == null ? segment : SegmentMerge.merge(mergedSoFar, segment);
-        if (!paused(merged)) {
-          deliver(new StreamEvent.Done(merged));
-        } else if (continuations >= MAX_PAUSE_CONTINUATIONS) {
-          deliver(
-              new StreamEvent.Error(
-                  "pause_turn continuation limit exceeded after "
-                      + MAX_PAUSE_CONTINUATIONS
-                      + " resumes; the server-tool loop did not converge",
-                  null,
-                  failed(merged)));
-        } else {
-          resume(merged);
-        }
-      }
-
-      private void resume(Response<Void> merged) {
-        try {
-          next = continuation(request, merged);
-          mergedSoFar = merged;
-          continuations++;
-        } catch (AnthropicException e) {
-          deliver(new StreamEvent.Error(e.getMessage(), e, failed(merged)));
-        }
-      }
-
-      @Override
-      public void onError(Throwable failure) {
-        downstream.onError(failure);
-      }
-
-      @Override
-      public void onComplete() {
-        if (next == null) {
-          downstream.onComplete();
+    private void openContinuation() {
+      var paused = current();
+      paused.close();
+      var opened = exchange.stream(continuation);
+      continuation = null;
+      thinkingStreamed = false;
+      synchronized (lock) {
+        if (!closed) {
+          segment = opened;
           return;
         }
-        boolean stop;
-        synchronized (lock) {
-          stop = cancelled;
-        }
-        if (!stop) {
-          exchange.stream(next, cancellation).subscribe(new Segment());
-        }
       }
+      opened.close();
+      throw new CancellationException("the turn's stream was closed during a pause");
+    }
+
+    /** {@code event} as the turn yields it, or {@code null} for a paused segment's completion. */
+    private StreamEvent relay(StreamEvent event) {
+      return switch (event) {
+        case StreamEvent.Done done -> complete(done);
+        case StreamEvent.Error(var message, var cause, var partial) when mergedSoFar != null ->
+            end(new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
+        case StreamEvent.Error error -> end(error);
+        case StreamEvent.ThinkingDelta delta -> separated(delta);
+        default -> event;
+      };
+    }
+
+    /**
+     * {@code delta}, the segment's first thinking prefixed with the separator the merge puts
+     * between the turn's thinking so far and this segment's, so the deltas add up to the turn's.
+     */
+    private StreamEvent separated(StreamEvent.ThinkingDelta delta) {
+      var first = !thinkingStreamed;
+      thinkingStreamed = true;
+      return first && mergedSoFar != null && mergedSoFar.thinking() != null
+          ? new StreamEvent.ThinkingDelta(ThinkingBlocks.SEPARATOR + delta.text())
+          : delta;
+    }
+
+    /** Completes the turn at the end of a segment, or arranges the next segment's opening. */
+    @SuppressWarnings("unchecked")
+    private StreamEvent complete(StreamEvent.Done done) {
+      var segmentResponse = (Response<Void>) done.response();
+      var merged =
+          mergedSoFar == null ? segmentResponse : SegmentMerge.merge(mergedSoFar, segmentResponse);
+      if (!paused(merged)) {
+        return end(new StreamEvent.Done(merged));
+      }
+      if (continuations >= MAX_PAUSE_CONTINUATIONS) {
+        return end(
+            new StreamEvent.Error(
+                "pause_turn continuation limit exceeded after "
+                    + MAX_PAUSE_CONTINUATIONS
+                    + " resumes; the server-tool loop did not converge",
+                null,
+                failed(merged)));
+      }
+      try {
+        continuation = continuation(request, merged);
+      } catch (AnthropicException e) {
+        return end(new StreamEvent.Error(e.getMessage(), e, failed(merged)));
+      }
+      mergedSoFar = merged;
+      continuations++;
+      return null;
+    }
+
+    private StreamEvent end(StreamEvent terminal) {
+      ended = true;
+      current().close();
+      return terminal;
     }
   }
 }

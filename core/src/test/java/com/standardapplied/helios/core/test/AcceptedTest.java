@@ -9,15 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
-import com.standardapplied.helios.core.model.IteratorPublisher;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -36,9 +34,8 @@ class AcceptedTest {
   private static final ModelChunk.MessageStop STOP =
       new ModelChunk.MessageStop("STOP", Response.Usage.of(3, 2), Map.of("k", "v"));
 
-  private static Flow.Publisher<ModelChunk> chunks(ModelChunk... chunks) {
-    return new IteratorPublisher<>(
-        () -> CloseableIterator.of(List.of(chunks).iterator()), new CancellationToken());
+  private static CloseableIterator<ModelChunk> chunks(ModelChunk... chunks) {
+    return CloseableIterator.of(List.of(chunks).iterator());
   }
 
   @ParameterizedTest
@@ -184,11 +181,18 @@ class AcceptedTest {
   @Test
   void aStreamThatFailsFails() {
     var failing =
-        new IteratorPublisher<ModelChunk>(
-            () -> {
-              throw new IllegalStateException("overloaded");
-            },
-            new CancellationToken());
+        CloseableIterator.<ModelChunk>of(
+            new Iterator<>() {
+              @Override
+              public boolean hasNext() {
+                throw new IllegalStateException("overloaded");
+              }
+
+              @Override
+              public ModelChunk next() {
+                throw new IllegalStateException("overloaded");
+              }
+            });
 
     assertThrows(AssertionError.class, () -> Accepted.stream(failing));
   }

@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
@@ -27,7 +27,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -51,9 +50,9 @@ import org.junit.jupiter.api.Test;
 class StreamReadErrorReproTest {
 
   /**
-   * Mimics what a provider's {@code core.provider.ChatExchange} throws when the SSE reader catches
-   * an {@code IOException} mid-stream: a {@link TransientStreamException} carrying the originating
-   * {@code IOException} as its cause and the provider name in {@link
+   * Mimics what a provider's {@code core.provider.StreamingModel} throws when the SSE reader
+   * catches an {@code IOException} mid-stream: a {@link TransientStreamException} carrying the
+   * originating {@code IOException} as its cause and the provider name in {@link
    * TransientStreamException#providerName()}.
    */
   private static final class TransientStreamFailureModel implements BlockingModel {
@@ -71,18 +70,14 @@ class StreamReadErrorReproTest {
     }
 
     @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+    public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
       chatStreamInvocations.incrementAndGet();
       throw providerException;
     }
 
     @Override
-    public Flow.Publisher<ModelChunk> chatStream(
-        List<Message> messages,
-        List<Tool> tools,
-        OutputSchema<?> outputSchema,
-        CancellationToken cancellation) {
+    public CloseableIterator<ModelChunk> chatStream(
+        List<Message> messages, List<Tool> tools, OutputSchema<?> outputSchema) {
       chatStreamInvocations.incrementAndGet();
       throw providerException;
     }
@@ -196,35 +191,15 @@ class StreamReadErrorReproTest {
           }
 
           @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+          public CloseableIterator<ModelChunk> chatStream(
+              List<Message> messages, List<Tool> tools) {
             var attempt = calls.incrementAndGet();
             if (attempt <= 2) {
               throw ex;
             }
-            return subscriber ->
-                subscriber.onSubscribe(
-                    new Flow.Subscription() {
-                      int i = 0;
-
-                      @Override
-                      public void request(long n) {
-                        if (i == 0) {
-                          subscriber.onNext(new ModelChunk.TextDelta("recovered"));
-                          i = 1;
-                        }
-                        if (i == 1) {
-                          subscriber.onNext(
-                              new ModelChunk.MessageStop(
-                                  FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
-                          i = 2;
-                          subscriber.onComplete();
-                        }
-                      }
-
-                      @Override
-                      public void cancel() {}
-                    });
+            return ModelStreams.of(
+                new ModelChunk.TextDelta("recovered"),
+                new ModelChunk.MessageStop(FinishReason.STOP.name(), Usage.of(1, 1), Map.of()));
           }
 
           @Override

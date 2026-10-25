@@ -8,12 +8,11 @@ import com.standardapplied.helios.core.provider.JsonPost;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.util.Map;
 
-/** Sends a Responses API request and opens its response as a stream of events. */
+/** Opens a Responses API request's response as a stream of events. */
 final class OpenAIStreams {
 
   static final String DEFAULT_BASE_URL = "https://api.openai.com/v1/responses";
@@ -26,11 +25,12 @@ final class OpenAIStreams {
     this.httpClient = httpClient;
   }
 
-  /** The stream answering {@code request}. */
-  SseReader open(ResponsesRequest request) throws IOException, InterruptedException {
-    return SseReader.open(
+  /** The stream answering {@code request}, sent on its first {@code hasNext()}. */
+  SseReader open(ResponsesRequest request) {
+    return new SseReader(
         httpClient,
         httpRequest(serialize(request)),
+        "OpenAI API",
         config.streamIdleTimeout(),
         new OpenAIStreamParser(),
         OpenAIException::new,

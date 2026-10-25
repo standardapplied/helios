@@ -13,7 +13,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.provider.ChatExchange;
+import com.standardapplied.helios.core.provider.Exchange;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
@@ -224,7 +224,7 @@ class StreamReadErrorCausePreservationReproTest {
     var request =
         new AnthropicRequestBuilder(opus.id(), opus, config, CachePolicy.shortLived())
             .build(List.of(Message.user("hi")), List.<Tool>of(), null);
-    ChatExchange.StreamOpener<MessagesRequest> segments =
+    Exchange<MessagesRequest> segments =
         ignored ->
             new SseReader(
                 new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),

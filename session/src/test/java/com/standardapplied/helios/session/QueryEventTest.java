@@ -94,9 +94,8 @@ final class QueryEventTest {
 
   @Test
   void assistantThinkingConstructsAndExposesFields() {
-    var e = new QueryEvent.AssistantThinking(SID, TURN, TS, "ponder", "sig-abc");
+    var e = new QueryEvent.AssistantThinking(SID, TURN, TS, "ponder");
     assertEquals("ponder", e.text());
-    assertEquals("sig-abc", e.signature());
   }
 
   @Test
@@ -104,17 +103,8 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.AssistantThinking(SID, TURN, TS, null, "sig"));
+            () -> new QueryEvent.AssistantThinking(SID, TURN, TS, null));
     assertEquals("text must not be null", ex.getMessage());
-  }
-
-  @Test
-  void assistantThinkingRejectsNullSignature() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new QueryEvent.AssistantThinking(SID, TURN, TS, "t", null));
-    assertEquals("signature must not be null", ex.getMessage());
   }
 
   // ── UserMessageReceived ───────────────────────────────────────────────────
@@ -436,7 +426,7 @@ final class QueryEventTest {
     List<QueryEvent> all =
         List.of(
             new QueryEvent.AssistantText(SID, TURN, TS, "t"),
-            new QueryEvent.AssistantThinking(SID, TURN, TS, "th", "sig"),
+            new QueryEvent.AssistantThinking(SID, TURN, TS, "th"),
             new QueryEvent.AssistantCitations(
                 SID, TURN, TS, List.of(Citation.of("https://src", "snippet"))),
             new QueryEvent.UserMessageReceived(SID, TURN, TS, UserMessage.text("hi")),
