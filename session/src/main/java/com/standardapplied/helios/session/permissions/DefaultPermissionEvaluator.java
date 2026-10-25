@@ -222,20 +222,20 @@ public final class DefaultPermissionEvaluator {
   /** The decision of the first of {@code rules} that matches {@code key}, with {@code effect}. */
   private Optional<PermissionDecision> firstMatch(
       PermissionEffect effect, List<PermissionRule> rules, ToolPermissionKey key) {
-    var match = matcher.firstMatch(key, rules);
-    if (match.isEmpty()) {
-      return Optional.empty();
-    }
-    var rule = match.orElseThrow();
+    return matcher
+        .firstMatch(key, rules)
+        .map(rule -> new PermissionDecision(effect, reason(effect, rule, key), Optional.of(rule)));
+  }
+
+  private static String reason(
+      PermissionEffect effect, PermissionRule rule, ToolPermissionKey key) {
     var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
-    var reason =
-        effect.name().toLowerCase(Locale.ROOT)
-            + " rule "
-            + rule.toolName()
-            + pattern
-            + " matched "
-            + describe(key);
-    return Optional.of(new PermissionDecision(effect, reason, Optional.of(rule)));
+    return effect.name().toLowerCase(Locale.ROOT)
+        + " rule "
+        + rule.toolName()
+        + pattern
+        + " matched "
+        + describe(key);
   }
 
   private static PermissionDecision defaultForCategory(
