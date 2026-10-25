@@ -304,6 +304,8 @@ final class AgentHttpServiceAuthorizationTest {
     return List.of(
         new Route("POST", messages(sessionId), "{\"text\":\"hi\"}"),
         new Route("POST", interrupt(sessionId), "{\"reason\":\"stop\"}"),
+        new Route("GET", path + "/questions", null),
+        new Route("POST", path + "/questions/perm-1", "{\"selectedLabels\":[\"Allow\"]}"),
         new Route("GET", path + "/events", null),
         new Route("GET", path + "/result?timeout=0", null),
         new Route("DELETE", path, null));

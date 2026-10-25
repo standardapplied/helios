@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -74,6 +75,11 @@ final class AgentSessionTest {
     @Override
     public void answer(String questionId, AskUserQuestionResponse response) {
       // not exercised by these interface-level tests
+    }
+
+    @Override
+    public List<AskUserQuestionRequest> pendingQuestions() {
+      return List.of();
     }
   }
 

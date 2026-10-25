@@ -254,7 +254,31 @@ See [Sessions](#sessions-helios-session) below.
 
 ### 3) HTTP surface
 
-`helios-runtime` exposes a session over REST + SSE so non-JVM clients can drive it. `POST /sessions`, `POST /sessions/{id}/messages`, SSE `GET /sessions/{id}/events`, long-poll `GET /sessions/{id}/result?timeout=<s>`, `DELETE /sessions/{id}`, each authenticated and scoped to the caller's own sessions (see [HTTP surface defaults](#http-surface-defaults)). See `runtime/` for routes.
+`helios-runtime` exposes a session over REST + SSE so non-JVM clients can drive it. `POST /sessions`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/interrupt`, SSE `GET /sessions/{id}/events`, long-poll `GET /sessions/{id}/result?timeout=<s>`, `GET /sessions/{id}/questions`, `POST /sessions/{id}/questions/{questionId}`, `DELETE /sessions/{id}`, each authenticated and scoped to the caller's own sessions (see [HTTP surface defaults](#http-surface-defaults)). See `runtime/` for routes.
+
+A session that asks the user, through a permission rule that says "ask" or the model's `AskUserQuestion`, waits until the question is answered. A client that missed the `QuestionAsked` event lists the questions still pending:
+
+```http
+GET /v1/sessions/sess-1/questions
+
+200 OK
+[{"questionId": "perm-0193…", "header": "Permission",
+  "question": "Allow Write(./notes.md)?\n\nArguments: {\"path\":\"./notes.md\"}",
+  "options": [{"label": "Allow", "description": "ask rule Write(**) matched Write(./notes.md)"},
+              {"label": "Deny", "description": "Refuse this tool call"}],
+  "multiSelect": false}]
+```
+
+and answers one by its id; `customText` is optional:
+
+```http
+POST /v1/sessions/sess-1/questions/perm-0193…
+{"selectedLabels": ["Allow"], "customText": ""}
+
+202 Accepted
+```
+
+An id starting `perm-` asks to approve a tool call; one starting `q-` is the model's own question. Tell them apart by the prefix, never the header: the model chooses its own question's header and labels. The answer names no tool or arguments, so it approves exactly the call the question was asked about. A body that is not a valid response is `400`, a question not pending (unknown or already answered) `404`, a closed session `409`; `401`, `413`, `429` and `503` as for `POST .../messages`.
 
 ## Sessions (`helios-session`)
 
@@ -265,7 +289,7 @@ See [Sessions](#sessions-helios-session) below.
 - `result()` — `CompletableFuture<ResultMessage>` for blocking await.
 - `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
 - `interrupt(reason)` — queue a synthetic mid-run user message.
-- `answer(qid, response)` — resolve a pending `AskUserQuestion`.
+- `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open.
 - `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.stopGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
 `SessionPresets` ships four curated factories, each returning a `SessionOptions.Builder` that already holds the model:

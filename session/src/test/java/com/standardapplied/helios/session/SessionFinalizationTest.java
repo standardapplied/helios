@@ -443,9 +443,8 @@ final class SessionFinalizationTest {
         assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
         events.awaitDone();
         assertEquals(Optional.empty(), events.error());
-        Await.termination(
-            "the publisher executor to end", session.lifecycleForTests().events().executor());
-        Await.termination("the scheduler to end", session.lifecycleForTests().scheduler());
+        Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+        Await.termination("the scheduler to end", session.lifecycle.scheduler());
       }
     }
     threads.forEach(thread -> Await.termination("thread " + thread.getName() + " to end", thread));

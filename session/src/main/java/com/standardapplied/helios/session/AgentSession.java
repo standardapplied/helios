@@ -8,7 +8,9 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -182,6 +184,17 @@ public interface AgentSession extends AutoCloseable {
    * @throws IllegalStateException if the session is closed
    */
   void answer(String questionId, AskUserQuestionResponse response);
+
+  /**
+   * The questions the session asked and that are not yet answered, cancelled or expired, in no
+   * particular order: each is what its {@link QueryEvent.QuestionAsked QuestionAsked} event
+   * carried, so a host that missed the event can still {@linkplain #answer answer} it. A question
+   * id starting {@code perm-} asks to approve a tool call; one starting {@code q-} is the model's
+   * own {@code AskUserQuestion}.
+   *
+   * @return an immutable snapshot; empty when no question is open
+   */
+  List<AskUserQuestionRequest> pendingQuestions();
 
   /**
    * Blocking convenience: send the message, then await the terminal {@link ResultMessage}.
