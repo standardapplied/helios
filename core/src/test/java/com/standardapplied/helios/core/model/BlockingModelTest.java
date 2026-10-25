@@ -21,6 +21,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
@@ -191,15 +192,7 @@ class BlockingModelTest {
                 })
             .chatStream(List.of(), List.of());
     try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
-      var read =
-          reader.submit(
-              () -> {
-                try {
-                  return stream.hasNext();
-                } finally {
-                  assertFalse(Thread.currentThread().isInterrupted(), "the close's interrupt");
-                }
-              });
+      var read = reader.submit(stream::hasNext);
       Await.latch("the call running", running);
 
       stream.close();
@@ -229,6 +222,40 @@ class BlockingModelTest {
       release.countDown();
 
       assertInstanceOf(CancellationException.class, Await.failure("the read", read));
+    }
+  }
+
+  @Test
+  void anInterruptOfTheReadingThreadDuringTheCallStaysSetWhenTheStreamIsAlsoClosed() {
+    var running = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var interrupted = new CountDownLatch(1);
+    var readingThread = new AtomicReference<Thread>();
+    var stream =
+        answering(
+                () -> {
+                  readingThread.set(Thread.currentThread());
+                  running.countDown();
+                  Uninterruptible.await(interrupted);
+                  Uninterruptible.await(release);
+                  return reply("dropped").build();
+                })
+            .chatStream(List.of(), List.of());
+    try (var reader = Executors.newVirtualThreadPerTaskExecutor()) {
+      var read =
+          reader.submit(
+              () -> {
+                assertThrows(CancellationException.class, stream::hasNext);
+                return Thread.interrupted();
+              });
+      Await.latch("the call running", running);
+
+      readingThread.get().interrupt();
+      interrupted.countDown();
+      stream.close();
+      release.countDown();
+
+      assertTrue(Await.value("the read", read), "the reading thread's interrupt");
     }
   }
 

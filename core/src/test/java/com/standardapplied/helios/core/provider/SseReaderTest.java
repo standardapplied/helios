@@ -619,6 +619,36 @@ class SseReaderTest {
   }
 
   @Test
+  void anInterruptAfterAnEventWasReadAheadClosesTheReaderAndThrowsCancellationAndStaysSet() {
+    var feed = new FeedableInputStream();
+    feed.feed("data: one\n\n");
+    var body = new Closing(feed);
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertTrue(reader.hasNext());
+      Thread.currentThread().interrupt();
+
+      assertThrows(CancellationException.class, reader::next);
+
+      assertTrue(Thread.interrupted());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
+  }
+
+  @Test
+  void anInterruptOnceTheReaderEndedLeavesItEnded() {
+    var body = new ByteArrayInputStream("data: stop\n\n".getBytes(StandardCharsets.UTF_8));
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertInstanceOf(StreamEvent.Done.class, reader.next());
+      Thread.currentThread().interrupt();
+
+      assertFalse(reader.hasNext());
+
+      assertTrue(Thread.interrupted());
+    }
+  }
+
+  @Test
   void aLazyReaderSendsNothingUntilItsFirstHasNext() throws Exception {
     var reply = HeldSseServer.Reply.of("data: hello\n\n");
     try (var server = HeldSseServer.start(reply);

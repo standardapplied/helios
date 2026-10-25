@@ -13,8 +13,9 @@ import java.util.function.Supplier;
  * runs that call at the first {@code hasNext()}, on the reading thread, and yields the finished
  * response whole: thinking, text, a start/stop pair per tool call, then the message stop. Closing
  * the stream, or interrupting the reading thread, before the call means it never runs; closing it
- * during the call interrupts the thread running it, and a call that ignores the interrupt runs
- * until it returns and its answer is dropped, since Java cannot end a thread by force.
+ * during the call interrupts the thread running it, an interrupt left set, and a call that ignores
+ * the interrupt runs until it returns and its answer is dropped, since Java cannot end a thread by
+ * force.
  */
 public interface BlockingModel extends Model {
 
@@ -48,7 +49,7 @@ public interface BlockingModel extends Model {
    * throws is thrown from {@code hasNext()} as itself. {@code close()} or an interrupt of the
    * reading thread before the call means it never runs; {@code close()} during it interrupts the
    * thread running it, and {@code hasNext()} throws {@link
-   * java.util.concurrent.CancellationException}.
+   * java.util.concurrent.CancellationException} with that interrupt kept.
    *
    * @param call the blocking call
    * @return the call's chunks

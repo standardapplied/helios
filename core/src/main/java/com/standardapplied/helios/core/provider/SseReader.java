@@ -45,7 +45,8 @@ import java.util.concurrent.TimeoutException;
  * IOException}, an idle timeout or an oversized line or event one carrying the provider's own
  * exception. Each error carries the parser's {@link Parser#partial()}. Closing the reader from
  * another thread releases a blocked read as such an error, an interrupt of the reading thread
- * throws a {@link CancellationException} with the interrupt kept. {@link SseFrames} frames the
+ * closes the reader and throws a {@link CancellationException} with the interrupt kept, even when
+ * an event was read ahead; a reader that ended still has nothing next. {@link SseFrames} frames the
  * lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
@@ -144,6 +145,10 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   @Override
   public boolean hasNext() {
+    if (Thread.currentThread().isInterrupted() && (!done || nextEvent != null)) {
+      close();
+      throw new CancellationException("interrupted while reading the stream");
+    }
     if (!sent) {
       sent = true;
       nextEvent = open();
