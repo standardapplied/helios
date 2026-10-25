@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 final class PendingQuestionsTest {
@@ -35,10 +36,46 @@ final class PendingQuestionsTest {
               new AskUserQuestionOption("a", "first"), new AskUserQuestionOption("b", "second")),
           false);
 
+  private final SessionState state = new SessionState("pending", new CancellationToken(), CLOCK);
+  private final SessionEventPublisher events = new SessionEventPublisher("pending");
+  private final PendingQuestions questions = new PendingQuestions(state, events, CLOCK);
+
+  @AfterEach
+  void closeEvents() {
+    events.close(Duration.ofMinutes(10));
+  }
+
+  @Test
+  void anAskedQuestionIsListedUntilItIsAnswered() {
+    var asking = asking();
+
+    assertEquals(List.of(QUESTION), questions.requests());
+    questions.answer("q1", AskUserQuestionResponse.single("q1", "a"));
+
+    assertEquals(AskUserQuestionResponse.single("q1", "a"), Await.value("ask", asking));
+    assertEquals(List.of(), questions.requests());
+  }
+
   @Test
   void cancellingTheSessionFailsAPendingQuestionAndForgetsIt() {
-    var state = new SessionState("pending", new CancellationToken(), CLOCK);
-    var events = new SessionEventPublisher("pending");
+    var asking = asking();
+
+    state.cancellation().cancel("session closed");
+
+    var failure = assertInstanceOf(CancellationException.class, Await.failure("ask", asking));
+    var cause = assertInstanceOf(CancellationException.class, failure.getCause());
+    assertEquals("session closed", cause.getMessage());
+    assertEquals(List.of(), questions.requests());
+    var unknown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> questions.answer("q1", AskUserQuestionResponse.single("q1", "a")));
+    assertEquals(
+        "no pending question with id 'q1' — already answered or unknown", unknown.getMessage());
+  }
+
+  /** Asks {@link #QUESTION} on a thread of its own and returns once the question was emitted. */
+  private FutureTask<AskUserQuestionResponse> asking() {
     var asked = new CompletableFuture<AskUserQuestionRequest>();
     events.subscribe(
         new CollectingSubscriber(
@@ -47,22 +84,9 @@ final class PendingQuestionsTest {
                 asked.complete(question.request());
               }
             }));
-    var questions = new PendingQuestions(state, events, CLOCK);
     var asking = new FutureTask<>(() -> questions.ask(QUESTION));
     Thread.ofVirtual().start(asking);
     Await.value("the question to be asked", asked);
-
-    state.cancellation().cancel("session closed");
-
-    var failure = assertInstanceOf(CancellationException.class, Await.failure("ask", asking));
-    var cause = assertInstanceOf(CancellationException.class, failure.getCause());
-    assertEquals("session closed", cause.getMessage());
-    var unknown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> questions.answer("q1", AskUserQuestionResponse.single("q1", "a")));
-    assertEquals(
-        "no pending question with id 'q1' — already answered or unknown", unknown.getMessage());
-    events.close(Duration.ofMinutes(10));
+    return asking;
   }
 }

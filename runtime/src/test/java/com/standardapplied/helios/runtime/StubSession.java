@@ -10,6 +10,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.SteeringQueueFullException;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.time.Duration;
 import java.util.List;
@@ -138,4 +139,9 @@ final class StubSession implements AgentSession {
 
   @Override
   public void answer(String questionId, AskUserQuestionResponse response) {}
+
+  @Override
+  public List<AskUserQuestionRequest> pendingQuestions() {
+    return List.of();
+  }
 }
