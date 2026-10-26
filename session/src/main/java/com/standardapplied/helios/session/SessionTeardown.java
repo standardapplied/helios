@@ -79,10 +79,9 @@ final class SessionTeardown {
   }
 
   /**
-   * End the runtime: every step runs, in order, and each waits only until {@code deadlineNanos}, a
-   * {@link System#nanoTime()} instant, so a step after one that used the deadline up is not waited
-   * for. An exception {@code onSessionEnd} throws that the session's ending does not record is kept
-   * for {@link #endAndSeal}.
+   * End the runtime by {@code deadlineNanos}, a {@link System#nanoTime()} instant. An exception
+   * {@code onSessionEnd} throws that the session's ending does not record is kept for {@link
+   * #endAndSeal}.
    */
   void end(ToolDispatch tools, long deadlineNanos) {
     if (!BoundedTask.settlesBy(state.ending().cancel("session ended"), deadlineNanos)) {
@@ -121,11 +120,6 @@ final class SessionTeardown {
                   + "; the session's provider resources are not known to be released, session "
                   + state.sessionId());
     }
-    release();
-  }
-
-  /** End the event streams, never waiting for a reader: what the session acquired first. */
-  void release() {
     events.close();
   }
 
