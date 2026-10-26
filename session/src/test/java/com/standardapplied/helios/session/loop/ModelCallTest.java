@@ -510,6 +510,40 @@ final class ModelCallTest {
     assertEquals(Level.WARNING, logged.getFirst().getLevel());
   }
 
+  @Test
+  void anInterruptOfTheWaitingThreadClosesTheStreamOffTheLoopThread() {
+    var pulled = new CountDownLatch(1);
+    var closing = new CountDownLatch(1);
+    var closer = new AtomicReference<String>();
+    var call =
+        modelCall(
+            new StreamModel(
+                cancellation ->
+                    blocking(
+                        pulled,
+                        () -> {
+                          closer.compareAndSet(null, Thread.currentThread().getName());
+                          closing.countDown();
+                          Uninterruptible.await(released);
+                        })));
+    var limits = SessionLimits.newBuilder().withStopGrace(Duration.ofMillis(50)).build();
+    var streaming = new FutureTask<>(() -> call.stream(state, limits, List.of()));
+
+    try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
+      var caller = Thread.ofVirtual().start(streaming);
+      Await.latch("the first read", pulled);
+
+      caller.interrupt();
+
+      Await.latch("the close", closing);
+      assertEquals("helios-model-stream-close-sess-call", closer.get());
+      assertInstanceOf(
+          InterruptedException.class, Await.value("the call", streaming).streamError());
+    }
+    assertEquals(1, logged.size());
+    assertEquals(Level.WARNING, logged.getFirst().getLevel());
+  }
+
   /**
    * The turn of a call over {@code model} whose waiting thread is interrupted once {@code pulled}
    * shows the stream is being read, asserting the interrupt stays set.
