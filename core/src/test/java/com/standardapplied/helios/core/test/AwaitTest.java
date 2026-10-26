@@ -36,6 +36,20 @@ class AwaitTest {
   }
 
   @Test
+  void aPassedDeadlineIsBeforeAnyLaterMoment() {
+    var passed = Await.passedDeadline();
+
+    assertTrue(Await.hangGuardDeadline() - passed > Await.HANG_GUARD.toNanos());
+  }
+
+  @Test
+  void aHangGuardDeadlineIsTheGuardAwayFromItsMoment() {
+    var hangGuard = Await.hangGuardDeadline();
+
+    assertTrue(hangGuard - Await.passedDeadline() <= Await.HANG_GUARD.toNanos() + 1);
+  }
+
+  @Test
   void latchReturnsOnceAnotherThreadCountsItDown() {
     var latch = new CountDownLatch(1);
     Thread.ofVirtual().start(latch::countDown);

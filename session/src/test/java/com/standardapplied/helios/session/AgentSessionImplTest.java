@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionImplTest {
@@ -395,15 +394,6 @@ final class AgentSessionImplTest {
     s.close();
     assertEquals(0, s.lifecycle.events().openStreams(), "close() detaches every stream");
     assertFalse(stream.iterator().hasNext(), "a stream ends with a pre-start close");
-  }
-
-  @Test
-  void aCancelledDeadlineLeavesTheSessionSchedulerAtOnce() {
-    try (var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP))) {
-      var scheduler = (ScheduledThreadPoolExecutor) s.lifecycle.scheduler();
-
-      assertTrue(scheduler.getRemoveOnCancelPolicy(), "a cancelled deadline is not kept until due");
-    }
   }
 
   @Test

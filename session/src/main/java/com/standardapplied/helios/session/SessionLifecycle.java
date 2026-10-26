@@ -9,17 +9,17 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StopClassifier;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Start-up and shutdown of one session's runtime. Acquires the session's event stream and then its
- * scheduler, notifies the {@link ExecutionProvider} that the session starts once everything else is
- * built ({@link SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the
- * agent-loop virtual thread on first use and arms the wall-clock deadline; its {@link
- * SessionTeardown} releases all of it in reverse order before the result future settles.
+ * Start-up and shutdown of one session's runtime. Acquires the session's event stream, notifies the
+ * {@link ExecutionProvider} that the session starts once everything else is built ({@link
+ * SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the agent-loop virtual
+ * thread on first use and, beside it, the wall-clock virtual thread; its {@link SessionTeardown}
+ * releases all of it in reverse order, by one {@link SessionLimits#stopGrace()} deadline, before
+ * the result future settles.
  *
  * <p>The runtime ends exactly once: a start-up the provider does not accept, {@link #startIfNeeded}
  * and {@link #close} share one compare-and-set, so exactly one path tears the runtime down and
@@ -31,7 +31,6 @@ final class SessionLifecycle {
   private final SessionLimits limits;
   private final CompletableFuture<ResultMessage> result;
   private final SessionEventPublisher events;
-  private final ScheduledExecutorService deadlineScheduler;
   private final SessionStart start;
   private final SessionTeardown teardown;
   private final AtomicBoolean started = new AtomicBoolean(false);
@@ -47,24 +46,8 @@ final class SessionLifecycle {
     this.limits = limits;
     this.result = result;
     this.events = new SessionEventPublisher(state.sessionId());
-    var scheduler =
-        new ScheduledThreadPoolExecutor(
-            1,
-            r -> {
-              var t = new Thread(r, "helios-deadline-" + state.sessionId());
-              t.setDaemon(true);
-              return t;
-            });
-    scheduler.setRemoveOnCancelPolicy(true);
-    this.deadlineScheduler = scheduler;
     this.teardown =
-        new SessionTeardown(
-            state,
-            sessionContext,
-            executionProvider,
-            events,
-            deadlineScheduler,
-            limits.stopGrace());
+        new SessionTeardown(state, sessionContext, executionProvider, events, limits.stopGrace());
     this.start =
         new SessionStart(
             state, sessionContext, executionProvider, () -> teardown.end(loop.toolDispatch()));
@@ -73,14 +56,6 @@ final class SessionLifecycle {
   /** The session's event stream, which the shutdown closes. */
   SessionEventPublisher events() {
     return events;
-  }
-
-  /**
-   * The session-scoped scheduler the wall-clock deadline runs on, shut down with the session. A
-   * cancelled timer leaves its queue at once.
-   */
-  ScheduledExecutorService scheduler() {
-    return deadlineScheduler;
   }
 
   /**
@@ -113,24 +88,40 @@ final class SessionLifecycle {
   }
 
   /**
-   * Start the agent loop on its virtual thread and arm the wall-clock deadline, at most once. The
-   * deadline cancels the session's {@link
+   * Start the agent loop and the wall clock, each on a virtual thread of its own, at most once. The
+   * wall clock cancels the session's {@link
    * com.standardapplied.helios.core.runtime.CancellationToken} when {@code limits.maxWallClock()}
    * elapses. Without it, {@code maxWallClock} is only checked at turn boundaries by {@link
-   * StopClassifier}, so a turn whose model stream never delivers {@code onComplete} / {@code
-   * onError} (silent socket, hung edge / proxy / load balancer) blocks the loop indefinitely. The
-   * wall-clock cancellation flips the token; the turn's subscriber observes it and unblocks; the
-   * loop proceeds to its next iteration, where {@link StopClassifier} sees {@code state.elapsed() >
-   * maxWallClock} and produces {@link ResultMessage.ErrorMaxWallClock}. The session is cancelled
-   * through {@link com.standardapplied.helios.session.loop.SessionEnding#cancel}, so its token's
-   * callbacks never run on the scheduler's one thread. The scheduler's shutdown drops it.
+   * StopClassifier}, so a turn blocked inside a model stream (silent socket, hung edge / proxy /
+   * load balancer), a tool, a permission prompt or a back-off blocks the loop indefinitely. The
+   * cancellation cuts the turn; the loop proceeds to its next iteration, where {@link
+   * StopClassifier} sees {@code state.elapsed() > maxWallClock} and produces {@link
+   * ResultMessage.ErrorMaxWallClock}.
    */
   void startIfNeeded() {
     if (started.compareAndSet(false, true)) {
-      deadlineScheduler.schedule(
-          this::expireWallClock, limits.maxWallClock().toMillis(), TimeUnit.MILLISECONDS);
+      BoundedTask.start(
+          "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending());
       Thread.ofVirtual().name("helios-agent-loop-" + state.sessionId()).start(this::runLoop);
     }
+  }
+
+  /**
+   * Wait until the session is cancelled or {@code maxWallClock} has passed, whichever is first, and
+   * expire the session at the latter. Every end of a session cancels it, so the wait always ends.
+   * It waits on the session's token, never on the result future, which a caller may complete.
+   */
+  private Void awaitWallClock() throws InterruptedException {
+    var ended = new CountDownLatch(1);
+    var registration = state.cancellation().onCancel(ended::countDown);
+    try {
+      if (!ended.await(limits.maxWallClock().toNanos(), TimeUnit.NANOSECONDS)) {
+        expireWallClock();
+      }
+    } finally {
+      registration.remove();
+    }
+    return null;
   }
 
   /**
@@ -146,11 +137,11 @@ final class SessionLifecycle {
    * com.standardapplied.helios.session.loop.SessionEnding#cancel}), its token's callbacks on a
    * thread of their own, so a callback that throws never reaches the caller. For a session whose
    * loop never started, also write a {@link ResultMessage.Cancelled} terminal and run the teardown
-   * on the caller's thread, each of its waits bounded by the teardown grace, then settle the
-   * result: as after a run, it settles only once the runtime has ended, so a host that frees
-   * capacity on the result never frees it while the provider still holds the session. Once the loop
-   * started, or the session ended at start-up, only the session is cancelled: the running loop
-   * observes it and ends the runtime itself. Never throws.
+   * on the caller's thread, by one {@code stopGrace} deadline, then settle the result: as after a
+   * run, it settles only once the runtime has ended, so a host that frees capacity on the result
+   * never frees it while the provider still holds the session. Once the loop started, or the
+   * session ended at start-up, only the session is cancelled: the running loop observes it and ends
+   * the runtime itself. Never throws.
    */
   void close() {
     state.ending().cancel("session closed");
@@ -167,7 +158,7 @@ final class SessionLifecycle {
     }
   }
 
-  /** The wall-clock deadline's task, package-private so a test can run it without the delay. */
+  /** What the wall clock does at its deadline, package-private so a test can run it at once. */
   void expireWallClock() {
     state.ending().cancel("maxWallClock exceeded after " + limits.maxWallClock().toMillis() + "ms");
   }

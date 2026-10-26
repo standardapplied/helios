@@ -35,11 +35,12 @@ import java.util.OptionalLong;
  *             {@link com.standardapplied.helios.core.tool.ToolOutcome.TimedOut}, one that does not
  *             {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, and until it ends
  *             every later tool call of the session is rejected;
- *         <li>each wait of the session's teardown: for the tool calls still running, cancelled
- *             first, to end; for the execution provider's {@code onSessionEnd} to return. A tool
- *             call or {@code onSessionEnd} still running when its wait ends is logged as such and
- *             the teardown moves on, so the result settles; such a tool's effects may land after it
- *             has;
+ *         <li>the whole of the session's teardown, whose waits share one deadline: for the tool
+ *             calls still running, cancelled first, to end; for the execution provider's {@code
+ *             onSessionEnd} to return. A tool call or {@code onSessionEnd} still running at the
+ *             deadline is logged as such and the teardown moves on, so the result settles; such a
+ *             tool's effects may land after it has, and a step after one that used the deadline up
+ *             is not waited for;
  *         <li>a model stream's reader, once the stream is closed: one still reading then is logged
  *             as such and the turn ends without it.
  *       </ul>

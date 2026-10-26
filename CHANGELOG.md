@@ -879,6 +879,15 @@ completes, and the reader drains it on its own thread.
 | `core.events.EventSinkPolicy` | removed; it had no use |
 | `examples.session.ConsoleEventPrinter` was a `Flow.Subscriber` | `new ConsoleEventPrinter(out).print(events)` prints an `Iterable<QueryEvent>` until it ends |
 
+**The teardown's waits share one `stopGrace` deadline.** Every end of a session waits for the
+token's callbacks, the live tool calls and `onSessionEnd` until one deadline, `stopGrace` (5 s)
+from the teardown's start, instead of up to `stopGrace` each: `close()` and every other end add at
+most `stopGrace`, not three times it. A step after one that used the deadline up (a callback or a
+tool that never returns) still runs, `onSessionEnd` is still called and the event streams still
+end, but it is not waited for: `onSessionEnd` may then still run when the result settles, and its
+`WARNING` is logged. `ToolDispatch.awaitLiveCalls(Duration grace)` →
+`awaitLiveCalls(long deadlineNanos)`, a `System.nanoTime()` instant.
+
 ### Added
 
 - **`ChunkDrain.drain(CloseableIterator<ModelChunk>)`** is the one drain of a model's chunk
@@ -1015,6 +1024,12 @@ completes, and the reader drains it on its own thread.
   and ASK rules then withhold its entries.
 
 ### Changed
+
+- **A session no longer holds a platform thread.** Its wall-clock deadline was a
+  `ScheduledThreadPoolExecutor` with one platform thread per session (`helios-deadline-<id>`); it
+  is now a virtual thread, `helios-wall-clock-<id>`, that waits on the session's token for
+  `maxWallClock` and ends with the session. Nothing a caller does to `result()`, such as
+  `orTimeout`, disarms it.
 
 - **A slow event reader never stalls the session.** A reader whose buffer is full misses a routine
   event at once, logged at FINE, instead of delaying the loop, or the turn's stream reader, by up to

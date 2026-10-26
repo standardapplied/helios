@@ -8,10 +8,6 @@ import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +20,7 @@ import java.util.logging.Logger;
  * after the session stopped waiting is logged as a {@code WARNING}, and a late acceptance is then
  * ended by the session's bounded teardown, so the provider is never left holding a session nobody
  * ends. That teardown runs on a thread of its own, which the interrupt that gave up on {@code
- * onSessionStart} never reaches, so its waits get their full grace.
+ * onSessionStart} never reaches, so it waits until its own {@code stopGrace} deadline.
  */
 final class SessionStart {
 
@@ -57,59 +53,34 @@ final class SessionStart {
    *     secret registry, or empty if the provider accepted
    */
   Optional<ResultMessage.ErrorProviderUnavailable> await(Duration bound) {
-    var outcome = new CompletableFuture<SessionStartOutcome>();
-    var worker =
-        Thread.ofVirtual()
-            .name("helios-session-start-" + state.sessionId())
-            .start(() -> run(outcome));
-    waitFor(outcome, bound)
-        .ifPresent(
-            reason -> {
-              outcome.complete(SessionStartOutcome.refuse(reason));
-              worker.interrupt();
-            });
-    return judged(outcome.join());
+    var task =
+        BoundedTask.start(
+            "helios-session-start-" + state.sessionId(),
+            () -> executionProvider.onSessionStart(sessionContext),
+            state.ending());
+    if (task.settlesBy(BoundedTask.deadlineAfter(bound))) {
+      return judged(task.outcome().handle(SessionStart::settled).join());
+    }
+    var reason =
+        Thread.currentThread().isInterrupted()
+            ? "interrupted while waiting for onSessionStart"
+            : "onSessionStart did not return within " + bound;
+    task.interrupt();
+    task.outcome().whenComplete((started, thrown) -> lateOutcome(settled(started, thrown)));
+    return Optional.of(refusal(reason, null));
   }
 
-  /**
-   * Wait up to {@code bound} for the provider to settle the start.
-   *
-   * @return why the session stopped waiting, or empty if the provider settled it in time
-   */
-  private static Optional<String> waitFor(
-      CompletableFuture<SessionStartOutcome> outcome, Duration bound) {
-    try {
-      outcome.get(bound.toNanos(), TimeUnit.NANOSECONDS);
-    } catch (ExecutionException | TimeoutException e) {
-      return Optional.of("onSessionStart did not return within " + bound);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return Optional.of("interrupted while waiting for onSessionStart");
+  /** What {@code onSessionStart} did, a throw as a refusal carrying it. */
+  private static SessionStartOutcome settled(SessionStartOutcome started, Throwable thrown) {
+    if (thrown == null) {
+      return started;
     }
-    return Optional.empty();
-  }
-
-  /**
-   * Settle {@code outcome} with what {@code onSessionStart} did, a throw as a refusal carrying it;
-   * if the session stopped waiting first, report what came too late and end a late acceptance.
-   */
-  private void run(CompletableFuture<SessionStartOutcome> outcome) {
-    SessionStartOutcome started;
-    try {
-      started = executionProvider.onSessionStart(sessionContext);
-    } catch (Throwable t) {
-      state.ending().failWith(t);
-      started =
-          SessionStartOutcome.refuse(
-              "onSessionStart threw "
-                  + t.getClass().getSimpleName()
-                  + ": "
-                  + (t.getMessage() == null ? "(no message)" : t.getMessage()),
-              t);
-    }
-    if (!outcome.complete(started)) {
-      lateOutcome(started);
-    }
+    return SessionStartOutcome.refuse(
+        "onSessionStart threw "
+            + thrown.getClass().getSimpleName()
+            + ": "
+            + (thrown.getMessage() == null ? "(no message)" : thrown.getMessage()),
+        thrown);
   }
 
   private void lateOutcome(SessionStartOutcome started) {

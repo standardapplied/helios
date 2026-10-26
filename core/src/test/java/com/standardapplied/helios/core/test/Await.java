@@ -29,6 +29,22 @@ public final class Await {
 
   private Await() {}
 
+  /**
+   * A {@link System#nanoTime()} deadline {@link #HANG_GUARD} from now, for code under test that
+   * waits until a deadline: its wait ends with the event or with the hang guard.
+   */
+  public static long hangGuardDeadline() {
+    return System.nanoTime() + HANG_GUARD.toNanos();
+  }
+
+  /**
+   * A {@link System#nanoTime()} deadline that has already passed, for code under test that waits
+   * until a deadline and must not wait at all.
+   */
+  public static long passedDeadline() {
+    return System.nanoTime() - 1;
+  }
+
   /** Waits until {@code latch} reaches zero. */
   public static void latch(String description, CountDownLatch latch) {
     latch(description, latch, HANG_GUARD);

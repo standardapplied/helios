@@ -162,7 +162,6 @@ final class SessionStartTest {
     var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
 
     assertEventsEnded(session);
-    Await.termination("the scheduler to end", session.lifecycle.scheduler());
     assertTrue(session.result().isDone(), kind + " settles the result");
     session.close();
     assertEquals(0, provider.ends.get());
@@ -183,7 +182,6 @@ final class SessionStartTest {
             Await.value("the result", session.result()));
     assertEquals("onSessionStart did not return within PT0.05S", refusal.reason());
     assertEventsEnded(session);
-    Await.termination("the scheduler to end", session.lifecycle.scheduler());
   }
 
   @Test
