@@ -19,6 +19,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -153,14 +154,13 @@ public final class SummarizingCompactor implements ContextCompactor {
   }
 
   private static <T> T valueOf(CompletableFuture<T> settled) {
-    var thrown = settled.handle((value, failure) -> failure).join();
-    switch (thrown) {
-      case null -> {
-        return settled.resultNow();
-      }
+    if (settled.state() == Future.State.SUCCESS) {
+      return settled.resultNow();
+    }
+    switch (settled.exceptionNow()) {
       case Error error -> throw error;
       case RuntimeException re -> throw re;
-      default -> throw new RuntimeException(thrown);
+      case Throwable thrown -> throw new RuntimeException(thrown);
     }
   }
 

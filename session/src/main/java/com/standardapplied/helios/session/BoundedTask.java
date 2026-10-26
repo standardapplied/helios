@@ -48,9 +48,12 @@ final class BoundedTask<T> {
     return new BoundedTask<>(thread, outcome);
   }
 
-  /** The {@link System#nanoTime()} instant {@code bound} from now. */
+  /**
+   * The {@link System#nanoTime()} instant {@code bound} from now; a bound past {@code
+   * Long.MAX_VALUE} nanoseconds counts as that many.
+   */
   static long deadlineAfter(Duration bound) {
-    return System.nanoTime() + bound.toNanos();
+    return System.nanoTime() + TimeUnit.NANOSECONDS.convert(bound);
   }
 
   /**

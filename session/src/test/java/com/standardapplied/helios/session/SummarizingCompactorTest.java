@@ -356,6 +356,32 @@ final class SummarizingCompactorTest {
   }
 
   @Test
+  void anErrorTheSummarizerJoinsFromAFailedFutureLeavesTheCompactionAsItself() {
+    var sentinel = new AssertionError("host failure");
+    var compactor = compactorSummarizingWith(() -> CompletableFuture.failedFuture(sentinel).join());
+    var state = freshState();
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, state));
+
+    assertSame(sentinel, thrown);
+    assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  @Test
+  void aSummaryTimeoutPastTheNanosecondRangeStillCompacts() {
+    var out =
+        SummarizingCompactor.newBuilder(summaryModel("the gist"))
+            .withSummaryTimeout(Duration.ofSeconds(Long.MAX_VALUE))
+            .build()
+            .compact(CONVERSATION, freshState());
+
+    assertEquals(
+        List.of(
+            Message.system("sys"), Message.user(SummarizingCompactor.SUMMARY_PREFIX + "the gist")),
+        out.history());
+  }
+
+  @Test
   void aCheckedExceptionTheSummarizerThrewUndeclaredLeavesTheHistoryUnchangedAtOnce() {
     var compactor = compactorSummarizingWith(() -> throwUndeclared(new IOException("undeclared")));
 
