@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -181,6 +182,7 @@ final class TurnReaderTest {
     assertInstanceOf(CancellationException.class, reader.outcome().streamError());
     assertEquals("", reader.outcome().assistantContent());
     assertEquals(List.of(), events);
+    assertEquals(1, stream.taken);
     assertTrue(stream.closed.get());
   }
 
@@ -192,6 +194,29 @@ final class TurnReaderTest {
     reader.read(ModelStreams.failing(failure));
 
     assertInstanceOf(CancellationException.class, reader.outcome().streamError());
+    assertSame(failure, state.ending().seal().orElseThrow());
+  }
+
+  /**
+   * Recording an {@link Error} cancels the session, whose callback ends the turn: holding the
+   * session's ending holds the record, so an ending that arrives meanwhile stands for that
+   * callback.
+   */
+  @Test
+  void anErrorEndsTheTurnBeforeItIsRecordedSoTheCancellationTheRecordCausesCannotTakeTheTurn() {
+    var failure = new AssertionError("host");
+    var reading = new FutureTask<Void>(() -> reader.read(ModelStreams.failing(failure)), null);
+
+    synchronized (state.ending()) {
+      var thread = Thread.ofVirtual().start(reading);
+      Await.until(
+          "the Error's record to wait for the session's ending",
+          () -> thread.getState() == Thread.State.BLOCKED);
+      reader.end(new CancellationException("the cancellation the record causes"));
+    }
+    Await.value("the read", reading);
+
+    assertSame(failure, reader.outcome().streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
@@ -283,6 +308,7 @@ final class TurnReaderTest {
     private final CloseableIterator<ModelChunk> chunks;
     private final Throwable onClose;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private int taken;
 
     Tracked(CloseableIterator<ModelChunk> chunks) {
       this(chunks, null);
@@ -300,6 +326,7 @@ final class TurnReaderTest {
 
     @Override
     public ModelChunk next() {
+      taken++;
       return chunks.next();
     }
 
