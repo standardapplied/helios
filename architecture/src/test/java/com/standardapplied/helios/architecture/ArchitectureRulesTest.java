@@ -82,8 +82,6 @@ class ArchitectureRulesTest {
   /** The one class in the session module that builds a Jackson mapper. */
   private static final String SESSION_JSON = HELIOS + ".session.SessionJson";
 
-  /** The one owner of the session's start-up and shutdown. */
-
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
 
