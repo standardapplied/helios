@@ -11,8 +11,8 @@ import java.util.Optional;
  * Applies the pre-stop hooks to the {@link StopClassifier}'s terminal verdict. Only a {@link
  * ResultMessage.Success} goes through them; other terminals (cancel, max-turns, errors) bypass.
  * {@link HookOutcome.Inject Inject} reverses the stop and queues a synthetic message; {@link
- * HookOutcome.Stop Stop} overrides the result text; Continue and Block confirm the stop unchanged;
- * mutation variants are not meaningful and are treated as Continue.
+ * HookOutcome.Stop Stop} overrides the result text; {@link HookOutcome.Continue Continue} confirms
+ * the stop unchanged.
  */
 final class PreStopDecision {
 
@@ -55,7 +55,7 @@ final class PreStopDecision {
         effects.inject(state, hookName, PHASE, inject);
         yield Optional.empty();
       }
-      default -> Optional.of(classifierVerdict);
+      case HookOutcome.Continue _ -> Optional.of(classifierVerdict);
     };
   }
 }

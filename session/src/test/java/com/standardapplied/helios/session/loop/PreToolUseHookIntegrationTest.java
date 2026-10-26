@@ -222,7 +222,8 @@ final class PreToolUseHookIntegrationTest {
 
   // ── the chain ────────────────────────────────────────────────────────────
 
-  private static PreToolUseHook recording(String name, List<String> seen, HookOutcome outcome) {
+  private static PreToolUseHook recording(
+      String name, List<String> seen, HookOutcome.PreToolUse outcome) {
     return named(
         name,
         (call, ctx) -> {

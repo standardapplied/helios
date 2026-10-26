@@ -14,21 +14,22 @@ import org.junit.jupiter.api.Test;
 final class PreToolUseResultTest {
 
   private static final ToolCall CALL = new ToolCall("c", "read", Map.of());
-  private static final HookDecision MUTATION =
+  private static final HookDecision<HookOutcome.MutateArgs> MUTATION =
       HookDecision.of("A", HookOutcome.mutateArgs(Map.of("path", "a")));
 
   @Test
   void theMutationsAreCopied() {
     var mutations = new ArrayList<>(List.of(MUTATION));
-    var result = new PreToolUseResult(CALL, mutations, HookDecision.proceed());
+    var result =
+        new PreToolUseResult(CALL, mutations, new HookDecision<>(null, HookOutcome.cont()));
     mutations.clear();
     assertEquals(List.of(MUTATION), result.mutations());
   }
 
   @Test
   void aNullComponentIsRejected() {
-    var none = List.<HookDecision>of();
-    var proceed = HookDecision.proceed();
+    var none = List.<HookDecision<HookOutcome.MutateArgs>>of();
+    HookDecision<HookOutcome.PreToolUse> proceed = new HookDecision<>(null, HookOutcome.cont());
     assertEquals(
         "call must not be null",
         assertThrows(NullPointerException.class, () -> new PreToolUseResult(null, none, proceed))
@@ -44,22 +45,13 @@ final class PreToolUseResultTest {
   }
 
   @Test
-  void aMutationThatIsNotAnArgumentMutationIsRejected() {
-    var block = HookDecision.of("B", HookOutcome.block("no"));
-    var mutations = List.of(block);
-    var proceed = HookDecision.proceed();
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> new PreToolUseResult(CALL, mutations, proceed));
-    assertEquals("not an argument mutation: " + block, ex.getMessage());
-  }
-
-  @Test
   void anArgumentMutationCannotEndTheChain() {
-    var none = List.<HookDecision>of();
+    var none = List.<HookDecision<HookOutcome.MutateArgs>>of();
+    HookDecision<HookOutcome.PreToolUse> mutation =
+        HookDecision.of("A", HookOutcome.mutateArgs(Map.of("path", "a")));
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> new PreToolUseResult(CALL, none, MUTATION));
+            IllegalArgumentException.class, () -> new PreToolUseResult(CALL, none, mutation));
     assertEquals("an argument mutation does not end the chain", ex.getMessage());
   }
 }

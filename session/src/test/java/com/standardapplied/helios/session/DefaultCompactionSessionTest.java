@@ -18,12 +18,14 @@ import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 
 /**
  * The session's compactor through the loop: the history crosses the compaction watermark after the
  * first tool round. The default compactor leaves the next model request with no earlier assistant
- * turn; the disabled one leaves the whole conversation.
+ * turn, a compactor wrapping it sees the history on both sides, and the disabled one leaves the
+ * whole conversation.
  */
 class DefaultCompactionSessionTest {
 
@@ -44,6 +46,42 @@ class DefaultCompactionSessionTest {
         model.calls().getLast());
     assertEquals(3, model.calls().size());
     assertEquals(1, events.eventsOf(QueryEvent.ContextEdited.class).size());
+  }
+
+  @Test
+  void aCompactorWrappingTheDefaultSeesTheHistoryBeforeAndTheResultAfter() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withTextTurn("the gist")
+            .withTextTurn("done")
+            .build();
+    var defaultCompactor = SummarizingCompactor.newBuilder(model).build();
+    var before = new CopyOnWriteArrayList<List<Message>>();
+    var after = new CopyOnWriteArrayList<List<Message>>();
+    ContextCompactor archiving =
+        (history, context) -> {
+          before.add(history);
+          var result = defaultCompactor.compact(history, context);
+          after.add(result.history());
+          return result;
+        };
+
+    var events =
+        runToSuccess(compactingAfterTheFirstToolResult(model).withContextCompactor(archiving));
+
+    assertEquals(
+        List.of(List.of(Role.SYSTEM, Role.USER, Role.ASSISTANT, Role.TOOL)),
+        before.stream().map(history -> history.stream().map(Message::role).toList()).toList());
+    var compacted =
+        List.of(
+            Message.system("sys"), Message.user(SummarizingCompactor.SUMMARY_PREFIX + "the gist"));
+    assertEquals(List.of(compacted), after);
+    var edited = events.eventsOf(QueryEvent.ContextEdited.class);
+    assertEquals(1, edited.size());
+    assertEquals(2, edited.getFirst().removedBlocks());
+    assertEquals(96L, edited.getFirst().tokensBefore());
+    assertEquals(10L, edited.getFirst().tokensAfter());
   }
 
   @Test

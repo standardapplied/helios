@@ -11,9 +11,7 @@ import com.standardapplied.helios.core.model.Response;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.Inject} queues a synthetic user message before the next turn; {@link
- * HookOutcome.Stop} terminates the session. Mutation variants ({@link HookOutcome.MutateArgs},
- * {@link HookOutcome.MutateHistory}, {@link HookOutcome.MutateText}, {@link
- * HookOutcome.MutateResult}) and {@link HookOutcome.Block} are not meaningful at this phase.
+ * HookOutcome.Stop} terminates the session.
  */
 @FunctionalInterface
 public non-sealed interface PostModelTurnHook extends Hook {
@@ -25,7 +23,7 @@ public non-sealed interface PostModelTurnHook extends Hook {
    * @param ctx the per-invocation context; non-null
    * @return the hook's decision
    */
-  HookOutcome afterModelTurn(Response<?> response, HookContext ctx);
+  HookOutcome.PostModelTurn afterModelTurn(Response<?> response, HookContext ctx);
 
   @Override
   default String name() {

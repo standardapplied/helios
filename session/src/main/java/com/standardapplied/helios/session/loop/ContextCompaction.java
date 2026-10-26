@@ -3,15 +3,11 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.context.TokenCounter;
-import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
-import com.standardapplied.helios.session.hooks.HookOutcome;
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -19,9 +15,7 @@ import java.util.logging.Logger;
  * The context watermark and compaction step the {@link AgentLoop} runs before and after every turn:
  * counts the tokens in the history, fires {@link QueryEvent.ContextWarning} on the first crossing
  * of {@link #CONTEXT_WARNING_WATERMARK}, and on crossings of {@link #CONTEXT_COMPACT_WATERMARK}
- * runs the {@link ContextCompactor} between the {@link
- * com.standardapplied.helios.session.hooks.PreCompactHook} and {@link
- * com.standardapplied.helios.session.hooks.PostCompactHook}.
+ * runs the {@link ContextCompactor}.
  */
 final class ContextCompaction {
 
@@ -74,7 +68,6 @@ final class ContextCompaction {
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
-  private final HookEffects effects;
   private final TurnRunner turnRunner;
   private final TokenCounter tokenCounter;
   private final ContextCompactor contextCompactor;
@@ -87,7 +80,6 @@ final class ContextCompaction {
       ContextCompactor contextCompactor) {
     this.collaborators = collaborators;
     this.emitter = emitter;
-    this.effects = new HookEffects(emitter, collaborators.steeringQueue());
     this.turnRunner = turnRunner;
     this.tokenCounter = tokenCounter;
     this.contextCompactor = contextCompactor;
@@ -158,14 +150,14 @@ final class ContextCompaction {
    * Invoke the configured {@link ContextCompactor}, swap in the returned history, accumulate any
    * usage reported by the compactor (e.g. summary call spend) — priced against the compactor's own
    * {@link CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's
-   * rate — fire the pre-compact hook before the compactor runs and the post-compact hook after a
-   * successful shrink, and emit {@link QueryEvent.ContextEdited} last. A returned identity (same
-   * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
-   * the warning flag stays set. A throwing compactor is swallowed; the loop continues, unless what
-   * it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session.
+   * rate — and emit {@link QueryEvent.ContextEdited} after a successful shrink. A returned identity
+   * (same instance) or no-shrink result is treated as a no-op — the compactor opted out for this
+   * turn and the warning flag stays set. A throwing compactor is swallowed; the loop continues,
+   * unless what it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the
+   * session.
    */
   private void compact(SessionState state, long tokensBefore) {
-    var historyBefore = beforeCompact(state, state.history().snapshot());
+    var historyBefore = state.history().snapshot();
     CompactionResult result;
     try {
       result = contextCompactor.compact(historyBefore, state);
@@ -192,12 +184,6 @@ final class ContextCompaction {
     state.history().replace(historyAfter);
     var tokensAfter = tokenCounter.count(state.history().snapshot());
     var removedBlocks = historyBefore.size() - historyAfter.size();
-    var payload =
-        new CompactionPayload(
-            historyBefore, historyAfter, tokensBefore, tokensAfter, removedBlocks);
-    if (afterCompactStops(state, payload)) {
-      return;
-    }
     emitter.emit(
         state,
         new QueryEvent.ContextEdited(
@@ -207,55 +193,5 @@ final class ContextCompaction {
             removedBlocks,
             tokensBefore,
             tokensAfter));
-  }
-
-  /**
-   * Fire the pre-compact hook and return the history the compactor should operate on. {@link
-   * HookOutcome.MutateHistory} swaps in the rewritten history; other non-Continue outcomes are
-   * logged and treated as Continue.
-   */
-  private List<Message> beforeCompact(SessionState state, List<Message> historyBefore) {
-    var decision =
-        collaborators.hooks().firePreCompact(historyBefore, collaborators.hookContext(state));
-    var hookName = decision.firingHookName();
-    return switch (decision.outcome()) {
-      case HookOutcome.Continue ignored -> historyBefore;
-      case HookOutcome.MutateHistory mutate -> {
-        emitter.emitHookFired(state, hookName, "PreCompactHook", "MutateHistory");
-        yield mutate.history();
-      }
-      default -> {
-        LOGGER.log(
-            Level.WARNING,
-            "PreCompactHook ''{0}'' {1} is not honored at this phase; using original history",
-            new Object[] {hookName, decision.outcome().getClass().getSimpleName()});
-        yield historyBefore;
-      }
-    };
-  }
-
-  /**
-   * Fire the post-compact hook. Returns {@code true} when the hook elected {@link HookOutcome.Stop}
-   * so the caller skips the {@link QueryEvent.ContextEdited} emission and lets the loop terminate.
-   * Other outcomes (including the unsupported Mutate / Block / Inject) are logged and treated as
-   * Continue.
-   */
-  private boolean afterCompactStops(SessionState state, CompactionPayload payload) {
-    var decision = collaborators.hooks().firePostCompact(payload, collaborators.hookContext(state));
-    var hookName = decision.firingHookName();
-    return switch (decision.outcome()) {
-      case HookOutcome.Continue ignored -> false;
-      case HookOutcome.Stop stop -> {
-        effects.stop(state, hookName, "PostCompactHook", stop);
-        yield true;
-      }
-      default -> {
-        LOGGER.log(
-            Level.WARNING,
-            "PostCompactHook ''{0}'' {1} is not honored at this phase",
-            new Object[] {hookName, decision.outcome().getClass().getSimpleName()});
-        yield false;
-      }
-    };
   }
 }

@@ -22,14 +22,11 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
-import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
@@ -111,21 +108,6 @@ final class LoopStagesTest {
   }
 
   @Test
-  void aPostCompactStopBeforeTheTurnEndsTheSessionWithoutCallingTheModel() {
-    state.history().append(Message.system("system"));
-    queue.offer(UserMessage.text("hello"));
-    ContextCompactor keepLast = (history, s) -> CompactionResult.noOp(List.of(history.getLast()));
-    PostCompactHook stop = (payload, ctx) -> HookOutcome.stop("compacted and stopped");
-    var model = ScriptedModel.newBuilder().build();
-
-    var result = loop(model, OVER_THE_WATERMARK, keepLast, stop).run(state, SMALL_WINDOW);
-
-    assertEquals(
-        "compacted and stopped", assertInstanceOf(ResultMessage.Success.class, result).result());
-    assertEquals(List.of(), model.calls());
-  }
-
-  @Test
   void compactionSpendOfOutputTokensOnlyIsPricedAtTheCompactorModel() {
     state.history().append(Message.system("system"));
     queue.offer(UserMessage.text("hello"));
@@ -168,57 +150,6 @@ final class LoopStagesTest {
   }
 
   @Test
-  void compactHookOutcomesTheirPhaseDoesNotHonourAreLoggedOnTheAgentLoopLogger() {
-    state.history().append(Message.system("system"));
-    queue.offer(UserMessage.text("hello"));
-    var compacted = new AtomicBoolean();
-    ContextCompactor keepLastOnce =
-        (history, s) ->
-            CompactionResult.noOp(
-                compacted.compareAndSet(false, true) ? List.of(history.getLast()) : history);
-    var blockingPre =
-        new PreCompactHook() {
-          @Override
-          public String name() {
-            return "pre";
-          }
-
-          @Override
-          public HookOutcome beforeCompact(List<Message> history, HookContext ctx) {
-            return HookOutcome.block("no");
-          }
-        };
-    var injectingPost =
-        new PostCompactHook() {
-          @Override
-          public String name() {
-            return "post";
-          }
-
-          @Override
-          public HookOutcome afterCompact(CompactionPayload payload, HookContext ctx) {
-            return HookOutcome.inject("ignored");
-          }
-        };
-    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
-    var records = new CopyOnWriteArrayList<LogRecord>();
-
-    try (var ignored = LogCapture.of(AgentLoop.class, records)) {
-      loop(model, OVER_THE_WATERMARK, keepLastOnce, blockingPre, injectingPost)
-          .run(state, SMALL_WINDOW);
-    }
-
-    assertEquals(
-        "PreCompactHook ''{0}'' {1} is not honored at this phase; using original history",
-        records.get(0).getMessage());
-    assertEquals(List.of("pre", "Block"), List.of(records.get(0).getParameters()));
-    assertEquals(
-        "PostCompactHook ''{0}'' {1} is not honored at this phase", records.get(1).getMessage());
-    assertEquals(List.of("post", "Inject"), List.of(records.get(1).getParameters()));
-    assertEquals(0, queue.size());
-  }
-
-  @Test
   void aPreStopInjectIntoAFullSteeringQueueIsDroppedWithAWarningOnTheAgentLoopLogger() {
     queue.offer(UserMessage.text("hello"));
     var fired = new AtomicBoolean();
@@ -230,7 +161,7 @@ final class LoopStagesTest {
           }
 
           @Override
-          public HookOutcome beforeStop(
+          public HookOutcome.PreStop beforeStop(
               com.standardapplied.helios.core.model.Response<?> response, HookContext ctx) {
             if (!fired.compareAndSet(false, true)) {
               return HookOutcome.cont();

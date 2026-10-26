@@ -16,9 +16,62 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 final class HookOutcomeTest {
+
+  @Test
+  void eachPhaseTypePermitsExactlyTheOutcomesItsPhaseHonours() {
+    assertEquals(
+        Set.of(
+            HookOutcome.OnUserMessage.class,
+            HookOutcome.PreModelTurn.class,
+            HookOutcome.PostModelTurn.class,
+            HookOutcome.PreStop.class,
+            HookOutcome.PreToolUse.class,
+            HookOutcome.PostToolUse.class),
+        permitted(HookOutcome.class));
+    assertEquals(
+        Set.of(
+            HookOutcome.Continue.class,
+            HookOutcome.MutateText.class,
+            HookOutcome.Block.class,
+            HookOutcome.Stop.class),
+        permitted(HookOutcome.OnUserMessage.class));
+    assertEquals(
+        Set.of(
+            HookOutcome.Continue.class,
+            HookOutcome.MutateHistory.class,
+            HookOutcome.Inject.class,
+            HookOutcome.Stop.class),
+        permitted(HookOutcome.PreModelTurn.class));
+    assertEquals(
+        Set.of(HookOutcome.Continue.class, HookOutcome.Inject.class, HookOutcome.Stop.class),
+        permitted(HookOutcome.PostModelTurn.class));
+    assertEquals(
+        Set.of(HookOutcome.Continue.class, HookOutcome.Inject.class, HookOutcome.Stop.class),
+        permitted(HookOutcome.PreStop.class));
+    assertEquals(
+        Set.of(
+            HookOutcome.Continue.class,
+            HookOutcome.MutateArgs.class,
+            HookOutcome.Block.class,
+            HookOutcome.Inject.class,
+            HookOutcome.Stop.class),
+        permitted(HookOutcome.PreToolUse.class));
+    assertEquals(
+        Set.of(
+            HookOutcome.Continue.class,
+            HookOutcome.MutateResult.class,
+            HookOutcome.Inject.class,
+            HookOutcome.Stop.class),
+        permitted(HookOutcome.PostToolUse.class));
+  }
+
+  private static Set<Class<?>> permitted(Class<?> sealed) {
+    return Set.of(sealed.getPermittedSubclasses());
+  }
 
   @Test
   void contFactoryReturnsSingleton() {

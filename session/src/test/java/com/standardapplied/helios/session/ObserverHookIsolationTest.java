@@ -5,19 +5,14 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import com.standardapplied.helios.core.context.TokenCounter;
-import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.OnUserMessageHook;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
-import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.permissions.Permission;
@@ -42,19 +37,15 @@ final class ObserverHookIsolationTest {
     POST_MODEL_TURN,
     POST_TOOL_USE,
     PRE_STOP,
-    PRE_COMPACT,
-    POST_COMPACT,
     ON_USER_MESSAGE,
     ON_STREAM_EVENT;
 
-    Hook hook(Supplier<HookOutcome> body) {
+    Hook hook(Supplier<HookOutcome.Continue> body) {
       return switch (this) {
         case PRE_MODEL_TURN -> (PreModelTurnHook) (history, ctx) -> body.get();
         case POST_MODEL_TURN -> (PostModelTurnHook) (response, ctx) -> body.get();
         case POST_TOOL_USE -> (PostToolUseHook) (call, result, ctx) -> body.get();
         case PRE_STOP -> (PreStopHook) (response, ctx) -> body.get();
-        case PRE_COMPACT -> (PreCompactHook) (history, ctx) -> body.get();
-        case POST_COMPACT -> (PostCompactHook) (payload, ctx) -> body.get();
         case ON_USER_MESSAGE -> (OnUserMessageHook) (message, ctx) -> body.get();
         case ON_STREAM_EVENT -> (OnStreamEventHook) (event, ctx) -> body.get();
       };
@@ -64,10 +55,8 @@ final class ObserverHookIsolationTest {
   private final WriteToolSessions sessions = new WriteToolSessions();
   private final List<Phase> recorded = new CopyOnWriteArrayList<>();
 
-  /** Runs a session through every phase: a tool round, a compaction and a stop. */
-  private ToolResult runWith(Phase phase, Supplier<HookOutcome> failing) {
-    TokenCounter counter =
-        messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L;
+  /** Runs a session through every phase: a user message, a tool round and a stop. */
+  private ToolResult runWith(Phase phase, Supplier<HookOutcome.Continue> failing) {
     var options =
         sessions
             .options(
@@ -76,14 +65,6 @@ final class ObserverHookIsolationTest {
                     List.of(PermissionRule.any("Write")),
                     List.of(),
                     List.of()))
-            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100).build())
-            .withTokenCounter(counter)
-            .withContextCompactor(
-                (history, state) ->
-                    new CompactionResult(
-                        List.of(history.getFirst(), history.getLast()),
-                        Usage.of(0, 0),
-                        "compactor"))
             .withHook(phase.hook(failing))
             .withHook(
                 phase.hook(
@@ -94,7 +75,7 @@ final class ObserverHookIsolationTest {
     return WriteToolSessions.run(options, WriteToolSessions.write("/w")).onlyResult();
   }
 
-  private void assertIsolated(Phase phase, Supplier<HookOutcome> failing) {
+  private void assertIsolated(Phase phase, Supplier<HookOutcome.Continue> failing) {
     var result = runWith(phase, failing);
 
     assertFalse(recorded.isEmpty(), "the recording hook of " + phase + " fired");

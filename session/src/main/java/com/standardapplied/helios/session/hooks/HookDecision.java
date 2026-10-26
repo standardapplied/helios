@@ -20,10 +20,9 @@ import java.util.Objects;
  * @param firingHookName the name of the hook whose non-Continue outcome won, or {@code null} if
  *     every hook returned {@link HookOutcome.Continue}
  * @param outcome the resolved outcome
+ * @param <O> the outcome type of the phase that decided
  */
-public record HookDecision(String firingHookName, HookOutcome outcome) {
-
-  private static final HookDecision PROCEED = new HookDecision(null, HookOutcome.cont());
+public record HookDecision<O extends HookOutcome>(String firingHookName, O outcome) {
 
   /**
    * Canonical constructor.
@@ -47,36 +46,28 @@ public record HookDecision(String firingHookName, HookOutcome outcome) {
   }
 
   /**
-   * The shared "no hook decided anything" instance — used as the default return when every hook in
-   * the phase returned {@link HookOutcome.Continue}.
-   *
-   * @return the singleton proceed decision
-   */
-  public static HookDecision proceed() {
-    return PROCEED;
-  }
-
-  /**
    * Build a decision from the firing hook's name and the outcome it returned.
    *
    * @param firingHookName the firing hook's name; non-blank
    * @param outcome the non-Continue outcome; non-null
+   * @param <O> the phase's outcome type
    * @return a fresh decision
    * @throws NullPointerException if {@code outcome} is null
-   * @throws IllegalArgumentException if {@code outcome} is {@link HookOutcome.Continue} (use {@link
-   *     #proceed()} for that case), or {@code firingHookName} is null or blank
+   * @throws IllegalArgumentException if {@code outcome} is {@link HookOutcome.Continue} (construct
+   *     that decision with a {@code null} name), or {@code firingHookName} is null or blank
    */
-  public static HookDecision of(String firingHookName, HookOutcome outcome) {
+  public static <O extends HookOutcome> HookDecision<O> of(String firingHookName, O outcome) {
     if (outcome instanceof HookOutcome.Continue) {
-      throw new IllegalArgumentException("use HookDecision.proceed() for Continue outcomes");
+      throw new IllegalArgumentException(
+          "a Continue decision has no firing hook; construct it with a null name");
     }
-    return new HookDecision(firingHookName, outcome);
+    return new HookDecision<>(firingHookName, outcome);
   }
 
   /**
-   * Whether this decision is the proceed sentinel.
+   * Whether no hook decided anything.
    *
-   * @return {@code true} when no hook decided anything
+   * @return {@code true} when the outcome is {@link HookOutcome.Continue}
    */
   public boolean shouldContinue() {
     return outcome instanceof HookOutcome.Continue;

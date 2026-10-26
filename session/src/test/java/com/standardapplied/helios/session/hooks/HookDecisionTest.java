@@ -12,7 +12,17 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
+import java.net.URI;
+import java.nio.file.Path;
+import java.util.List;
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaFileObject;
+import javax.tools.SimpleJavaFileObject;
+import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,19 +30,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 final class HookDecisionTest {
 
   private static final HookOutcome BLOCK = HookOutcome.block("nope");
-
-  @Test
-  void proceedSingletonIsContinueWithNoName() {
-    var d = HookDecision.proceed();
-    assertTrue(d.shouldContinue());
-    assertInstanceOf(HookOutcome.Continue.class, d.outcome());
-    assertNull(d.firingHookName());
-  }
-
-  @Test
-  void proceedIsSingleton() {
-    assertSame(HookDecision.proceed(), HookDecision.proceed());
-  }
 
   @Test
   void ofWrapsNameAndOutcome() {
@@ -63,7 +60,8 @@ final class HookDecisionTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class, () -> HookDecision.of("myHook", HookOutcome.cont()));
-    assertEquals("use HookDecision.proceed() for Continue outcomes", ex.getMessage());
+    assertEquals(
+        "a Continue decision has no firing hook; construct it with a null name", ex.getMessage());
   }
 
   @Test
@@ -95,5 +93,49 @@ final class HookDecisionTest {
   void constructorAllowsContinueWithoutAName() {
     var d = new HookDecision(null, HookOutcome.cont());
     assertTrue(d.shouldContinue());
+    assertInstanceOf(HookOutcome.Continue.class, d.outcome());
+    assertNull(d.firingHookName());
+  }
+
+  @Test
+  void aContinueDecisionTypesAsAPhaseButNeverAsAConcreteOutcome(@TempDir Path out) {
+    var diagnostics =
+        compile(
+            out,
+            """
+            import com.standardapplied.helios.session.hooks.HookDecision;
+            import com.standardapplied.helios.session.hooks.HookOutcome.*;
+            import static com.standardapplied.helios.session.hooks.HookOutcome.cont;
+            final class Probe {
+              HookDecision<PreToolUse> phase = new HookDecision<>(null, cont());
+              HookDecision<MutateArgs> constructed = new HookDecision<>(null, cont());
+              HookDecision<MutateArgs> named = HookDecision.of("A", cont());
+              HookDecision<MutateArgs> proceed = HookDecision.proceed();
+            }
+            """);
+    assertEquals(List.of(6L, 7L, 8L), diagnostics.stream().map(Diagnostic::getLineNumber).toList());
+  }
+
+  private static String classPath() {
+    return System.getProperty("java.class.path")
+        + File.pathSeparator
+        + System.getProperty("jdk.module.path", "");
+  }
+
+  private static List<Diagnostic<? extends JavaFileObject>> compile(Path out, String source) {
+    var compiler = ToolProvider.getSystemJavaCompiler();
+    var collector = new DiagnosticCollector<JavaFileObject>();
+    var file =
+        new SimpleJavaFileObject(URI.create("string:///Probe.java"), JavaFileObject.Kind.SOURCE) {
+          @Override
+          public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+            return source;
+          }
+        };
+    var options = List.of("-proc:none", "-d", out.toString(), "-cp", classPath());
+    compiler.getTask(null, null, collector, options, null, List.of(file)).call();
+    return collector.getDiagnostics().stream()
+        .filter(d -> d.getKind() == Diagnostic.Kind.ERROR)
+        .toList();
   }
 }

@@ -17,11 +17,10 @@
  * com.standardapplied.helios.session.hooks.PostToolUseHook}, {@link
  * com.standardapplied.helios.session.hooks.PreStopHook}, {@link
  * com.standardapplied.helios.session.hooks.OnStreamEventHook} — each describing a place in the loop
- * where the model's intent is decided. Hooks return a {@link
- * com.standardapplied.helios.session.hooks.HookOutcome} (sealed {@code Continue} / {@code
- * MutateArgs} / {@code MutateHistory} / {@code MutateText} / {@code MutateResult} / {@code Block} /
- * {@code Inject} / {@code Stop}); not every outcome is meaningful at every phase, and the phase
- * Javadoc documents what each one does.
+ * where the model's intent is decided. Each decisive phase method returns its phase's {@link
+ * com.standardapplied.helios.session.hooks.HookOutcome} sub-interface (for example {@code
+ * HookOutcome.PreToolUse}), which admits exactly the outcomes that phase honours, so an outcome the
+ * phase would ignore does not compile; the phase Javadoc documents what each one does.
  *
  * <p>{@link com.standardapplied.helios.session.hooks.HookRegistry} is the priority-sorted,
  * type-fanned dispatcher the loop calls. {@link
