@@ -772,7 +772,7 @@ mvn -B clean verify javadoc:jar   # what CI runs: tests, coverage and the qualit
 limits, CPD duplication detection across modules, and ArchUnit architecture rules. A change that
 breaks it is fixed in the code — exclusions are never added and rules are never suppressed in
 source. The limits, the commands and the policy are in the
-["Quality gate" section of `CLAUDE.md`](CLAUDE.md#quality-gate).
+["Quality gate" section of `AGENTS.md`](AGENTS.md#quality-gate).
 
 ## License
 

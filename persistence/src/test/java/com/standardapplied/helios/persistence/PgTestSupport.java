@@ -98,7 +98,7 @@ final class PgTestSupport {
       // because schema.sql uses CREATE TABLE IF NOT EXISTS — it would skip existing tables that
       // carry old shapes (e.g. pre-1.4 helios_core_blocks.block_id NOT NULL, pre-1.4
       // helios_messages without ON DELETE CASCADE to helios_sessions). DROP CASCADE is safe in
-      // the test database; production migrations are documented in CLAUDE.md.
+      // the test database; production migrations are documented in AGENTS.md.
       for (var table :
           List.of(
               "helios_tool_calls",

@@ -11,7 +11,7 @@ Exit status:
   2  the result cannot be trusted: the scanner, the network, the advisory data, an inventory or
      the exception file is at fault, or the scan itself failed. Never a clean scan, and never 1.
 
-The policy this enforces is documented in CLAUDE.md, "Supply-chain gate".
+The policy this enforces is documented in AGENTS.md, "Supply-chain gate".
 """
 
 import collections
