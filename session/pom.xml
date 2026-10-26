@@ -16,6 +16,7 @@
 
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
+        <helios.test.opens>--add-modules java.compiler --add-reads com.standardapplied.helios.session=java.compiler</helios.test.opens>
     </properties>
 
     <dependencies>
@@ -51,6 +52,27 @@
 
     <build>
         <plugins>
+            <plugin>
+                <!--
+                  HookDecisionTest compiles a probe to prove a phase's type rule is a compile error,
+                  through java.compiler, which the main module does not require.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <compilerArgs>
+                                <arg>--add-modules</arg>
+                                <arg>java.compiler</arg>
+                                <arg>--add-reads</arg>
+                                <arg>com.standardapplied.helios.session=java.compiler</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <!--
                   Publishes the test fixtures of com.standardapplied.helios.session.test as the

@@ -20,7 +20,8 @@ final class PreToolUseResultTest {
   @Test
   void theMutationsAreCopied() {
     var mutations = new ArrayList<>(List.of(MUTATION));
-    var result = new PreToolUseResult(CALL, mutations, HookDecision.proceed());
+    var result =
+        new PreToolUseResult(CALL, mutations, new HookDecision<>(null, HookOutcome.cont()));
     mutations.clear();
     assertEquals(List.of(MUTATION), result.mutations());
   }
@@ -28,7 +29,7 @@ final class PreToolUseResultTest {
   @Test
   void aNullComponentIsRejected() {
     var none = List.<HookDecision<HookOutcome.MutateArgs>>of();
-    HookDecision<HookOutcome.PreToolUse> proceed = HookDecision.proceed();
+    HookDecision<HookOutcome.PreToolUse> proceed = new HookDecision<>(null, HookOutcome.cont());
     assertEquals(
         "call must not be null",
         assertThrows(NullPointerException.class, () -> new PreToolUseResult(null, none, proceed))
