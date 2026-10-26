@@ -17,7 +17,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -40,8 +40,7 @@ final class CompactingSession {
   static final String THINKING_BLOCKS_KEY = "anthropic.thinkingBlocks";
 
   /** What one run produced: its terminal, its events and the history it compacted, if any. */
-  record Run(
-      ResultMessage terminal, CollectingSubscriber events, Optional<List<Message>> compacted) {
+  record Run(ResultMessage terminal, EventCollector events, Optional<List<Message>> compacted) {
 
     /** Whether the first assistant turn of the compacted history held a signed thinking block. */
     boolean compactedASignedThinkingTurn() {
@@ -80,8 +79,8 @@ final class CompactingSession {
             .withContextCompactor(recording)
             .build();
     try (var session = AgentSession.create(options)) {
-      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(events);
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
       var terminal =
           session.runBlocking(
               UserMessage.text(

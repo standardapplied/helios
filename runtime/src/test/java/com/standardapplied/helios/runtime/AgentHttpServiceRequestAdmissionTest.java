@@ -136,11 +136,11 @@ final class AgentHttpServiceRequestAdmissionTest {
       assertRefused(refused, TOO_MANY_REQUESTS);
     }
     assertEquals(0, session.queue.size());
-    assertEquals(2, session.subscribers.size());
+    assertEquals(2, session.streams.size());
     assertEquals(factoryRuns + 1, harness.factoryRuns.get());
     assertEquals(201, bobs.statusCode());
 
-    session.subscribers.getFirst().onComplete();
+    session.streams.getFirst().end();
 
     assertEquals(
         202, harness.sendAdmitted(server, "POST", messages(sessionId), "alice").statusCode());

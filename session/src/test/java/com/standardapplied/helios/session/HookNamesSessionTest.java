@@ -17,7 +17,7 @@ import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
@@ -49,7 +49,7 @@ final class HookNamesSessionTest {
     }
   }
 
-  private record Run(CollectingSubscriber events, ResultMessage terminal) {
+  private record Run(EventCollector events, ResultMessage terminal) {
 
     ToolResult onlyResult() {
       var results = events.eventsOf(QueryEvent.ToolResult.class);
@@ -82,9 +82,9 @@ final class HookNamesSessionTest {
   }
 
   private static Run run(Hook hook) {
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var session = AgentSession.create(options(hook))) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("go"));
       var terminal = Await.value("the session to end", session.result());
       events.awaitDone();

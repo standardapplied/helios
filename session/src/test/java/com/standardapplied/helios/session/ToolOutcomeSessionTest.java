@@ -23,7 +23,7 @@ import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -284,9 +284,9 @@ final class ToolOutcomeSessionTest {
             .withToolCallsTurn(call("holds"), call("next"))
             .withTextTurn("done")
             .build();
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var session = AgentSession.create(options.withModel(model).build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("go"));
       Await.latch("the first call to start", entered);
 

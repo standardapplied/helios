@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -159,7 +161,7 @@ final class SessionStartTest {
 
     var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
 
-    Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+    assertEventsEnded(session);
     Await.termination("the scheduler to end", session.lifecycle.scheduler());
     assertTrue(session.result().isDone(), kind + " settles the result");
     session.close();
@@ -180,7 +182,7 @@ final class SessionStartTest {
             ResultMessage.ErrorProviderUnavailable.class,
             Await.value("the result", session.result()));
     assertEquals("onSessionStart did not return within PT0.05S", refusal.reason());
-    Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+    assertEventsEnded(session);
     Await.termination("the scheduler to end", session.lifecycle.scheduler());
   }
 
@@ -552,6 +554,13 @@ final class SessionStartTest {
         .withModel(ScriptedModel.newBuilder().withTextTurn("done").build())
         .withSessionId(SID)
         .withExecutionProvider(provider);
+  }
+
+  /** A stream opened on a session whose fan-out was closed ends at once instead of blocking. */
+  private static void assertEventsEnded(AgentSession session) {
+    var reading = new FutureTask<>(() -> session.events().iterator().hasNext());
+    Thread.ofVirtual().start(reading);
+    assertFalse(Await.value("a stream opened after the release to end", reading));
   }
 
   private static SessionLimits shortStart() {

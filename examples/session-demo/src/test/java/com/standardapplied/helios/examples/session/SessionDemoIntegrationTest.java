@@ -29,7 +29,7 @@ import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
@@ -96,8 +96,8 @@ final class SessionDemoIntegrationTest {
                 SessionDemoMain.exploreAndRememberOptions(forced, tmp)
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(3).build())
                     .build())) {
-      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(events);
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
       var prompt =
           "Do exactly two steps, then stop:\n"
               + "1. Call LS on the workspace root to list its contents.\n"
@@ -134,9 +134,7 @@ final class SessionDemoIntegrationTest {
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att-test").build();
 
     try (var session = AgentSession.create(options)) {
-      session
-          .events()
-          .subscribe(new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny")));
+      new EventCollector(QuestionAnswers.selecting(session, "Deny")).read(session.events());
       var msg =
           UserMessage.newBuilder()
               .withText("I'm sending a small generated image. Briefly describe what you see.")
@@ -164,7 +162,7 @@ final class SessionDemoIntegrationTest {
             List.of(PermissionRule.of("MemoryRead", "/memories/**")),
             List.of(),
             List.of());
-    CollectingSubscriber events;
+    EventCollector events;
     String modelId;
     try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
         var session =
@@ -175,8 +173,8 @@ final class SessionDemoIntegrationTest {
                     .withTools(new ToolRegistry(List.of(MemoryWriteTool.binding(memoryBackend))))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
-      events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(events);
+      events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
       session.runBlocking(
           UserMessage.text(
               "Use MemoryWrite with op=create to save a note at /memories/test.md with content"

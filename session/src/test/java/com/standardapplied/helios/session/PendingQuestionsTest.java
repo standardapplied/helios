@@ -12,8 +12,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.loop.SessionState;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
-import java.time.Duration;
+import com.standardapplied.helios.session.test.EventCollector;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
@@ -42,7 +41,7 @@ final class PendingQuestionsTest {
 
   @AfterEach
   void closeEvents() {
-    events.close(Duration.ofMinutes(10));
+    events.close();
   }
 
   @Test
@@ -77,13 +76,13 @@ final class PendingQuestionsTest {
   /** Asks {@link #QUESTION} on a thread of its own and returns once the question was emitted. */
   private FutureTask<AskUserQuestionResponse> asking() {
     var asked = new CompletableFuture<AskUserQuestionRequest>();
-    events.subscribe(
-        new CollectingSubscriber(
+    new EventCollector(
             event -> {
               if (event instanceof QueryEvent.QuestionAsked question) {
                 asked.complete(question.request());
               }
-            }));
+            })
+        .read(events.open());
     var asking = new FutureTask<>(() -> questions.ask(QUESTION));
     Thread.ofVirtual().start(asking);
     Await.value("the question to be asked", asked);

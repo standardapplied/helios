@@ -43,6 +43,7 @@ import java.time.Clock;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
@@ -80,9 +81,6 @@ class ArchitectureRulesTest {
 
   /** The one class in the session module that builds a Jackson mapper. */
   private static final String SESSION_JSON = HELIOS + ".session.SessionJson";
-
-  /** The one owner of the session's event fan-out. */
-  private static final String SESSION_EVENT_PUBLISHER = HELIOS + ".session.SessionEventPublisher";
 
   /** The one owner of the session's start-up and shutdown. */
   private static final String SESSION_LIFECYCLE = HELIOS + ".session.SessionLifecycle";
@@ -222,21 +220,20 @@ class ArchitectureRulesTest {
   }
 
   @Test
-  void submissionPublisherIsUsedOnlyBySessionEventPublisher() {
+  void streamsArePulledNeverPublishedThroughFlow() {
     noClasses()
-        .that(
-            not(name(SESSION_EVENT_PUBLISHER).or(nameStartingWith(SESSION_EVENT_PUBLISHER + "$"))))
         .should()
-        .dependOnClassesThat(type(SubmissionPublisher.class))
+        .dependOnClassesThat(
+            nameStartingWith(Flow.class.getName()).or(type(SubmissionPublisher.class)))
         .because(
-            "a session's events fan out through session.SessionEventPublisher, which owns the"
-                + " SubmissionPublisher, its executor, the bounded wait on a slow subscriber and"
-                + " the replay of the terminal event")
+            "a stream is pulled by its reader: a model turn's through core.model.CloseableIterator,"
+                + " a session's events through session.EventStream; nothing is published through"
+                + " java.util.concurrent.Flow or SubmissionPublisher")
         .check(LIBRARY);
   }
 
   @Test
-  void sessionExecutorsAreCreatedOnlyByTheEventPublisherAndTheLifecycle() {
+  void sessionExecutorsAreCreatedOnlyByTheLifecycle() {
     noClasses()
         .that()
         .resideInAPackage(HELIOS + ".session..")
@@ -245,12 +242,7 @@ class ArchitectureRulesTest {
             HELIOS + ".session.files..",
             HELIOS + ".session.memory..",
             HELIOS + ".session.execution..")
-        .and(
-            not(
-                name(SESSION_EVENT_PUBLISHER)
-                    .or(nameStartingWith(SESSION_EVENT_PUBLISHER + "$"))
-                    .or(name(SESSION_LIFECYCLE))
-                    .or(nameStartingWith(SESSION_LIFECYCLE + "$"))))
+        .and(not(name(SESSION_LIFECYCLE).or(nameStartingWith(SESSION_LIFECYCLE + "$"))))
         .should()
         .accessTargetWhere(
             targetOwner(type(Executors.class))
@@ -259,9 +251,8 @@ class ArchitectureRulesTest {
                     targetOwner(assignableTo(ExecutorService.class))
                         .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
         .because(
-            "every pool a session owns has one owner that shuts it down: the event executor is"
-                + " session.SessionEventPublisher's and the deadline scheduler is"
-                + " session.SessionLifecycle's; every other class is handed the pool it uses")
+            "every pool a session owns has one owner that shuts it down: the deadline scheduler"
+                + " is session.SessionLifecycle's; every other class is handed the pool it uses")
         .check(LIBRARY);
   }
 

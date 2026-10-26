@@ -8,8 +8,8 @@ import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.util.function.Consumer;
 
 /**
- * Reactions to a session's events, for a {@link CollectingSubscriber}, that answer the questions
- * the session asks while its loop waits on them.
+ * Reactions to a session's events, for a {@link EventCollector}, that answer the questions the
+ * session asks while its loop waits on them.
  */
 public final class QuestionAnswers {
 

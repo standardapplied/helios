@@ -35,7 +35,7 @@ import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.SampleDocuments;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -85,7 +85,7 @@ final class RecordedSessionTest {
   private static final String SECRET = "sk-test-CONFIDENTIAL-do-not-leak-789012";
 
   /** What one replayed session produced and every request it sent. */
-  private record Replay(ResultMessage terminal, CollectingSubscriber events, List<String> bodies) {}
+  private record Replay(ResultMessage terminal, EventCollector events, List<String> bodies) {}
 
   @Test
   void claudeProgressLoopSurfacesItsNotesAndRunsEveryToolCall() {
@@ -218,7 +218,7 @@ final class RecordedSessionTest {
       Function<URI, Model> modelAt,
       Function<Model, SessionOptions.Builder> options) {
     var replies = Arrays.asList(Golden.read(fixture).split(ModelHarness.NEXT_RESPONSE));
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     var terminal = new ResultMessage[1];
     var requests =
         ModelHarness.exchange(
@@ -226,7 +226,7 @@ final class RecordedSessionTest {
             modelAt,
             model -> {
               try (var session = AgentSession.create(options.apply(model).build())) {
-                session.events().subscribe(events);
+                events.read(session.events());
                 terminal[0] = session.runBlocking(UserMessage.text("Go."));
                 events.awaitDone();
               }

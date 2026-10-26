@@ -121,9 +121,9 @@ final class AgentHttpServiceOnAnyServerTest {
 
     var events = openEvents(sessionId, "alice");
     session
-        .subscribers
+        .streams
         .getFirst()
-        .onNext(new QueryEvent.AssistantText(sessionId, 0L, Instant.EPOCH, "hello"));
+        .push(new QueryEvent.AssistantText(sessionId, 0L, Instant.EPOCH, "hello"));
     assertEquals(
         List.of(
             "event:AssistantText",

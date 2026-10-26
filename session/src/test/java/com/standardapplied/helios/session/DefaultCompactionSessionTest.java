@@ -11,7 +11,7 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -116,10 +116,10 @@ class DefaultCompactionSessionTest {
             messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L);
   }
 
-  private static CollectingSubscriber runToSuccess(SessionOptions.Builder options) {
-    var events = new CollectingSubscriber();
+  private static EventCollector runToSuccess(SessionOptions.Builder options) {
+    var events = new EventCollector();
     try (var session = AgentSession.create(options.build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("go"));
 
       assertInstanceOf(

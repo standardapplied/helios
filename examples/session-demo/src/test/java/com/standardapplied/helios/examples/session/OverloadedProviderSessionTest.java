@@ -23,7 +23,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.time.Duration;
@@ -51,11 +51,11 @@ final class OverloadedProviderSessionTest {
         SseReplies.stream(
             Golden.read(overload.provider() + "/sessions/held-text.sse")
                 .replace(StreamingSessionTest.HOLD, ""));
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(overload.reply(Map.of()), served));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
         var session = AgentSession.create(retrying(model, 3, Duration.ZERO))) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("Hi"));
 
       var success =
@@ -95,11 +95,11 @@ final class OverloadedProviderSessionTest {
   @MethodSource("overloads")
   void aBadRequestIsNotRetriedWhateverItsRetryAfter(Overload overload) throws IOException {
     var refused = new StubHttpServer.Reply(400, Map.of("Retry-After", "0"), "{\"error\":\"bad\"}");
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(refused));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
         var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("Hi"));
 
       var failed =
@@ -117,11 +117,11 @@ final class OverloadedProviderSessionTest {
   @MethodSource("overloads")
   void anOverloadThatOutlastsTheRetriesEndsTheSessionAsATransientFailure(Overload overload)
       throws IOException {
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(overload.reply(Map.of())));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
         var session = AgentSession.create(retrying(model, 2, Duration.ZERO))) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("Hi"));
 
       var failed =

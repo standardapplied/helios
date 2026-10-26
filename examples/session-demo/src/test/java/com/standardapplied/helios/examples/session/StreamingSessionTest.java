@@ -40,7 +40,7 @@ import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -192,7 +192,7 @@ final class StreamingSessionTest {
         Arrays.asList(
             Golden.read("anthropic/sessions/structured-tool.sse")
                 .split(ModelHarness.NEXT_RESPONSE));
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server =
             StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, SseReplies.inOrder(replies));
         var model = modelAt("anthropic", server.uri());
@@ -203,7 +203,7 @@ final class StreamingSessionTest {
                     .withTools(new ToolRegistry(List.of(weather())))
                     .withOutputSchema(OutputSchema.of(Forecast.class))
                     .build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
 
       var forecast =
           session.runBlocking(UserMessage.text("Weather?"), OutputSchema.of(Forecast.class));
@@ -227,7 +227,7 @@ final class StreamingSessionTest {
 
   @Test
   void citationsTraverseTheStreamingPath() throws IOException {
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server =
             StubHttpServer.start(
                 InetAddress.getLoopbackAddress(),
@@ -235,7 +235,7 @@ final class StreamingSessionTest {
                 SseReplies.inOrder(List.of(Golden.read("gemini/sessions/cited.sse"))));
         var model = modelAt("gemini", server.uri());
         var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
 
       session.send(UserMessage.text("Paris?"));
       var success = assertInstanceOf(ResultMessage.Success.class, result(session));
@@ -363,15 +363,13 @@ final class StreamingSessionTest {
 
   static <E extends QueryEvent> LinkedBlockingQueue<E> queued(AgentSession session, Class<E> type) {
     var queue = new LinkedBlockingQueue<E>();
-    session
-        .events()
-        .subscribe(
-            new CollectingSubscriber(
-                event -> {
-                  if (type.isInstance(event)) {
-                    queue.add(type.cast(event));
-                  }
-                }));
+    new EventCollector(
+            event -> {
+              if (type.isInstance(event)) {
+                queue.add(type.cast(event));
+              }
+            })
+        .read(session.events());
     return queue;
   }
 

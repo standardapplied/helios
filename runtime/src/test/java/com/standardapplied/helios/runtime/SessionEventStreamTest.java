@@ -3,7 +3,6 @@
 package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.ToolCall;
@@ -19,63 +18,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
-/** Unit tests for {@link SessionEventStream} as a subscriber, against a recording sink. */
+/**
+ * Unit tests for {@link SessionEventStream} reading a hand-fed event stream into a recording sink.
+ */
 final class SessionEventStreamTest {
 
   private static final QueryEvent EVENT =
       new QueryEvent.AssistantText("sess-1", 0L, Instant.EPOCH, "hello");
+  private static final String EVENT_LINE =
+      "AssistantText:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+          + "\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}";
 
   @Test
-  void subscribingRequestsEverythingAndEmitsReady() {
-    var sink = new RecordingSink(null);
-    var subscription = new RecordingSubscription();
+  void readyThenEachEventNamedByItsSubtypeUntilTheStreamEndsThenTheSinkCloses() {
+    var sink = new RecordingSink();
+    var events = FedEventStream.of(EVENT, EVENT);
 
-    new SessionEventStream("sess-1", sink, new ObjectMapper()).onSubscribe(subscription);
+    forward(sink, new ObjectMapper(), events);
 
-    assertEquals(Long.MAX_VALUE, subscription.requested.get());
-    assertEquals(List.of("Ready:{}"), sink.emitted);
-  }
-
-  @Test
-  void aFailedReadyEmitIsIgnored() {
-    var subscription = new RecordingSubscription();
-    var stream =
-        new SessionEventStream("sess-1", new RecordingSink(new IllegalStateException("x")), null);
-
-    stream.onSubscribe(subscription);
-
-    assertEquals(Long.MAX_VALUE, subscription.requested.get());
-    assertFalse(subscription.cancelled.get());
-  }
-
-  @Test
-  void eachEventIsEmittedNamedByItsSubtype() {
-    var sink = new RecordingSink(null);
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-
-    stream.onNext(EVENT);
-
-    assertEquals(
-        List.of(
-            "AssistantText:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
-                + "\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}"),
-        sink.emitted);
+    assertEquals(List.of("Ready:{}", EVENT_LINE, EVENT_LINE), sink.emitted);
+    assertTrue(sink.closed.get());
   }
 
   @Test
   void aToolResultIsEmittedWithItsRedactionsAndNoData() {
-    var sink = new RecordingSink(null);
-    var stream =
-        new SessionEventStream("sess-1", sink, ToolOutcomeSerializer.addTo(new ObjectMapper()));
+    var sink = new RecordingSink();
 
-    stream.onNext(
+    forward(
+        sink,
+        ToolOutcomeSerializer.addTo(new ObjectMapper()),
         new QueryEvent.ToolResult(
             "sess-1",
             0L,
@@ -86,6 +61,7 @@ final class SessionEventStreamTest {
 
     assertEquals(
         List.of(
+            "Ready:{}",
             "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
                 + "\"timestamp\":\"1970-01-01T00:00:00Z\","
                 + "\"call\":{\"id\":\"c1\",\"name\":\"leak\",\"arguments\":{}},"
@@ -114,215 +90,142 @@ final class SessionEventStreamTest {
             + "\"output\":\"tool 'slow' timed out after PT1M\",\"attachments\":[]},"
             + "\"redactions\":{}}";
 
-    var sink = new RecordingSink(null);
+    var sink = new RecordingSink();
 
-    new SessionEventStream("sess-1", sink, JsonBody.MAPPER).onNext(event);
+    forward(sink, JsonBody.MAPPER, event);
 
-    assertEquals(List.of(expected), sink.emitted);
+    assertEquals(List.of("Ready:{}", expected), sink.emitted);
   }
 
   @Test
-  void aFailedEmitCancelsTheSubscriptionAndEndsTheStream() {
-    var sink = new RecordingSink(new IllegalStateException("sink broke"));
-    var subscription = new RecordingSubscription();
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-    stream.onSubscribe(subscription);
+  void aFailedReadyWriteEndsTheStreamWithoutReadingAnEvent() {
+    var sink = new RecordingSink(new IllegalStateException("sink broke"), 0);
+    var events = FedEventStream.of(EVENT);
 
-    stream.onNext(EVENT);
+    forward(sink, new ObjectMapper(), events);
 
-    assertTrue(subscription.cancelled.get());
-    awaitEnd(stream);
+    assertTrue(sink.emitted.isEmpty());
     assertTrue(sink.closed.get());
+    assertTrue(events.iterator().hasNext(), "the event was never taken");
   }
 
   @Test
-  void aDisconnectCancelsTheSubscriptionAndEndsTheStream() {
-    var sink = new RecordingSink(new CloseConnectionException("peer closed"));
-    var subscription = new RecordingSubscription();
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-    stream.onSubscribe(subscription);
+  void aFailedEventWriteEndsTheStream() {
+    var sink = new RecordingSink(new IllegalStateException("sink broke"), 1);
+    var events = new FedEventStream();
+    events.push(EVENT);
 
-    stream.onNext(EVENT);
+    forward(sink, new ObjectMapper(), events);
 
-    assertTrue(subscription.cancelled.get());
-    awaitEnd(stream);
-  }
-
-  @Test
-  void aFailedEmitBeforeSubscriptionEndsTheStream() {
-    var stream =
-        new SessionEventStream(
-            "sess-1", new RecordingSink(new IllegalStateException("x")), new ObjectMapper());
-
-    stream.onNext(EVENT);
-
-    awaitEnd(stream);
-  }
-
-  @Test
-  void endingCancelsTheSubscriptionAndEndsTheStreamWithoutAFurtherEvent() {
-    var sink = new RecordingSink(null);
-    var subscription = new RecordingSubscription();
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-    stream.onSubscribe(subscription);
-
-    stream.end();
-
-    assertTrue(subscription.cancelled.get());
-    awaitEnd(stream);
     assertEquals(List.of("Ready:{}"), sink.emitted);
     assertTrue(sink.closed.get());
   }
 
   @Test
-  void anEventStillSerializingWhenTheStreamEndsIsNotWritten() {
-    var sink = new RecordingSink(null);
-    var stream = new AtomicReference<SessionEventStream>();
+  void aDisconnectEndsTheStream() {
+    var sink = new RecordingSink(new CloseConnectionException("peer closed"), 1);
+    var events = new FedEventStream();
+    events.push(EVENT);
+
+    forward(sink, new ObjectMapper(), events);
+
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void theIdentityEndingClosesTheStreamWithoutAFurtherEvent() {
+    var sink = new RecordingSink();
+    var events = new FedEventStream();
+    var identityEnded = new CompletableFuture<Void>();
+    var forwarding =
+        CompletableFuture.runAsync(
+            () ->
+                new SessionEventStream("sess-1", sink, new ObjectMapper(), identityEnded)
+                    .forward(events));
+    Await.until("the Ready event", () -> !sink.emitted.isEmpty());
+
+    identityEnded.complete(null);
+
+    Await.value("the stream to end", forwarding);
+    assertTrue(events.isClosed());
+    assertEquals(List.of("Ready:{}"), sink.emitted);
+    assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void anIdentityAlreadyEndedWritesNothingAndClosesTheStream() {
+    var sink = new RecordingSink();
+    var events = FedEventStream.of(EVENT);
+
+    new SessionEventStream(
+            "sess-1", sink, new ObjectMapper(), CompletableFuture.completedFuture(null))
+        .forward(events);
+
+    assertTrue(sink.emitted.isEmpty());
+    assertTrue(events.isClosed());
+    assertTrue(sink.closed.get());
+  }
+
+  @Test
+  void anEventStillSerializingWhenTheIdentityEndsIsNotWritten() {
+    var sink = new RecordingSink();
+    var identityEnded = new CompletableFuture<Void>();
     var endingMidSerialization =
         new ObjectMapper() {
           @Override
           public String writeValueAsString(Object value) {
-            stream.get().end();
+            identityEnded.complete(null);
             return super.writeValueAsString(value);
           }
         };
-    stream.set(new SessionEventStream("sess-1", sink, endingMidSerialization));
-    stream.get().onSubscribe(new RecordingSubscription());
 
-    stream.get().onNext(EVENT);
+    new SessionEventStream("sess-1", sink, endingMidSerialization, identityEnded)
+        .forward(FedEventStream.of(EVENT));
 
     assertEquals(List.of("Ready:{}"), sink.emitted);
-    awaitEnd(stream.get());
-  }
-
-  @Test
-  void anEventArrivingAfterTheEndIsNeitherSerializedNorWritten() {
-    var sink = new RecordingSink(null);
-    var serialized = new AtomicBoolean();
-    var recording =
-        new ObjectMapper() {
-          @Override
-          public String writeValueAsString(Object value) {
-            serialized.set(true);
-            return super.writeValueAsString(value);
-          }
-        };
-    var stream = new SessionEventStream("sess-1", sink, recording);
-    stream.end();
-
-    stream.onNext(EVENT);
-
-    assertFalse(serialized.get());
-    assertTrue(sink.emitted.isEmpty());
-    awaitEnd(stream);
-  }
-
-  @Test
-  void aSubscriptionArrivingAfterTheEndIsCancelledAndNothingIsRequested() {
-    var sink = new RecordingSink(null);
-    var subscription = new RecordingSubscription();
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-    stream.end();
-
-    stream.onSubscribe(subscription);
-
-    assertTrue(subscription.cancelled.get());
-    assertEquals(0L, subscription.requested.get());
-    assertTrue(sink.emitted.isEmpty());
-    awaitEnd(stream);
-  }
-
-  @Test
-  void aStreamEndingAsItSubscribesWritesNoReady() {
-    var sink = new RecordingSink(null);
-    var stream = new AtomicReference<SessionEventStream>();
-    var endingOnRequest =
-        new Flow.Subscription() {
-          @Override
-          public void request(long n) {
-            stream.get().end();
-          }
-
-          @Override
-          public void cancel() {}
-        };
-    stream.set(new SessionEventStream("sess-1", sink, new ObjectMapper()));
-
-    stream.get().onSubscribe(endingOnRequest);
-
-    assertTrue(sink.emitted.isEmpty());
-    awaitEnd(stream.get());
-  }
-
-  @Test
-  void aPublisherErrorEndsTheStream() {
-    var sink = new RecordingSink(null);
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-
-    stream.onError(new IllegalStateException("publisher broke"));
-
-    awaitEnd(stream);
-    assertTrue(sink.closed.get());
-  }
-
-  @Test
-  void completionEndsTheStream() {
-    var sink = new RecordingSink(null);
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-
-    stream.onComplete();
-
-    awaitEnd(stream);
     assertTrue(sink.closed.get());
   }
 
   @Test
   void aSinkThatFailsToCloseStillEndsTheStream() {
-    var sink = new RecordingSink(null);
+    var sink = new RecordingSink();
     sink.failClose = true;
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
 
-    stream.onComplete();
+    forward(sink, new ObjectMapper(), FedEventStream.of());
 
-    awaitEnd(stream);
-  }
-
-  @Test
-  void anInterruptedWaitEndsTheStreamClosesTheSinkAndKeepsTheInterrupt() {
-    var sink = new RecordingSink(null);
-    var subscription = new RecordingSubscription();
-    var stream = new SessionEventStream("sess-1", sink, new ObjectMapper());
-    stream.onSubscribe(subscription);
-
-    Thread.currentThread().interrupt();
-    stream.awaitEndThenClose();
-
-    assertTrue(Thread.interrupted());
-    assertTrue(sink.closed.get());
-    assertTrue(subscription.cancelled.get());
-    stream.onNext(EVENT);
     assertEquals(List.of("Ready:{}"), sink.emitted);
+    assertTrue(sink.closed.get());
   }
 
-  private static void awaitEnd(SessionEventStream stream) {
-    Await.value(
-        "the end of the event stream", CompletableFuture.runAsync(stream::awaitEndThenClose));
+  private static void forward(SseSink sink, ObjectMapper mapper, QueryEvent event) {
+    forward(sink, mapper, FedEventStream.of(event));
+  }
+
+  private static void forward(SseSink sink, ObjectMapper mapper, FedEventStream events) {
+    new SessionEventStream("sess-1", sink, mapper, new CompletableFuture<>()).forward(events);
   }
 
   private static final class RecordingSink implements SseSink {
 
     private final RuntimeException emitFailure;
+    private final int writesBeforeFailure;
     private final List<String> emitted = new CopyOnWriteArrayList<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile boolean failClose;
 
-    RecordingSink(RuntimeException emitFailure) {
+    RecordingSink() {
+      this(null, Integer.MAX_VALUE);
+    }
+
+    RecordingSink(RuntimeException emitFailure, int writesBeforeFailure) {
       this.emitFailure = emitFailure;
+      this.writesBeforeFailure = writesBeforeFailure;
     }
 
     @Override
     public SseSink emit(SseEvent event) {
-      if (emitFailure != null) {
+      if (emitted.size() == writesBeforeFailure) {
         throw emitFailure;
       }
       emitted.add(event.name().orElseThrow() + ":" + event.data());
@@ -335,22 +238,6 @@ final class SessionEventStreamTest {
       if (failClose) {
         throw new IllegalStateException("already closed");
       }
-    }
-  }
-
-  private static final class RecordingSubscription implements Flow.Subscription {
-
-    private final AtomicLong requested = new AtomicLong();
-    private final AtomicBoolean cancelled = new AtomicBoolean();
-
-    @Override
-    public void request(long n) {
-      requested.set(n);
-    }
-
-    @Override
-    public void cancel() {
-      cancelled.set(true);
     }
   }
 }
