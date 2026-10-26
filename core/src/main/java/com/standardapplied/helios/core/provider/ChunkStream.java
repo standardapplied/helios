@@ -12,17 +12,13 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 /**
- * A turn's event stream as the {@link ModelChunk}s a model yields. Each event becomes exactly one
- * chunk as it is read: a {@link StreamEvent.KeepAlive} a {@link ModelChunk.KeepAlive}; the {@link
- * StreamEvent.Done} the {@link ModelChunk.MessageStop}, once its response passes the turn's check,
- * which ends the stream. A {@link StreamEvent.Error} is thrown from {@code hasNext()} as the
- * exception it ends in, and events that end without a {@code Done} throw as unterminated; either
- * closes the events first. Closing closes the events, from any thread: what the events yield or
- * throw after it, save an {@link Error} or a {@link CompletionException} carrying one, is thrown as
- * a {@link CancellationException}, an event a read that was blocked yields and a chunk already read
- * ahead included. An interrupt of the reading thread, one that arrives while an event is read
- * included, does the same with the interrupt kept, so a retryable failure read after it is never
- * retried.
+ * A turn's event stream as the {@link ModelChunk}s a model yields, one chunk per event; the {@link
+ * StreamEvent.Done} becomes the {@link ModelChunk.MessageStop} once its response passes the turn's
+ * check. A {@link StreamEvent.Error}, and events that end without a {@code Done}, are thrown from
+ * {@code hasNext()} after closing the events. Once the stream is closed or its reading thread
+ * interrupted (the interrupt kept), whatever is read, a chunk read ahead included, is thrown as a
+ * {@link CancellationException}, unless it is an {@link Error} or a {@link CompletionException}
+ * carrying one, so nothing retries a failure read then.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 

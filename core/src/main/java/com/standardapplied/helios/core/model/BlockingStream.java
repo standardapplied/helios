@@ -12,21 +12,18 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
 /**
- * The chunk stream of {@link BlockingModel#streamOf}: runs its call once, at the first {@code
- * hasNext()} on the reading thread, which {@code close()} interrupts while the call runs, an
- * interrupt the stream keeps like any other of the reading thread; a stream closed, or a reading
- * thread interrupted, before that never runs it. A call that ends after a close, or that throws on
- * an interrupt of the reading thread, ends the stream in a {@link CancellationException}, as does a
- * close or an interrupt between the chunks of its answer; an {@link Error} the call throws, or a
- * {@link CompletionException} carrying one, is thrown as itself. Whatever ends the stream, it never
- * runs the call again.
+ * The chunk stream of {@link BlockingModel#streamOf}. The call runs at most once; a close or an
+ * interrupt of the reading thread before the call, during it or between the chunks of its answer
+ * ends the stream in a {@link CancellationException}, unless the call threw an {@link Error} or a
+ * {@link CompletionException} carrying one. The interrupt of a close stays set: it cannot be told
+ * apart from one of the reading thread, which the stream keeps.
  */
 final class BlockingStream implements CloseableIterator<ModelChunk> {
 
   private final Supplier<? extends Response<?>> call;
   private final Object lock = new Object();
   private Thread running;
-  private boolean closed;
+  private volatile boolean closed;
   private Iterator<ModelChunk> chunks;
 
   BlockingStream(Supplier<? extends Response<?>> call) {
@@ -66,50 +63,24 @@ final class BlockingStream implements CloseableIterator<ModelChunk> {
 
   private Response<?> run() {
     synchronized (lock) {
-      if (closed || Thread.currentThread().isInterrupted()) {
+      if (cutShort()) {
         throw cancelled(null);
       }
       running = Thread.currentThread();
     }
-    Response<?> response = null;
-    RuntimeException failure = null;
-    boolean cutShort;
     try {
-      response = call.get();
-    } catch (RuntimeException thrown) {
-      failure = thrown;
+      return call.get();
+    } catch (RuntimeException failure) {
+      throw cutShort() && !thrownAsItself(failure) ? cancelled(failure) : failure;
     } finally {
-      cutShort = finish();
-    }
-    if (cutShort && !thrownAsItself(failure)) {
-      throw cancelled(failure);
-    }
-    if (failure != null) {
-      throw failure;
-    }
-    return response;
-  }
-
-  /**
-   * Ends the call and says whether it was {@linkplain #cutShort() cut short}. The interrupt of a
-   * close stays set: it cannot be told apart from an interrupt of the reading thread, which the
-   * stream keeps.
-   */
-  private boolean finish() {
-    synchronized (lock) {
-      running = null;
-    }
-    return cutShort();
-  }
-
-  /** Whether the stream was closed or the reading thread, whose interrupt is kept, interrupted. */
-  private boolean cutShort() {
-    synchronized (lock) {
-      if (closed) {
-        return true;
+      synchronized (lock) {
+        running = null;
       }
     }
-    return Thread.currentThread().isInterrupted();
+  }
+
+  private boolean cutShort() {
+    return closed || Thread.currentThread().isInterrupted();
   }
 
   /**
