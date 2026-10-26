@@ -12,8 +12,7 @@ import com.standardapplied.helios.session.UserMessage;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.MutateText} replaces the message text; {@link HookOutcome.Block} drops the message;
- * {@link HookOutcome.Stop} terminates the session. {@link HookOutcome.Inject} is not meaningful
- * here (the loop is already handling a user message).
+ * {@link HookOutcome.Stop} terminates the session.
  */
 @FunctionalInterface
 public non-sealed interface OnUserMessageHook extends Hook {
@@ -25,7 +24,7 @@ public non-sealed interface OnUserMessageHook extends Hook {
    * @param ctx the per-invocation context; non-null
    * @return the hook's decision
    */
-  HookOutcome onUserMessage(UserMessage msg, HookContext ctx);
+  HookOutcome.OnUserMessage onUserMessage(UserMessage msg, HookContext ctx);
 
   @Override
   default String name() {

@@ -24,7 +24,7 @@ public final class HookInputs {
   private record Named(String name, int priority, PreToolUseHook body) implements PreToolUseHook {
 
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return body.beforeTool(call, ctx);
     }
   }

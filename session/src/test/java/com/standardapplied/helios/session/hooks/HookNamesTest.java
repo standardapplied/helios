@@ -17,63 +17,49 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The default {@link Hook#name()} and {@link Hook#priority()} of each of the nine phase interfaces:
- * a named class is named by its simple name, an anonymous one by its binary name.
+ * The default {@link Hook#name()} and {@link Hook#priority()} of each of the seven phase
+ * interfaces: a named class is named by its simple name, an anonymous one by its binary name.
  */
 final class HookNamesTest {
 
   private record PreToolUse() implements PreToolUseHook {
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
 
   private record PostToolUse() implements PostToolUseHook {
     @Override
-    public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+    public HookOutcome.PostToolUse afterTool(ToolCall call, ToolResult result, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
 
   private record PreModelTurn() implements PreModelTurnHook {
     @Override
-    public HookOutcome beforeModelTurn(List<Message> history, HookContext ctx) {
+    public HookOutcome.PreModelTurn beforeModelTurn(List<Message> history, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
 
   private record PostModelTurn() implements PostModelTurnHook {
     @Override
-    public HookOutcome afterModelTurn(Response<?> response, HookContext ctx) {
+    public HookOutcome.PostModelTurn afterModelTurn(Response<?> response, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
 
   private record PreStop() implements PreStopHook {
     @Override
-    public HookOutcome beforeStop(Response<?> stopResponse, HookContext ctx) {
-      return HookOutcome.cont();
-    }
-  }
-
-  private record PreCompact() implements PreCompactHook {
-    @Override
-    public HookOutcome beforeCompact(List<Message> history, HookContext ctx) {
-      return HookOutcome.cont();
-    }
-  }
-
-  private record PostCompact() implements PostCompactHook {
-    @Override
-    public HookOutcome afterCompact(CompactionPayload payload, HookContext ctx) {
+    public HookOutcome.PreStop beforeStop(Response<?> stopResponse, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
 
   private record OnUserMessage() implements OnUserMessageHook {
     @Override
-    public HookOutcome onUserMessage(UserMessage msg, HookContext ctx) {
+    public HookOutcome.OnUserMessage onUserMessage(UserMessage msg, HookContext ctx) {
       return HookOutcome.cont();
     }
   }
@@ -90,7 +76,7 @@ final class HookNamesTest {
             "PreToolUse",
             new PreToolUseHook() {
               @Override
-              public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+              public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),
@@ -99,7 +85,8 @@ final class HookNamesTest {
             "PostToolUse",
             new PostToolUseHook() {
               @Override
-              public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+              public HookOutcome.PostToolUse afterTool(
+                  ToolCall call, ToolResult result, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),
@@ -108,7 +95,8 @@ final class HookNamesTest {
             "PreModelTurn",
             new PreModelTurnHook() {
               @Override
-              public HookOutcome beforeModelTurn(List<Message> history, HookContext ctx) {
+              public HookOutcome.PreModelTurn beforeModelTurn(
+                  List<Message> history, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),
@@ -117,7 +105,8 @@ final class HookNamesTest {
             "PostModelTurn",
             new PostModelTurnHook() {
               @Override
-              public HookOutcome afterModelTurn(Response<?> response, HookContext ctx) {
+              public HookOutcome.PostModelTurn afterModelTurn(
+                  Response<?> response, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),
@@ -126,25 +115,7 @@ final class HookNamesTest {
             "PreStop",
             new PreStopHook() {
               @Override
-              public HookOutcome beforeStop(Response<?> stopResponse, HookContext ctx) {
-                return HookOutcome.cont();
-              }
-            }),
-        Arguments.of(
-            new PreCompact(),
-            "PreCompact",
-            new PreCompactHook() {
-              @Override
-              public HookOutcome beforeCompact(List<Message> history, HookContext ctx) {
-                return HookOutcome.cont();
-              }
-            }),
-        Arguments.of(
-            new PostCompact(),
-            "PostCompact",
-            new PostCompactHook() {
-              @Override
-              public HookOutcome afterCompact(CompactionPayload payload, HookContext ctx) {
+              public HookOutcome.PreStop beforeStop(Response<?> stopResponse, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),
@@ -153,7 +124,7 @@ final class HookNamesTest {
             "OnUserMessage",
             new OnUserMessageHook() {
               @Override
-              public HookOutcome onUserMessage(UserMessage msg, HookContext ctx) {
+              public HookOutcome.OnUserMessage onUserMessage(UserMessage msg, HookContext ctx) {
                 return HookOutcome.cont();
               }
             }),

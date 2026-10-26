@@ -625,7 +625,7 @@ the blank name and ended the session with `ErrorDuringExecution`.
 | 2.x | 3.0 |
 |---|---|
 | `HookRegistry` never checked a hook's `name()` and called it again at every decision, so a blank or throwing `name()` ended the session at the hook's first decisive outcome, and a `null` one fell back to the phase name, such as `PreToolUseHook`, at some decisions and ended the session at others | `HookRegistry` (and so `AgentSession.create`) reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
-| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on `HookDecision.proceed()` |
+| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on a `Continue` decision |
 
 **Tool authorization is mandatory, fails closed and runs on the call that executes.** The
 permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission-key extractor, or
@@ -845,6 +845,22 @@ what a failed turn streamed rather than its error. To keep a read ledger, regist
 | `runBlocking(msg, schema)` on a session built with a different schema parsed against the given one | throws `IllegalArgumentException` naming both types, before sending; pass the session's schema, or build the session without one |
 | A `PostModelTurn` hook on a failed turn saw the redacted error message as the response content | it sees the text the model streamed before the failure (empty when none); the error is in the terminal, redacted |
 | `ContextCompactor.disabled()` was documented as skipped by the loop | the loop calls it at the 0.95 watermark and it leaves the history unchanged, so a long session overflows and the provider's error ends it |
+
+**Each hook phase returns its own outcome type, so an outcome the phase would ignore does not
+compile.** A wrong-phase outcome used to end its phase silently: the first non-`Continue` outcome
+won, the phase ignored it, and no later hook of the phase ran, so a sibling's typo could defeat a
+guard. `HookOutcome` now permits six sealed phase types, each admitting exactly what its phase
+honours (`OnUserMessage`: Continue, MutateText, Block, Stop; `PreModelTurn`: Continue,
+MutateHistory, Inject, Stop; `PostModelTurn` and `PreStop`: Continue, Inject, Stop; `PreToolUse`:
+Continue, MutateArgs, Block, Inject, Stop; `PostToolUse`: Continue, MutateResult, Inject, Stop).
+What each phase does with each outcome is unchanged. The two compaction hooks are removed: wrapping
+the compactor does their job.
+
+| 2.x | 3.0 |
+|---|---|
+| Hook methods return `HookOutcome` | each returns its phase type (`HookOutcome.OnUserMessage`, `PreModelTurn`, `PostModelTurn`, `PreStop`, `PreToolUse`, `PostToolUse`); a hook returning an outcome its phase ignored no longer compiles. `HookOutcome.cont()`, `block(...)`, `inject(...)`, `stop(...)` and the `mutate*(...)` factories return their record types |
+| `HookDecision`, `HookDecision.proceed()` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision. `proceed()` is removed, because one shared instance cannot be typed for every phase without an unchecked cast; build a phase's Continue decision with `new HookDecision<>(null, HookOutcome.cont())` |
+| `PreCompactHook`, `PostCompactHook`, `CompactionPayload`, `HookRegistry.firePreCompact`, `firePostCompact` | wrap the compactor (`SessionOptions.Builder.withContextCompactor`) to see the history before and after, and observe `QueryEvent.ContextEdited` for the counts; to stop after a compaction, return `Stop` from a `PreModelTurnHook` |
 
 ### Added
 

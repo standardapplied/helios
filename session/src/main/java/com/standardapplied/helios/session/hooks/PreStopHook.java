@@ -14,8 +14,7 @@ import com.standardapplied.helios.core.model.Response;
  * HookOutcome.Inject} treats the response as not-terminal and queues a synthetic user message for
  * the next turn, so on the session's last allowed turn it ends the session in {@link
  * com.standardapplied.helios.session.ResultMessage.ErrorMaxTurns}; {@link HookOutcome.Stop}
- * confirms termination with a custom result string. Mutation variants and {@link HookOutcome.Block}
- * are not meaningful at this phase.
+ * confirms termination with a custom result string.
  *
  * <p>This is the canonical hook surface for "devil's advocate" patterns: a {@code PreStopHook}
  * calls {@code ctx.model().chat(...)} with the draft answer + a critique prompt and returns {@link
@@ -31,7 +30,7 @@ public non-sealed interface PreStopHook extends Hook {
    * @param ctx the per-invocation context; non-null
    * @return the hook's decision
    */
-  HookOutcome beforeStop(Response<?> stopResponse, HookContext ctx);
+  HookOutcome.PreStop beforeStop(Response<?> stopResponse, HookContext ctx);
 
   @Override
   default String name() {

@@ -98,7 +98,7 @@ final class HookSubtypesTest {
     PreToolUseHook hook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             return HookOutcome.cont();
           }
 
@@ -115,7 +115,7 @@ final class HookSubtypesTest {
     PreToolUseHook hook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             return HookOutcome.cont();
           }
 

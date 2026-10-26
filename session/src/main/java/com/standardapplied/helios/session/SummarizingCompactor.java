@@ -52,10 +52,8 @@ import java.util.logging.Logger;
 public final class SummarizingCompactor implements ContextCompactor {
 
   /**
-   * Marker prepended to the summary message, so the next model turn and {@link
-   * com.standardapplied.helios.session.hooks.CompactionPayload#summary()
-   * CompactionPayload.summary()} recognise the row as a compaction artefact rather than a user
-   * instruction.
+   * Marker prepended to the summary message, so the next model turn recognises the row as a
+   * compaction artefact rather than a user instruction.
    */
   public static final String SUMMARY_PREFIX = "[Earlier context summary]\n";
 
