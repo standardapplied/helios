@@ -5,7 +5,7 @@
          xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
     <description>
         Complexity, size and coupling limits for Helios main code. The limits and their rationale
-        are documented in the "Quality gate" section of CLAUDE.md. pmd-test.xml is this rule set
+        are documented in the "Quality gate" section of AGENTS.md. pmd-test.xml is this rule set
         minus the class-level rules that do not fit test classes; keep the two in step.
     </description>
 

@@ -300,7 +300,7 @@ class RetryPolicyTest {
   @Test
   void errorEscapesRetryPolicy() {
     // An Error is a host failure: it escapes as itself, never retried or wrapped in
-    // RetryExhaustedException (see CLAUDE.md "Loop crash semantics and teardown").
+    // RetryExhaustedException (see AGENTS.md "Loop crash semantics and teardown").
     var policy =
         RetryPolicy.newBuilder()
             .withMaxAttempts(5)

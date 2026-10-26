@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  * Regression coverage for the session-loop schema self-correction fix landed in 2.3.3.
  *
  * <p>Pre-2.3.3 the session terminated as {@link ResultMessage.ErrorDuringExecution} on the first
- * {@link StructuredOutputParseException} (CLAUDE.md's "Structured Output Resilience" row was
+ * {@link StructuredOutputParseException} (AGENTS.md's "Structured Output Resilience" row was
  * aspirational). Now the loop appends the model's wrong attempt to history, injects a corrective
  * synthetic user message naming each schema-validator error, and iterates until the model converges
  * (bounded by {@link SessionLimits#maxTurns()}).
