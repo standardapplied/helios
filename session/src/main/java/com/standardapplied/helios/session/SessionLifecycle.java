@@ -76,9 +76,8 @@ final class SessionLifecycle {
   }
 
   /**
-   * The session-scoped scheduler: the wall-clock deadline, the turn subscribers' stream-idle timers
-   * and the tool calls' deadlines run on it, and it is shut down with the session. A cancelled
-   * timer leaves its queue at once, so re-arming and finished calls accumulate nothing.
+   * The session-scoped scheduler the wall-clock deadline runs on, shut down with the session. A
+   * cancelled timer leaves its queue at once.
    */
   ScheduledExecutorService scheduler() {
     return deadlineScheduler;

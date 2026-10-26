@@ -39,12 +39,9 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,15 +58,9 @@ final class LoopStagesTest {
       SessionLimits.newBuilder().withMaxContextTokens(100).build();
   private static final TokenCounter OVER_THE_WATERMARK = messages -> 96L;
 
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final SteeringQueue queue = new SteeringQueue(1);
   private final SessionState state = new SessionState("sess-loop", new CancellationToken(), CLOCK);
-
-  @AfterEach
-  void shutDownScheduler() {
-    scheduler.shutdownNow();
-  }
 
   private AgentLoop loop(
       Model model, TokenCounter counter, ContextCompactor compactor, Hook... hooks) {
@@ -91,8 +82,7 @@ final class LoopStagesTest {
             collaborators,
             model,
             (modelId, usage) -> CostEstimate.ofMicroUsd(modelId.equals("summary") ? 7 : 1),
-            null,
-            scheduler);
+            null);
     return new AgentLoop(
         collaborators, runner, new StopClassifier(new SecretRegistry()), counter, compactor);
   }

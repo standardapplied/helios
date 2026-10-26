@@ -23,6 +23,7 @@ import com.standardapplied.helios.core.test.SseEvents;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.Test;
 
 /** Reading a Gemini stream: framing, read failures, idle timeout and closing. */
@@ -160,11 +161,8 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void interruptedThreadEmitsErrorEvent() {
-    var events = SseEvents.drainInterrupted(GeminiSse::reader);
-
-    assertFalse(events.isEmpty());
-    assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+  void interruptOfTheReadingThreadCancelsTheRead() {
+    assertInstanceOf(CancellationException.class, SseEvents.readInterrupted(GeminiSse::reader));
   }
 
   private static StreamEvent.Error firstError(InputStream body) {

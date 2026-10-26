@@ -10,7 +10,6 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
-import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.StreamingModel;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionRequest;
@@ -20,8 +19,8 @@ import com.standardapplied.helios.gemini.api.InteractionRequest;
  *
  * <p>Supports Gemini 3 models through the Interactions API, at the configured API version. Every
  * request streams over SSE, so a blocking {@code chat} drains the stream rather than waiting on one
- * long HTTP read, and a per-line idle timeout turns a stalled stream into a retryable {@link
- * GeminiException}.
+ * long HTTP read, and a per-line idle timeout turns a stalled stream into a {@link
+ * GeminiException}, which is not retried.
  */
 public class GeminiProvider implements ModelProvider {
 
@@ -61,7 +60,7 @@ public class GeminiProvider implements ModelProvider {
         .withMaxOutputTokens(id.maxOutputTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(new ChatExchange<>("Gemini API", streams::open))
+        .withExchange(streams::open)
         .withFailure(GeminiException::new)
         .withJson(GeminiJson.STRUCTURED)
         .build();

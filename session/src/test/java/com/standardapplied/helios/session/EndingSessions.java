@@ -4,11 +4,11 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
@@ -19,15 +19,16 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Flow;
-import java.util.function.Function;
+import java.util.NoSuchElementException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
 /**
  * Sessions and models for the tests of how a session ends: the session {@link #SID}, the short
- * teardown grace under test and one beyond the hang guard, models built from a stream function,
- * hand-made subscriptions and tools.
+ * teardown grace under test and one beyond the hang guard, models built from a stream supplier,
+ * hand-made streams and tools.
  */
 final class EndingSessions {
 
@@ -84,27 +85,12 @@ final class EndingSessions {
     }
   }
 
-  static Flow.Subscription subscription(Runnable request, Runnable cancel) {
-    return new Flow.Subscription() {
-      @Override
-      public void request(long n) {
-        request.run();
-      }
-
-      @Override
-      public void cancel() {
-        cancel.run();
-      }
-    };
-  }
-
-  /** A model whose stream for each call is what {@code stream} returns for the call's token. */
-  static Model model(Function<CancellationToken, Flow.Publisher<ModelChunk>> stream) {
+  /** A model whose stream for each call is what {@code stream} supplies. */
+  static Model model(Supplier<CloseableIterator<ModelChunk>> stream) {
     return new Model() {
       @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return stream.apply(cancellation);
+      public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
+        return stream.get();
       }
 
       @Override
@@ -115,6 +101,29 @@ final class EndingSessions {
       @Override
       public String provider() {
         return "test";
+      }
+    };
+  }
+
+  /**
+   * A stream whose reads run {@code read}, which yields whether a chunk follows, and whose close
+   * runs {@code close}; it yields no chunk.
+   */
+  static CloseableIterator<ModelChunk> stream(BooleanSupplier read, Runnable close) {
+    return new CloseableIterator<>() {
+      @Override
+      public boolean hasNext() {
+        return read.getAsBoolean();
+      }
+
+      @Override
+      public ModelChunk next() {
+        throw new NoSuchElementException("this stream yields no chunk");
+      }
+
+      @Override
+      public void close() {
+        close.run();
       }
     };
   }

@@ -94,13 +94,7 @@ public final class AgentSessionImpl implements AgentSession {
     try {
       this.loop =
           SessionWiring.agentLoop(
-              options,
-              sessionContext,
-              pendingQuestions,
-              steeringQueue,
-              events,
-              lifecycle.scheduler(),
-              state.ending());
+              options, sessionContext, pendingQuestions, steeringQueue, events, state.ending());
     } catch (RuntimeException | Error e) {
       lifecycle.abandon();
       throw e;

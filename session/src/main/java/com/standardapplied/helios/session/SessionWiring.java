@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
-import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Builds one session's agent loop from its options: the tool registry with the built-in tools, the
@@ -41,7 +40,6 @@ final class SessionWiring {
       PendingQuestions pendingQuestions,
       SteeringQueue steeringQueue,
       SessionEventPublisher events,
-      ScheduledExecutorService scheduler,
       SessionEnding ending) {
     var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
     var toolDispatch = new ToolDispatch(sessionContext, combinedTools, ending);
@@ -63,11 +61,7 @@ final class SessionWiring {
             .build();
     var turnRunner =
         new TurnRunner(
-            collaborators,
-            model,
-            options.costCalculator(),
-            options.outputSchema().orElse(null),
-            scheduler);
+            collaborators, model, options.costCalculator(), options.outputSchema().orElse(null));
     return new AgentLoop(
         collaborators,
         turnRunner,

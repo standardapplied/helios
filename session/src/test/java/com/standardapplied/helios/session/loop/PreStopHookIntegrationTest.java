@@ -12,18 +12,12 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link PreStopHook} outcomes wired through AgentLoop + TurnRunner. */
 final class PreStopHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   @Test
   void preStopInjectQueuesMessageAndContinuesLoop() {

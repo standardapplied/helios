@@ -19,10 +19,9 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
-import com.standardapplied.helios.core.test.RecordingSubscriber;
+import com.standardapplied.helios.core.test.StreamRead;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -106,36 +105,29 @@ class ScriptedModelTest {
   }
 
   @Test
-  void aStructuredStreamWithASchemaMismatchEndsWithTheParseException() {
+  void aStructuredStreamWithASchemaMismatchThrowsTheParseExceptionFromItsFirstRead() {
     var model = ScriptedModel.newBuilder().withTextTurn("{\"unexpected\": true}").build();
-    var chunks = new RecordingSubscriber<ModelChunk>();
+    var stream =
+        model.chatStream(List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class));
 
-    model
-        .chatStream(
-            List.of(Message.user("judge")),
-            List.of(),
-            OutputSchema.of(Verdict.class),
-            new CancellationToken())
-        .subscribe(chunks);
+    var read = StreamRead.of(stream);
 
-    assertInstanceOf(StructuredOutputParseException.class, chunks.awaitFailure());
+    assertEquals(List.of(), read.items());
+    assertInstanceOf(StructuredOutputParseException.class, read.failure());
   }
 
   @Test
-  void aStructuredStreamOfAMatchingAnswerPublishesItsChunks() {
+  void aStructuredStreamOfAMatchingAnswerYieldsItsChunks() {
     var json = "{\"answer\": \"yes\", \"score\": 4}";
     var model = ScriptedModel.newBuilder().withTextTurn(json).build();
-    var chunks = new RecordingSubscriber<ModelChunk>();
 
-    model
-        .chatStream(
-            List.of(Message.user("judge")),
-            List.of(),
-            OutputSchema.of(Verdict.class),
-            new CancellationToken())
-        .subscribe(chunks);
+    var read =
+        StreamRead.of(
+            model.chatStream(
+                List.of(Message.user("judge")), List.of(), OutputSchema.of(Verdict.class)));
 
-    assertEquals(new ModelChunk.TextDelta(json), chunks.awaitCompletion().getFirst());
+    assertNull(read.failure());
+    assertEquals(new ModelChunk.TextDelta(json), read.items().getFirst());
   }
 
   @Test
@@ -193,15 +185,15 @@ class ScriptedModelTest {
   }
 
   @Test
-  void aResponseTurnStreamsAsItsChunksOnceRequested() {
+  void aResponseTurnIsConsumedWhenItsStreamIsCreatedAndYieldsItsChunksWhenRead() {
     var model = ScriptedModel.newBuilder().withTextTurn("streamed").build();
-    var subscriber = new RecordingSubscriber<ModelChunk>();
 
-    model
-        .chatStream(List.of(Message.user("hi")), List.of(), new CancellationToken())
-        .subscribe(subscriber);
+    var stream = model.chatStream(List.of(Message.user("hi")), List.of());
 
-    assertEquals(new ModelChunk.TextDelta("streamed"), subscriber.awaitCompletion().getFirst());
+    assertEquals(1, model.calls().size());
+    var read = StreamRead.of(stream);
+    assertNull(read.failure());
+    assertEquals(new ModelChunk.TextDelta("streamed"), read.items().getFirst());
   }
 
   @Test
@@ -273,33 +265,27 @@ class ScriptedModelTest {
                     .build())
             .build();
 
-    var chunks = new RecordingSubscriber<ModelChunk>();
-    model
-        .chatStream(List.of(Message.user("go")), List.of(), new CancellationToken())
-        .subscribe(chunks);
+    var read = StreamRead.of(model.chatStream(List.of(Message.user("go")), List.of()));
 
+    assertNull(read.failure());
     assertEquals(
         List.of(
             new ModelChunk.TextDelta("calling"),
             new ModelChunk.ToolUseStart("c1", "search"),
             new ModelChunk.ToolUseStop(call),
             new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(2, 1), Map.of())),
-        chunks.awaitCompletion());
-    assertEquals(0, chunks.violations());
+        read.items());
   }
 
   @Test
-  void streamTurnAnswersEitherChatStreamWithItsPublisher() {
+  void streamTurnAnswersEitherChatStreamWithItsStream() {
     var first = ModelStreams.of(new ModelChunk.TextDelta("a"));
     var second = ModelStreams.failing(new IllegalStateException("cut"));
     var model = ScriptedModel.newBuilder().withStreamTurn(first).withStreamTurn(second).build();
     var schema = OutputSchema.of(Verdict.class);
 
-    assertSame(
-        first, model.chatStream(List.of(Message.user("1")), List.of(), new CancellationToken()));
-    assertSame(
-        second,
-        model.chatStream(List.of(Message.user("2")), List.of(), schema, new CancellationToken()));
+    assertSame(first, model.chatStream(List.of(Message.user("1")), List.of()));
+    assertSame(second, model.chatStream(List.of(Message.user("2")), List.of(), schema));
     assertEquals(List.of(Optional.empty(), Optional.of(schema)), model.outputSchemas());
     assertEquals("2", model.calls().get(1).getFirst().content());
   }
@@ -311,21 +297,18 @@ class ScriptedModelTest {
     var ex =
         assertThrows(
             IllegalStateException.class, () -> model.chat(List.of(Message.user("hi")), List.of()));
-    assertEquals(
-        "Scripted turn 1 is a stream turn: only chatStream with a CancellationToken answers it",
-        ex.getMessage());
+    assertEquals("Scripted turn 1 is a stream turn: only chatStream answers it", ex.getMessage());
   }
 
   @Test
   void streamingPastTheScriptFailsFast() {
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.of()).build();
-    var token = new CancellationToken();
-    model.chatStream(List.of(Message.user("one")), List.of(), token);
+    model.chatStream(List.of(Message.user("one")), List.of());
 
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> model.chatStream(List.of(Message.user("two")), List.of(), token));
+            () -> model.chatStream(List.of(Message.user("two")), List.of()));
     assertEquals("Scripted turns exhausted: 1 turn(s) scripted, call 2 requested", ex.getMessage());
   }
 
@@ -341,7 +324,7 @@ class ScriptedModelTest {
 
     model.chat(List.of(Message.user("1")), List.of());
     model.chat(List.of(Message.user("2")), List.of(), schema);
-    model.chatStream(List.of(Message.user("3")), List.of(), schema, new CancellationToken());
+    model.chatStream(List.of(Message.user("3")), List.of(), schema);
 
     assertEquals(
         List.of(Optional.empty(), Optional.of(schema), Optional.of(schema)), model.outputSchemas());
@@ -352,16 +335,15 @@ class ScriptedModelTest {
     var builder = ScriptedModel.newBuilder();
     var model = ScriptedModel.newBuilder().withTextTurn("x").build();
     var messages = List.of(Message.user("hi"));
-    var schema = OutputSchema.of(Verdict.class);
-    var token = new CancellationToken();
     assertThrows(NullPointerException.class, () -> builder.withResponseTurn(null));
     assertThrows(NullPointerException.class, () -> builder.withStreamTurn(null));
-    assertThrows(NullPointerException.class, () -> model.chatStream(messages, List.of(), null));
+    assertThrows(NullPointerException.class, () -> builder.withId(null));
     assertThrows(
         NullPointerException.class,
-        () -> model.chatStream(messages, List.of(), (OutputSchema<?>) null, token));
+        () -> model.chatStream(messages, List.of(), (OutputSchema<?>) null));
     assertThrows(
-        NullPointerException.class, () -> model.chatStream(messages, List.of(), schema, null));
+        NullPointerException.class,
+        () -> model.chat(messages, List.of(), (OutputSchema<Verdict>) null));
     assertTrue(model.calls().isEmpty(), "a rejected call consumes no turn");
   }
 }

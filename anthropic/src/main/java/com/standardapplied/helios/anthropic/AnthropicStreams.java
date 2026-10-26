@@ -8,14 +8,13 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.provider.JsonPost;
 import com.standardapplied.helios.core.provider.SseReader;
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** Sends a Messages API request and opens its response as a stream of events. */
+/** Opens a Messages API request's response as a stream of events. */
 final class AnthropicStreams {
 
   static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/messages";
@@ -36,11 +35,12 @@ final class AnthropicStreams {
     this.httpClient = httpClient;
   }
 
-  /** The stream answering {@code request}. */
-  SseReader open(MessagesRequest request) throws IOException, InterruptedException {
-    return SseReader.open(
+  /** The stream answering {@code request}, sent on its first {@code hasNext()}. */
+  SseReader open(MessagesRequest request) {
+    return new SseReader(
         httpClient,
         httpRequest(serialize(request)),
+        "Anthropic API",
         config.streamIdleTimeout(),
         new AnthropicStreamParser(),
         AnthropicException::new,

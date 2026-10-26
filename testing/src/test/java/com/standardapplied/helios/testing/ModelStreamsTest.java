@@ -3,23 +3,26 @@
 package com.standardapplied.helios.testing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
-import java.util.Collections;
+import com.standardapplied.helios.core.test.StreamRead;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 class ModelStreamsTest {
 
@@ -28,193 +31,115 @@ class ModelStreamsTest {
       new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of());
 
   @Test
-  void ofDeliversEveryChunkInOrderThenCompletes() {
-    var recorder = ChunkRecorder.drain(ModelStreams.of(TEXT, STOP));
+  void ofYieldsEveryChunkInOrderThenEnds() {
+    var read = StreamRead.of(ModelStreams.of(TEXT, STOP));
 
-    assertEquals(
-        List.of("subscribed", TEXT.toString(), STOP.toString(), "complete"), recorder.signals);
+    assertEquals(List.of(TEXT, STOP), read.items());
+    assertNull(read.failure());
   }
 
   @Test
-  void ofDeliversOnlyWhatIsDemanded() {
-    var recorder = new ChunkRecorder();
-    ModelStreams.of(TEXT, STOP).subscribe(recorder);
+  void anEmptyStreamEndsAtTheFirstRead() {
+    var read = StreamRead.of(ModelStreams.of());
 
-    recorder.request(1);
-    assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
-
-    recorder.request(1);
-    assertEquals(
-        List.of("subscribed", TEXT.toString(), STOP.toString(), "complete"), recorder.signals);
+    assertEquals(List.of(), read.items());
+    assertNull(read.failure());
   }
 
   @Test
-  void everySubscriberReceivesTheWholeSequence() {
+  void aStreamIsReadOnce() {
     var stream = ModelStreams.of(TEXT);
+    StreamRead.of(stream);
 
-    ChunkRecorder.drain(stream);
-    var second = ChunkRecorder.drain(stream);
-
-    assertEquals(List.of("subscribed", TEXT.toString(), "complete"), second.signals);
+    assertEquals(List.of(), StreamRead.of(stream).items());
   }
 
   @Test
-  void anEmptyStreamCompletesOnTheFirstRequest() {
-    assertEquals(List.of("subscribed", "complete"), ChunkRecorder.drain(ModelStreams.of()).signals);
+  void failingYieldsItsChunksThenThrowsTheErrorAsItself() {
+    var error = new IllegalStateException("cut");
+
+    var read = StreamRead.of(ModelStreams.failing(error, TEXT, STOP));
+
+    assertEquals(List.of(TEXT, STOP), read.items());
+    assertSame(error, read.failure());
   }
 
   @Test
-  void aCancelledStreamDeliversNothingMore() {
-    var recorder = new ChunkRecorder();
-    ModelStreams.of(TEXT, STOP).subscribe(recorder);
-    recorder.request(1);
+  void failingWithoutChunksThrowsAtTheFirstRead() {
+    var error = new IllegalStateException("cut");
 
-    recorder.cancel();
-    recorder.request(1);
+    var read = StreamRead.of(ModelStreams.failing(error));
 
-    assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
+    assertEquals(List.of(), read.items());
+    assertSame(error, read.failure());
   }
 
   @Test
-  void aStreamCancelledFromItsSubscriberStopsAtThatChunkAndNeverCompletes() {
-    for (var stream : List.of(ModelStreams.of(TEXT), ModelStreams.of(TEXT, STOP))) {
-      var recorder = new ChunkRecorder().cancellingOnEveryChunk();
-      stream.subscribe(recorder);
+  void failingThrowsAnErrorAsTheSameInstanceFromHasNextAndNext() {
+    var error = new OutOfMemoryError("host");
+    var stream = ModelStreams.failing(error, TEXT);
 
-      recorder.request(Long.MAX_VALUE);
-
-      assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
-    }
+    assertEquals(TEXT, stream.next());
+    assertSame(error, assertThrows(OutOfMemoryError.class, stream::hasNext));
+    assertSame(error, assertThrows(OutOfMemoryError.class, stream::next));
   }
 
   @Test
-  void demandRequestedFromEveryChunkDeliversALongSequenceWithoutRecursion() {
-    var chunks = Collections.nCopies(100_000, TEXT).toArray(ModelChunk[]::new);
-    var streams =
-        Map.of(
-            "complete", ModelStreams.of(chunks),
-            "error: cut", ModelStreams.failing(new IllegalStateException("cut"), chunks));
-    streams.forEach(
-        (terminal, stream) -> {
-          var recorder = new ChunkRecorder().requestingOneOnEveryChunk();
-          stream.subscribe(recorder);
-
-          recorder.request(1);
-
-          assertEquals(chunks.length + 2, recorder.signals.size());
-          assertEquals(terminal, recorder.signals.getLast());
-        });
-  }
-
-  @Test
-  void cancelFromAnotherThreadReturnsDuringDeliveryAndStopsTheRemainingChunks() {
-    var recorder =
-        actWhileFirstSignalIsPaused(
-            ModelStreams.of(TEXT, STOP), r -> r.request(Long.MAX_VALUE), ChunkRecorder::cancel);
-
-    assertEquals(List.of("subscribed", TEXT.toString()), recorder.signals);
-  }
-
-  @Test
-  void requestFromAnotherThreadReturnsDuringDeliveryAndLeavesItToTheDeliveringThread() {
-    var recorder =
-        actWhileFirstSignalIsPaused(
-            ModelStreams.of(TEXT, STOP), r -> r.request(1), r -> r.request(1));
+  void failingRejectsACheckedException() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ModelStreams.failing(new IOException("closed"), TEXT));
 
     assertEquals(
-        List.of("subscribed", TEXT.toString(), STOP.toString(), "complete"), recorder.signals);
+        "a stream fails with a RuntimeException or an Error, not java.io.IOException",
+        thrown.getMessage());
   }
 
   @Test
-  void aNonPositiveRequestFailsTheStreamOnce() {
-    var recorder = new ChunkRecorder();
-    ModelStreams.of(TEXT).subscribe(recorder);
+  void stalledRunsOnFirstPullThenBlocksUntilClosed() {
+    var pulled = new CountDownLatch(1);
+    var stream = ModelStreams.stalled(pulled::countDown);
+    var interruptedAfter = readOnAVirtualThread(stream).interruptedAfter();
 
-    recorder.request(0);
-    recorder.request(1);
+    Await.latch("the first pull", pulled);
+    assertFalse(interruptedAfter.isDone(), "a stalled stream ends only when closed or interrupted");
+    stream.close();
 
-    assertEquals(
-        List.of("subscribed", "error: non-positive subscription request: 0"), recorder.signals);
+    assertFalse(Await.value("the reader's end after the close", interruptedAfter));
   }
 
   @Test
-  void failingDeliversItsChunksThenTheError() {
-    var recorder =
-        ChunkRecorder.drain(ModelStreams.failing(new IllegalStateException("cut"), TEXT));
+  void stalledEndsOnAnInterruptAndKeepsItSet() {
+    var pulled = new CountDownLatch(1);
+    var reading = readOnAVirtualThread(ModelStreams.stalled(pulled::countDown));
 
-    assertEquals(List.of("subscribed", TEXT.toString(), "error: cut"), recorder.signals);
+    Await.latch("the first pull", pulled);
+    reading.reader().interrupt();
+
+    assertTrue(Await.value("the reader's end after the interrupt", reading.interruptedAfter()));
   }
 
   @Test
-  void failingWithoutChunksFailsOnTheFirstRequest() {
-    var recorder = ChunkRecorder.drain(ModelStreams.failing(new IllegalStateException("cut")));
+  void aClosedStalledStreamThrowsOnEveryReadAndRunsOnFirstPullOnce() {
+    var pulls = new AtomicInteger();
+    var stream = ModelStreams.stalled(pulls::incrementAndGet);
+    stream.close();
 
-    assertEquals(List.of("subscribed", "error: cut"), recorder.signals);
-  }
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertThrows(CancellationException.class, stream::next);
 
-  @Test
-  void stalledRunsItsHookOnEveryRequestAndNeverSignals() {
-    var requests = new AtomicInteger();
-    var recorder = new ChunkRecorder();
-    ModelStreams.stalled(requests::incrementAndGet).subscribe(recorder);
-
-    recorder.request(1);
-    recorder.request(Long.MAX_VALUE);
-    recorder.cancel();
-
-    assertEquals(2, requests.get());
-    assertEquals(List.of("subscribed"), recorder.signals);
-  }
-
-  @ParameterizedTest
-  @ValueSource(longs = {0, -1, Long.MIN_VALUE})
-  void stalledFailsOnceOnANonPositiveRequestWithoutRunningItsHook(long n) {
-    var requests = new AtomicInteger();
-    var recorder = new ChunkRecorder();
-    ModelStreams.stalled(requests::incrementAndGet).subscribe(recorder);
-
-    recorder.request(n);
-    recorder.request(1);
-    recorder.request(n);
-
-    assertEquals(0, requests.get());
-    assertEquals(
-        List.of("subscribed", "error: non-positive subscription request: " + n), recorder.signals);
-  }
-
-  @Test
-  void stalledIgnoresRequestsAfterCancel() {
-    var requests = new AtomicInteger();
-    var recorder = new ChunkRecorder();
-    ModelStreams.stalled(requests::incrementAndGet).subscribe(recorder);
-
-    recorder.cancel();
-    recorder.request(1);
-    recorder.request(0);
-
-    assertEquals(0, requests.get());
-    assertEquals(List.of("subscribed"), recorder.signals);
-  }
-
-  @Test
-  void stalledCancelFromAnotherThreadReturnsWhileTheErrorIsDelivered() {
-    var recorder =
-        actWhileFirstSignalIsPaused(
-            ModelStreams.stalled(() -> {}), r -> r.request(0), ChunkRecorder::cancel);
-
-    assertEquals(
-        List.of("subscribed", "error: non-positive subscription request: 0"), recorder.signals);
+    assertEquals(1, pulls.get());
   }
 
   @Test
   void nullArgumentsAreRejected() {
     var error = new IllegalStateException("cut");
     assertNullRejected("error must not be null", () -> ModelStreams.failing(null, TEXT));
-    assertNullRejected("onRequest must not be null", () -> ModelStreams.stalled(null));
-    assertNullRejected(
-        "subscriber must not be null", () -> ModelStreams.stalled(() -> {}).subscribe(null));
-    assertNullRejected("subscriber must not be null", () -> ModelStreams.of(TEXT).subscribe(null));
+    assertNullRejected("onFirstPull must not be null", () -> ModelStreams.stalled(null));
     assertNullRejected("chunks must not be null", () -> ModelStreams.of((ModelChunk[]) null));
+    assertNullRejected("chunk must not be null", () -> ModelStreams.of(TEXT, null));
     assertNullRejected(
         "chunk must not be null", () -> ModelStreams.failing(error, TEXT, (ModelChunk) null));
   }
@@ -223,24 +148,24 @@ class ModelStreamsTest {
     assertEquals(message, assertThrows(NullPointerException.class, call).getMessage());
   }
 
-  private static ChunkRecorder actWhileFirstSignalIsPaused(
-      Flow.Publisher<ModelChunk> stream,
-      Consumer<ChunkRecorder> deliver,
-      Consumer<ChunkRecorder> act) {
-    var paused = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
-    var recorder = new ChunkRecorder().pausingOnEverySignal(paused, release);
-    stream.subscribe(recorder);
-    var deliverer = Thread.ofVirtual().start(() -> deliver.accept(recorder));
-    try {
-      Await.latch("the first signal", paused);
-      Await.value(
-          "a subscription call made while a signal is paused",
-          CompletableFuture.runAsync(() -> act.accept(recorder)));
-    } finally {
-      release.countDown();
-    }
-    Await.termination("the delivering thread", deliverer);
-    return recorder;
+  private record Reading(Thread reader, CompletableFuture<Boolean> interruptedAfter) {}
+
+  private static Reading readOnAVirtualThread(CloseableIterator<ModelChunk> stream) {
+    var interruptedAfter = new CompletableFuture<Boolean>();
+    var reader =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    stream.hasNext();
+                    interruptedAfter.completeExceptionally(
+                        new AssertionError("a stalled stream's hasNext returned"));
+                  } catch (CancellationException e) {
+                    interruptedAfter.complete(Thread.currentThread().isInterrupted());
+                  } catch (RuntimeException e) {
+                    interruptedAfter.completeExceptionally(e);
+                  }
+                });
+    return new Reading(reader, interruptedAfter);
   }
 }

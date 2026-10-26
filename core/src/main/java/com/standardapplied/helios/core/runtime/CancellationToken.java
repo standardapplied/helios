@@ -19,13 +19,13 @@ import java.util.logging.Logger;
  * Cooperative cancellation signal.
  *
  * <p>One writer (typically the caller that creates the token), many readers (agent loops, tool
- * implementations, model stream subscribers, durable-resume scanners). State is set once;
- * subsequent {@link #cancel(String)} calls are no-ops and the first reason is preserved.
+ * implementations, model stream readers, durable-resume scanners). State is set once; subsequent
+ * {@link #cancel(String)} calls are no-ops and the first reason is preserved.
  *
  * <p>Cancellation is cooperative: code performing long-running work is responsible for polling
  * {@link #isCancelled()} or calling {@link #throwIfCancelled()} at safe points. The token itself
- * does not interrupt OS threads, close I/O streams, or unsubscribe {@code Flow.Subscription}s —
- * those side effects are wired by the consumer.
+ * does not interrupt OS threads or close I/O or model streams — those side effects are wired by the
+ * consumer.
  *
  * <h2>Linearization</h2>
  *

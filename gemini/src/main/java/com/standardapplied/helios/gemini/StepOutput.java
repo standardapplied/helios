@@ -88,15 +88,6 @@ final class StepOutput {
     return new StreamEvent.ToolCallComplete(call);
   }
 
-  /** The thinking so far with the latest signature, unless there is no thinking. */
-  StreamEvent thinkingComplete() {
-    if (thinking == null || thinking.isEmpty()) {
-      return null;
-    }
-    return new StreamEvent.ThinkingComplete(
-        thinking, signatures.isEmpty() ? null : signatures.getLast());
-  }
-
   Result result() {
     return new Result(
         content.toString(),

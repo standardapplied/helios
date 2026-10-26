@@ -12,21 +12,24 @@ import static com.standardapplied.helios.session.EndingSessions.grace;
 import static com.standardapplied.helios.session.EndingSessions.model;
 import static com.standardapplied.helios.session.EndingSessions.options;
 import static com.standardapplied.helios.session.EndingSessions.slowGrace;
-import static com.standardapplied.helios.session.EndingSessions.subscription;
+import static com.standardapplied.helios.session.EndingSessions.stream;
 import static com.standardapplied.helios.session.EndingSessions.withProvider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -38,9 +41,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -96,67 +98,38 @@ final class SessionHostErrorTest {
   }
 
   @Test
-  void anErrorSubscribingToTheModelStreamCancelsItsSubscriptionAndFailsTheResult() {
-    var sentinel = new AssertionError("request failure");
-    var cancels = new AtomicInteger();
+  void anErrorTheStreamsFirstReadThrowsClosesTheStreamAndFailsTheResult() {
+    var sentinel = new AssertionError("read failure");
+    var closed = new AtomicBoolean();
 
-    var failure = failureOf(subscriptionFailing(sentinel, cancels::incrementAndGet));
+    var failure =
+        failureOf(
+            model(
+                () ->
+                    stream(
+                        () -> {
+                          throw sentinel;
+                        },
+                        () -> closed.set(true))));
 
     assertSame(sentinel, failure);
-    assertEquals(1, cancels.get());
+    assertTrue(closed.get());
   }
 
   @Test
-  void anErrorSubscribeThrowsAfterAcceptingASubscriptionCancelsItAndFailsTheResult() {
-    var sentinel = new AssertionError("subscribe failure");
-    var cancels = new AtomicInteger();
-    var model =
-        model(
-            token ->
-                subscriber -> {
-                  subscriber.onSubscribe(subscription(() -> {}, cancels::incrementAndGet));
-                  throw sentinel;
-                });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, cancels.get());
-  }
-
-  @Test
-  void anErrorCancellingASubscriptionThatFailedTransientlyFailsTheResultWithoutARetry() {
-    var sentinel = new AssertionError("cancel failure");
+  void anErrorClosingAStreamThatFailedTransientlyFailsTheResultWithoutARetry() {
+    var sentinel = new AssertionError("close failure");
     var transientFailure = new TransientStreamException("connection reset", null, "test");
     var calls = new AtomicInteger();
     var model =
         model(
-            token -> {
+            () -> {
               calls.incrementAndGet();
-              return subscriber ->
-                  subscriber.onSubscribe(
-                      subscription(
-                          () -> {
-                            throw transientFailure;
-                          },
-                          () -> {
-                            throw sentinel;
-                          }));
-            });
-
-    assertSame(sentinel, failureOf(model));
-    assertEquals(1, calls.get());
-  }
-
-  @Test
-  void anErrorRequestingAfterTheStreamFailedTransientlyFailsTheResultWithoutARetry() {
-    var sentinel = new AssertionError("request failure");
-    var calls = new AtomicInteger();
-    var model =
-        model(
-            token -> {
-              calls.incrementAndGet();
-              return requesting(
-                  subscriber -> {
-                    subscriber.onError(new TransientStreamException("reset", null, "test"));
+              return stream(
+                  () -> {
+                    throw transientFailure;
+                  },
+                  () -> {
                     throw sentinel;
                   });
             });
@@ -166,15 +139,17 @@ final class SessionHostErrorTest {
   }
 
   @Test
-  void anErrorRequestingAfterTheStreamEndedWithAnErrorIsSuppressedOnThatError() {
+  void anErrorClosingAStreamThatEndedWithAnErrorIsSuppressedOnThatError() {
     var streamed = new AssertionError("stream failure");
-    var sentinel = new AssertionError("request failure");
+    var sentinel = new AssertionError("close failure");
     var model =
         model(
-            token ->
-                requesting(
-                    subscriber -> {
-                      subscriber.onError(streamed);
+            () ->
+                stream(
+                    () -> {
+                      throw streamed;
+                    },
+                    () -> {
                       throw sentinel;
                     }));
 
@@ -183,32 +158,49 @@ final class SessionHostErrorTest {
   }
 
   @Test
+  void anErrorAStreamEventHookThrowsFailsTheResultAsItself() {
+    var sentinel = new AssertionError("hook failure");
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.of(
+                    new ModelChunk.TextDelta("hi"),
+                    new ModelChunk.MessageStop("STOP", Response.Usage.of(1, 1), Map.of())))
+            .build();
+    OnStreamEventHook failing =
+        (event, ctx) -> {
+          if (event instanceof QueryEvent.AssistantText) {
+            throw sentinel;
+          }
+        };
+
+    assertSame(sentinel, failureOf(options(model).withHook(failing)));
+  }
+
+  @Test
   void anErrorABlockingModelThrowsAfterCloseCancelledItsStreamFailsTheResult() {
     var sentinel = new AssertionError("model failure");
-    var calling = new CompletableFuture<Thread>();
-    var provider = new RecordingProvider(order);
-    provider.end =
-        () -> {
-          released.countDown();
-          Await.termination("the model call to throw", Await.value("the model call", calling));
-        };
+    var calling = new CountDownLatch(1);
     var session =
         AgentSession.create(
             withProvider(
-                    provider,
+                    new RecordingProvider(order),
                     model(
-                        token ->
-                            BlockingModel.publisherOf(
+                        () ->
+                            BlockingModel.streamOf(
                                 () -> {
-                                  calling.complete(Thread.currentThread());
-                                  Uninterruptible.await(released);
-                                  throw sentinel;
-                                },
-                                token)))
+                                  calling.countDown();
+                                  try {
+                                    new CountDownLatch(1).await();
+                                  } catch (InterruptedException closedTheStream) {
+                                    throw sentinel;
+                                  }
+                                  throw new AssertionError("the call was released");
+                                })))
                 .withLimits(slowGrace())
                 .build());
     session.send("go");
-    Await.value("the model call to start", calling);
+    Await.latch("the model call to start", calling);
 
     session.close();
 
@@ -446,7 +438,6 @@ final class SessionHostErrorTest {
         SessionLimits.newBuilder()
             .withToolTimeoutDefault(SHORT_GRACE)
             .withStopGrace(SHORT_GRACE)
-            .withStreamIdleTimeout(NOT_REACHED)
             .withMaxWallClock(NOT_REACHED)
             .build();
 
@@ -527,11 +518,7 @@ final class SessionHostErrorTest {
     var sentinel = new AssertionError("callback failure");
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(() -> {})).build();
     var provider = new RecordingProvider(order);
-    var limits =
-        SessionLimits.newBuilder()
-            .withMaxWallClock(SHORT_GRACE)
-            .withStreamIdleTimeout(NOT_REACHED)
-            .build();
+    var limits = SessionLimits.newBuilder().withMaxWallClock(SHORT_GRACE).build();
 
     try (var session =
         AgentSession.create(withProvider(provider, model).withLimits(limits).build())) {
@@ -595,27 +582,9 @@ final class SessionHostErrorTest {
     }
   }
 
-  private static Model subscriptionFailing(AssertionError requestFailure, Runnable cancel) {
-    return model(
-        token ->
-            subscriber ->
-                subscriber.onSubscribe(
-                    subscription(
-                        () -> {
-                          throw requestFailure;
-                        },
-                        cancel)));
-  }
-
-  private static Flow.Publisher<ModelChunk> requesting(
-      Consumer<Flow.Subscriber<? super ModelChunk>> request) {
-    return subscriber ->
-        subscriber.onSubscribe(subscription(() -> request.accept(subscriber), () -> {}));
-  }
-
   private static Model throwingModel(AtomicInteger calls, Error failure) {
     return model(
-        token -> {
+        () -> {
           calls.incrementAndGet();
           throw failure;
         });

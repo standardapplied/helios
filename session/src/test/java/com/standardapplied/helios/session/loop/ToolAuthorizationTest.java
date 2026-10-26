@@ -40,7 +40,6 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,11 +56,6 @@ final class ToolAuthorizationTest {
   private final HookLoop loop = new HookLoop();
   private final List<Map<String, Object>> executed = new CopyOnWriteArrayList<>();
   private final List<ApprovalRequest> requests = new CopyOnWriteArrayList<>();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   private ToolRegistry writeTool() {
     var tool =

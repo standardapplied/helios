@@ -9,10 +9,9 @@ import java.util.stream.Collectors;
 
 /**
  * The reasoning summary of a streamed response, one part per summary index of each reasoning item:
- * each part streams as thinking and completes with the full text its {@code done} event carries.
- * The Responses API signs no summary, so a completed part carries no signature. A part's first text
- * after another part's carries the blank line {@link #text()} puts between them, so the deltas add
- * up to the thinking.
+ * each part streams as thinking, and its {@code done} event carries its full text. The Responses
+ * API signs no summary. A part's first text after another part's carries the blank line {@link
+ * #text()} puts between them, so the deltas add up to the thinking.
  */
 final class ReasoningSummary {
 
@@ -32,8 +31,8 @@ final class ReasoningSummary {
   }
 
   /**
-   * The completion of a part as {@code text}: its thinking, unless the part is empty. A part that
-   * streamed no delta completes as one delta of its whole text, so a chunk stream still sees it.
+   * The completion of a part as {@code text}: nothing more for a part that streamed deltas, and one
+   * delta of its whole text for a part that streamed none, so a chunk stream still sees it.
    */
   StreamEvent done(String itemId, Integer summaryIndex, String text) {
     var part = part(itemId, summaryIndex);
@@ -43,12 +42,10 @@ final class ReasoningSummary {
       part.setLength(0);
       part.append(text);
     }
-    if (part.isEmpty()) {
+    if (streamed || part.isEmpty()) {
       return null;
     }
-    return streamed
-        ? new StreamEvent.ThinkingComplete(part.toString(), null)
-        : new StreamEvent.ThinkingDelta(separator + part);
+    return new StreamEvent.ThinkingDelta(separator + part);
   }
 
   /** The parts that hold text, in arrival order, a blank line apart; {@code null} without one. */

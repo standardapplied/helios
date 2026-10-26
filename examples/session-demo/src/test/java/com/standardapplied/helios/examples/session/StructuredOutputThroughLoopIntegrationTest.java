@@ -22,10 +22,10 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 /**
  * End-to-end regression for the wiring that transmits {@link SessionOptions#outputSchema()} to the
  * model on every turn. Before the fix, the agent loop dispatched the untyped {@code
- * Model.chatStream(messages, tools, cancellation)} regardless of whether an output schema was
- * configured, so the schema reached neither {@code response_format.schema} (Gemini) nor a system
- * instruction reinforcement (Anthropic). The model produced freeform text loosely guided by the
- * system prompt, and Helios's post-hoc validator failed against any non-trivial nested schema.
+ * Model.chatStream(messages, tools)} regardless of whether an output schema was configured, so the
+ * schema reached neither {@code response_format.schema} (Gemini) nor a system instruction
+ * reinforcement (Anthropic). The model produced freeform text loosely guided by the system prompt,
+ * and Helios's post-hoc validator failed against any non-trivial nested schema.
  *
  * <p>These tests run against the live Gemini Interactions API and exercise the same kind of nested
  * schema the original light-grid bug report described — outer record holding a list of inner
