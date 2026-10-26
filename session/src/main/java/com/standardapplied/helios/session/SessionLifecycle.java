@@ -173,10 +173,9 @@ final class SessionLifecycle {
   }
 
   /**
-   * Drive the loop to terminal, tear the runtime down, then settle the result future. The teardown
-   * drains the publisher before the future resolves, the happens-before guarantee that lets
-   * deployers read aggregates set by a {@code LoopEnded} subscriber immediately after {@code
-   * result().get()} / {@code runBlocking(...)} unblocks.
+   * Drive the loop to terminal, tear the runtime down, then settle the result future. Every event
+   * is in each open stream's buffer, or missed by it, before the future resolves; the teardown does
+   * not wait for readers, which read on their own threads.
    *
    * <p>{@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an {@link
    * Error} escapes it, which goes to the session's {@link

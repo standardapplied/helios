@@ -22,7 +22,7 @@ import com.standardapplied.helios.session.QueryEvent;
 public non-sealed interface OnStreamEventHook extends Hook {
 
   /**
-   * Observe an event that just shipped to the publisher.
+   * Observe an event that was just offered to the session's event streams.
    *
    * @param event the event; non-null
    * @param ctx the per-invocation context; non-null

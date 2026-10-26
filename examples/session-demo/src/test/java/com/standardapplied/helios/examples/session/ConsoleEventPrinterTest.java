@@ -24,7 +24,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 
 final class ConsoleEventPrinterTest {
@@ -38,13 +37,17 @@ final class ConsoleEventPrinterTest {
   private final ConsoleEventPrinter printer =
       new ConsoleEventPrinter(new PrintStream(bytes, false, StandardCharsets.UTF_8));
 
+  private void print(QueryEvent event) {
+    printer.print(List.of(event));
+  }
+
   private String printed() {
     return bytes.toString(StandardCharsets.UTF_8);
   }
 
   @Test
   void writesOneLinePerPrintedEventKind() {
-    printer.onNext(
+    print(
         new QueryEvent.AssistantCitations(
             SID,
             TURN,
@@ -52,14 +55,12 @@ final class ConsoleEventPrinterTest {
             List.of(
                 Citation.newBuilder().withSourceId("s1").withTitle("Docs").build(),
                 Citation.of("s2", "body"))));
-    printer.onNext(new QueryEvent.ToolUse(SID, TURN, TS, CALL));
-    printer.onNext(
-        new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of()));
-    printer.onNext(
-        new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
-    printer.onNext(new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "perm", "denied"));
-    printer.onNext(new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP));
-    printer.onNext(
+    print(new QueryEvent.ToolUse(SID, TURN, TS, CALL));
+    print(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of()));
+    print(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
+    print(new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "perm", "denied"));
+    print(new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP));
+    print(
         new QueryEvent.LoopEnded(
             SID,
             TURN,
@@ -105,16 +106,19 @@ final class ConsoleEventPrinterTest {
     var streaming =
         new ConsoleEventPrinter(new PrintStream(recording, false, StandardCharsets.UTF_8));
 
-    streaming.onNext(new QueryEvent.AssistantText(SID, TURN, TS, "Hel"));
-    streaming.onNext(new QueryEvent.AssistantText(SID, TURN, TS, "lo"));
+    streaming.print(
+        List.of(
+            new QueryEvent.AssistantText(SID, TURN, TS, "Hel"),
+            new QueryEvent.AssistantText(SID, TURN, TS, "lo")));
 
-    assertEquals(List.of("Hel", "Hello"), flushed);
+    assertEquals(
+        List.of("Hel", "Hello", "Hello"), flushed, "each delta, then the end of the stream");
   }
 
   @Test
   void longToolArgumentsAreCutWithTheirLengthNoted() {
     var arguments = "x".repeat(241);
-    printer.onNext(
+    print(
         new QueryEvent.ToolUse(SID, TURN, TS, new ToolCall("c2", "Grep", Map.of("p", arguments))));
 
     var rendered = Map.of("p", arguments).toString();
@@ -130,46 +134,18 @@ final class ConsoleEventPrinterTest {
 
   @Test
   void eventsWithoutALineAreSkipped() {
-    printer.onNext(new QueryEvent.AssistantThinking(SID, TURN, TS, "hmm"));
-    printer.onNext(new QueryEvent.ContextWarning(SID, TURN, TS, 0.9));
+    print(new QueryEvent.AssistantThinking(SID, TURN, TS, "hmm"));
+    print(new QueryEvent.ContextWarning(SID, TURN, TS, 0.9));
 
     assertEquals("", printed());
   }
 
   @Test
-  void aStreamErrorIsOneLine() {
-    printer.onError(new IllegalStateException("boom"));
+  void rejectsNullEventsAndWritesNothing() {
+    var ex = assertThrows(NullPointerException.class, () -> printer.print(null));
 
-    assertEquals(
-        "[stream-error] java.lang.IllegalStateException: boom" + System.lineSeparator(), printed());
-  }
-
-  @Test
-  void aNullStreamErrorIsRejectedAndNothingIsWritten() {
-    var ex = assertThrows(NullPointerException.class, () -> printer.onError(null));
-
-    assertEquals("throwable must not be null", ex.getMessage());
+    assertEquals("events must not be null", ex.getMessage());
     assertEquals("", printed());
-  }
-
-  @Test
-  void subscribingRequestsEveryEventAndCompletionFlushes() {
-    var requested = new ArrayList<Long>();
-    printer.onSubscribe(
-        new Flow.Subscription() {
-          @Override
-          public void request(long n) {
-            requested.add(n);
-          }
-
-          @Override
-          public void cancel() {}
-        });
-    printer.onNext(new QueryEvent.AssistantText(SID, TURN, TS, "tail"));
-    printer.onComplete();
-
-    assertEquals(List.of(Long.MAX_VALUE), requested);
-    assertEquals("tail", printed());
   }
 
   @Test

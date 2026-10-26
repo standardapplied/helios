@@ -17,7 +17,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -82,8 +82,8 @@ final class CitationSurfacingTest {
   @Test
   void groundedRunSurfacesCitationsOnEventStreamAndTerminal() throws Exception {
     try (var s = session(groundedModel(List.of(WIKI, BRIT)))) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("What is the capital of Australia?"));
 
       var result = Await.value("the session result", s.result());
@@ -105,8 +105,8 @@ final class CitationSurfacingTest {
   @Test
   void ungroundedRunEmitsNoCitationEventAndEmptyTerminalCitations() throws Exception {
     try (var s = session(groundedModel(List.of()))) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("hi"));
 
       var result = Await.value("the session result", s.result());

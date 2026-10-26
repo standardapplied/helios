@@ -45,7 +45,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **One secret registry per session, applied where tool output enters it.** `SessionOptions.withSecretRegistry(registry)` gives the session its `SecretRegistry`. The session redacts every tool result's text once, before its `ToolResult` event, a `PostToolUse` hook or the history sees it, and the messages of every error it reports. Output cut at a size cap first loses any trailing start of a registered secret. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials. See [Secret redaction](#secret-redaction-secretregistry--redactor) for the promise and what it does not cover.
-- **Bounded HTTP/SSE backpressure.** `AgentSession`'s event publisher uses `SubmissionPublisher.offer(...)` with bounded timeouts (1s for routine events, 30s for control events like `LoopEnded` / `QuestionAsked` / `Error`). A slow or paused SSE client cannot pin the agent loop. Routine events may be dropped on a sustained slow consumer with a FINE log; control events use the longer timeout to maximise delivery.
+- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `LoopEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
 - **Test coverage.** JaCoCo gates at 95% instruction / 90% branch on `helios-core`, `helios-session`, `helios-runtime`. Tests across the project: ~3,200 unit tests. Provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) are gated by environment variables for live-API integration tests; CI runs unit tests without those keys.
 
 ### Known limitations
@@ -238,7 +238,7 @@ not use.
 
 ### 2) Streamable session
 
-`AgentSession` is a long-lived object that runs an agent loop on a virtual thread. `send` messages, `subscribe` to events, `interrupt` mid-turn, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, mid-run user steering, permission gates, observability.
+`AgentSession` is a long-lived object that runs an agent loop on a virtual thread. `send` messages, read `events()` with for-each, `interrupt` mid-turn, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, mid-run user steering, permission gates, observability.
 
 <!-- snippet: QuickStarts#workspaceSession -->
 ```java
@@ -285,12 +285,12 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 `AgentSession.create(SessionOptions)` returns a session that drives an agent loop on a virtual thread the first time you `send`. Key surfaces:
 
 - `send(UserMessage)` — queue a message (steering queue, drained per-iteration).
-- `events()` — `Flow.Publisher<QueryEvent>` for streaming subscribers (text, thinking, citations, tool use and results, hooks, context warning/edited, questions, retries, turn and loop ends, errors).
+- `events()` — a new `EventStream` per call, an `Iterable<QueryEvent>` that is also `AutoCloseable`, read once with for-each (text, thinking, citations, tool use and results, hooks, context warning/edited, questions, retries, turn and loop ends, errors).
 - `result()` — `CompletableFuture<ResultMessage>` for blocking await.
 - `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
 - `interrupt(reason)` — queue a synthetic mid-run user message.
 - `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open.
-- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls, `onSessionEnd`, scheduler shutdown, publisher drain, each wait bounded by `SessionLimits.stopGrace` (5 s). A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
+- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to the teardown graces below. Every end of a session runs one bounded teardown before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls and `onSessionEnd`, each wait bounded by `SessionLimits.stopGrace` (5 s); shut the scheduler down; then end the event streams without waiting for their readers. A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
 `SessionPresets` ships four curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
@@ -304,13 +304,13 @@ Every session has a permission policy. Without `withPermission` it is `Permissio
 Stream events for a live UI:
 
 ```java
-session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
-  public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
-  public void onNext(QueryEvent event) {
-    if (event instanceof QueryEvent.AssistantText t) System.out.print(t.text());
+var events = session.events();
+Thread.ofVirtual().start(() -> {
+  try (events) {
+    for (var event : events) {
+      if (event instanceof QueryEvent.AssistantText t) System.out.print(t.text());
+    }
   }
-  public void onError(Throwable t) {}
-  public void onComplete() {}
 });
 session.send(UserMessage.text("Refactor the loop module's package-info comments."));
 ```
@@ -323,7 +323,7 @@ The loop terminates when the model's `FinishReason` indicates the session is don
 
 ### Event delivery semantics
 
-`AgentSession.events()` is a `SubmissionPublisher<QueryEvent>` with a 256-item per-subscriber buffer. The agent loop emits via `offer(...)` with a bounded timeout, not blocking `submit`: routine events (text, tool use, hook fired) wait up to 1 s before dropping on a slow consumer; control events (`LoopEnded`, `QuestionAsked`, `Error`) wait up to 30 s. A subscriber that pauses indefinitely will see a gap in its event stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control).
+`AgentSession.events()` opens a new `EventStream` per call, attached before it returns, with its own 256-event buffer. The loop offers each event to every open stream on its own thread and never waits for a reader on a routine event (text, tool use, hook fired): a stream whose buffer is full misses it at once. Control events (`LoopEnded`, `QuestionAsked`, `Error`) wait up to 30 s for room in each full stream, then are dropped there. A reader that pauses indefinitely sees a gap in its stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control). A dropped terminal stays readable through `result()`, a dropped question through `pendingQuestions()`. A stream ends when its reader closes it, when the session ended and the reader has read every buffered event, or when the reading thread is interrupted. One opened after the session ended holds its `LoopEnded` once, then ends. Every event is in each stream's buffer, or missed by it, before `result()` completes, but the session does not wait for readers. A reader that must have handled `LoopEnded` before `result()` returns synchronises with its own reading thread.
 
 ### Context compaction
 
@@ -365,7 +365,7 @@ try (var model = new AnthropicProvider().create(modelId, config)) {
 } // HttpClient and connection pool released here
 ```
 
-`AgentSession` is `AutoCloseable` and owns its loop, per-session publisher executor, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, and the result future settles once the teardown has run, each of its waits bounded by `SessionLimits.stopGrace` (5 s).
+`AgentSession` is `AutoCloseable` and owns its loop, its event streams' fan-out, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, and the result future settles once the teardown has run, each of its waits bounded by `SessionLimits.stopGrace` (5 s).
 
 `ReplSession` is `AutoCloseable` and owns its sandbox subprocess. `JvmSandbox` also installs a JVM shutdown hook so a leaked sandbox is force-killed on host JVM exit. Both the explicit close and the shutdown hook snapshot the subprocess's descendants and forcibly destroy them before the parent — snippets that call `Runtime.exec(...)` cannot leave orphaned grandchildren past the sandbox lifetime.
 
@@ -460,7 +460,7 @@ Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredO
 
 ## Streaming
 
-The session's `events()` publisher is the primary streaming surface — see [Sessions](#sessions-helios-session). For direct model use without a session:
+The session's `events()` stream is the primary streaming surface — see [Sessions](#sessions-helios-session). For direct model use without a session:
 
 ```java
 try (var stream = model.chatStream(messages, tools)) {
@@ -505,12 +505,11 @@ var result = ft.execute(() -> model.chat(messages, List.of()));   // checked exc
 
 ## Observability
 
-The session's `events()` publisher is the primary observability surface. Subscribe a `Flow.Subscriber<QueryEvent>` (or a per-phase `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
+The session's `events()` stream is the primary observability surface. Read an `EventStream` on a thread of your own (or register an `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
 
 ```java
-session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
-  public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
-  public void onNext(QueryEvent ev) {
+try (var events = session.events()) {
+  for (var ev : events) {
     switch (ev) {
       case QueryEvent.ToolUse t -> log.info("tool: {} args={}", t.call().name(), t.call().arguments());
       case QueryEvent.ContextWarning w -> metrics.recordContextFill(w.usagePct());
@@ -518,9 +517,7 @@ session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
       default -> { /* skip */ }
     }
   }
-  public void onError(Throwable t) {}
-  public void onComplete() {}
-});
+}
 ```
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
@@ -528,7 +525,7 @@ For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events
 `helios-core` also ships generic event-sink primitives (`EventSink`, `JsonlEventSink`,
 `CollectingEventSink` in `com.standardapplied.helios.core.events`) plus a `Trace` / `Span` value-type hierarchy in
 `com.standardapplied.helios.core.trace` for custom collectors. These are currently inert for `AgentSession` runs —
-wire them via your own hook or stream subscriber.
+wire them via your own hook or stream reader.
 
 `JsonlEventSink.openMetadataOnly(path)` persists run/span IDs, event types, timing, model and token
 counts, API version, tool names, outcomes, and redacted error categories. It omits message history,

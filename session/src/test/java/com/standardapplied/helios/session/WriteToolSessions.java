@@ -9,7 +9,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
@@ -31,7 +31,7 @@ final class WriteToolSessions {
   final List<Map<String, Object>> executed = new CopyOnWriteArrayList<>();
 
   /** What a run emitted, the model it ran on, and how it ended. */
-  record Run(CollectingSubscriber events, ScriptedModel model, ResultMessage terminal) {
+  record Run(EventCollector events, ScriptedModel model, ResultMessage terminal) {
 
     ToolResult onlyResult() {
       var results = events.eventsOf(QueryEvent.ToolResult.class);
@@ -103,8 +103,8 @@ final class WriteToolSessions {
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions) {
     try (var session = AgentSession.create(options.build())) {
-      var events = new CollectingSubscriber(reactions.apply(session));
-      session.events().subscribe(events);
+      var events = new EventCollector(reactions.apply(session));
+      events.read(session.events());
       session.send(UserMessage.text("go"));
       var terminal = Await.value("the session to end", session.result());
       events.awaitDone();

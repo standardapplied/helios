@@ -862,6 +862,23 @@ the compactor does their job.
 | `HookDecision`, `HookDecision.proceed()` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision. `proceed()` is removed, because one shared instance cannot be typed for every phase without an unchecked cast; build a phase's Continue decision with `new HookDecision<>(null, HookOutcome.cont())` |
 | `PreCompactHook`, `PostCompactHook`, `CompactionPayload`, `HookRegistry.firePreCompact`, `firePostCompact` | wrap the compactor (`SessionOptions.Builder.withContextCompactor`) to see the history before and after, and observe `QueryEvent.ContextEdited` for the counts; to stop after a compaction, return `Stop` from a `PreModelTurnHook` |
 
+**`AgentSession.events()` returns an `EventStream`, not a `Flow.Publisher`.** `EventStream` is an
+`Iterable<QueryEvent>` that is also `AutoCloseable`, read once with for-each inside
+try-with-resources, the shape of `java.nio.file.DirectoryStream`. Each call opens a new stream with
+its own 256-event buffer, attached before `events()` returns. The session no longer waits for
+readers at its end: every event is in each stream's buffer, or missed by it, before `result()`
+completes, and the reader drains it on its own thread.
+
+| 3.0 snapshot | 3.0 |
+|---|---|
+| `Flow.Publisher<QueryEvent> AgentSession.events()`; `session.events().subscribe(subscriber)` | `EventStream AgentSession.events()`; `try (var events = session.events()) { for (var event : events) { ... } }` on a thread of the reader's own |
+| A subscriber's `onComplete` / `onError` | the iteration ends: when the stream is closed, when the session ended and every buffered event was read, or when the reading thread is interrupted (`hasNext()` returns `false`, the interrupt kept); a stream never fails |
+| `Subscription.cancel()` | `EventStream.close()`, from any thread, idempotent, never throwing |
+| A `LoopEnded` subscriber's work was done before `result()` returned, since the teardown drained the subscribers | the teardown no longer waits for readers; a reader that must have handled `LoopEnded` before `result()` returns synchronises with its own reading thread (join it, or complete a future from it) |
+| An `AgentSession` implementation returned a `Flow.Publisher` | it returns its own `EventStream` |
+| `core.events.EventSinkPolicy` | removed; it had no use |
+| `examples.session.ConsoleEventPrinter` was a `Flow.Subscriber` | `new ConsoleEventPrinter(out).print(events)` prints an `Iterable<QueryEvent>` until it ends |
+
 ### Added
 
 - **`ChunkDrain.drain(CloseableIterator<ModelChunk>)`** is the one drain of a model's chunk
@@ -913,8 +930,9 @@ the compactor does their job.
   and event arguments, event attributes and data, `JsonSchema` properties and REPL bindings are
   stored through it.
 - **`helios-session` publishes its test fixtures as `helios-session-<version>-tests.jar`**, in
-  `com.standardapplied.helios.session.test`: `CollectingSubscriber` (records a session's events,
-  optionally reacting to each, and waits for the stream to end through `Await`), `QuestionAnswers`
+  `com.standardapplied.helios.session.test`: `EventCollector` (reads a session's `EventStream`
+  on a virtual thread, records its events, optionally reacting to each, and waits for the stream
+  to end through `Await`), `QuestionAnswers`
   (answers every `AskUserQuestion` with one label), `HookInputs` and `SampleDocuments`.
 - **`helios-testing` scripts any response and any stream.**
   `ScriptedModel.Builder.withResponseTurn(Response)` returns exactly the given response, metadata,
@@ -995,6 +1013,15 @@ the compactor does their job.
   `evaluate`'s order, and
   `withContentRulesOf` names the tools whose content a walk returns (`Read` for `Grep`), whose DENY
   and ASK rules then withhold its entries.
+
+### Changed
+
+- **A slow event reader never stalls the session.** A reader whose buffer is full misses a routine
+  event at once, logged at FINE, instead of delaying the loop, or the turn's stream reader, by up to
+  1 s per event. `LoopEnded`, `QuestionAsked` and `Error` still wait up to 30 s for room in each
+  full stream, then are dropped there with a WARNING; the terminal stays readable through
+  `result()`, an open question through `pendingQuestions()`. The session's event executor and its
+  drain at teardown are gone.
 
 ### Fixed
 

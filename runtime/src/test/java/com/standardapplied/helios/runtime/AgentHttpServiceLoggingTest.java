@@ -55,9 +55,9 @@ final class AgentHttpServiceLoggingTest {
   @Test
   void aFailedEmitIsLoggedAsAWarningWithItsCause() {
     var failure = new IllegalStateException("sink broke");
-    var stream = new SessionEventStream(SESSION_ID, failingSink(failure), new ObjectMapper());
+    var stream = streamTo(failingSink(failure));
 
-    stream.onNext(EVENT);
+    stream.forward(FedEventStream.of(EVENT));
 
     var logged = onlyRecordForTheSession();
     assertEquals(Level.WARNING, logged.getLevel());
@@ -67,28 +67,11 @@ final class AgentHttpServiceLoggingTest {
 
   @Test
   void aDisconnectIsNotLogged() {
-    var stream =
-        new SessionEventStream(
-            SESSION_ID,
-            failingSink(new CloseConnectionException("peer closed")),
-            new ObjectMapper());
+    var stream = streamTo(failingSink(new CloseConnectionException("peer closed")));
 
-    stream.onNext(EVENT);
+    stream.forward(FedEventStream.of(EVENT));
 
     assertTrue(recordsForTheSession().isEmpty(), () -> "logged: " + recordsForTheSession());
-  }
-
-  @Test
-  void aPublisherErrorIsLoggedAsAWarningWithTheError() {
-    var error = new IllegalStateException("publisher broke");
-    var stream = new SessionEventStream(SESSION_ID, failingSink(error), new ObjectMapper());
-
-    stream.onError(error);
-
-    var logged = onlyRecordForTheSession();
-    assertEquals(Level.WARNING, logged.getLevel());
-    assertEquals("events publisher errored for session " + SESSION_ID, logged.getMessage());
-    assertSame(error, logged.getThrown());
   }
 
   @Test
@@ -215,6 +198,10 @@ final class AgentHttpServiceLoggingTest {
 
   private List<LogRecord> recordsForTheSession() {
     return log.records().stream().filter(r -> r.getMessage().contains(SESSION_ID)).toList();
+  }
+
+  private static SessionEventStream streamTo(SseSink sink) {
+    return new SessionEventStream(SESSION_ID, sink, new ObjectMapper(), new CompletableFuture<>());
   }
 
   private static SseSink failingSink(RuntimeException failure) {

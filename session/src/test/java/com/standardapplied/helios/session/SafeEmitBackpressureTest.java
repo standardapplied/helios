@@ -14,7 +14,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,29 +24,27 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Theme G regression test for the SSE-backpressure wedge. The agent loop emits events via {@code
- * AgentSessionImpl#safeEmit}, which offers each event to the session's {@link
- * java.util.concurrent.SubmissionPublisher} with a bounded wait and drops it on overflow. Before
- * the fix, {@code publisher.submit(...)} blocked the loop indefinitely when any subscriber filled
- * its 256-item buffer — a slow SSE client could pin the producer forever.
+ * A reader that stalls never stalls the session: the loop and the turn's stream reader offer each
+ * routine event to the reader's bounded {@link EventStream} without waiting, so a stream whose
+ * buffer is full misses the event and the session runs on.
  *
  * <p>The tests drive a real session whose model streams a burst of text chunks to the turn's
- * reader. A subscriber that stalls in its first {@code onNext} holds one event and lets the buffer
- * fill, so the next event can only be dropped; a subscriber that never stalls receives a burst that
- * fits the buffer whole.
+ * reader. A reader that stalls on its first event holds that event and lets its buffer fill, so the
+ * next event can only be missed; a reader that keeps up receives a burst that fits the buffer
+ * whole.
  */
 final class SafeEmitBackpressureTest {
 
-  private static final int SUBSCRIBER_BUFFER = 256;
+  private static final int CAPACITY = BufferedEventStream.CAPACITY;
 
   @Test
-  void offerWithTimeoutDoesNotWedgeOnSlowSubscriber() {
+  void aStalledReaderMissesTheEventItHasNoRoomForAndTheTurnKeepsItsContent() {
     var stalled = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var backlogDelivered = new CountDownLatch(1 + SUBSCRIBER_BUFFER);
+    var backlogDelivered = new CountDownLatch(1 + CAPACITY);
     var overflowEmitted = new CountDownLatch(1);
-    var subscriber =
-        new CollectingSubscriber(
+    var reader =
+        new EventCollector(
             event -> {
               if (event instanceof QueryEvent.UserMessageReceived) {
                 stalled.countDown();
@@ -56,7 +54,7 @@ final class SafeEmitBackpressureTest {
             });
     var model =
         burstModel(
-            SUBSCRIBER_BUFFER + 1,
+            CAPACITY + 1,
             () -> block(stalled),
             () -> {
               overflowEmitted.countDown();
@@ -64,42 +62,42 @@ final class SafeEmitBackpressureTest {
             });
 
     try (var session = session("sess-backpressure-slow", model)) {
-      session.events().subscribe(subscriber);
+      reader.read(session.events());
       session.send(UserMessage.text("go"));
 
-      Await.latch("the loop to emit past the stalled subscriber's full buffer", overflowEmitted);
+      Await.latch("the turn to emit past the stalled reader's full buffer", overflowEmitted);
       release.countDown();
       var terminal = Await.value("the session to finish", session.result());
-      awaitCompletion(subscriber);
+      awaitCompletion(reader);
 
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals(
-          String.join("", chunks(SUBSCRIBER_BUFFER + 1)),
+          String.join("", chunks(CAPACITY + 1)),
           success.result(),
           "the dropped event must not cost the turn its content");
       assertEquals(
-          chunks(SUBSCRIBER_BUFFER),
-          texts(subscriber),
-          "exactly the one event offered to the full buffer is dropped");
-      var last = assertInstanceOf(QueryEvent.LoopEnded.class, subscriber.events().getLast());
+          chunks(CAPACITY),
+          texts(reader),
+          "exactly the one event offered to the full buffer is missed");
+      var last = assertInstanceOf(QueryEvent.LoopEnded.class, reader.events().getLast());
       assertEquals(terminal, last.result());
     }
   }
 
   @Test
-  void offerSucceedsForFastSubscriber() {
+  void aReaderThatKeepsUpMissesNothing() {
     var burst = 100;
-    var subscriber = new CollectingSubscriber();
+    var reader = new EventCollector();
 
     try (var session = session("sess-backpressure-fast", burstModel(burst, () -> {}, () -> {}))) {
-      session.events().subscribe(subscriber);
+      reader.read(session.events());
       session.send(UserMessage.text("go"));
 
       assertInstanceOf(
           ResultMessage.Success.class, Await.value("the session to finish", session.result()));
-      awaitCompletion(subscriber);
+      awaitCompletion(reader);
 
-      assertEquals(chunks(burst), texts(subscriber), "fast subscriber should not see drops");
+      assertEquals(chunks(burst), texts(reader), "a reader that keeps up misses nothing");
     }
   }
 
@@ -155,13 +153,13 @@ final class SafeEmitBackpressureTest {
     return ScriptedModel.newBuilder().withStreamTurn(stream).build();
   }
 
-  private static void awaitCompletion(CollectingSubscriber subscriber) {
-    subscriber.awaitDone();
-    assertNull(subscriber.error().orElse(null), "the event stream must complete without an error");
+  private static void awaitCompletion(EventCollector reader) {
+    reader.awaitDone();
+    assertNull(reader.error().orElse(null), "the reader must end without an error");
   }
 
-  private static List<String> texts(CollectingSubscriber subscriber) {
-    return subscriber.eventsOf(QueryEvent.AssistantText.class).stream()
+  private static List<String> texts(EventCollector reader) {
+    return reader.eventsOf(QueryEvent.AssistantText.class).stream()
         .map(QueryEvent.AssistantText::text)
         .toList();
   }

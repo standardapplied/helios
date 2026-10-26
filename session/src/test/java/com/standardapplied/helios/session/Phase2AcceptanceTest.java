@@ -22,7 +22,7 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -122,7 +122,7 @@ final class Phase2AcceptanceTest {
     try (var session = AgentSession.create(options)) {
       var answered = new AtomicBoolean(false);
       var sub =
-          new CollectingSubscriber(
+          new EventCollector(
               QuestionAnswers.selecting(session, "Yes")
                   .andThen(
                       event -> {
@@ -130,7 +130,7 @@ final class Phase2AcceptanceTest {
                           answered.set(true);
                         }
                       }));
-      session.events().subscribe(sub);
+      sub.read(session.events());
 
       var result = session.runBlocking(UserMessage.text("explore the repo"));
       sub.awaitDone();

@@ -16,7 +16,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -66,8 +66,8 @@ final class GroundedCitationSurfacingIntegrationTest {
             .build();
 
     try (var session = AgentSession.create(options)) {
-      var sub = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(sub);
+      var sub = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      sub.read(session.events());
 
       var terminal =
           session.runBlocking(

@@ -26,7 +26,7 @@ import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
@@ -149,7 +149,7 @@ final class CompactionIntegrationTest {
                 + providerErrors.size());
   }
 
-  private record Run(ResultMessage result, CollectingSubscriber events) {}
+  private record Run(ResultMessage result, EventCollector events) {}
 
   /**
    * Run {@link #NOTES_TASK} over a seeded workspace with a compactor that fires mid-run: each tool
@@ -182,8 +182,8 @@ final class CompactionIntegrationTest {
             .build();
 
     try (var session = AgentSession.create(options)) {
-      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(events);
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
       var result = session.runBlocking(UserMessage.text(NOTES_TASK));
       events.awaitDone();
       return new Run(result, events);

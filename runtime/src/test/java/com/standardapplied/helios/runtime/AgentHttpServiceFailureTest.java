@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.EventStream;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -18,9 +19,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -35,7 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class AgentHttpServiceFailureTest {
 
-  private static final String BROKEN = "publisher closed: password=hunter22";
+  private static final String BROKEN = "event stream broke: password=hunter22";
 
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private final JsonMapper mapper = JsonMapper.builder().build();
@@ -96,11 +97,11 @@ final class AgentHttpServiceFailureTest {
           () ->
               helidonErrors.records().stream()
                   .map(LogRecord::getThrown)
-                  .anyMatch(AgentHttpServiceFailureTest::isTheBrokenPublisher));
+                  .anyMatch(AgentHttpServiceFailureTest::isTheBrokenStream));
     }
   }
 
-  private static boolean isTheBrokenPublisher(Throwable reported) {
+  private static boolean isTheBrokenStream(Throwable reported) {
     for (var cause = reported; cause != null; cause = cause.getCause()) {
       if (BROKEN.equals(cause.getMessage())) {
         return true;
@@ -116,10 +117,15 @@ final class AgentHttpServiceFailureTest {
             new Class<?>[] {AgentSession.class},
             (proxy, method, args) -> {
               if (method.getName().equals("events")) {
-                return (Flow.Publisher<QueryEvent>)
-                    subscriber -> {
-                      throw new IllegalStateException(BROKEN);
-                    };
+                return new EventStream() {
+                  @Override
+                  public Iterator<QueryEvent> iterator() {
+                    throw new IllegalStateException(BROKEN);
+                  }
+
+                  @Override
+                  public void close() {}
+                };
               }
               try {
                 return method.invoke(session, args);

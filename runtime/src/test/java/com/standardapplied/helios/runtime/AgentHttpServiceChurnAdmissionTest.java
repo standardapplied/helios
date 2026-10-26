@@ -7,7 +7,6 @@ import static com.standardapplied.helios.runtime.AdmissionHarness.messages;
 import static com.standardapplied.helios.runtime.AdmissionHarness.result;
 import static com.standardapplied.helios.runtime.ResponseBodies.rest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
@@ -81,7 +80,7 @@ final class AgentHttpServiceChurnAdmissionTest {
     var sessionId = harness.create(server, "alice");
     var events = harness.openEventsOnOwnConnectionAdmitted(server, sessionId, "alice");
     var session = harness.sessions.get(sessionId);
-    var delivery = CompletableFuture.runAsync(() -> session.subscribers.getFirst().onNext(LARGE));
+    session.streams.getFirst().push(LARGE);
     assertEquals(
         "event:AssistantText",
         Await.value(
@@ -91,9 +90,7 @@ final class AgentHttpServiceChurnAdmissionTest {
     var refused = open(server, sessionId, "alice");
 
     assertStreamRefused(refused);
-    assertFalse(delivery.isDone());
     events.close();
-    Await.value("the event's write to end", delivery);
     harness.openEventsAdmitted(server, sessionId, "alice").close();
   }
 
