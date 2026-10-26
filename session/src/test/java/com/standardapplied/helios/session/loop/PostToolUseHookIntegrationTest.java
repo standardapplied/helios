@@ -12,18 +12,12 @@ import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link PostToolUseHook} outcomes wired through AgentLoop + TurnRunner. */
 final class PostToolUseHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   private ResultMessage callEcho(ScriptedModel.Builder thenTurns, PostToolUseHook hook) {
     return loop.run(thenTurns.build(), HookLoop.echoTool(), UserMessage.text("call echo"), hook);

@@ -2,19 +2,19 @@
 
 package com.standardapplied.helios.testing;
 
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ModelChunk;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.Flow;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
 
 /**
- * Fixed model streams for tests: publishers of {@link ModelChunk} that replay a chunk sequence and
- * complete, replay one and fail, or never end. Each publisher serves any number of subscribers,
- * each receiving the whole sequence. Script one into a {@link ScriptedModel} with {@link
+ * Fixed model streams for tests: one-pass {@link CloseableIterator}s of {@link ModelChunk} that
+ * yield a chunk sequence and end, yield one and fail, or never end. A test that scripts the same
+ * stream twice builds it twice. Script one into a {@link ScriptedModel} with {@link
  * ScriptedModel.Builder#withStreamTurn}.
  */
 public final class ModelStreams {
@@ -22,69 +22,45 @@ public final class ModelStreams {
   private ModelStreams() {}
 
   /**
-   * A stream that delivers {@code chunks} in order, as the subscriber demands them, then completes.
+   * A stream that yields {@code chunks} in order, then ends.
    *
-   * @param chunks the chunks to deliver
+   * @param chunks the chunks to yield
    * @return the stream
    */
-  public static Flow.Publisher<ModelChunk> of(ModelChunk... chunks) {
-    return new Replay(sequence(chunks), null);
+  public static CloseableIterator<ModelChunk> of(ModelChunk... chunks) {
+    return CloseableIterator.of(sequence(chunks).iterator());
   }
 
   /**
-   * A stream that delivers {@code chunks} in order, as the subscriber demands them, then fails with
-   * {@code error}, as a provider does when its connection breaks or its output does not parse.
+   * A stream that yields {@code chunks} in order, then throws {@code error} from {@code hasNext()}
+   * as itself, as a provider's stream does when its connection breaks or its output does not parse.
    *
-   * @param error the error that ends the stream
-   * @param chunks the chunks to deliver before the error; none to fail on the first request
+   * @param error the error that ends the stream: a {@link RuntimeException} or an {@link Error}
+   * @param chunks the chunks to yield before the error; none to fail on the first {@code hasNext()}
    * @return the stream
+   * @throws IllegalArgumentException if {@code error} is a checked exception, which {@code
+   *     hasNext()} cannot throw
    */
-  public static Flow.Publisher<ModelChunk> failing(Throwable error, ModelChunk... chunks) {
+  public static CloseableIterator<ModelChunk> failing(Throwable error, ModelChunk... chunks) {
     Objects.requireNonNull(error, "error must not be null");
-    return new Replay(sequence(chunks), error);
+    if (!(error instanceof RuntimeException) && !(error instanceof Error)) {
+      throw new IllegalArgumentException(
+          "a stream fails with a RuntimeException or an Error, not " + error.getClass().getName());
+    }
+    return new Failing(sequence(chunks).iterator(), error);
   }
 
   /**
-   * A stream that never delivers a chunk or ends, as a stalled provider connection does. {@code
-   * onRequest} runs on the requesting thread each time the subscriber requests chunks, so a test
-   * learns the consumer is now waiting. A non-positive request fails the stream with {@link
-   * IllegalArgumentException} instead, as {@link Flow.Subscription#request} requires.
+   * A stream that never yields a chunk or ends, as a stalled provider connection does. Its first
+   * {@code hasNext()} runs {@code onFirstPull}, so a test learns the reader is now waiting, then
+   * blocks until the stream is closed or the reading thread interrupted, and throws a {@link
+   * CancellationException}; an interrupt stays set.
    *
-   * @param onRequest what to run on each request
+   * @param onFirstPull what to run on the first {@code hasNext()}
    * @return the stream
    */
-  public static Flow.Publisher<ModelChunk> stalled(Runnable onRequest) {
-    Objects.requireNonNull(onRequest, "onRequest must not be null");
-    return subscriber -> {
-      Objects.requireNonNull(subscriber, "subscriber must not be null");
-      subscriber.onSubscribe(new StalledSubscription(onRequest, subscriber));
-    };
-  }
-
-  private static final class StalledSubscription implements Flow.Subscription {
-
-    private final Runnable onRequest;
-    private final Flow.Subscriber<? super ModelChunk> subscriber;
-    private final AtomicBoolean ended = new AtomicBoolean();
-
-    StalledSubscription(Runnable onRequest, Flow.Subscriber<? super ModelChunk> subscriber) {
-      this.onRequest = onRequest;
-      this.subscriber = subscriber;
-    }
-
-    @Override
-    public void request(long n) {
-      if (n > 0 && !ended.get()) {
-        onRequest.run();
-      } else if (n <= 0 && ended.compareAndSet(false, true)) {
-        subscriber.onError(nonPositiveRequest(n));
-      }
-    }
-
-    @Override
-    public void cancel() {
-      ended.set(true);
-    }
+  public static CloseableIterator<ModelChunk> stalled(Runnable onFirstPull) {
+    return new Stalled(Objects.requireNonNull(onFirstPull, "onFirstPull must not be null"));
   }
 
   private static List<ModelChunk> sequence(ModelChunk[] chunks) {
@@ -93,95 +69,66 @@ public final class ModelStreams {
     return List.of(chunks);
   }
 
-  private static IllegalArgumentException nonPositiveRequest(long n) {
-    return new IllegalArgumentException("non-positive subscription request: " + n);
+  private record Failing(Iterator<ModelChunk> chunks, Throwable error)
+      implements CloseableIterator<ModelChunk> {
+
+    @Override
+    public boolean hasNext() {
+      if (chunks.hasNext()) {
+        return true;
+      }
+      if (error instanceof Error fatal) {
+        throw fatal;
+      }
+      throw (RuntimeException) error;
+    }
+
+    @Override
+    public ModelChunk next() {
+      hasNext();
+      return chunks.next();
+    }
+
+    @Override
+    public void close() {}
   }
 
-  private record Replay(List<ModelChunk> chunks, Throwable error)
-      implements Flow.Publisher<ModelChunk> {
+  private static final class Stalled implements CloseableIterator<ModelChunk> {
 
-    @Override
-    public void subscribe(Flow.Subscriber<? super ModelChunk> subscriber) {
-      Objects.requireNonNull(subscriber, "subscriber must not be null");
-      subscriber.onSubscribe(new ReplaySubscription(this, subscriber));
-    }
-  }
+    private final Runnable onFirstPull;
+    private final CountDownLatch closed = new CountDownLatch(1);
+    private boolean pulled;
 
-  private static final class ReplaySubscription implements Flow.Subscription {
-
-    private final Replay replay;
-    private final Flow.Subscriber<? super ModelChunk> subscriber;
-    private final AtomicLong demand = new AtomicLong();
-    private final AtomicInteger drainRequests = new AtomicInteger();
-    private volatile IllegalArgumentException invalidRequest;
-    private volatile boolean ended;
-    private int next;
-
-    ReplaySubscription(Replay replay, Flow.Subscriber<? super ModelChunk> subscriber) {
-      this.replay = replay;
-      this.subscriber = subscriber;
+    Stalled(Runnable onFirstPull) {
+      this.onFirstPull = onFirstPull;
     }
 
     @Override
-    public void request(long n) {
-      if (n <= 0) {
-        invalidRequest = nonPositiveRequest(n);
-      } else {
-        demand.accumulateAndGet(n, ReplaySubscription::saturatedAdd);
-      }
-      drain();
+    public boolean hasNext() {
+      throw stall();
     }
 
     @Override
-    public void cancel() {
-      ended = true;
+    public ModelChunk next() {
+      throw stall();
     }
 
-    private static long saturatedAdd(long demand, long n) {
-      return n >= Long.MAX_VALUE - demand ? Long.MAX_VALUE : demand + n;
-    }
-
-    /**
-     * Delivers on one thread at a time, in a loop, and never under a lock. A request from {@code
-     * onNext} or from another thread only records its demand and leaves delivery to the thread
-     * already draining, which passes again until no request arrived since its last pass; so the
-     * stack stays flat however long the sequence, and neither {@code request} nor {@code cancel}
-     * waits on a subscriber callback.
-     */
-    private void drain() {
-      if (drainRequests.getAndIncrement() != 0) {
-        return;
+    private CancellationException stall() {
+      if (!pulled) {
+        pulled = true;
+        onFirstPull.run();
       }
-      var missed = 1;
-      do {
-        deliver();
-        missed = drainRequests.addAndGet(-missed);
-      } while (missed != 0);
+      try {
+        closed.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return new CancellationException("the stalled stream was closed or interrupted");
     }
 
-    private void deliver() {
-      while (!ended) {
-        if (invalidRequest != null) {
-          ended = true;
-          subscriber.onError(invalidRequest);
-        } else if (next == replay.chunks().size()) {
-          ended = true;
-          end();
-        } else if (demand.get() == 0) {
-          return;
-        } else {
-          demand.decrementAndGet();
-          subscriber.onNext(replay.chunks().get(next++));
-        }
-      }
-    }
-
-    private void end() {
-      if (replay.error() == null) {
-        subscriber.onComplete();
-      } else {
-        subscriber.onError(replay.error());
-      }
+    @Override
+    public void close() {
+      closed.countDown();
     }
   }
 }

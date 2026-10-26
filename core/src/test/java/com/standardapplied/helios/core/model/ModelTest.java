@@ -4,25 +4,16 @@ package com.standardapplied.helios.core.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
-import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class ModelTest {
@@ -59,12 +50,12 @@ class ModelTest {
   }
 
   @Test
-  void chatOnAStreamThatCompletesWithoutItsStopThrows() {
+  void chatOnAStreamThatEndsWithoutItsStopThrows() {
     var model = streaming(new ModelChunk.TextDelta("hi"));
 
     var failure = assertThrows(IllegalStateException.class, () -> model.chat(List.of(), List.of()));
 
-    assertEquals("the model's stream completed without its MessageStop", failure.getMessage());
+    assertEquals("the model's stream ended without its MessageStop", failure.getMessage());
   }
 
   @Test
@@ -90,131 +81,26 @@ class ModelTest {
   }
 
   @Test
-  void chatWrapsTheStreamsCheckedFailure() {
-    var reset = new IOException("reset");
+  void chatClosesTheStreamItDrainedOrThatFailed() {
+    var drained = new Tracked(List.<ModelChunk>of(stop()).iterator(), null);
+    var failed = new Tracked(List.<ModelChunk>of().iterator(), new IllegalStateException("no"));
 
-    var thrown = assertThrows(IllegalStateException.class, () -> failing(reset));
+    model(drained).chat(List.of(), List.of());
+    assertThrows(IllegalStateException.class, () -> model(failed).chat(List.of(), List.of()));
 
-    assertSame(reset, thrown.getCause());
-  }
-
-  @Test
-  void anInterruptWhileWaitingCancelsTheStreamAndRestoresTheInterrupt() {
-    var subscribed = new CountDownLatch(1);
-    var cancelled = new CountDownLatch(1);
-    Model model =
-        model(
-            (cancellation) ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        new Flow.Subscription() {
-                          @Override
-                          public void request(long n) {
-                            subscribed.countDown();
-                          }
-
-                          @Override
-                          public void cancel() {
-                            cancelled.countDown();
-                          }
-                        }));
-    var interruptRestored = new boolean[1];
-    var chat =
-        new FutureTask<>(
-            () -> {
-              try {
-                return model.chat(List.of(), List.of());
-              } finally {
-                interruptRestored[0] = Thread.currentThread().isInterrupted();
-              }
-            });
-    var caller = Thread.ofPlatform().start(chat);
-    Await.latch("the chat subscribed", subscribed);
-    caller.interrupt();
-
-    assertInstanceOf(CancellationException.class, Await.failure("the chat", chat));
-    Await.latch("the stream cancelled", cancelled);
-    assertTrue(interruptRestored[0]);
-  }
-
-  @Test
-  void anInterruptWhoseCancelFailsStillRestoresTheInterrupt() {
-    var subscribed = new CountDownLatch(1);
-    Model model =
-        model(
-            (cancellation) ->
-                subscriber ->
-                    subscriber.onSubscribe(
-                        new Flow.Subscription() {
-                          @Override
-                          public void request(long n) {
-                            subscribed.countDown();
-                          }
-
-                          @Override
-                          public void cancel() {
-                            throw new IllegalStateException("close failed");
-                          }
-                        }));
-    var interruptRestored = new boolean[1];
-    var chat =
-        new FutureTask<>(
-            () -> {
-              try {
-                return model.chat(List.of(), List.of());
-              } finally {
-                interruptRestored[0] = Thread.currentThread().isInterrupted();
-              }
-            });
-    var caller = Thread.ofPlatform().start(chat);
-    Await.latch("the chat subscribed", subscribed);
-    caller.interrupt();
-
-    var thrown = assertInstanceOf(IllegalStateException.class, Await.failure("the chat", chat));
-    assertEquals("close failed", thrown.getMessage());
-    assertTrue(interruptRestored[0]);
-  }
-
-  @Test
-  void anInterruptBeforeTheStreamSubscribesCancelsTheLateSubscriptionWithoutARequest() {
-    var subscribers = new LinkedBlockingQueue<Flow.Subscriber<? super ModelChunk>>();
-    Model model = model((cancellation) -> subscribers::add);
-    var chat = new FutureTask<>(() -> model.chat(List.of(), List.of()));
-    var caller = Thread.ofPlatform().start(chat);
-    var late = Await.next("the chat subscribed", subscribers);
-    caller.interrupt();
-    assertInstanceOf(CancellationException.class, Await.failure("the chat", chat));
-
-    var requests = new AtomicInteger();
-    var cancels = new AtomicInteger();
-    late.onSubscribe(
-        new Flow.Subscription() {
-          @Override
-          public void request(long n) {
-            requests.incrementAndGet();
-          }
-
-          @Override
-          public void cancel() {
-            cancels.incrementAndGet();
-          }
-        });
-
-    assertEquals(0, requests.get());
-    assertEquals(1, cancels.get());
+    assertTrue(drained.closed.get());
+    assertTrue(failed.closed.get());
   }
 
   @Test
   void structuredOutputIsUnsupportedByDefault() {
     var model = streaming();
     var schema = OutputSchema.of(Answer.class);
-    var token = new CancellationToken();
 
     assertThrows(
         UnsupportedOperationException.class, () -> model.chat(List.of(), List.of(), schema));
     assertThrows(
-        UnsupportedOperationException.class,
-        () -> model.chatStream(List.of(), List.of(), schema, token));
+        UnsupportedOperationException.class, () -> model.chatStream(List.of(), List.of(), schema));
   }
 
   @Test
@@ -237,37 +123,42 @@ class ModelTest {
     closeable.close();
   }
 
-  private static void failing(Throwable failure) {
-    model(
-            cancellation ->
-                subscriber -> {
-                  subscriber.onSubscribe(
-                      new Flow.Subscription() {
-                        @Override
-                        public void request(long n) {
-                          subscriber.onError(failure);
-                        }
+  private static ModelChunk.MessageStop stop() {
+    return new ModelChunk.MessageStop("STOP", Response.Usage.of(1, 1), Map.of());
+  }
 
-                        @Override
-                        public void cancel() {}
-                      });
-                })
+  private static void failing(RuntimeException failure) {
+    model(new Tracked(List.<ModelChunk>of().iterator(), failure)).chat(List.of(), List.of());
+  }
+
+  private static void failing(Error failure) {
+    model(
+            new CloseableIterator<>() {
+              @Override
+              public boolean hasNext() {
+                throw failure;
+              }
+
+              @Override
+              public ModelChunk next() {
+                throw failure;
+              }
+
+              @Override
+              public void close() {}
+            })
         .chat(List.of(), List.of());
   }
 
   private static Model streaming(ModelChunk... chunks) {
-    return model(
-        cancellation ->
-            new IteratorPublisher<>(
-                () -> CloseableIterator.of(List.of(chunks).iterator()), cancellation));
+    return model(CloseableIterator.of(List.of(chunks).iterator()));
   }
 
-  private static Model model(Function<CancellationToken, Flow.Publisher<ModelChunk>> stream) {
+  private static Model model(CloseableIterator<ModelChunk> stream) {
     return new Model() {
       @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        return stream.apply(cancellation);
+      public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
+        return stream;
       }
 
       @Override
@@ -280,5 +171,35 @@ class ModelTest {
         return "test";
       }
     };
+  }
+
+  /**
+   * Yields {@code chunks}, then throws {@code failure} unless it is null, and records its close.
+   */
+  private record Tracked(
+      Iterator<ModelChunk> chunks, RuntimeException failure, AtomicBoolean closed)
+      implements CloseableIterator<ModelChunk> {
+
+    Tracked(Iterator<ModelChunk> chunks, RuntimeException failure) {
+      this(chunks, failure, new AtomicBoolean());
+    }
+
+    @Override
+    public boolean hasNext() {
+      if (!chunks.hasNext() && failure != null) {
+        throw failure;
+      }
+      return chunks.hasNext();
+    }
+
+    @Override
+    public ModelChunk next() {
+      return chunks.next();
+    }
+
+    @Override
+    public void close() {
+      closed.set(true);
+    }
   }
 }

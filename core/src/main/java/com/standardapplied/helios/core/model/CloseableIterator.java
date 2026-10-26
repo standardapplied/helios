@@ -9,8 +9,8 @@ import java.util.Iterator;
 
 /**
  * An iterator that holds resources (e.g., HTTP connections, streams) that must be released when
- * iteration is complete or abandoned early: what an {@link IteratorPublisher} pulls, such as a
- * provider's response stream. Its owner closes it once done, in a try-with-resources block.
+ * iteration is complete or abandoned early, such as a model's chunk stream or a provider's response
+ * stream. Its owner closes it once done, in a try-with-resources block.
  *
  * @param <T> the element type
  */

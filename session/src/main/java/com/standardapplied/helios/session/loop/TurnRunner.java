@@ -19,7 +19,6 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolVisibilityContext;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Drives one model turn end-to-end, in order: the {@code PreModelTurn} hook, the model call, the
@@ -46,7 +45,7 @@ import java.util.concurrent.ScheduledExecutorService;
  * <h2>Thread-safety</h2>
  *
  * It has no mutable state of its own. Each {@link #runTurn(SessionState, SessionLimits)} invocation
- * creates its own subscriber state.
+ * reads the model's stream through a {@link TurnReader} of its own, on a thread of its own.
  */
 public final class TurnRunner {
 
@@ -62,41 +61,32 @@ public final class TurnRunner {
    * Build a turn runner.
    *
    * @param collaborators the collaborators shared with the {@link AgentLoop}; non-null
-   * @param model the model providing {@link Model#chatStream(List, List,
-   *     com.standardapplied.helios.core.runtime.CancellationToken)}; non-null
+   * @param model the model providing {@link Model#chatStream(List, List)}; non-null
    * @param costCalculator converts per-turn {@link Usage} into a {@link
    *     com.standardapplied.helios.core.common.CostEstimate}; non-null. Use {@link
    *     CostCalculator#ZERO} to disable cost tracking
    * @param outputSchema the schema the model's text output must conform to, or {@code null} when
    *     the session has no structured-output constraint. When non-null, the loop dispatches {@link
-   *     Model#chatStream(List, List, OutputSchema,
-   *     com.standardapplied.helios.core.runtime.CancellationToken)} on every turn so the schema
-   *     rides the provider's native channel (Gemini {@code response_format.schema}, OpenAI {@code
+   *     Model#chatStream(List, List, OutputSchema)} on every turn so the schema rides the
+   *     provider's native channel (Gemini {@code response_format.schema}, OpenAI {@code
    *     text.format=json_schema}, Anthropic {@code system_instruction} text). The schema is dormant
    *     on tool-calling turns (tool arguments validate against the tool's own schema) and activates
    *     on text-output turns. When {@code null}, the loop dispatches {@link Model#chatStream(List,
-   *     List, com.standardapplied.helios.core.runtime.CancellationToken)} and the model is free to
-   *     produce arbitrary text
-   * @param scheduler shared per-session scheduler used by {@link TurnSubscriber} to enforce the
-   *     per-chunk {@code streamIdleTimeout}; non-null. The caller owns its lifetime — {@link
-   *     com.standardapplied.helios.session.AgentSessionImpl} passes a session-scoped scheduler it
-   *     shuts down with the session
+   *     List)} and the model is free to produce arbitrary text
    * @throws NullPointerException if any non-{@code outputSchema} argument is null
    */
   public TurnRunner(
       LoopCollaborators collaborators,
       Model model,
       CostCalculator costCalculator,
-      OutputSchema<?> outputSchema,
-      ScheduledExecutorService scheduler) {
+      OutputSchema<?> outputSchema) {
     this.collaborators = Objects.requireNonNull(collaborators, "collaborators must not be null");
     this.model = Objects.requireNonNull(model, "model must not be null");
     Objects.requireNonNull(costCalculator, "costCalculator must not be null");
-    Objects.requireNonNull(scheduler, "scheduler must not be null");
     this.emitter = collaborators.emitter();
     var effects = new HookEffects(emitter, collaborators.steeringQueue());
     this.turnHooks = new TurnHooks(collaborators, emitter, effects);
-    this.modelCall = new ModelCall(collaborators, emitter, model, outputSchema, scheduler);
+    this.modelCall = new ModelCall(collaborators, emitter, model, outputSchema);
     this.toolRound = new ToolRound(collaborators, emitter, effects);
     this.accounting = new UsageAccounting(model, costCalculator);
   }

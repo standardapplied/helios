@@ -27,7 +27,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link PreToolUseHook} outcomes, and the hook name they carry, wired through the loop. */
@@ -38,11 +37,6 @@ final class PreToolUseHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
   private final List<Map<String, Object>> executed = new CopyOnWriteArrayList<>();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   private ResultMessage callEchoThenAnswer(
       Map<String, Object> arguments, String answer, PreToolUseHook hook) {

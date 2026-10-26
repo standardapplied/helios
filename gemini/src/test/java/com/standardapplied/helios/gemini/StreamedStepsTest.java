@@ -24,6 +24,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.test.SseEvents;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -137,7 +138,7 @@ class StreamedStepsTest {
   }
 
   @Test
-  void thoughtDeltaTextFoldsIntoThinking() {
+  void thoughtDeltaTextStreamsAsThinkingAndItsStopYieldsNothing() {
     var thoughtStart = stepStart(0, "{\"type\":\"thought\",\"signature\":\"sig\"}");
     var thoughtDelta = stepDelta(0, "{\"type\":\"text\",\"text\":\"deeper\"}");
     var sse =
@@ -148,32 +149,17 @@ class StreamedStepsTest {
             + HELLO_DELTA
             + MODEL_OUTPUT_STOP
             + INTERACTION_COMPLETED;
-    var events = drain(sse);
-    var textDeltas = events.stream().filter(e -> e instanceof StreamEvent.TextDelta).count();
-    assertEquals(1, textDeltas, "thought delta text must NOT surface as a TextDelta");
 
-    // Streaming surface: thought delta text arrives as ThinkingDelta, step.stop emits
-    // ThinkingComplete with the assembled text and signature.
-    var thinkingDelta =
-        events.stream()
-            .filter(StreamEvent.ThinkingDelta.class::isInstance)
-            .map(StreamEvent.ThinkingDelta.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("deeper", thinkingDelta.text());
+    var events = SseEvents.drain(GeminiSse.reader(SseEvents.body(sse)));
 
-    var thinkingComplete =
-        events.stream()
-            .filter(StreamEvent.ThinkingComplete.class::isInstance)
-            .map(StreamEvent.ThinkingComplete.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertTrue(thinkingComplete.fullThinking().contains("deeper"));
-    assertEquals("sig", thinkingComplete.signature());
-
-    var done = (StreamEvent.Done) events.getLast();
-    assertNotNull(done.response().thinking());
-    assertTrue(done.response().thinking().contains("deeper"));
+    assertEquals(new StreamEvent.KeepAlive(), events.get(0));
+    assertEquals(new StreamEvent.ThinkingDelta("deeper"), events.get(1));
+    assertEquals(new StreamEvent.KeepAlive(), events.get(2));
+    assertEquals(new StreamEvent.KeepAlive(), events.get(3));
+    assertEquals(new StreamEvent.TextDelta("Hello"), events.get(4));
+    var response = ((StreamEvent.Done) events.getLast()).response();
+    assertEquals("deeper", response.thinking());
+    assertEquals("sig", response.metadata().get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
   }
 
   @Test
@@ -196,16 +182,13 @@ class StreamedStepsTest {
             .findFirst()
             .orElseThrow()
             .text());
-    var complete =
-        events.stream()
-            .filter(StreamEvent.ThinkingComplete.class::isInstance)
-            .map(StreamEvent.ThinkingComplete.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("Checking the arithmetic.", complete.fullThinking());
-    assertEquals("sig", complete.signature());
-    var done = (StreamEvent.Done) events.getLast();
-    assertEquals("Checking the arithmetic.", done.response().thinking());
+    assertEquals(
+        List.of(
+            StreamEvent.ThinkingDelta.class, StreamEvent.TextDelta.class, StreamEvent.Done.class),
+        events.stream().map(Object::getClass).toList());
+    var response = ((StreamEvent.Done) events.getLast()).response();
+    assertEquals("Checking the arithmetic.", response.thinking());
+    assertEquals("sig", response.metadata().get(GeminiResponseAssembler.THOUGHT_SIGNATURES_KEY));
   }
 
   @Test

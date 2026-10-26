@@ -4,12 +4,13 @@ package com.standardapplied.helios.core.provider;
 
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.ChunkDrain;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
@@ -17,17 +18,16 @@ import com.standardapplied.helios.core.tool.Tool;
 import java.net.http.HttpClient;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.Flow;
 
 /**
  * The {@link Model} of a streaming HTTP provider, assembled from the provider's parts: each turn
- * becomes the provider's request, and its {@link Exchange}'s event stream is published as chunks as
- * they arrive, or drained by the blocking forms. A structured turn is checked against its output
- * schema once it completes, unless it called tools: it is then intermediate, and a later text-only
- * turn delivers the structured answer. A failed turn ends in one exception, mapped the same way for
- * every provider (see {@link Builder#withFailure}). Cancelling one turn's stream releases that
- * turn's request alone; closing the model shuts its HTTP client down. A provider builds one per
- * model id and configuration through {@link #newBuilder()}.
+ * becomes the provider's request, and its {@link Exchange}'s event stream is read as chunks as they
+ * arrive, or drained by the blocking forms. A structured turn is checked against its output schema
+ * once it completes, unless it called tools: it is then intermediate, and a later text-only turn
+ * delivers the structured answer. A failed turn ends in one exception, mapped the same way for
+ * every provider (see {@link Builder#withFailure}). Closing one turn's stream releases that turn's
+ * request alone; closing the model shuts its HTTP client down. A provider builds one per model id
+ * and configuration through {@link #newBuilder()}.
  *
  * @param <R> the provider's request type
  */
@@ -93,42 +93,28 @@ public final class StreamingModel<R> implements Model {
     return config.rawOutputCapturePolicy();
   }
 
-  /** Drains the turn's event stream to the response its completion carries. */
-  @Override
-  public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-    return ResponseDrain.drain(
-        exchange.stream(requests.build(messages, tools, null), new CancellationToken()), failures);
-  }
-
-  /** Drains the turn's event stream and parses its response against {@code outputSchema}. */
+  /** Drains the turn's chunk stream and parses its response against {@code outputSchema} once. */
   @Override
   public <T> Response<T> chat(
       List<Message> messages, List<Tool> tools, OutputSchema<T> outputSchema) {
     var request = requests.build(messages, tools, outputSchema.schema().toMap());
-    var response = ResponseDrain.drain(exchange.stream(request, new CancellationToken()), failures);
-    return structured.of(response, outputSchema);
+    try (var stream = new ChunkStream(exchange.stream(request), failures, response -> {})) {
+      return structured.of(ChunkDrain.drain(stream), outputSchema);
+    }
   }
 
   @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
+  public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
     var request = requests.build(messages, tools, null);
-    return new ChunkStream(exchange.stream(request, cancellation), failures, response -> {});
+    return new ChunkStream(exchange.stream(request), failures, response -> {});
   }
 
   @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages,
-      List<Tool> tools,
-      OutputSchema<?> outputSchema,
-      CancellationToken cancellation) {
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
+  public CloseableIterator<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, OutputSchema<?> outputSchema) {
     var request = requests.build(messages, tools, outputSchema.schema().toMap());
     return new ChunkStream(
-        exchange.stream(request, cancellation),
-        failures,
-        response -> structured.of(response, outputSchema));
+        exchange.stream(request), failures, response -> structured.of(response, outputSchema));
   }
 
   /** Shuts the model's HTTP client down, waiting briefly for requests in flight. */

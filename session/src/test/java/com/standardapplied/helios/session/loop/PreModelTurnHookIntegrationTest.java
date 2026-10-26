@@ -11,18 +11,12 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link PreModelTurnHook} outcomes wired through AgentLoop + TurnRunner. */
 final class PreModelTurnHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   @Test
   void preModelTurnInjectSkipsTheModelCallForThatTurn() {

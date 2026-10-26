@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Citation;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -33,9 +34,7 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** End-to-end TurnRunner tests exercising tool dispatch through a real ToolDispatch. */
@@ -47,11 +46,6 @@ final class TurnRunnerToolDispatchTest {
   private final List<QueryEvent> events = fixture.events;
   private final HookRegistry hooks = HookRegistry.empty();
   private final SteeringQueue queue = new SteeringQueue(8);
-
-  @AfterEach
-  void closeFixture() {
-    fixture.close();
-  }
 
   private static Tool echoTool() {
     return Tool.newBuilder()
@@ -80,6 +74,34 @@ final class TurnRunnerToolDispatchTest {
   private static Model fixedChunkModel(List<ModelChunk> chunks) {
     return ScriptedModel.newBuilder()
         .withStreamTurn(ModelStreams.of(chunks.toArray(ModelChunk[]::new)))
+        .build();
+  }
+
+  /**
+   * A model whose stream yields {@code chunks} and, once read, cancels {@code token} as it closes:
+   * the turn's tool calls are then dispatched under a cancelled session.
+   */
+  private static Model cancellingOnClose(
+      CancellationToken token, String reason, List<ModelChunk> chunks) {
+    var stream = ModelStreams.of(chunks.toArray(ModelChunk[]::new));
+    return ScriptedModel.newBuilder()
+        .withStreamTurn(
+            new CloseableIterator<>() {
+              @Override
+              public boolean hasNext() {
+                return stream.hasNext();
+              }
+
+              @Override
+              public ModelChunk next() {
+                return stream.next();
+              }
+
+              @Override
+              public void close() {
+                token.cancel(reason);
+              }
+            })
         .build();
   }
 
@@ -201,11 +223,10 @@ final class TurnRunnerToolDispatchTest {
     var registry = new ToolRegistry(List.of(echoBinding()));
     var dispatch = fixture.dispatch(registry);
     var call = new ToolCall("c1", "echo", Map.of("v", "hi"));
-    // Pre-cancel: dispatch sees the token and throws CancellationException, which TurnRunner
-    // catches and converts to a synthetic failure ToolResult.
-    token.cancel("user-stop");
     var model =
-        fixedChunkModel(
+        cancellingOnClose(
+            token,
+            "user-stop",
             List.of(
                 new ModelChunk.ToolUseStop(call),
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())));
@@ -232,10 +253,11 @@ final class TurnRunnerToolDispatchTest {
     var secrets = new SecretRegistry();
     secrets.register("API_KEY", "sk-test-0123456789abcdef");
     var token = new CancellationToken();
-    token.cancel("stopped holding sk-test-0123456789abcdef");
     var call = new ToolCall("c1", "echo", Map.of("v", "hi"));
     var model =
-        fixedChunkModel(
+        cancellingOnClose(
+            token,
+            "stopped holding sk-test-0123456789abcdef",
             List.of(
                 new ModelChunk.ToolUseStop(call),
                 new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(0, 0), Map.of(), List.of())));
@@ -291,8 +313,8 @@ final class TurnRunnerToolDispatchTest {
           }
 
           @Override
-          public Flow.Publisher<ModelChunk> chatStream(
-              List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
+          public CloseableIterator<ModelChunk> chatStream(
+              List<Message> messages, List<Tool> tools) {
             capturedTools.set(tools);
             return ModelStreams.of(
                 new ModelChunk.TextDelta("ok"),

@@ -117,23 +117,23 @@ public sealed interface QueryEvent
 
   /**
    * Assistant produced a reasoning / thinking delta (extended-thinking models only). Like {@link
-   * AssistantText}, a {@link TurnRetried} restarts the turn's thinking.
+   * AssistantText}, a {@link TurnRetried} restarts the turn's thinking. The turn's thinking
+   * signatures are not here: they are in the history {@link
+   * com.standardapplied.helios.core.model.Message#metadata()} of its assistant message, under the
+   * provider's key, {@code anthropic.thinkingBlocks} (text and signature per block) or {@code
+   * gemini.thoughtSignatures}; OpenAI signs no summary.
    *
    * @param sessionId the session id
    * @param turnIndex the turn index
    * @param timestamp the event timestamp
    * @param text the thinking text delta; non-null, may be empty
-   * @param signature provider-supplied verification signature for the thinking block; non-null, may
-   *     be empty
    */
-  record AssistantThinking(
-      String sessionId, long turnIndex, Instant timestamp, String text, String signature)
+  record AssistantThinking(String sessionId, long turnIndex, Instant timestamp, String text)
       implements QueryEvent {
 
     public AssistantThinking {
       validateCommon(sessionId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
-      Objects.requireNonNull(signature, "signature must not be null");
     }
   }
 

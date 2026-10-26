@@ -21,21 +21,18 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Wires the collaborators of a {@link TurnRunner} or {@link AgentLoop} under test: a tool dispatch
  * over a given registry, a hook-context factory over a model no hook calls, a clock fixed at one
- * instant, a scheduler the test closes, and an event sink that records into {@link #events}.
+ * instant, and an event sink that records into {@link #events}.
  */
-final class LoopFixture implements AutoCloseable {
+final class LoopFixture {
 
   final List<QueryEvent> events = new ArrayList<>();
   final InstantSource clock;
   private final String sessionId;
   private final Model hookModel = ScriptedModel.newBuilder().build();
-  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
   LoopFixture(String sessionId, Instant now) {
     this.sessionId = sessionId;
@@ -85,7 +82,7 @@ final class LoopFixture implements AutoCloseable {
       Model model,
       CostCalculator costs,
       OutputSchema<?> outputSchema) {
-    return new TurnRunner(collaborators, model, costs, outputSchema, scheduler);
+    return new TurnRunner(collaborators, model, costs, outputSchema);
   }
 
   /** A loop over {@link #runner(LoopCollaborators, Model) a plain runner} of {@code model}. */
@@ -115,15 +112,5 @@ final class LoopFixture implements AutoCloseable {
   /** A fresh state of this fixture's session with its own cancellation token. */
   SessionState state() {
     return state(new CancellationToken());
-  }
-
-  /** The scheduler every runner of this fixture uses, shut down by {@link #close}. */
-  ScheduledExecutorService scheduler() {
-    return scheduler;
-  }
-
-  @Override
-  public void close() {
-    scheduler.shutdownNow();
   }
 }

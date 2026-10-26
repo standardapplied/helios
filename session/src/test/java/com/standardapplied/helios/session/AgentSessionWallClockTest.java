@@ -4,22 +4,16 @@
  */
 package com.standardapplied.helios.session;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import com.standardapplied.helios.core.model.BlockingModel;
-import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
-import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
+import java.util.NoSuchElementException;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -27,30 +21,24 @@ import org.junit.jupiter.api.Test;
  * stack trace where the JVM main thread parked at {@code AgentSession.runBlocking} → {@code
  * CompletableFuture.join()} for 494 s despite a 2-minute wall-clock cap. Root cause: {@link
  * com.standardapplied.helios.session.loop.StopClassifier} checks {@code maxWallClock} only between
- * turns, while {@link com.standardapplied.helios.session.loop.TurnSubscriber#awaitDone()} blocks
- * indefinitely waiting for a provider stream that may never deliver {@code onComplete} / {@code
- * onError} (silent socket, hung proxy, mid-stream stall).
+ * turns, while the loop waited indefinitely for a provider stream that may never end (silent
+ * socket, hung proxy, mid-stream stall).
  *
- * <p>The test constructs an inline {@link Model} whose {@code chatStream} returns a publisher that
- * calls {@code onSubscribe} and then never emits another signal — the bare-minimum hang. The only
- * limit short enough to end that wait is the 500 ms {@code maxWallClock}; the stream-idle timeout
- * is an hour. Pre-fix the result never settles and the hang guard fails the test; post-fix the
- * terminal is {@link ResultMessage.ErrorMaxWallClock}.
+ * <p>The model's stream blocks its first read until it is closed — the bare-minimum hang. The only
+ * limit short enough to end that wait is the 500 ms {@code maxWallClock}: the terminal is {@link
+ * ResultMessage.ErrorMaxWallClock}, and the session closed the stream.
  */
 final class AgentSessionWallClockTest {
 
   @Test
   void maxWallClockTerminatesHangingChatStream() {
-    var token = new CompletableFuture<CancellationToken>();
+    var closed = new CountDownLatch(1);
+    var model = ScriptedModel.newBuilder().withStreamTurn(blockingUntilClosed(closed)).build();
     var options =
         SessionOptions.newBuilder()
-            .withModel(hangingChatStreamModel(token))
+            .withModel(model)
             .withSessionId("sess-hang-wallclock")
-            .withLimits(
-                SessionLimits.newBuilder()
-                    .withMaxWallClock(Duration.ofMillis(500))
-                    .withStreamIdleTimeout(Duration.ofHours(1))
-                    .build())
+            .withLimits(SessionLimits.newBuilder().withMaxWallClock(Duration.ofMillis(500)).build())
             .build();
 
     try (var session = AgentSession.create(options)) {
@@ -66,43 +54,25 @@ final class AgentSessionWallClockTest {
                   + ": "
                   + terminal);
     }
-    assertEquals(
-        Optional.of("maxWallClock exceeded after 500ms"),
-        Await.value("the model's token", token).reason());
+    Await.latch("the stream closed", closed);
   }
 
-  // ── inline Model whose chatStream hangs forever ──────────────────────────
-
-  private static Model hangingChatStreamModel(CompletableFuture<CancellationToken> token) {
-    return new BlockingModel() {
+  private static CloseableIterator<ModelChunk> blockingUntilClosed(CountDownLatch closed) {
+    return new CloseableIterator<>() {
       @Override
-      public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-        throw new UnsupportedOperationException("chat() not used by the streaming loop");
+      public boolean hasNext() {
+        Await.latch("the stream closed", closed);
+        throw new CancellationException("closed");
       }
 
       @Override
-      public Flow.Publisher<ModelChunk> chatStream(
-          List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-        token.complete(cancellation);
-        return subscriber ->
-            subscriber.onSubscribe(
-                new Flow.Subscription() {
-                  @Override
-                  public void request(long n) {}
-
-                  @Override
-                  public void cancel() {}
-                });
+      public ModelChunk next() {
+        throw new NoSuchElementException();
       }
 
       @Override
-      public String id() {
-        return "test-hanging";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
+      public void close() {
+        closed.countDown();
       }
     };
   }

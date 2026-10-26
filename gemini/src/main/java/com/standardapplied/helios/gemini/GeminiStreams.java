@@ -8,12 +8,11 @@ import com.standardapplied.helios.core.provider.JsonPost;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionRequest;
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.util.Map;
 
-/** Sends an Interactions API request and opens its response as a stream of events. */
+/** Opens an Interactions API request's response as a stream of events. */
 final class GeminiStreams {
 
   private final ModelConfig config;
@@ -26,11 +25,12 @@ final class GeminiStreams {
     this.endpoint = endpoint;
   }
 
-  /** The stream answering {@code request}. */
-  SseReader open(InteractionRequest request) throws IOException, InterruptedException {
-    return SseReader.open(
+  /** The stream answering {@code request}, sent on its first {@code hasNext()}. */
+  SseReader open(InteractionRequest request) {
+    return new SseReader(
         httpClient,
         httpRequest(serialize(request)),
+        "Gemini API",
         config.streamIdleTimeout(),
         new GeminiStreamParser(config.providerContinuation(), endpoint.apiVersion()),
         GeminiException::new,

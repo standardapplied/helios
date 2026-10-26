@@ -10,11 +10,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Normalized streaming chunk emitted by a {@link Model} during {@code chatStream}.
+ * Normalized streaming chunk a {@link Model}'s {@link Model#chatStream(java.util.List,
+ * java.util.List) chatStream} yields.
  *
  * <p>Provider modules ({@code helios-anthropic}, {@code helios-openai}, {@code helios-gemini})
  * translate wire-level streaming events into the eight subtypes below so the agent loop never sees
- * provider-specific payloads. Subscribers pattern-match the subtype via {@code switch}; the sealed
+ * provider-specific payloads. Readers pattern-match the subtype via {@code switch}; the sealed
  * permits list is the closed contract.
  *
  * <h2>Adding a subtype</h2>
@@ -26,7 +27,7 @@ import java.util.Objects;
  *
  * {@link StreamEvent} is what a provider's stream parser reads off the wire; a provider's model
  * turns those events into these chunks, the one stream {@link Model#chatStream(java.util.List,
- * java.util.List, com.standardapplied.helios.core.runtime.CancellationToken)} publishes.
+ * java.util.List)} yields.
  */
 public sealed interface ModelChunk
     permits ModelChunk.TextDelta,
@@ -40,7 +41,7 @@ public sealed interface ModelChunk
 
   /**
    * A fragment of assistant text. {@code text} may be empty (some providers emit empty deltas);
-   * subscribers concatenate across the stream to assemble the full message.
+   * readers concatenate across the stream to assemble the full message.
    *
    * @param text the text fragment; non-null
    */
@@ -66,7 +67,7 @@ public sealed interface ModelChunk
   }
 
   /**
-   * A new tool call has started. Subscribers track {@code callId} to correlate subsequent {@link
+   * A new tool call has started. Readers track {@code callId} to correlate subsequent {@link
    * ToolUseDelta}s and the terminating {@link ToolUseStop}.
    *
    * @param callId provider-assigned correlation id; non-null and non-blank
@@ -127,8 +128,11 @@ public sealed interface ModelChunk
    * the grounding citations the provider harvested for this message (e.g. Google Search / web
    * grounding), empty when the turn did no grounding.
    *
-   * <p>This is the terminal chunk for a single model message. A successful turn ends with exactly
-   * one {@code MessageStop}; the publisher then signals {@code onComplete()}.
+   * <p>This is the terminal chunk for a single model message: a successful turn ends with exactly
+   * one {@code MessageStop}, and the stream with it. A turn's thinking signatures are in {@code
+   * metadata}, so in {@link Response#metadata()} and the history {@link Message#metadata()}, under
+   * the provider's key: {@code anthropic.thinkingBlocks} (the text and signature of each block) or
+   * {@code gemini.thoughtSignatures}. OpenAI signs no reasoning summary.
    *
    * @param stopReason the provider-reported finish reason; non-null and non-blank
    * @param usage final usage at message end; non-null
@@ -208,9 +212,9 @@ public sealed interface ModelChunk
 
   /**
    * The stream is alive but this part of it carries nothing for the turn: a provider frame without
-   * content (a ping, a status or envelope event, an SSE comment) or a completed thinking block,
-   * whose text the {@link ThinkingDelta}s already carried. A subscriber adds nothing for it; a
-   * session re-arms its idle clock on it, as on every chunk.
+   * content, such as a ping, a status or envelope event, an SSE comment or a block's end. It is the
+   * liveness signal a direct caller may use for an idle rule of its own; a reader adds nothing for
+   * it, and a session adds nothing for it either.
    */
   record KeepAlive() implements ModelChunk {}
 }

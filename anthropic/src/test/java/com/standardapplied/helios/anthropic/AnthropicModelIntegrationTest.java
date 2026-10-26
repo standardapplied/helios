@@ -18,7 +18,6 @@ import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.Description;
 import com.standardapplied.helios.core.schema.Nullable;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -427,10 +426,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   void aStreamCompletesOnlyAtMessageStopWithTheFinishReasonOfItsStopReason() {
     var response =
         Accepted.stream(
-            model.chatStream(
-                List.of(Message.user("Reply with the single word: ok")),
-                List.of(),
-                new CancellationToken()));
+            model.chatStream(List.of(Message.user("Reply with the single word: ok")), List.of()));
 
     var stopReason = response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY);
     assertNotNull(stopReason, "message_delta carried no stop_reason");
@@ -443,9 +439,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       Accepted.textReply(
           Accepted.stream(
               sonnet.chatStream(
-                  List.of(Message.user("Count from 1 to 3, one per line.")),
-                  List.of(),
-                  new CancellationToken())));
+                  List.of(Message.user("Count from 1 to 3, one per line.")), List.of())));
     }
   }
 

@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -187,23 +188,28 @@ class StreamingIteratorTest {
     assertFalse(metadata.containsKey("anthropic.thinking"));
     assertFalse(metadata.containsKey("anthropic.thinkingSignature"));
 
-    // Streaming surface: each thinking_delta arrives as ThinkingDelta, and the closing
-    // content_block_stop emits ThinkingComplete with the assembled text + signature.
-    var thinkingDeltaEvent =
-        events.stream()
-            .filter(StreamEvent.ThinkingDelta.class::isInstance)
-            .map(StreamEvent.ThinkingDelta.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("Let me think...", thinkingDeltaEvent.text());
-    var thinkingComplete =
-        events.stream()
-            .filter(StreamEvent.ThinkingComplete.class::isInstance)
-            .map(StreamEvent.ThinkingComplete.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals("Let me think...", thinkingComplete.fullThinking());
-    assertEquals("EqoB123", thinkingComplete.signature());
+    assertEquals(
+        List.of(
+            new StreamEvent.ThinkingDelta("Let me think..."),
+            new StreamEvent.TextDelta("Hello"),
+            done),
+        events);
+  }
+
+  @Test
+  void aThinkingBlocksStopYieldsOnlyAKeepAlive() {
+    var thinking = thinkingBlock(0, "Weighing it.", "SIG-0");
+
+    var events = SseEvents.drain(reader(SseEvents.body(MESSAGE_START + thinking)));
+
+    assertEquals(
+        List.of(
+            new StreamEvent.KeepAlive(),
+            new StreamEvent.KeepAlive(),
+            new StreamEvent.ThinkingDelta("Weighing it."),
+            new StreamEvent.KeepAlive(),
+            new StreamEvent.KeepAlive()),
+        events.subList(0, 5));
   }
 
   @Test
@@ -375,11 +381,10 @@ class StreamingIteratorTest {
   }
 
   @Test
-  void interruptedThreadEmitsErrorEvent() {
-    var events = SseEvents.drainInterrupted(StreamingIteratorTest::reader);
+  void anInterruptOfTheReadingThreadThrowsCancellation() {
+    var thrown = SseEvents.readInterrupted(StreamingIteratorTest::reader);
 
-    assertFalse(events.isEmpty());
-    assertInstanceOf(StreamEvent.Error.class, events.getFirst());
+    assertInstanceOf(CancellationException.class, thrown);
   }
 
   // ── thinking blocks: verbatim echo, omitted display, redaction ────────────
@@ -615,11 +620,7 @@ class StreamingIteratorTest {
     var response = ((StreamEvent.Done) events.getLast()).response();
 
     assertTrue(
-        events.stream()
-            .noneMatch(
-                event ->
-                    event instanceof StreamEvent.ThinkingDelta
-                        || event instanceof StreamEvent.ThinkingComplete),
+        events.stream().noneMatch(event -> event instanceof StreamEvent.ThinkingDelta),
         "an empty thinking block carries nothing to render");
     assertNull(response.thinking());
     var thinkingBlocks = ThinkingBlock.decodeAll(response.metadata());

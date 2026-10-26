@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.fault.Backoff;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
@@ -43,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -124,7 +124,6 @@ class SessionRunCharacterizationTest {
   @Test
   void cancellationDuringAStalledTurnEndsTheRunAsCancelledAndShutsTheExecutorsDown() {
     var run = new Run();
-    run.limits = run.limits().withStreamIdleTimeout(Duration.ofHours(1));
     var stalled = new CountDownLatch(1);
     run.replies.removeLast();
     run.replies.removeLast();
@@ -210,7 +209,7 @@ class SessionRunCharacterizationTest {
   private static final class Run {
 
     final AtomicReference<Instant> now = new AtomicReference<>(START);
-    final List<Flow.Publisher<ModelChunk>> replies =
+    final List<CloseableIterator<ModelChunk>> replies =
         new ArrayList<>(
             List.of(
                 transientFailure(),
@@ -323,11 +322,10 @@ class SessionRunCharacterizationTest {
           "the session has an output schema");
     }
 
-    static Flow.Publisher<ModelChunk> transientFailure() {
-      return subscriber -> {
-        throw new TransientStreamException(
-            "Stream read error", new IOException("connection reset"), "test");
-      };
+    static CloseableIterator<ModelChunk> transientFailure() {
+      return ModelStreams.failing(
+          new TransientStreamException(
+              "Stream read error", new IOException("connection reset"), "test"));
     }
 
     private static ToolBinding echo() {

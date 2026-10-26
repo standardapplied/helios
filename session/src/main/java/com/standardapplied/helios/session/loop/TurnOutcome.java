@@ -13,12 +13,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Outcome of one model turn: what {@link TurnSubscriber#awaitDone} found once the turn's stream
- * ended, with the attempt count {@link ModelCall} made, or an outcome the loop synthesises itself.
- * Produced by {@link TurnRunner#runTurn(SessionState,
- * com.standardapplied.helios.session.SessionLimits)} and consumed by {@link
- * StopClassifier#classify(SessionState, com.standardapplied.helios.session.SessionLimits,
- * TurnOutcome, boolean)}.
+ * Outcome of one model turn: what {@link TurnReader} read once the turn's stream ended, with the
+ * attempt count {@link ModelCall} made, or an outcome the loop synthesises itself. Produced by
+ * {@link TurnRunner#runTurn(SessionState, com.standardapplied.helios.session.SessionLimits)} and
+ * consumed by {@link StopClassifier#classify(SessionState,
+ * com.standardapplied.helios.session.SessionLimits, TurnOutcome, boolean)}.
  *
  * <p>{@code assistantContent} is the assistant text accumulated from every {@link
  * com.standardapplied.helios.core.model.ModelChunk.TextDelta TextDelta} chunk during the turn —

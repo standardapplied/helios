@@ -2,10 +2,11 @@
 
 package com.standardapplied.helios.core.provider;
 
+import static com.standardapplied.helios.core.provider.SseFixtures.NEVER_IDLE;
+import static com.standardapplied.helios.core.provider.SseFixtures.stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,62 +15,28 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.model.TransientStreamException;
+import com.standardapplied.helios.core.provider.SseFixtures.Closing;
+import com.standardapplied.helios.core.provider.SseFixtures.EchoParser;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
-import com.standardapplied.helios.core.test.StubHttpServer;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import java.io.ByteArrayInputStream;
 import java.io.EOFException;
-import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 class SseReaderTest {
-
-  private static final Duration NEVER_IDLE = Duration.ofMinutes(10);
-
-  /**
-   * Echoes each payload as text, completes the stream on "stop", fails it on "fail", and reports
-   * the payloads so far as its partial response.
-   */
-  private static class EchoParser implements SseReader.Parser {
-    private final List<String> payloads = new ArrayList<>();
-
-    @Override
-    public StreamEvent parse(String payload) {
-      payloads.add(payload);
-      return switch (payload) {
-        case "stop" -> new StreamEvent.Done(Response.newBuilder().withContent("done").build());
-        case "fail" -> new StreamEvent.Error("failed", null, partial());
-        case "silent" -> null;
-        default -> new StreamEvent.TextDelta(payload);
-      };
-    }
-
-    @Override
-    public Response<Void> partial() {
-      return Response.newBuilder()
-          .withContent(String.join("|", payloads))
-          .withFinishReason(FinishReason.ERROR)
-          .build();
-    }
-  }
 
   private static final class TrackingStream extends ByteArrayInputStream {
     private boolean closed;
@@ -100,21 +67,6 @@ class SseReaderTest {
     @Override
     public void close() {
       closed.countDown();
-    }
-  }
-
-  /** Records whether the reader closed the body it owns. */
-  private static final class Closing extends FilterInputStream {
-    private boolean closed;
-
-    Closing(InputStream body) {
-      super(body);
-    }
-
-    @Override
-    public void close() throws IOException {
-      closed = true;
-      super.close();
     }
   }
 
@@ -591,80 +543,46 @@ class SseReaderTest {
   }
 
   @Test
-  void anInterruptWhileWaitingForALineIsAReadFailureAndStaysSet() {
-    try (var reader =
-        new SseReader(
-            new FeedableInputStream(), NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+  void anInterruptWhileWaitingForALineThrowsCancellationAndStaysSet() {
+    var body = new Closing(new FeedableInputStream());
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
       Thread.currentThread().interrupt();
 
-      var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+      assertThrows(CancellationException.class, reader::next);
 
       assertTrue(Thread.interrupted());
-      assertEquals("Stream read interrupted", error.cause().getMessage());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
     }
   }
 
   @Test
-  void openStreamsATwoHundredResponse() throws Exception {
-    try (var server = server(200, Map.of(), "data: hello\n\n");
-        var client = HttpClient.newHttpClient();
-        var reader = open(client, server)) {
+  void anInterruptAfterAnEventWasReadAheadClosesTheReaderAndThrowsCancellationAndStaysSet() {
+    var feed = new FeedableInputStream();
+    feed.feed("data: one\n\n");
+    var body = new Closing(feed);
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertTrue(reader.hasNext());
+      Thread.currentThread().interrupt();
 
-      assertEquals(new StreamEvent.TextDelta("hello"), reader.next());
+      assertThrows(CancellationException.class, reader::next);
+
+      assertTrue(Thread.interrupted());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
     }
   }
 
   @Test
-  void openFailsARetryableStatusAsTransientWithTheProvidersExceptionAndTheBody() throws Exception {
-    try (var server = server(529, Map.of(), "{\"error\":\"overloaded\"}");
-        var client = HttpClient.newHttpClient()) {
+  void anInterruptOnceTheReaderEndedLeavesItEnded() {
+    var body = new ByteArrayInputStream("data: stop\n\n".getBytes(StandardCharsets.UTF_8));
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertInstanceOf(StreamEvent.Done.class, reader.next());
+      Thread.currentThread().interrupt();
 
-      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
+      assertFalse(reader.hasNext());
 
-      assertEquals("API error (status 529): {\"error\":\"overloaded\"}", failure.getMessage());
-      assertEquals("stub", failure.providerName());
-      assertEquals(Optional.empty(), failure.retryAfter());
-      var cause = assertInstanceOf(ProviderException.class, failure.getCause());
-      assertEquals(529, cause.statusCode());
-      assertEquals(failure.getMessage(), cause.getMessage());
-    }
-  }
-
-  @ParameterizedTest
-  @ValueSource(ints = {408, 429, 500, 503, 504, 529})
-  void openFailsEveryRetryableStatusAsTransient(int status) throws Exception {
-    try (var server = server(status, Map.of(), "busy");
-        var client = HttpClient.newHttpClient()) {
-
-      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
-
-      assertEquals(
-          status, assertInstanceOf(ProviderException.class, failure.getCause()).statusCode());
-    }
-  }
-
-  @ParameterizedTest
-  @ValueSource(ints = {400, 401, 403, 404, 413, 422})
-  void openFailsAnotherStatusWithTheProvidersException(int status) throws Exception {
-    try (var server = server(status, Map.of("Retry-After", "0"), "refused");
-        var client = HttpClient.newHttpClient()) {
-
-      var failure = assertThrows(ProviderException.class, () -> open(client, server));
-
-      assertEquals("API error (status " + status + "): refused", failure.getMessage());
-      assertEquals(status, failure.statusCode());
-      assertNull(failure.getCause());
-    }
-  }
-
-  @Test
-  void openCarriesTheRetryAfterOfARetryableStatus() throws Exception {
-    try (var server = server(429, Map.of("Retry-After", "2"), "slow down");
-        var client = HttpClient.newHttpClient()) {
-
-      var failure = assertThrows(TransientStreamException.class, () -> open(client, server));
-
-      assertEquals(Optional.of(Duration.ofSeconds(2)), failure.retryAfter());
+      assertTrue(Thread.interrupted());
     }
   }
 
@@ -674,10 +592,6 @@ class SseReaderTest {
       events.add(reader.next());
     }
     return events;
-  }
-
-  private static InputStream stream(String text) {
-    return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
   }
 
   private static InputStream byteByByte(String text) {
@@ -718,19 +632,45 @@ class SseReaderTest {
     };
   }
 
-  private static StubHttpServer server(int status, Map<String, String> headers, String body) {
-    return StubHttpServer.start(
-        InetAddress.getLoopbackAddress(),
-        0,
-        request -> new StubHttpServer.Reply(status, headers, body));
+  @Test
+  void anInterruptOfAHasNextBlockedOnALineThrowsCancellationClosesTheBodyAndStaysSet() {
+    var feed = new FeedableInputStream();
+    var body = new Closing(feed);
+    var interruptKept = new AtomicBoolean();
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      var read =
+          new FutureTask<>(
+              () -> {
+                try {
+                  return reader.hasNext();
+                } finally {
+                  interruptKept.set(Thread.currentThread().isInterrupted());
+                }
+              });
+      var thread = Thread.ofVirtual().start(read);
+      feed.awaitBlockedRead();
+
+      thread.interrupt();
+
+      assertInstanceOf(CancellationException.class, Await.failure("the blocked read", read));
+      assertTrue(interruptKept.get());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
   }
 
-  private static SseReader open(HttpClient client, StubHttpServer server) throws Exception {
-    return SseReader.open(
-        client, get(server), NEVER_IDLE, new EchoParser(), ProviderException::new, "stub");
-  }
+  @Test
+  void anInterruptAfterTheTerminalWasReadAheadThrowsCancellationInsteadOfTheTerminal() {
+    var body = new Closing(stream("data: stop\n\n"));
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertTrue(reader.hasNext());
+      Thread.currentThread().interrupt();
 
-  private static HttpRequest get(StubHttpServer server) {
-    return HttpRequest.newBuilder(server.uri()).build();
+      assertThrows(CancellationException.class, reader::next);
+
+      assertTrue(Thread.interrupted());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
   }
 }

@@ -16,18 +16,12 @@ import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /** {@link OnUserMessageHook} outcomes wired through AgentLoop + TurnRunner. */
 final class OnUserMessageHookIntegrationTest {
 
   private final HookLoop loop = new HookLoop();
-
-  @AfterEach
-  void closeLoop() {
-    loop.close();
-  }
 
   @Test
   void onUserMessageBlockDropsTheMessage() {

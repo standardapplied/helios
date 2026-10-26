@@ -13,11 +13,10 @@ import java.util.OptionalLong;
 /**
  * Per-session ceilings the agent loop enforces.
  *
- * <p>Nine orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
- * tokens, stream-idle timeout, stream-retry policy, start timeout — each mapping to a distinct
- * termination path, recovery or shutdown behaviour. Limits are immutable for the lifetime of a
- * session; runtime mutation would let a long-running session escape the contract its caller saw at
- * construction.
+ * <p>Eight orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
+ * tokens, stream-retry policy, start timeout — each mapping to a distinct termination path,
+ * recovery or shutdown behaviour. Limits are immutable for the lifetime of a session; runtime
+ * mutation would let a long-running session escape the contract its caller saw at construction.
  *
  * <p>Defaults track Helios production values:
  *
@@ -41,7 +40,8 @@ import java.util.OptionalLong;
  *             subscribers to drain. A tool call or {@code onSessionEnd} still running when its wait
  *             ends is logged as such and the teardown moves on, so the result settles; such a
  *             tool's effects may land after it has;
- *         <li>the cancel of a model stream's subscription.
+ *         <li>a model stream's reader, once the stream is closed: one still reading then is logged
+ *             as such and the turn ends without it.
  *       </ul>
  *   <li>{@code maxContextTokens}: {@code 0} — sentinel meaning "auto, resolve from {@code
  *       Model.contextWindow()}". The agent loop picks an effective ceiling by reading the
@@ -50,23 +50,6 @@ import java.util.OptionalLong;
  *       they want to compact earlier (or use a tighter cost ceiling). Any positive value is treated
  *       as a hard cap and clamped against the model's actual window to avoid requesting more
  *       context than the provider supports.
- *   <li>{@code streamIdleTimeout}: 60 seconds — once a model stream has published its first chunk,
- *       if it publishes none for this long the turn fails with {@link
- *       com.standardapplied.helios.core.model.FinishReason#ERROR} and the stream is cancelled,
- *       surfaced as {@link ResultMessage.ErrorDuringExecution} carrying the {@link
- *       java.util.concurrent.TimeoutException}; the turn is not retried. Every chunk re-arms it,
- *       including a {@link com.standardapplied.helios.core.model.ModelChunk.KeepAlive}, which a
- *       provider publishes for each frame that carries no content. The clock does not run before
- *       the first chunk: a provider's first frame arrives with its response headers, which a model
- *       may hold back while it thinks, and that wait is bounded by {@code
- *       ModelConfig.responseTimeout} (default 60 seconds, a retryable failure), {@code
- *       maxWallClock} and cancellation. A {@link
- *       com.standardapplied.helios.core.model.BlockingModel} publishes nothing until it answers, so
- *       the clock does not run during its call. The defaults never race: once the stream is open
- *       this clock always fires before the provider's per-line {@code
- *       ModelConfig.streamIdleTimeout} (default 120 seconds), which guards direct {@code chat} /
- *       {@code chatStream} callers. Guards against silent-socket / hung-edge stalls that {@code
- *       maxWallClock} would otherwise catch only at the end of the wall-clock budget.
  *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
  *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
  *       with {@link com.standardapplied.helios.core.model.TransientStreamException}: a transport
@@ -103,8 +86,6 @@ import java.util.OptionalLong;
  *     Must be non-negative. {@code 0} signals "auto" — the agent loop resolves an effective ceiling
  *     from {@link com.standardapplied.helios.core.model.Model#contextWindow()}. Any positive value
  *     is an explicit cap clamped against the model's actual window
- * @param streamIdleTimeout per-chunk idle ceiling on a model stream, from its first chunk; must be
- *     non-null and strictly positive
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  * @param startTimeout how long {@code onSessionStart} is waited for; must be non-null and strictly
@@ -117,7 +98,6 @@ public record SessionLimits(
     Duration toolTimeoutDefault,
     Duration stopGrace,
     long maxContextTokens,
-    Duration streamIdleTimeout,
     StreamRetryPolicy streamRetryPolicy,
     Duration startTimeout) {
 
@@ -131,7 +111,6 @@ public record SessionLimits(
           Duration.ofMinutes(2),
           Duration.ofSeconds(5),
           0L,
-          Duration.ofSeconds(60),
           StreamRetryPolicy.defaults(),
           Duration.ofSeconds(60));
 
@@ -158,7 +137,6 @@ public record SessionLimits(
       throw new IllegalArgumentException(
           "maxContextTokens must be non-negative, got " + maxContextTokens);
     }
-    requirePositiveNanos("streamIdleTimeout", streamIdleTimeout);
     Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
     requirePositiveNanos("startTimeout", startTimeout);
   }
@@ -203,7 +181,6 @@ public record SessionLimits(
         .withToolTimeoutDefault(toolTimeoutDefault)
         .withStopGrace(stopGrace)
         .withMaxContextTokens(maxContextTokens)
-        .withStreamIdleTimeout(streamIdleTimeout)
         .withStreamRetryPolicy(streamRetryPolicy)
         .withStartTimeout(startTimeout);
   }
@@ -217,7 +194,6 @@ public record SessionLimits(
     private Duration toolTimeoutDefault = DEFAULTS.toolTimeoutDefault;
     private Duration stopGrace = DEFAULTS.stopGrace;
     private long maxContextTokens = DEFAULTS.maxContextTokens;
-    private Duration streamIdleTimeout = DEFAULTS.streamIdleTimeout;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
     private Duration startTimeout = DEFAULTS.startTimeout;
 
@@ -301,17 +277,6 @@ public record SessionLimits(
     }
 
     /**
-     * Set the per-chunk stream-idle ceiling. A model stream that, after its first chunk, emits no
-     * chunk within this duration is treated as stalled and the turn fails with {@link
-     * com.standardapplied.helios.core.model.FinishReason#ERROR}. Keep it below the model's {@code
-     * ModelConfig.streamIdleTimeout} so the session's clock fires first.
-     */
-    public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {
-      this.streamIdleTimeout = streamIdleTimeout;
-      return this;
-    }
-
-    /**
      * Set the stream-retry policy. The loop applies this policy when a turn fails with {@link
      * com.standardapplied.helios.core.model.TransientStreamException}. Pass {@link
      * StreamRetryPolicy#disabled()} to opt out of retry entirely; the loop will then terminate on
@@ -351,7 +316,6 @@ public record SessionLimits(
           toolTimeoutDefault,
           stopGrace,
           maxContextTokens,
-          streamIdleTimeout,
           streamRetryPolicy,
           startTimeout);
     }

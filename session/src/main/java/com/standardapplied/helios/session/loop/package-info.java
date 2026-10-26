@@ -15,11 +15,10 @@
  *       it drains the steering queue, fires hooks at every lifecycle phase, runs one turn at a
  *       time, and classifies the loop's stop condition after each turn.
  *   <li>{@link com.standardapplied.helios.session.loop.TurnRunner} executes one model turn
- *       end-to-end: streams the provider's chunks through a {@link
- *       com.standardapplied.helios.session.loop.TurnSubscriber}, dispatches any tool calls via
- *       {@link com.standardapplied.helios.session.loop.ToolDispatch}, accumulates usage + cost on
- *       the session, fires {@code PreModelTurn} / {@code PostModelTurn} hooks, and returns a {@link
- *       com.standardapplied.helios.session.loop.TurnOutcome}.
+ *       end-to-end: reads the model's chunk stream on a thread of its own, dispatches any tool
+ *       calls via {@link com.standardapplied.helios.session.loop.ToolDispatch}, accumulates usage +
+ *       cost on the session, fires {@code PreModelTurn} / {@code PostModelTurn} hooks, and returns
+ *       a {@link com.standardapplied.helios.session.loop.TurnOutcome}.
  *   <li>{@link com.standardapplied.helios.session.loop.StopClassifier} is the pure function that
  *       maps a turn outcome + session state + limits to an optional terminal {@code ResultMessage}.
  *   <li>{@link com.standardapplied.helios.session.loop.SessionState} is the loop's shared mutable

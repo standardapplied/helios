@@ -3,7 +3,6 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
@@ -108,11 +108,8 @@ class SseEventsTest {
   }
 
   @Test
-  void drainInterruptedEndsWithTheErrorTheInterruptCauses() {
-    var drained = SseEvents.drainInterrupted(SseEventsTest::echo);
-
-    assertFalse(drained.isEmpty());
-    assertInstanceOf(StreamEvent.Error.class, drained.getFirst());
+  void anInterruptedReadThrowsCancellation() {
+    assertInstanceOf(CancellationException.class, SseEvents.readInterrupted(SseEventsTest::echo));
   }
 
   private static SseReader echo(InputStream body) {

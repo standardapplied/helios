@@ -6,6 +6,7 @@
 package com.standardapplied.helios.testing;
 
 import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -13,7 +14,6 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.core.tool.Tool;
@@ -22,24 +22,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Flow;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * A deterministic {@link Model} that replays a fixed script of turns. Each model call consumes the
  * next scripted turn in order; when the script is exhausted the model fails fast so a test never
- * silently loops. A response turn answers {@code chat}, and {@code chatStream} as the chunk
- * sequence {@link BlockingModel#publisherOf} publishes from it; a stream turn ({@link
- * Builder#withStreamTurn}) answers {@code chatStream} with its publisher verbatim and fails a
- * {@code chat} call. Structured-output calls run the scripted text through the real {@link
- * StructuredContentParser} path, so schema mismatches surface exactly as they would against a live
- * provider. Thread-safe; every invocation's message history and output schema are captured for
- * assertions via {@link #calls()} and {@link #outputSchemas()}.
+ * silently loops. A response turn answers {@code chat}, and {@code chatStream} as the chunk stream
+ * {@link BlockingModel#streamOf} yields from it; a stream turn ({@link Builder#withStreamTurn})
+ * answers {@code chatStream} with its stream verbatim and fails a {@code chat} call.
+ * Structured-output calls run the scripted text through the real {@link StructuredContentParser}
+ * path, so schema mismatches surface exactly as they would against a live provider. Thread-safe;
+ * every invocation's message history and output schema are captured for assertions via {@link
+ * #calls()} and {@link #outputSchemas()}.
  */
 public final class ScriptedModel implements Model {
 
-  private record Turn(Response<Void> response, Flow.Publisher<ModelChunk> stream) {}
+  private record Turn(Response<Void> response, CloseableIterator<ModelChunk> stream) {}
 
   private record Call(List<Message> messages, Optional<OutputSchema<?>> outputSchema) {}
 
@@ -83,40 +82,34 @@ public final class ScriptedModel implements Model {
     return typed(script.nextResponse(messages, outputSchema), outputSchema);
   }
 
-  /** Consumes the next turn now; a response turn is published once the subscriber requests. */
+  /** Consumes the next turn now; a response turn is yielded from the stream's first read. */
   @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages, List<Tool> tools, CancellationToken cancellation) {
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
+  public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
     synchronized (script) {
       var stream = script.nextStream(messages, null);
       if (stream.isPresent()) {
         return stream.get();
       }
       var scripted = script.nextResponse(messages, null);
-      return BlockingModel.publisherOf(() -> scripted, cancellation);
+      return BlockingModel.streamOf(() -> scripted);
     }
   }
 
   /**
-   * Consumes the next turn now; a response turn is parsed against {@code outputSchema} and
-   * published once the subscriber requests, so a mismatch ends the stream with {@code onError}.
+   * Consumes the next turn now; a response turn is parsed against {@code outputSchema} at the
+   * stream's first read, so a mismatch is thrown from {@code hasNext()}.
    */
   @Override
-  public Flow.Publisher<ModelChunk> chatStream(
-      List<Message> messages,
-      List<Tool> tools,
-      OutputSchema<?> outputSchema,
-      CancellationToken cancellation) {
+  public CloseableIterator<ModelChunk> chatStream(
+      List<Message> messages, List<Tool> tools, OutputSchema<?> outputSchema) {
     Objects.requireNonNull(outputSchema, "outputSchema must not be null");
-    Objects.requireNonNull(cancellation, "cancellation must not be null");
     synchronized (script) {
       var stream = script.nextStream(messages, outputSchema);
       if (stream.isPresent()) {
         return stream.get();
       }
       var scripted = script.nextResponse(messages, outputSchema);
-      return BlockingModel.publisherOf(() -> typed(scripted, outputSchema), cancellation);
+      return BlockingModel.streamOf(() -> typed(scripted, outputSchema));
     }
   }
 
@@ -177,13 +170,13 @@ public final class ScriptedModel implements Model {
       var turn = next(messages, schema);
       if (turn.stream() != null) {
         throw new IllegalStateException(
-            "Scripted turn %d is a stream turn: only chatStream with a CancellationToken answers it"
+            "Scripted turn %d is a stream turn: only chatStream answers it"
                 .formatted(calls.size()));
       }
       return turn.response();
     }
 
-    synchronized Optional<Flow.Publisher<ModelChunk>> nextStream(
+    synchronized Optional<CloseableIterator<ModelChunk>> nextStream(
         List<Message> messages, OutputSchema<?> schema) {
       var index = calls.size();
       if (index < turns.size() && turns.get(index).stream() != null) {
@@ -303,10 +296,10 @@ public final class ScriptedModel implements Model {
      * that never ends, chunks out of the usual order. A {@code chat} call that reaches this turn
      * fails. {@link ModelStreams} builds the common streams.
      *
-     * @param stream the publisher this turn returns
+     * @param stream the stream this turn returns, read once
      * @return this builder for chaining
      */
-    public Builder withStreamTurn(Flow.Publisher<ModelChunk> stream) {
+    public Builder withStreamTurn(CloseableIterator<ModelChunk> stream) {
       Objects.requireNonNull(stream, "stream must not be null");
       turns.add(new Turn(null, stream));
       return this;

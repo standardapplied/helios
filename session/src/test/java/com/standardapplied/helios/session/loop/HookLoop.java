@@ -30,9 +30,9 @@ import java.util.function.Function;
 
 /**
  * Runs an {@link AgentLoop} to its terminal with the hooks a hook integration test registers, then
- * exposes the events it emitted and the history it built. Closed after each test.
+ * exposes the events it emitted and the history it built.
  */
-final class HookLoop implements AutoCloseable {
+final class HookLoop {
 
   private final LoopFixture fixture =
       new LoopFixture("sess-hook", Instant.parse("2026-05-15T09:00:00Z"));
@@ -113,10 +113,5 @@ final class HookLoop implements AutoCloseable {
   /** The first message of the built history with role {@code TOOL}; fails when there is none. */
   Message toolMessage() {
     return history().stream().filter(m -> m.role() == Role.TOOL).findFirst().orElseThrow();
-  }
-
-  @Override
-  public void close() {
-    fixture.close();
   }
 }

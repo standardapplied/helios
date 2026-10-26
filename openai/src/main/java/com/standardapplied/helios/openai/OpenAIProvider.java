@@ -10,7 +10,6 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
-import com.standardapplied.helios.core.provider.ChatExchange;
 import com.standardapplied.helios.core.provider.StreamingModel;
 import com.standardapplied.helios.openai.api.OpenAIJson;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
@@ -26,8 +25,8 @@ import com.standardapplied.helios.openai.api.ResponsesRequest;
  * override output tokens via {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
  *
  * <p>Every request streams over SSE, including a blocking {@code chat}, which drains the stream; a
- * stream idle past {@link ModelConfig#streamIdleTimeout()} fails with a retryable {@link
- * OpenAIException}.
+ * stream idle past {@link ModelConfig#streamIdleTimeout()} fails with an {@link OpenAIException},
+ * which is not retried.
  */
 public class OpenAIProvider implements ModelProvider {
 
@@ -74,7 +73,7 @@ public class OpenAIProvider implements ModelProvider {
         .withMaxOutputTokens(requests.defaultMaxTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(new ChatExchange<>("OpenAI API", streams::open))
+        .withExchange(streams::open)
         .withFailure(OpenAIException::new)
         .withJson(OpenAIJson.STRUCTURED)
         .build();
