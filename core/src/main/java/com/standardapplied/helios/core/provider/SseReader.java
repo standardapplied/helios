@@ -44,9 +44,10 @@ import java.util.concurrent.TimeoutException;
  * cause is an {@link EOFException}. A failure to read ends in an error carrying its {@link
  * IOException}, an idle timeout or an oversized line or event one carrying the provider's own
  * exception. Each error carries the parser's {@link Parser#partial()}. Closing the reader from
- * another thread releases a blocked read as such an error; an interrupt of a thread waiting for a
- * line closes the reader and throws a {@link CancellationException} with the interrupt kept. {@link
- * SseFrames} frames the lines into events.
+ * another thread releases a blocked read as such an error, an interrupt of the reading thread
+ * closes the reader and throws a {@link CancellationException} with the interrupt kept, even when
+ * an event was read ahead; a reader that ended still has nothing next. {@link SseFrames} frames the
+ * lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
 
@@ -106,14 +107,14 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   /**
    * Reads the response to {@code request}, of which nothing is sent before the first {@code
    * hasNext()}. That sends it through {@code client} and waits for the headers; {@link #close()}
-   * before them cancels the request, after them closes the body, and an interrupt while waiting
-   * cancels it and throws a {@link CancellationException} with the interrupt kept. A failure to
-   * open is the stream's one {@link StreamEvent.Error}: a status other than 200 carries the
-   * provider's exception with the status and the start of the response body, as the cause of a
-   * {@link TransientStreamException} carrying the response's {@code Retry-After} when that status
-   * is {@linkplain ProviderException#isRetryable() retryable}; an {@link IOException}, the {@link
-   * java.net.http.HttpTimeoutException} of the request's timeout included, is a failure to
-   * communicate with {@code apiName}.
+   * before them cancels the request, after them closes the body, and an interrupt while waiting, or
+   * while reading the body of a refusal, cancels it and throws a {@link CancellationException} with
+   * the interrupt kept. A failure to open is the stream's one {@link StreamEvent.Error}: a status
+   * other than 200 carries the provider's exception with the status and the start of the response
+   * body, as the cause of a {@link TransientStreamException} carrying the response's {@code
+   * Retry-After} when that status is {@linkplain ProviderException#isRetryable() retryable}; an
+   * {@link IOException}, the {@link java.net.http.HttpTimeoutException} of the request's timeout
+   * included, is a failure to communicate with {@code apiName}.
    *
    * @param client the client the request goes through
    * @param request the request
@@ -144,6 +145,10 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   @Override
   public boolean hasNext() {
+    if (Thread.currentThread().isInterrupted() && (!done || nextEvent != null)) {
+      close();
+      throw new CancellationException("interrupted while reading the stream");
+    }
     if (!sent) {
       sent = true;
       nextEvent = open();
