@@ -154,8 +154,8 @@ public final class SummarizingCompactor implements ContextCompactor {
   }
 
   private static <T> T valueOf(CompletableFuture<T> settled) {
-    if (settled.state() == Future.State.SUCCESS) {
-      return settled.resultNow();
+    if (settled.state() != Future.State.FAILED) {
+      return settled.join();
     }
     switch (settled.exceptionNow()) {
       case Error error -> throw error;

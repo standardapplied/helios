@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,14 +22,18 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -365,6 +370,25 @@ final class SummarizingCompactorTest {
 
     assertSame(sentinel, thrown);
     assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  @Test
+  void aCancellationTheSummarizerThrewIsLoggedWithItsReasonAndLeavesTheHistoryUnchanged() {
+    var cancelled = new CancellationException("summary transport cancelled");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw cancelled;
+            });
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+    }
+
+    var thrown = logged.getFirst().getThrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertSame(cancelled, thrown.getCause());
   }
 
   @Test
