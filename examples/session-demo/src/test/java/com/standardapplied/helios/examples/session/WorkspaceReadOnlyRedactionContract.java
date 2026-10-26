@@ -18,7 +18,7 @@ import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -134,8 +134,8 @@ abstract class WorkspaceReadOnlyRedactionContract {
                     .withTools(new ToolRegistry(List.of(tool)))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
-      var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(events);
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
       var terminal = session.runBlocking(UserMessage.text(request));
       events.awaitDone();
 

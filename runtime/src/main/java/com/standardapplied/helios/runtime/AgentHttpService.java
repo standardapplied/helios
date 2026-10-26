@@ -48,8 +48,8 @@ import java.util.logging.Logger;
  *       returns {@code 202 Accepted}; {@code 404} when it is not pending, already answered or
  *       unknown. The answer names no tool or arguments, so it cannot widen what an approval covers.
  *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s. The
- *       handler blocks the request thread until the publisher signals {@code onComplete}, the
- *       client disconnects, or the caller's identity ends.
+ *       handler reads the session's {@link com.standardapplied.helios.session.EventStream} on the
+ *       request thread until it ends, the client disconnects, or the caller's identity ends.
  *   <li>{@code GET /sessions/{sessionId}/result?timeout=<seconds>} — long-poll for the terminal
  *       {@link com.standardapplied.helios.session.ResultMessage ResultMessage}. Returns {@code 200
  *       OK} with body {@code {type: "<SubtypeName>", result: <record-fields>}} when terminal;
@@ -63,8 +63,8 @@ import java.util.logging.Logger;
  * <h2>Authentication and ownership</h2>
  *
  * Every route runs behind the one {@link Authenticator} before it reads the body, looks up a
- * session, subscribes or queues work: a request without a valid identity is answered {@code 401}
- * with the authenticator's {@link Authenticator#challenge()} in {@code WWW-Authenticate} (the
+ * session, opens a stream or queues work: a request without a valid identity is answered {@code
+ * 401} with the authenticator's {@link Authenticator#challenge()} in {@code WWW-Authenticate} (the
  * authenticator failing, {@code 503}) and nothing else happens. A session is owned by the {@link
  * Principal} that created it. A request for another principal's session is answered with the same
  * {@code 404} as an unknown id, so ids of other users and tenants are never disclosed. An SSE

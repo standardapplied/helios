@@ -23,11 +23,11 @@
  *       maps a turn outcome + session state + limits to an optional terminal {@code ResultMessage}.
  *   <li>{@link com.standardapplied.helios.session.loop.SessionState} is the loop's shared mutable
  *       state (history, usage / cost / elapsed accumulators, cancellation token, turn index,
- *       terminal slot). Single-writer (the loop) with thread-safe accumulators so subscriber
- *       threads can read.
+ *       terminal slot). Single-writer (the loop) with thread-safe accumulators so reader threads
+ *       can read.
  *   <li>{@link com.standardapplied.helios.session.loop.EventEmitter} is the convenience shim that
  *       builds {@link com.standardapplied.helios.session.QueryEvent} records and pushes them to the
- *       publisher.
+ *       session's event sink.
  * </ul>
  *
  * <p>None of these types are part of the published SDK surface — they live here so the {@code

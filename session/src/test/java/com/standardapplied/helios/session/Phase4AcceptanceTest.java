@@ -19,7 +19,7 @@ import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.file.Path;
@@ -117,9 +117,9 @@ final class Phase4AcceptanceTest {
             .withTextTurn("done", USAGE)
             .build();
 
-    var sub = new CollectingSubscriber();
+    var sub = new EventCollector();
     try (var session = AgentSession.create(options("phase4-", model, backend, permission))) {
-      session.events().subscribe(sub);
+      sub.read(session.events());
       var result = session.runBlocking(UserMessage.text("update my preferences"));
       sub.awaitDone();
       assertInstanceOf(ResultMessage.Success.class, result);
@@ -151,10 +151,10 @@ final class Phase4AcceptanceTest {
     var options =
         options("phase4-allow-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
-    CollectingSubscriber sub;
+    EventCollector sub;
     try (var session = AgentSession.create(options)) {
-      sub = new CollectingSubscriber(QuestionAnswers.selecting(session, "Allow"));
-      session.events().subscribe(sub);
+      sub = new EventCollector(QuestionAnswers.selecting(session, "Allow"));
+      sub.read(session.events());
 
       var result = session.runBlocking(UserMessage.text("try to write"));
       assertInstanceOf(ResultMessage.Success.class, result);
@@ -180,10 +180,10 @@ final class Phase4AcceptanceTest {
     var options =
         options("phase4-deny-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
-    CollectingSubscriber sub;
+    EventCollector sub;
     try (var session = AgentSession.create(options)) {
-      sub = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
-      session.events().subscribe(sub);
+      sub = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      sub.read(session.events());
 
       session.runBlocking(UserMessage.text("try to write"));
       sub.awaitDone();
@@ -211,15 +211,13 @@ final class Phase4AcceptanceTest {
 
     var questionLatch = new CountDownLatch(1);
     var session = AgentSession.create(options);
-    session
-        .events()
-        .subscribe(
-            new CollectingSubscriber(
-                event -> {
-                  if (event instanceof QueryEvent.QuestionAsked) {
-                    questionLatch.countDown();
-                  }
-                }));
+    new EventCollector(
+            event -> {
+              if (event instanceof QueryEvent.QuestionAsked) {
+                questionLatch.countDown();
+              }
+            })
+        .read(session.events());
     session.send(UserMessage.text("trigger write"));
     Await.latch("the agent to reach the ASK question", questionLatch);
     session.close();

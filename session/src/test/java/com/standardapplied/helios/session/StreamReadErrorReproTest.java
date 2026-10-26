@@ -19,7 +19,7 @@ import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
@@ -237,14 +237,14 @@ class StreamReadErrorReproTest {
                     new ModelChunk.TextDelta("Hello"),
                     new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of())))
             .build();
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var session =
         AgentSession.create(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withLimits(limitsWithFastRetry(2))
                 .build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       var terminal = session.runBlocking(UserMessage.text("hi"));
       events.awaitDone();
 
@@ -346,15 +346,13 @@ class StreamReadErrorReproTest {
                     SessionLimits.newBuilder().withStreamRetryPolicy(unreachableBackoff).build())
                 .build())) {
       var retryAnnounced = new CountDownLatch(1);
-      session
-          .events()
-          .subscribe(
-              new CollectingSubscriber(
-                  event -> {
-                    if (event instanceof QueryEvent.TurnRetried) {
-                      retryAnnounced.countDown();
-                    }
-                  }));
+      new EventCollector(
+              event -> {
+                if (event instanceof QueryEvent.TurnRetried) {
+                  retryAnnounced.countDown();
+                }
+              })
+          .read(session.events());
       var run = new FutureTask<>(() -> session.runBlocking(UserMessage.text("emit JSON")));
       Thread.startVirtualThread(run);
 

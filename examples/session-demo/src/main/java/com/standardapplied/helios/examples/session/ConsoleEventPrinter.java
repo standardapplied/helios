@@ -7,22 +7,24 @@ package com.standardapplied.helios.examples.session;
 import com.standardapplied.helios.session.QueryEvent;
 import java.io.PrintStream;
 import java.util.Objects;
-import java.util.concurrent.Flow;
 
 /**
  * Prints a session's {@link QueryEvent} stream for a command-line host. Assistant text is written
  * as it streams and flushed at once; grounding citations, tool use, tool results, blocked tools,
- * turn ends and the loop end are written one line each; every other event is skipped. A stream
- * error is written as one line too. Tool arguments longer than 240 characters are cut, with the
- * full length noted.
+ * turn ends and the loop end are written one line each; every other event is skipped. Tool
+ * arguments longer than 240 characters are cut, with the full length noted.
  *
- * <p>The printer writes only to the {@link PrintStream} it is given, which the host chooses:
+ * <p>The printer writes only to the {@link PrintStream} it is given, which the host chooses, and
+ * reads the stream on the calling thread until it ends:
  *
  * <pre>{@code
- * session.events().subscribe(new ConsoleEventPrinter(System.out));
+ * try (var events = session.events()) {
+ *   Thread.ofVirtual().start(() -> new ConsoleEventPrinter(System.out).print(events));
+ *   ...
+ * }
  * }</pre>
  */
-public final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
+public final class ConsoleEventPrinter {
 
   private static final int MAX_ARGUMENT_CHARS = 240;
 
@@ -38,13 +40,21 @@ public final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
     this.out = Objects.requireNonNull(out, "out must not be null");
   }
 
-  @Override
-  public void onSubscribe(Flow.Subscription subscription) {
-    subscription.request(Long.MAX_VALUE);
+  /**
+   * Print every event of {@code events} until it ends, then flush.
+   *
+   * @param events the session's events; non-null
+   * @throws NullPointerException if {@code events} is null
+   */
+  public void print(Iterable<QueryEvent> events) {
+    Objects.requireNonNull(events, "events must not be null");
+    for (var event : events) {
+      print(event);
+    }
+    out.flush();
   }
 
-  @Override
-  public void onNext(QueryEvent event) {
+  private void print(QueryEvent event) {
     switch (event) {
       case QueryEvent.AssistantText text -> {
         out.print(text.text());
@@ -75,17 +85,6 @@ public final class ConsoleEventPrinter implements Flow.Subscriber<QueryEvent> {
           out.println("[loop-ended] " + ended.result().getClass().getSimpleName());
       default -> {}
     }
-  }
-
-  @Override
-  public void onError(Throwable throwable) {
-    Objects.requireNonNull(throwable, "throwable must not be null");
-    out.println("[stream-error] " + throwable);
-  }
-
-  @Override
-  public void onComplete() {
-    out.flush();
   }
 
   private static String truncate(Object value) {

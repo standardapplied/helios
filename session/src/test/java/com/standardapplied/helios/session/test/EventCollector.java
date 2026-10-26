@@ -3,21 +3,22 @@
 package com.standardapplied.helios.session.test;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.EventStream;
 import com.standardapplied.helios.session.QueryEvent;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * A {@link Flow.Subscriber} of a session's events that requests everything, records each event in
- * arrival order, hands it to an optional reaction (answering a question, say) and counts down when
- * the stream ends, normally or with an error, which it keeps.
+ * Reads a session's {@link EventStream} to its end on a virtual thread of its own, recording each
+ * event in arrival order and handing it to an optional reaction (answering a question, say). It
+ * closes the stream and counts down when the read ends, normally or with a reaction's failure,
+ * which it keeps.
  */
-public final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
+public final class EventCollector {
 
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final CountDownLatch done = new CountDownLatch(1);
@@ -25,35 +26,36 @@ public final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
   private final Consumer<QueryEvent> onEvent;
 
   /** A collector that only records. */
-  public CollectingSubscriber() {
+  public EventCollector() {
     this(event -> {});
   }
 
   /** A collector that records each event, then passes it to {@code onEvent}. */
-  public CollectingSubscriber(Consumer<QueryEvent> onEvent) {
+  public EventCollector(Consumer<QueryEvent> onEvent) {
     this.onEvent = onEvent;
   }
 
-  @Override
-  public void onSubscribe(Flow.Subscription subscription) {
-    subscription.request(Long.MAX_VALUE);
+  /**
+   * Start reading {@code stream} on a virtual thread; call once.
+   *
+   * @return this collector
+   */
+  public EventCollector read(EventStream stream) {
+    Thread.ofVirtual().name("event-collector").start(() -> readToEnd(stream));
+    return this;
   }
 
-  @Override
-  public void onNext(QueryEvent event) {
-    events.add(event);
-    onEvent.accept(event);
-  }
-
-  @Override
-  public void onError(Throwable throwable) {
-    error.set(throwable);
-    done.countDown();
-  }
-
-  @Override
-  public void onComplete() {
-    done.countDown();
+  private void readToEnd(EventStream stream) {
+    try (stream) {
+      for (var event : stream) {
+        events.add(event);
+        onEvent.accept(event);
+      }
+    } catch (RuntimeException | Error e) {
+      error.set(e);
+    } finally {
+      done.countDown();
+    }
   }
 
   /** The events received so far, in arrival order. */
@@ -66,13 +68,13 @@ public final class CollectingSubscriber implements Flow.Subscriber<QueryEvent> {
     return events.stream().filter(type::isInstance).map(type::cast).toList();
   }
 
-  /** The error the stream ended with, or empty while it runs or once it completed normally. */
+  /** What the read ended with, or empty while it runs or once it ended normally. */
   public Optional<Throwable> error() {
     return Optional.ofNullable(error.get());
   }
 
-  /** Waits through {@link Await} until the stream completes or fails. */
+  /** Waits through {@link Await} until the read ends. */
   public void awaitDone() {
-    Await.latch("the event stream to complete", done);
+    Await.latch("the event stream to end", done);
   }
 }

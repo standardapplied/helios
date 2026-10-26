@@ -47,7 +47,7 @@ import java.util.logging.Logger;
  *
  * <h2>Retention</h2>
  *
- * A session not running stays registered so a late subscriber still sees its {@code LoopEnded}
+ * A session not running stays registered so a late event stream still sees its {@code LoopEnded}
  * event and its result, until its owner closes it or {@link #sweep()} finds it not running for the
  * retention (default 15 minutes): a terminal session measured from its end, one never started (see
  * {@link AgentSession#isStarted()}) from its registration. A started session that has not ended is

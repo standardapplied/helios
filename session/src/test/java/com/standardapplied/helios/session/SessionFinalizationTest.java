@@ -32,7 +32,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.loop.TurnRunner;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -87,9 +87,9 @@ final class SessionFinalizationTest {
                       return false;
                     },
                     () -> {}));
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     var session = AgentSession.create(options(model).withLimits(grace()).build());
-    session.events().subscribe(events);
+    events.read(session.events());
     session.send("go");
     var reading = Await.value("the stream read", reader);
 
@@ -415,14 +415,12 @@ final class SessionFinalizationTest {
     var model = ScriptedModel.newBuilder().withTextTurn("done").build();
 
     try (var session = AgentSession.create(options(model).withLimits(grace()).build())) {
-      session
-          .events()
-          .subscribe(
-              new CollectingSubscriber(
-                  event -> {
-                    entered.countDown();
-                    Uninterruptible.await(released);
-                  }));
+      new EventCollector(
+              event -> {
+                entered.countDown();
+                Uninterruptible.await(released);
+              })
+          .read(session.events());
       session.send("go");
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
@@ -451,18 +449,18 @@ final class SessionFinalizationTest {
             threads.add(Thread.currentThread());
             return HookOutcome.cont();
           };
-      var events = new CollectingSubscriber(event -> threads.add(Thread.currentThread()));
+      var events = new EventCollector(event -> threads.add(Thread.currentThread()));
       var options =
           options(model).withTools(new ToolRegistry(List.of(tool))).withHook(recordingLoop).build();
 
       try (var session = (AgentSessionImpl) AgentSession.create(options)) {
-        session.events().subscribe(events);
+        events.read(session.events());
         session.send("go");
 
         assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
         events.awaitDone();
         assertEquals(Optional.empty(), events.error());
-        Await.termination("the publisher executor to end", session.lifecycle.events().executor());
+        assertEquals(0, session.lifecycle.events().openStreams());
         Await.termination("the scheduler to end", session.lifecycle.scheduler());
       }
     }
@@ -577,13 +575,13 @@ final class SessionFinalizationTest {
             .withToolTimeoutDefault(SHORT_GRACE)
             .withStopGrace(SHORT_GRACE)
             .build();
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
             AgentSession.create(
                 callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send("go");
 
       assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
@@ -658,15 +656,13 @@ final class SessionFinalizationTest {
   /** A latch that opens on the first event of {@code type} that {@code session} publishes. */
   private static CountDownLatch opensOn(AgentSession session, Class<? extends QueryEvent> type) {
     var seen = new CountDownLatch(1);
-    session
-        .events()
-        .subscribe(
-            new CollectingSubscriber(
-                event -> {
-                  if (type.isInstance(event)) {
-                    seen.countDown();
-                  }
-                }));
+    new EventCollector(
+            event -> {
+              if (type.isInstance(event)) {
+                seen.countDown();
+              }
+            })
+        .read(session.events());
     return seen;
   }
 

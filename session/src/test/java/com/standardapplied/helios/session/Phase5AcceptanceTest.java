@@ -27,7 +27,7 @@ import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.file.Files;
@@ -56,7 +56,7 @@ final class Phase5AcceptanceTest {
     ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
   }
 
-  private record Run(ResultMessage result, CollectingSubscriber events) {}
+  private record Run(ResultMessage result, EventCollector events) {}
 
   /** A model that calls Execute once with {@code arguments}, then answers "done". */
   private static ScriptedModel executing(Map<String, Object> arguments) {
@@ -99,9 +99,9 @@ final class Phase5AcceptanceTest {
   }
 
   private static Run run(SessionOptions.Builder options, String prompt) {
-    var sub = new CollectingSubscriber();
+    var sub = new EventCollector();
     try (var session = AgentSession.create(options.build())) {
-      session.events().subscribe(sub);
+      sub.read(session.events());
       var result = session.runBlocking(UserMessage.text(prompt));
       sub.awaitDone();
       return new Run(result, sub);
