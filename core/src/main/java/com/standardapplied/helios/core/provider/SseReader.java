@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -101,7 +102,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   public SseReader(InputStream body, Duration idleTimeout, Parser parser, ProviderFailure failure) {
     this((SseRequest) null, idleTimeout, parser, failure);
     sent = true;
-    attach(body);
+    attach(Objects.requireNonNull(body, "body must not be null"));
   }
 
   /**
@@ -138,9 +139,9 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   private SseReader(
       SseRequest request, Duration idleTimeout, Parser parser, ProviderFailure failure) {
     this.request = request;
-    this.idleTimeout = idleTimeout;
-    this.parser = parser;
-    this.failure = failure;
+    this.idleTimeout = Objects.requireNonNull(idleTimeout, "idleTimeout must not be null");
+    this.parser = Objects.requireNonNull(parser, "parser must not be null");
+    this.failure = Objects.requireNonNull(failure, "failure must not be null");
   }
 
   @Override
