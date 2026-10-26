@@ -1055,4 +1055,46 @@ class SseReaderTest {
   private static HttpRequest post(URI uri) {
     return HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.ofString("{}")).build();
   }
+
+  @Test
+  void anInterruptOfAHasNextBlockedOnALineThrowsCancellationClosesTheBodyAndStaysSet() {
+    var feed = new FeedableInputStream();
+    var body = new Closing(feed);
+    var interruptKept = new AtomicBoolean();
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      var read =
+          new FutureTask<>(
+              () -> {
+                try {
+                  return reader.hasNext();
+                } finally {
+                  interruptKept.set(Thread.currentThread().isInterrupted());
+                }
+              });
+      var thread = Thread.ofVirtual().start(read);
+      feed.awaitBlockedRead();
+
+      thread.interrupt();
+
+      assertInstanceOf(CancellationException.class, Await.failure("the blocked read", read));
+      assertTrue(interruptKept.get());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
+  }
+
+  @Test
+  void anInterruptAfterTheTerminalWasReadAheadThrowsCancellationInsteadOfTheTerminal() {
+    var body = new Closing(stream("data: stop\n\n"));
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      assertTrue(reader.hasNext());
+      Thread.currentThread().interrupt();
+
+      assertThrows(CancellationException.class, reader::next);
+
+      assertTrue(Thread.interrupted());
+      assertTrue(body.closed);
+      assertFalse(reader.hasNext());
+    }
+  }
 }
