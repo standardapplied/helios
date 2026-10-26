@@ -3,16 +3,13 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 
 /**
  * Fires the turn-level hooks around the model call — {@code PreModelTurn} and {@code PostModelTurn}
  * — and applies their outcome to the session, telling the {@link TurnRunner} whether to keep going.
  *
- * <p>{@link HookOutcome.MutateHistory} at PreModelTurn rewrites the conversation history wholesale
- * — the BYO-compactor-as-hook path. At PostModelTurn, mutation variants are not meaningful and are
- * treated as Continue.
+ * <p>{@link HookOutcome.MutateHistory} at PreModelTurn rewrites the conversation history wholesale.
  */
 final class TurnHooks {
 
@@ -23,20 +20,8 @@ final class TurnHooks {
     TERMINATE
   }
 
-  /**
-   * Typed tag for the phase whose decision is applied. Avoids a stringly-typed {@code
-   * phaseName.equals("PreModelTurnHook")} comparison.
-   */
-  private enum Phase {
-    PRE_MODEL_TURN("PreModelTurnHook"),
-    POST_MODEL_TURN("PostModelTurnHook");
-
-    private final String phaseName;
-
-    Phase(String phaseName) {
-      this.phaseName = phaseName;
-    }
-  }
+  private static final String PRE_MODEL_TURN = "PreModelTurnHook";
+  private static final String POST_MODEL_TURN = "PostModelTurnHook";
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -54,38 +39,39 @@ final class TurnHooks {
         collaborators
             .hooks()
             .firePreModelTurn(state.history().snapshot(), collaborators.hookContext(state));
-    return apply(state, decision, Phase.PRE_MODEL_TURN);
+    var hookName = decision.firingHookName();
+    return switch (decision.outcome()) {
+      case HookOutcome.Stop stop -> stop(state, hookName, PRE_MODEL_TURN, stop);
+      case HookOutcome.Inject inject -> {
+        effects.inject(state, hookName, PRE_MODEL_TURN, inject);
+        yield Decision.SKIP_MODEL;
+      }
+      case HookOutcome.MutateHistory mutate -> {
+        state.history().replace(mutate.history());
+        emitter.emitHookFired(state, hookName, PRE_MODEL_TURN, "MutateHistory");
+        yield Decision.CONTINUE;
+      }
+      case HookOutcome.Continue _ -> Decision.CONTINUE;
+    };
   }
 
   /** Fire {@code PostModelTurn} against the turn's response and apply its outcome. */
   Decision afterModelTurn(SessionState state, Response<?> response) {
     var decision =
         collaborators.hooks().firePostModelTurn(response, collaborators.hookContext(state));
-    return apply(state, decision, Phase.POST_MODEL_TURN);
-  }
-
-  private Decision apply(SessionState state, HookDecision decision, Phase phase) {
     var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
-      case HookOutcome.Stop stop -> {
-        effects.stop(state, hookName, phase.phaseName, stop);
-        yield Decision.TERMINATE;
-      }
+      case HookOutcome.Stop stop -> stop(state, hookName, POST_MODEL_TURN, stop);
       case HookOutcome.Inject inject -> {
-        effects.inject(state, hookName, phase.phaseName, inject);
-        yield phase == Phase.PRE_MODEL_TURN ? Decision.SKIP_MODEL : Decision.CONTINUE;
+        effects.inject(state, hookName, POST_MODEL_TURN, inject);
+        yield Decision.CONTINUE;
       }
-      case HookOutcome.MutateHistory mutate -> mutateHistory(state, hookName, phase, mutate);
-      default -> Decision.CONTINUE;
+      case HookOutcome.Continue _ -> Decision.CONTINUE;
     };
   }
 
-  private Decision mutateHistory(
-      SessionState state, String hookName, Phase phase, HookOutcome.MutateHistory mutate) {
-    if (phase == Phase.PRE_MODEL_TURN) {
-      state.history().replace(mutate.history());
-      emitter.emitHookFired(state, hookName, phase.phaseName, "MutateHistory");
-    }
-    return Decision.CONTINUE;
+  private Decision stop(SessionState state, String hookName, String phase, HookOutcome.Stop stop) {
+    effects.stop(state, hookName, phase, stop);
+    return Decision.TERMINATE;
   }
 }

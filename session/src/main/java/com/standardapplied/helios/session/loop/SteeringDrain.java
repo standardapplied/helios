@@ -52,7 +52,7 @@ final class SteeringDrain {
           effects.stop(state, hookName, PHASE, stop);
           return;
         }
-        default -> accepted.add(receive(state, message));
+        case HookOutcome.Continue _ -> accepted.add(receive(state, message));
       }
     }
     if (accepted.isEmpty()) {

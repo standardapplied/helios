@@ -47,10 +47,10 @@ final class ToolOutcomeSessionTest {
       List.of(InlineFile.of(new byte[] {(byte) 0x89, 'P', 'N', 'G'}, "image/png"));
 
   /** A named {@code PreToolUse} hook, so the rejecting hook's name is stable. */
-  private record Gate(HookOutcome outcome) implements PreToolUseHook {
+  private record Gate(HookOutcome.PreToolUse outcome) implements PreToolUseHook {
 
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return outcome;
     }
   }

@@ -4,7 +4,6 @@ package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.SecretRegistry;
@@ -89,17 +88,6 @@ final class TurnStagesTest {
   }
 
   @Test
-  void postModelTurnMutateHistoryIsIgnored() {
-    PostModelTurnHook mutate = (response, ctx) -> HookOutcome.mutateHistory(List.of());
-
-    runner(ScriptedModel.newBuilder().withTextTurn("hello back").build(), mutate)
-        .runTurn(state, SessionLimits.defaults());
-
-    assertEquals(2, state.history().snapshot().size());
-    assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.HookFired));
-  }
-
-  @Test
   void injectIntoAFullSteeringQueueIsDroppedWithAWarningOnTheTurnRunnerLogger() {
     queue.offer(UserMessage.text("occupying"));
     var named =
@@ -110,7 +98,7 @@ final class TurnStagesTest {
           }
 
           @Override
-          public HookOutcome beforeModelTurn(List<Message> history, HookContext ctx) {
+          public HookOutcome.PreModelTurn beforeModelTurn(List<Message> history, HookContext ctx) {
             return HookOutcome.inject("dropped");
           }
         };

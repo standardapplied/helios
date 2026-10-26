@@ -10,14 +10,15 @@ package com.standardapplied.helios.session.hooks;
  * message, on each stream event.
  *
  * <p>The sealed permits list names the seven phase-specific subtypes. Each is a functional
- * interface with a single phase-shaped method, and each subtype defines its own semantics for the
- * {@link HookOutcome} values it returns (see the spec §9.3 table). The {@link #name()} is used in
- * audit events and error messages; the {@link #priority()} drives the firing order (low → high),
- * ties broken by registration order.
+ * interface with a single phase-shaped method returning its phase's {@link HookOutcome} type, which
+ * admits only the outcomes that phase honours. The {@link #name()} is used in audit events and
+ * error messages; the {@link #priority()} drives the firing order (low → high), ties broken by
+ * registration order.
  *
- * <p>Hook misbehavior cannot abort the session. If a hook throws, the orchestrator (see {@link
- * HookRegistry}) treats the outcome as {@link HookOutcome.Continue} and logs/audits the failure.
- * This is by design — see spec §9.4.
+ * <p>A hook that throws a {@link RuntimeException} or returns {@code null} cannot abort the
+ * session: a {@link PreToolUseHook} fails closed as a {@link HookOutcome.Block}, any other hook is
+ * treated as {@link HookOutcome.Continue}, and {@link HookRegistry} logs the failure. An {@link
+ * Error} escapes.
  */
 public sealed interface Hook
     permits PreToolUseHook,
@@ -25,8 +26,6 @@ public sealed interface Hook
         PreModelTurnHook,
         PostModelTurnHook,
         PreStopHook,
-        PreCompactHook,
-        PostCompactHook,
         OnUserMessageHook,
         OnStreamEventHook {
 

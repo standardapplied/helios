@@ -846,6 +846,22 @@ what a failed turn streamed rather than its error. To keep a read ledger, regist
 | A `PostModelTurn` hook on a failed turn saw the redacted error message as the response content | it sees the text the model streamed before the failure (empty when none); the error is in the terminal, redacted |
 | `ContextCompactor.disabled()` was documented as skipped by the loop | the loop calls it at the 0.95 watermark and it leaves the history unchanged, so a long session overflows and the provider's error ends it |
 
+**Each hook phase returns its own outcome type, so an outcome the phase would ignore does not
+compile.** A wrong-phase outcome used to end its phase silently: the first non-`Continue` outcome
+won, the phase ignored it, and no later hook of the phase ran, so a sibling's typo could defeat a
+guard. `HookOutcome` now permits six sealed phase types, each admitting exactly what its phase
+honours (`OnUserMessage`: Continue, MutateText, Block, Stop; `PreModelTurn`: Continue,
+MutateHistory, Inject, Stop; `PostModelTurn` and `PreStop`: Continue, Inject, Stop; `PreToolUse`:
+Continue, MutateArgs, Block, Inject, Stop; `PostToolUse`: Continue, MutateResult, Inject, Stop).
+What each phase does with each outcome is unchanged. The two compaction hooks are removed: wrapping
+the compactor does their job.
+
+| 2.x | 3.0 |
+|---|---|
+| Hook methods return `HookOutcome` | each returns its phase type (`HookOutcome.OnUserMessage`, `PreModelTurn`, `PostModelTurn`, `PreStop`, `PreToolUse`, `PostToolUse`); a hook returning an outcome its phase ignored no longer compiles. `HookOutcome.cont()`, `block(...)`, `inject(...)`, `stop(...)` and the `mutate*(...)` factories return their record types |
+| `HookDecision` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision |
+| `PreCompactHook`, `PostCompactHook`, `CompactionPayload`, `HookRegistry.firePreCompact`, `firePostCompact` | wrap the compactor (`SessionOptions.Builder.withContextCompactor`) to see the history before and after, and observe `QueryEvent.ContextEdited` for the counts; to stop after a compaction, return `Stop` from a `PreModelTurnHook` |
+
 ### Added
 
 - **`ChunkDrain.drain(CloseableIterator<ModelChunk>)`** is the one drain of a model's chunk

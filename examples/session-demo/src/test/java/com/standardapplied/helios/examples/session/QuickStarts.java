@@ -5,6 +5,7 @@ import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.session.AgentSession;
@@ -30,6 +31,14 @@ import java.util.Map;
  * QuickStartsDocsTest} holds each README block to its method's body; none of these methods runs.
  */
 final class QuickStarts {
+
+  /** Where {@link #archivingCompaction} keeps the history on both sides of a compaction. */
+  interface CompactionArchive {
+
+    void save(List<Message> history);
+
+    void saveCompacted(List<Message> history);
+  }
 
   private QuickStarts() {}
 
@@ -113,6 +122,18 @@ final class QuickStarts {
 
     var session =
         AgentSession.create(SessionPresets.workspace(model, root).withHook(denyShell).build());
+  }
+
+  static void archivingCompaction(
+      Model model, Path repo, SummarizingCompactor defaultCompactor, CompactionArchive archive) {
+    ContextCompactor archiving =
+        (history, context) -> {
+          archive.save(history);
+          var result = defaultCompactor.compact(history, context);
+          archive.saveCompacted(result.history());
+          return result;
+        };
+    var options = SessionPresets.workspace(model, repo).withContextCompactor(archiving).build();
   }
 
   static void compaction(Model model, Path repo, Model cheapHaikuModel) {

@@ -58,7 +58,7 @@ final class HookAndEventRedactionTest {
   private record Auditor(RuntimeException failure) implements PostToolUseHook {
 
     @Override
-    public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+    public HookOutcome.PostToolUse afterTool(ToolCall call, ToolResult result, HookContext ctx) {
       throw failure;
     }
   }

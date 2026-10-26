@@ -33,7 +33,9 @@ import java.util.List;
  *   <li><b>Default</b> — do nothing; the session uses {@link SummarizingCompactor} bound to the
  *       same model as the conversation.
  *   <li><b>BYO compactor</b> — pass a custom {@code ContextCompactor} to {@code
- *       SessionOptions.Builder.withContextCompactor(...)}.
+ *       SessionOptions.Builder.withContextCompactor(...)}. To see the history before and after a
+ *       compaction, wrap the default one: delegate to it and inspect both sides; {@code
+ *       QueryEvent.ContextEdited} reports the removed-block and token counts.
  *   <li><b>BYO hook</b> — register a {@code PreModelTurnHook} returning {@code
  *       HookOutcome.MutateHistory} carrying the rewritten history. Lets the user trim without
  *       implementing the full SPI; e.g. a "drop tool-result rows older than turn N" policy.

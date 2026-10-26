@@ -32,7 +32,7 @@ public non-sealed interface PreToolUseHook extends Hook {
    * @param ctx the per-invocation context; non-null
    * @return the hook's decision
    */
-  HookOutcome beforeTool(ToolCall call, HookContext ctx);
+  HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx);
 
   @Override
   default String name() {
