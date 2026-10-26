@@ -10,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -31,10 +32,10 @@ final class SseRequest {
   private boolean cancelled;
 
   SseRequest(HttpClient client, HttpRequest request, String apiName, String providerName) {
-    this.client = client;
-    this.request = request;
-    this.apiName = apiName;
-    this.providerName = providerName;
+    this.client = Objects.requireNonNull(client, "client must not be null");
+    this.request = Objects.requireNonNull(request, "request must not be null");
+    this.apiName = Objects.requireNonNull(apiName, "apiName must not be null");
+    this.providerName = Objects.requireNonNull(providerName, "providerName must not be null");
   }
 
   /** The API a failure to communicate names. */
