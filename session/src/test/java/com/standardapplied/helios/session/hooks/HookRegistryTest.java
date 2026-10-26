@@ -183,7 +183,9 @@ final class HookRegistryTest {
   @Test
   void firePreToolUseEmptyReturnsTheCallUnchanged() {
     var result = HookRegistry.empty().firePreToolUse(CALL, ctx());
-    assertEquals(new PreToolUseResult(CALL, List.of(), HookDecision.proceed()), result);
+    assertEquals(
+        new PreToolUseResult(CALL, List.of(), new HookDecision<>(null, HookOutcome.cont())),
+        result);
   }
 
   @Test
@@ -492,7 +494,7 @@ final class HookRegistryTest {
             List.of(
                 HookDecision.of("A", HookOutcome.mutateArgs(Map.of("path", "a"))),
                 HookDecision.of("B", HookOutcome.mutateArgs(Map.of("path", "b")))),
-            HookDecision.proceed()),
+            new HookDecision<>(null, HookOutcome.cont())),
         result);
   }
 

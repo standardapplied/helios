@@ -625,7 +625,7 @@ the blank name and ended the session with `ErrorDuringExecution`.
 | 2.x | 3.0 |
 |---|---|
 | `HookRegistry` never checked a hook's `name()` and called it again at every decision, so a blank or throwing `name()` ended the session at the hook's first decisive outcome, and a `null` one fell back to the phase name, such as `PreToolUseHook`, at some decisions and ended the session at others | `HookRegistry` (and so `AgentSession.create`) reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
-| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on `HookDecision.proceed()` |
+| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on a `Continue` decision |
 
 **Tool authorization is mandatory, fails closed and runs on the call that executes.** The
 permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission-key extractor, or
@@ -859,7 +859,7 @@ the compactor does their job.
 | 2.x | 3.0 |
 |---|---|
 | Hook methods return `HookOutcome` | each returns its phase type (`HookOutcome.OnUserMessage`, `PreModelTurn`, `PostModelTurn`, `PreStop`, `PreToolUse`, `PostToolUse`); a hook returning an outcome its phase ignored no longer compiles. `HookOutcome.cont()`, `block(...)`, `inject(...)`, `stop(...)` and the `mutate*(...)` factories return their record types |
-| `HookDecision` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision |
+| `HookDecision`, `HookDecision.proceed()` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision. `proceed()` is removed, because one shared instance cannot be typed for every phase without an unchecked cast; build a phase's Continue decision with `new HookDecision<>(null, HookOutcome.cont())` |
 | `PreCompactHook`, `PostCompactHook`, `CompactionPayload`, `HookRegistry.firePreCompact`, `firePostCompact` | wrap the compactor (`SessionOptions.Builder.withContextCompactor`) to see the history before and after, and observe `QueryEvent.ContextEdited` for the counts; to stop after a compaction, return `Stop` from a `PreModelTurnHook` |
 
 ### Added

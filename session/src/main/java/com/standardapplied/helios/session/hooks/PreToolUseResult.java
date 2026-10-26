@@ -13,8 +13,8 @@ import java.util.Objects;
  * @param call the final call, the one the session authorizes and runs; non-null
  * @param mutations every argument mutation, in order; non-null, copied
  * @param decision the {@link HookOutcome.Block}, {@link HookOutcome.Inject} or {@link
- *     HookOutcome.Stop} decision that ended the chain, or {@link HookDecision#proceed()} when none
- *     did; non-null
+ *     HookOutcome.Stop} decision that ended the chain, or a {@link HookOutcome.Continue} decision
+ *     when none did; non-null
  */
 public record PreToolUseResult(
     ToolCall call,
