@@ -64,7 +64,7 @@ final class SessionLifecycle {
    */
   void abandon() {
     started.set(true);
-    teardown.release();
+    events.close();
   }
 
   /**
