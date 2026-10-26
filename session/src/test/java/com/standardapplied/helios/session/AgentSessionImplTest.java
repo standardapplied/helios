@@ -24,7 +24,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.hooks.PreStopHook;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
 import java.time.Instant;
@@ -33,10 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionImplTest {
@@ -72,7 +69,7 @@ final class AgentSessionImplTest {
     return ScriptedModel.newBuilder().withResponseTurn(response).build();
   }
 
-  private static List<Class<?>> eventTypes(CollectingSubscriber sub) {
+  private static List<Class<?>> eventTypes(EventCollector sub) {
     return sub.events().stream().<Class<?>>map(QueryEvent::getClass).toList();
   }
 
@@ -263,8 +260,8 @@ final class AgentSessionImplTest {
   @Test
   void singleMessageProducesSuccessAndStreamCompletes() throws Exception {
     try (var s = buildSession(textOnceModel("hello back", FinishReason.STOP))) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("hi"));
 
       var result = terminalOf(s);
@@ -327,8 +324,8 @@ final class AgentSessionImplTest {
           }
         };
     try (var s = buildSession(alternating)) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("first"));
       Await.latch("the first turn to reach chat()", firstTurnEntered);
       s.interrupt("rethink");
@@ -392,13 +389,12 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void closeBeforeAnySendShutsDownPublisherExecutor() {
+  void closeBeforeAnySendEndsEveryOpenStream() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("x", FinishReason.STOP));
-    var executor = s.lifecycle.events().executor();
-    assertTrue(!executor.isShutdown(), "executor live before close()");
+    var stream = s.events();
     s.close();
-    assertTrue(executor.isShutdown(), "executor shut down by close()");
-    assertTrue(executor.isTerminated(), "executor terminated by close()");
+    assertEquals(0, s.lifecycle.events().openStreams(), "close() detaches every stream");
+    assertFalse(stream.iterator().hasNext(), "a stream ends with a pre-start close");
   }
 
   @Test
@@ -411,15 +407,12 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void naturalLoopTerminationShutsDownPublisherExecutor() throws Exception {
+  void naturalLoopTerminationEndsEveryOpenStreamBeforeTheResultSettles() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
-    var executor = s.lifecycle.events().executor();
+    s.events();
     s.send(UserMessage.text("hi"));
     terminalOf(s);
-    // The teardown drains the publisher before the result settles (hv2-bug2 Issue 2 fix), so the
-    // executor is already terminated by the time the result is available.
-    assertTrue(executor.isShutdown(), "executor shut down after natural termination");
-    assertTrue(executor.isTerminated(), "executor terminated after natural termination");
+    assertEquals(0, s.lifecycle.events().openStreams(), "the teardown ended every stream");
   }
 
   @Test
@@ -450,8 +443,8 @@ final class AgentSessionImplTest {
           }
         };
     try (var s = buildSession(throwing)) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("hi"));
       var result = terminalOf(s);
       assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
@@ -499,107 +492,13 @@ final class AgentSessionImplTest {
     assertEquals(com.standardapplied.helios.core.model.Role.SYSTEM, seen.getFirst().role());
   }
 
-  // ── publisher-drain happens-before result settling (hv2-bug2 Issue 2) ────
-
-  /**
-   * Subscriber that is slow exactly where the hv2-bug2 Issue 2 race lives: it holds {@code
-   * LoopEnded} until the session has begun draining its publisher, records whether the result had
-   * already settled by then, and only then captures the terminal. Pre-fix the session settled the
-   * result before draining, so {@link #resultSettledFirst} is deterministically {@code true}.
-   */
-  private static final class DrainObservingSubscriber implements Flow.Subscriber<QueryEvent> {
-
-    final AtomicReference<ResultMessage> captured = new AtomicReference<>();
-    final AtomicBoolean resultSettledFirst = new AtomicBoolean();
-    private final AgentSessionImpl session;
-
-    DrainObservingSubscriber(AgentSession session) {
-      this.session = (AgentSessionImpl) session;
-    }
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      subscription.request(Long.MAX_VALUE);
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      if (event instanceof QueryEvent.LoopEnded ended) {
-        Await.until(
-            "the session to begin draining its publisher",
-            session.lifecycle.events().executor()::isShutdown);
-        resultSettledFirst.set(session.result().isDone());
-        captured.set(ended.result());
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {}
-
-    @Override
-    public void onComplete() {}
-
-    void assertObservedLoopEndedBeforeResult(ResultMessage terminal) {
-      assertEquals(
-          terminal,
-          captured.get(),
-          "subscriber must observe LoopEnded happens-before the result is available — without "
-              + "this guarantee deployer-side usage/cost capture races and silently drops data");
-      assertFalse(
-          resultSettledFirst.get(), "the result must not settle while a subscriber is draining");
-    }
-  }
-
-  @Test
-  void subscriberObservesLoopEndedBeforeRunBlockingReturns() {
-    // Regression for hv2-bug2 Issue 2: a subscriber that captures LoopEnded for usage/cost
-    // observability must see the event BEFORE any caller of runBlocking / result().get()
-    // unblocks. Pre-fix the publisher executor drained asynchronously after the result future
-    // resolved, so an immediate read of the AtomicReference would still observe null. 3 of 24
-    // viewers in the Light Grid matchmaking baseline silently dropped cost data this way.
-    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      var subscriber = new DrainObservingSubscriber(s);
-      s.events().subscribe(subscriber);
-      var terminal = s.runBlocking(UserMessage.text("hi"));
-      subscriber.assertObservedLoopEndedBeforeResult(terminal);
-    }
-  }
-
-  @Test
-  void subscriberObservesLoopEndedBeforeResultFutureCompletes() {
-    // Same happens-before contract from the result()-future side. Asserted from the
-    // result-future code path because runBlocking is a thin default; some deployers call
-    // result().get() directly (e.g. when wrapping the session in their own runtime).
-    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      var subscriber = new DrainObservingSubscriber(s);
-      s.events().subscribe(subscriber);
-      s.send(UserMessage.text("hi"));
-      var terminal = terminalOf(s);
-      subscriber.assertObservedLoopEndedBeforeResult(terminal);
-    }
-  }
-
-  @Test
-  void multipleSlowSubscribersAllObserveLoopEndedBeforeRunBlockingReturns() {
-    // Two subscribers both slow. The drain must wait for ALL of them, not just the first.
-    try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      var first = new DrainObservingSubscriber(s);
-      var second = new DrainObservingSubscriber(s);
-      s.events().subscribe(first);
-      s.events().subscribe(second);
-      var terminal = s.runBlocking(UserMessage.text("hi"));
-      first.assertObservedLoopEndedBeforeResult(terminal);
-      second.assertObservedLoopEndedBeforeResult(terminal);
-    }
-  }
-
   @Test
   void multipleSubscribersAllReceiveEvents() throws Exception {
     try (var s = buildSession(textOnceModel("hello", FinishReason.STOP))) {
-      var sub1 = new CollectingSubscriber();
-      var sub2 = new CollectingSubscriber();
-      s.events().subscribe(sub1);
-      s.events().subscribe(sub2);
+      var sub1 = new EventCollector();
+      var sub2 = new EventCollector();
+      sub1.read(s.events());
+      sub2.read(s.events());
       s.send(UserMessage.text("hi"));
       terminalOf(s);
       sub1.awaitDone();
@@ -632,8 +531,8 @@ final class AgentSessionImplTest {
   @Test
   void timestampOnPublishedEventsCarriesClock() throws Exception {
     try (var s = buildSession(textOnceModel("hi", FinishReason.STOP))) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("hi"));
       terminalOf(s);
       sub.awaitDone();
@@ -682,8 +581,8 @@ final class AgentSessionImplTest {
             .build();
 
     try (var s = buildSession(respondingWith(thoughtful))) {
-      var sub = new CollectingSubscriber();
-      s.events().subscribe(sub);
+      var sub = new EventCollector();
+      sub.read(s.events());
       s.send(UserMessage.text("match me"));
       terminalOf(s);
       sub.awaitDone();

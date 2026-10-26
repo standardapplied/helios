@@ -72,10 +72,10 @@ final class SessionEventStreamDisconnectTest {
     try (var log = LogCapture.of(AgentHttpService.class)) {
       var event = new QueryEvent.AssistantText(session.sessionId(), 0L, Instant.EPOCH, "after");
       Await.until(
-          "the stream's subscription to be cancelled",
+          "the stream to be closed",
           () -> {
-            session.subscribers.getFirst().onNext(event);
-            return session.cancels.get() > 0;
+            session.streams.getFirst().push(event);
+            return session.closedStreams() > 0;
           });
       logged = log.records();
     }

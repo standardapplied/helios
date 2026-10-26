@@ -3,32 +3,27 @@
 package com.standardapplied.helios.runtime;
 
 import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.EventStream;
 import com.standardapplied.helios.session.QueryEvent;
 import io.helidon.http.sse.SseEvent;
 import io.helidon.webserver.CloseConnectionException;
 import io.helidon.webserver.http.ServerResponse;
 import io.helidon.webserver.sse.SseSink;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The SSE stream behind {@code GET /sessions/{sessionId}/events}: subscribes to one session's
- * {@link QueryEvent}s, emits a synthetic {@code Ready} event once subscribed and then each event
- * named by its subtype, and holds the request thread until the publisher completes or errors, the
- * client disconnects, or the caller's identity ends. An ended identity (expired or revoked) cancels
- * the subscription and closes the stream without a further event: an event is serialized only while
- * the stream is open, and written only if it still is once serialized. The request thread returns
- * only after a delivery under way has finished, so the stream's admission covers every callback
- * still holding one of its events.
+ * The SSE stream behind {@code GET /sessions/{sessionId}/events}: reads one session's {@link
+ * EventStream} on the request's thread, writes a synthetic {@code Ready} event once the stream is
+ * open and then each event named by its subtype, until the stream ends, a write fails (the client
+ * is gone) or the caller's identity ends. An ended identity (expired or revoked) closes the stream
+ * without a further event: an event is serialized only while the identity holds, and written only
+ * if it still does once serialized.
  */
-final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
+final class SessionEventStream {
 
   /** The HTTP surface's logger, so one logging configuration covers every route. */
   private static final Logger LOGGER = Logger.getLogger(AgentHttpService.class.getName());
@@ -36,14 +31,17 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
   private final String sessionId;
   private final SseSink sink;
   private final ObjectMapper objectMapper;
-  private final CountDownLatch done = new CountDownLatch(1);
-  private final AtomicReference<Flow.Subscription> subscription = new AtomicReference<>();
-  private final ReentrantLock delivery = new ReentrantLock();
+  private final CompletableFuture<Void> identityEnded;
 
-  SessionEventStream(String sessionId, SseSink sink, ObjectMapper objectMapper) {
+  SessionEventStream(
+      String sessionId,
+      SseSink sink,
+      ObjectMapper objectMapper,
+      CompletableFuture<Void> identityEnded) {
     this.sessionId = sessionId;
     this.sink = sink;
     this.objectMapper = objectMapper;
+    this.identityEnded = identityEnded;
   }
 
   /**
@@ -59,113 +57,66 @@ final class SessionEventStream implements Flow.Subscriber<QueryEvent> {
       ServerResponse resp,
       ObjectMapper objectMapper,
       CompletableFuture<Void> identityEnded) {
-    var stream = new SessionEventStream(session.sessionId(), resp.sink(SseSink.TYPE), objectMapper);
-    identityEnded.thenRun(stream::end);
-    session.events().subscribe(stream);
-    stream.awaitEndThenClose();
-  }
-
-  /**
-   * Wait until the stream ends, close the sink, then wait for a delivery under way to finish.
-   * Package-private for tests.
-   */
-  void awaitEndThenClose() {
-    try {
-      done.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      end();
-    } finally {
-      try {
-        sink.close();
-      } catch (Exception ignored) {
-        // sink may already be closed by Helidon if the client disconnected
-      }
-      delivery.lock();
-      delivery.unlock();
-    }
-  }
-
-  @Override
-  public void onSubscribe(Flow.Subscription s) {
-    subscription.set(s);
-    if (!isOpen()) {
-      s.cancel();
-      return;
-    }
-    s.request(Long.MAX_VALUE);
-    // Synthetic Ready event so clients can synchronously confirm subscription is
-    // live before triggering work — closes the race between Helidon writing 200 OK
-    // and the subscriber actually registering on the SubmissionPublisher.
-    try {
-      emit(() -> SseEvent.builder().name("Ready").data("{}").build());
-    } catch (Exception ignored) {
-      // sink failures are handled in onNext below
-    }
-  }
-
-  @Override
-  public void onNext(QueryEvent event) {
-    try {
-      emit(
-          () ->
-              SseEvent.builder()
-                  .name(eventName(event))
-                  .data(objectMapper.writeValueAsString(event))
-                  .build());
-    } catch (Exception ex) {
-      if (!isDisconnect(ex)) {
-        LOGGER.log(Level.WARNING, "SSE emit failed for session " + sessionId, ex);
-      }
-      end();
+    try (var events = session.events()) {
+      new SessionEventStream(
+              session.sessionId(), resp.sink(SseSink.TYPE), objectMapper, identityEnded)
+          .forward(events);
     }
   }
 
   /**
-   * Serialize and write {@code event} unless the stream has ended, one delivery at a time. Checked
-   * again once the event is serialized, so an event whose serialization outlasts the identity is
-   * dropped; only a write already under way when the stream ends can still complete.
+   * Write {@code Ready}, then every event of {@code events} until it ends or a write fails, then
+   * close the sink. The caller's identity ending closes {@code events}.
    */
-  private void emit(Supplier<SseEvent> event) {
-    delivery.lock();
+  void forward(EventStream events) {
+    identityEnded.thenRun(events::close);
     try {
-      if (isOpen()) {
-        var serialized = event.get();
-        if (isOpen()) {
-          sink.emit(serialized);
+      if (write(() -> SseEvent.builder().name("Ready").data("{}").build())) {
+        for (var event : events) {
+          if (!write(() -> serialized(event))) {
+            break;
+          }
         }
       }
     } finally {
-      delivery.unlock();
+      try {
+        sink.close();
+      } catch (RuntimeException ignored) {
+        // Helidon closes the sink itself when the client disconnected
+      }
     }
   }
 
-  private boolean isOpen() {
-    return done.getCount() != 0;
-  }
-
-  /** Stop forwarding: cancel the subscription and release the request thread. */
-  void end() {
-    done.countDown();
-    var s = subscription.get();
-    if (s != null) {
-      s.cancel();
+  /**
+   * Serialize and write {@code event} while the caller's identity holds, checked again once the
+   * event is serialized.
+   *
+   * @return {@code false} if the identity ended or the write failed, which ends the stream
+   */
+  private boolean write(Supplier<SseEvent> event) {
+    try {
+      if (identityEnded.isDone()) {
+        return false;
+      }
+      var serialized = event.get();
+      if (identityEnded.isDone()) {
+        return false;
+      }
+      sink.emit(serialized);
+      return true;
+    } catch (RuntimeException e) {
+      if (!isDisconnect(e)) {
+        LOGGER.log(Level.WARNING, "SSE emit failed for session " + sessionId, e);
+      }
+      return false;
     }
   }
 
-  @Override
-  public void onError(Throwable t) {
-    LOGGER.log(Level.WARNING, "events publisher errored for session " + sessionId, t);
-    done.countDown();
-  }
-
-  @Override
-  public void onComplete() {
-    done.countDown();
-  }
-
-  private static String eventName(QueryEvent event) {
-    return event.getClass().getSimpleName();
+  private SseEvent serialized(QueryEvent event) {
+    return SseEvent.builder()
+        .name(event.getClass().getSimpleName())
+        .data(objectMapper.writeValueAsString(event))
+        .build();
   }
 
   /** Helidon wraps every socket write failure in {@code ServerConnectionException}. */

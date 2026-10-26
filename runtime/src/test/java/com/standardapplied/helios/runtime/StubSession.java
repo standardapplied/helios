@@ -6,7 +6,7 @@ import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.session.AgentSession;
-import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.EventStream;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.SteeringQueueFullException;
@@ -17,24 +17,22 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * An {@link AgentSession} with no agent loop: messages go into a real {@link SteeringQueue} that
- * nothing drains, event subscribers are held until {@link #completeEvents()}, and the result
- * completes through {@link #terminate()}, standing for the end of the loop. Like a real session,
- * closing it before the first message completes the result at once, while a started one keeps
- * running until terminated. It counts its closes and runs {@link #onClose} on each, and counts the
- * cancels of its event subscriptions.
+ * nothing drains, event streams are fed by hand and end at {@link #completeEvents()}, and the
+ * result completes through {@link #terminate()}, standing for the end of the loop. Like a real
+ * session, closing it before the first message completes the result at once, while a started one
+ * keeps running until terminated. It counts its closes and runs {@link #onClose} on each, and
+ * counts the event streams its readers closed.
  */
 final class StubSession implements AgentSession {
 
   final CompletableFuture<ResultMessage> result = new CompletableFuture<>();
   final SteeringQueue queue;
-  final List<Flow.Subscriber<? super QueryEvent>> subscribers = new CopyOnWriteArrayList<>();
+  final List<FedEventStream> streams = new CopyOnWriteArrayList<>();
   final AtomicInteger closes = new AtomicInteger();
-  final AtomicInteger cancels = new AtomicInteger();
   volatile Runnable onClose = () -> {};
 
   /** Thrown by {@link #result()} once set, standing for a session that fails to answer. */
@@ -64,9 +62,14 @@ final class StubSession implements AgentSession {
             List.of()));
   }
 
-  /** End every event stream subscribed so far. */
+  /** End every event stream opened so far. */
   void completeEvents() {
-    subscribers.forEach(Flow.Subscriber::onComplete);
+    streams.forEach(FedEventStream::end);
+  }
+
+  /** The number of event streams their readers closed. */
+  long closedStreams() {
+    return streams.stream().filter(FedEventStream::isClosed).count();
   }
 
   @Override
@@ -83,20 +86,10 @@ final class StubSession implements AgentSession {
   }
 
   @Override
-  public Flow.Publisher<QueryEvent> events() {
-    return subscriber -> {
-      subscribers.add(subscriber);
-      subscriber.onSubscribe(
-          new Flow.Subscription() {
-            @Override
-            public void request(long n) {}
-
-            @Override
-            public void cancel() {
-              cancels.incrementAndGet();
-            }
-          });
-    };
+  public EventStream events() {
+    var stream = new FedEventStream();
+    streams.add(stream);
+    return stream;
   }
 
   @Override

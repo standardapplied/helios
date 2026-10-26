@@ -26,7 +26,7 @@ import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -146,7 +146,7 @@ class SessionRunCharacterizationTest {
 
   private static void assertShutDown(AgentSession session) {
     var impl = (AgentSessionImpl) session;
-    assertTrue(impl.lifecycle.events().executor().isShutdown(), "publisher executor shut down");
+    assertEquals(0, impl.lifecycle.events().openStreams(), "event streams ended");
     assertTrue(impl.lifecycle.scheduler().isShutdown(), "deadline scheduler shut down");
   }
 
@@ -211,7 +211,7 @@ class SessionRunCharacterizationTest {
                 ModelStreams.of(
                     new ModelChunk.TextDelta("{\"answer\":\"final\"}"),
                     new ModelChunk.MessageStop("STOP", Usage.of(30, 7), Map.of(), List.of()))));
-    final CollectingSubscriber events = new CollectingSubscriber();
+    final EventCollector events = new EventCollector();
     ScriptedModel model;
     SessionLimits.Builder limits;
     PreModelTurnHook preModelTurn =
@@ -279,7 +279,7 @@ class SessionRunCharacterizationTest {
                   .withHook(postToolUse)
                   .withHook(preStop)
                   .build());
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(
           UserMessage.newBuilder()
               .withText("start")

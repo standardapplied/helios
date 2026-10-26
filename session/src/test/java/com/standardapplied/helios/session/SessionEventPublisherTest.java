@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,38 +20,35 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.test.EventCollector;
+import com.standardapplied.helios.session.test.LogCapture;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
+import java.util.NoSuchElementException;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Flow;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
-import java.util.logging.Handler;
-import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
- * A subscriber sees the terminal {@code LoopEnded} exactly once whenever it attaches: live if it
- * attached before the event was recorded, replayed if after. The first group drives the publisher
- * directly; the second drives a real session, where "after" is forced by attaching from inside
- * another subscriber's {@code onNext(LoopEnded)} or after the result has settled.
+ * The fan-out offers each event to every open {@link EventStream} without waiting for a routine
+ * one, waits a bounded time for room for a critical one, and replays the terminal {@code LoopEnded}
+ * exactly once to a stream opened after it. The first group drives the fan-out directly, emitting
+ * from a thread of its own as a session's loop does; the last group drives a real session, where
+ * "after" is forced by opening a stream from inside another reader's handling of {@code LoopEnded}
+ * or after the result has settled.
  */
 final class SessionEventPublisherTest {
 
   private static final String SID = "sess-events";
   private static final Instant AT = Instant.parse("2026-10-02T00:00:00Z");
-  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
-  private static final int SUBSCRIBER_BUFFER = 256;
-  private static final QueryEvent TEXT = new QueryEvent.AssistantText(SID, 0, AT, "hello");
+  private static final int CAPACITY = BufferedEventStream.CAPACITY;
+  private static final QueryEvent TEXT = text(0);
   private static final QueryEvent QUESTION =
       new QueryEvent.QuestionAsked(
           SID,
@@ -73,284 +71,320 @@ final class SessionEventPublisherTest {
               SID, "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO));
 
   @Test
-  void aSubscriberAttachedBeforeTheTerminalReceivesTheLiveStreamAndIsCompletedByClose() {
+  void aStalledReaderDoesNotSlowTheEmitterAndKeepsTheEventsItHadRoomFor() {
     var publisher = new SessionEventPublisher(SID);
-    var subscriber = Recorder.requestingAll();
-    publisher.subscribe(subscriber);
-
-    emit(publisher, TEXT, ENDED);
-    publisher.close(NOT_REACHED);
-
-    assertEquals(List.of(TEXT, ENDED), subscriber.eventsOnceCompleted());
-    assertTrue(publisher.executor().isTerminated());
-  }
-
-  @Test
-  void aSubscriberAttachedAfterTheTerminalReceivesOnlyThatEventThenCompletes() {
-    var publisher = new SessionEventPublisher(SID);
-    emit(publisher, TEXT, ENDED);
-    var beforeClose = Recorder.requestingAll();
-    publisher.subscribe(beforeClose);
-    publisher.close(NOT_REACHED);
-    var afterClose = Recorder.requestingAll();
-    publisher.subscribe(afterClose);
-
-    assertSame(ENDED, onlyEvent(beforeClose));
-    assertSame(ENDED, onlyEvent(afterClose));
-  }
-
-  @Test
-  void theReplayWaitsForTheSubscriberToRequest() {
-    var publisher = endedPublisher();
-    var subscriber = Recorder.requestingNothing();
-    publisher.subscribe(subscriber);
-
-    assertEquals(List.of(), subscriber.events);
-    assertEquals(0, subscriber.completions.get());
-
-    subscriber.subscription().request(1);
-    subscriber.subscription().request(1);
-
-    assertSame(ENDED, onlyEvent(subscriber));
-  }
-
-  @Test
-  void aCancelledReplayDeliversNothing() {
-    var publisher = endedPublisher();
-    var subscriber = Recorder.requestingNothing();
-    publisher.subscribe(subscriber);
-
-    subscriber.subscription().cancel();
-    subscriber.subscription().request(1);
-
-    assertEquals(List.of(), subscriber.events);
-    assertEquals(0, subscriber.completions.get());
-  }
-
-  @Test
-  void aNonPositiveRequestFailsTheReplayOnce() {
-    var publisher = endedPublisher();
-    var subscriber = Recorder.requestingNothing();
-    publisher.subscribe(subscriber);
-
-    subscriber.subscription().request(0);
-    subscriber.subscription().request(-1);
-    subscriber.subscription().request(1);
-
-    var failure = Await.failure("the replay to reject a non-positive request", subscriber.done);
-    assertInstanceOf(IllegalArgumentException.class, failure);
-    assertEquals("non-positive subscription request: 0", failure.getMessage());
-    assertEquals(List.of(), subscriber.events);
-    assertEquals(0, subscriber.completions.get());
-  }
-
-  @Test
-  void aNonPositiveRequestMadeDuringOnSubscribeFailsTheReplayOnlyAfterOnSubscribeReturns() {
-    var publisher = endedPublisher();
-    var signals = new CopyOnWriteArrayList<String>();
-
-    publisher.subscribe(
-        new Flow.Subscriber<QueryEvent>() {
-          @Override
-          public void onSubscribe(Flow.Subscription subscription) {
-            var requesting = new FutureTask<Void>(() -> subscription.request(0), null);
-            Thread.ofVirtual().start(requesting);
-            Await.value("request(0) from another thread to return", requesting);
-            signals.add("onSubscribe returned");
-          }
-
-          @Override
-          public void onNext(QueryEvent event) {
-            signals.add("onNext");
-          }
-
-          @Override
-          public void onError(Throwable throwable) {
-            signals.add("onError: " + throwable.getMessage());
-          }
-
-          @Override
-          public void onComplete() {
-            signals.add("onComplete");
-          }
-        });
-
-    assertEquals(
-        List.of("onSubscribe returned", "onError: non-positive subscription request: 0"), signals);
-  }
-
-  @Test
-  void aSubscriberAttachedAfterACloseWithoutATerminalIsCompletedAtOnce() {
-    var publisher = new SessionEventPublisher(SID);
-    emit(publisher, TEXT);
-    publisher.close(NOT_REACHED);
-    var subscriber = Recorder.requestingNothing();
-    publisher.subscribe(subscriber);
-
-    assertEquals(List.of(), subscriber.eventsOnceCompleted());
-  }
-
-  @Test
-  void aNullSubscriberIsRejected() {
-    var publisher = new SessionEventPublisher(SID);
-
-    assertThrows(NullPointerException.class, () -> publisher.subscribe(null));
-  }
-
-  /**
-   * Guards the owner placeholder. Without it the JDK publisher treats this thread, which attached
-   * the first subscriber, as its owner and can leave the event in the buffer with no consumer task,
-   * about once in 40,000 runs; with it the event is always delivered.
-   */
-  @Test
-  void anEventEmittedByTheThreadThatAttachedTheFirstSubscriberIsDelivered() {
-    var publisher = new SessionEventPublisher(SID);
-    var subscriber = Recorder.requestingAll();
-    publisher.subscribe(subscriber);
-
-    publisher.emit(TEXT);
-
-    assertSame(
-        TEXT, Await.next("the event emitted by the subscribing thread", subscriber.received));
-    publisher.close(NOT_REACHED);
-    assertEquals(List.of(TEXT), subscriber.eventsOnceCompleted());
-  }
-
-  @Test
-  void anEmitWithNoSubscriberNeitherWaitsNorReportsADrop() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
+    var stream = publisher.open();
+    var burst = IntStream.range(0, 2 * CAPACITY).mapToObj(SessionEventPublisherTest::text).toList();
     var logged = new CopyOnWriteArrayList<LogRecord>();
 
-    try (var ignored = capturingLog(logged)) {
-      emit(publisher, TEXT, ENDED);
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
+      emit(publisher, burst.toArray(QueryEvent[]::new));
     }
-    publisher.close(NOT_REACHED);
+    publisher.close();
 
-    assertEquals(List.of(), logged);
-    assertTrue(publisher.executor().isTerminated());
+    assertEquals(burst.subList(0, CAPACITY), readToEnd(stream));
+    assertEquals(CAPACITY, logged.size());
+    assertEquals(
+        "FINE dropped AssistantText for 1 full event stream(s) on session " + SID,
+        describe(logged.getFirst()));
   }
 
   @Test
-  void aFullSubscriberBufferDropsTheEventAfterTheEmitTimeoutAndLogsIt() {
-    var publisher = new SessionEventPublisher(SID, Duration.ofMillis(20), Duration.ofMillis(20));
-    var stalled = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
-    var subscriber =
-        Recorder.requestingAll(
-            event -> {
-              stalled.countDown();
-              awaitUninterrupted(release);
-            });
-    publisher.subscribe(subscriber);
-    emit(publisher, TEXT);
-    Await.latch("the subscriber to stall in its first onNext", stalled);
-    emit(publisher, Collections.nCopies(SUBSCRIBER_BUFFER, TEXT).toArray(QueryEvent[]::new));
+  void aCriticalEventWaitsForTheReaderToMakeRoom() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+    var events = stream.iterator();
 
+    var emitting = started(() -> publisher.emit(QUESTION));
+    assertSame(TEXT, events.next());
+    Await.value("the question to find room", emitting);
+    publisher.close();
+
+    var rest = new ArrayList<QueryEvent>();
+    events.forEachRemaining(rest::add);
+    assertEquals(CAPACITY, rest.size());
+    assertSame(QUESTION, rest.getLast());
+  }
+
+  @Test
+  void aCriticalEventStillWithoutRoomAfterItsWaitIsDroppedWithAWarning() {
+    var publisher = new SessionEventPublisher(SID, Duration.ofMillis(1));
+    var stream = publisher.open();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
     var logged = new CopyOnWriteArrayList<LogRecord>();
-    try (var ignored = capturingLog(logged)) {
+
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
       emit(
           publisher,
-          TEXT,
           new QueryEvent.Error(SID, 0, AT, SerializedError.of("Boom", "boom")),
           QUESTION,
           ENDED);
     }
-    release.countDown();
-    publisher.close(NOT_REACHED);
+    publisher.close();
 
-    assertEquals(1 + SUBSCRIBER_BUFFER, subscriber.eventsOnceCompleted().size());
+    assertEquals(Collections.nCopies(CAPACITY, TEXT), readToEnd(stream));
     assertEquals(
         List.of(
-            "FINE dropped AssistantText for 1 slow subscriber(s) on session " + SID,
-            "WARNING dropped Error for 1 slow subscriber(s) on session " + SID,
-            "WARNING dropped QuestionAsked for 1 slow subscriber(s) on session " + SID,
-            "WARNING dropped LoopEnded for 1 slow subscriber(s) on session " + SID),
-        logged.stream().map(r -> r.getLevel() + " " + r.getMessage()).toList());
+            "WARNING dropped Error for 1 full event stream(s) on session " + SID,
+            "WARNING dropped QuestionAsked for 1 full event stream(s) on session " + SID,
+            "WARNING dropped LoopEnded for 1 full event stream(s) on session " + SID),
+        logged.stream().map(SessionEventPublisherTest::describe).toList());
   }
 
   @Test
-  void closeInterruptsASubscriberThatOutlastsTheDrainGrace() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
-    var interrupted = new CountDownLatch(1);
-    publisher.subscribe(Recorder.requestingAll(event -> blockUntilInterrupted(interrupted)));
+  void anInterruptEndsACriticalWaitDropsTheEventAndKeepsTheInterrupt() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+
+    var interrupted =
+        call(
+            () -> {
+              Thread.currentThread().interrupt();
+              publisher.emit(QUESTION);
+              return Thread.currentThread().isInterrupted();
+            });
+    publisher.close();
+
+    assertTrue(interrupted);
+    assertEquals(Collections.nCopies(CAPACITY, TEXT), readToEnd(stream));
+  }
+
+  @Test
+  void closingAStreamEndsACriticalWaitWithoutADrop() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
+      var emitting = started(() -> publisher.emit(QUESTION));
+      stream.close();
+      Await.value("the question's wait to end", emitting);
+    }
+
+    assertEquals(List.of(), logged);
+    assertFalse(stream.iterator().hasNext());
+  }
+
+  @Test
+  void anOfferToAClosedStreamIsNoMiss() {
+    var stream = new BufferedEventStream(closed -> {});
+    stream.close();
+
+    assertTrue(stream.offer(TEXT, 0));
+    assertFalse(stream.iterator().hasNext());
+  }
+
+  @Test
+  void everyOpenStreamReceivesEveryEventInOrderAndEndsAfterDrainingWhenThePublisherCloses() {
+    var publisher = new SessionEventPublisher(SID);
+    var first = publisher.open();
+    var second = publisher.open();
+
+    emit(publisher, TEXT, QUESTION, ENDED);
+    publisher.close();
+
+    assertEquals(List.of(TEXT, QUESTION, ENDED), readToEnd(first));
+    assertEquals(List.of(TEXT, QUESTION, ENDED), readToEnd(second));
+  }
+
+  @Test
+  void anEmitWithNoOpenStreamLogsNothing() {
+    var publisher = new SessionEventPublisher(SID);
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
+      emit(publisher, TEXT, ENDED);
+    }
+
+    assertEquals(List.of(), logged);
+  }
+
+  @Test
+  void aStreamIsReadOnce() {
+    var stream = new SessionEventPublisher(SID).open();
+    stream.iterator();
+
+    var second = assertThrows(IllegalStateException.class, stream::iterator);
+
+    assertEquals("an EventStream is read once", second.getMessage());
+  }
+
+  @Test
+  void nextPastTheEndThrowsAndRemoveIsUnsupported() {
+    var publisher = new SessionEventPublisher(SID);
+    var events = publisher.open().iterator();
+    emit(publisher, TEXT);
+    publisher.close();
+
+    assertSame(TEXT, events.next());
+    assertThrows(UnsupportedOperationException.class, events::remove);
+    assertFalse(events.hasNext());
+    assertThrows(NoSuchElementException.class, events::next);
+  }
+
+  @Test
+  void closeFromAnotherThreadEndsABlockedRead() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    var reader = new FutureTask<>(() -> stream.iterator().hasNext());
+    var thread = Thread.ofVirtual().start(reader);
+    awaitBlocked(thread);
+
+    stream.close();
+
+    assertFalse(Await.value("the blocked read to end", reader));
+    assertEquals(0, publisher.openStreams());
+  }
+
+  @Test
+  void anInterruptEndsABlockedReadKeepsTheInterruptAndDetachesTheStream() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    var reader =
+        new FutureTask<>(
+            () -> List.of(stream.iterator().hasNext(), Thread.currentThread().isInterrupted()));
+    var thread = Thread.ofVirtual().start(reader);
+    awaitBlocked(thread);
+
+    thread.interrupt();
+
+    assertEquals(List.of(false, true), Await.value("the interrupted read to end", reader));
+    assertEquals(0, publisher.openStreams());
+  }
+
+  @Test
+  void anInterruptedReaderStopsWithEventsBufferedKeepsTheInterruptAndDetachesTheStream() {
+    try (var session = (AgentSessionImpl) session()) {
+      var stream = session.events();
+      emit(session.lifecycle.events(), TEXT);
+
+      var read =
+          call(
+              () -> {
+                Thread.currentThread().interrupt();
+                return List.of(stream.iterator().hasNext(), Thread.currentThread().isInterrupted());
+              });
+
+      assertEquals(List.of(false, true), read);
+      assertEquals(0, session.lifecycle.events().openStreams());
+    }
+  }
+
+  @Test
+  void closeTwiceDoesNothingMore() {
+    var publisher = new SessionEventPublisher(SID);
+    var stream = publisher.open();
+    var kept = publisher.open();
     emit(publisher, TEXT);
 
-    publisher.close(Duration.ofMillis(20));
+    stream.close();
+    stream.close();
 
-    Await.latch("the wedged subscriber to be interrupted", interrupted);
-    assertTrue(publisher.executor().isShutdown());
+    assertEquals(1, publisher.openStreams());
+    assertFalse(stream.iterator().hasNext());
+    kept.close();
+    assertEquals(0, publisher.openStreams());
   }
 
   @Test
-  void anInterruptedCloseStopsTheDrainAndStaysInterrupted() {
-    var publisher = new SessionEventPublisher(SID, NOT_REACHED, NOT_REACHED);
-    var stalled = new CountDownLatch(1);
-    var interrupted = new CountDownLatch(1);
-    publisher.subscribe(
-        Recorder.requestingAll(
-            event -> {
-              stalled.countDown();
-              blockUntilInterrupted(interrupted);
-            }));
+  void aStreamOpenedAfterTheTerminalHoldsOnlyThatEventThenEnds() {
+    var publisher = new SessionEventPublisher(SID);
+    emit(publisher, TEXT, ENDED);
+    var beforeClose = publisher.open();
+    publisher.close();
+    var afterClose = publisher.open();
+
+    assertEquals(List.of(ENDED), readToEnd(beforeClose));
+    assertEquals(List.of(ENDED), readToEnd(afterClose));
+    assertEquals(0, publisher.openStreams());
+  }
+
+  @Test
+  void aStreamOpenedAfterACloseWithoutATerminalEndsAtOnce() {
+    var publisher = new SessionEventPublisher(SID);
     emit(publisher, TEXT);
-    Await.latch("the subscriber to stall in onNext", stalled);
+    publisher.close();
 
-    Thread.currentThread().interrupt();
-    publisher.close(NOT_REACHED);
-
-    assertTrue(Thread.interrupted(), "close leaves the caller's interrupt set");
-    Await.latch("the stalled subscriber to be interrupted", interrupted);
+    assertEquals(List.of(), readToEnd(publisher.open()));
   }
 
   @Test
-  void aSubscriberAttachedAfterTheResultSettledReceivesTheLoopEndedTheEarlyOneSaw() {
+  void aReaderThatKeepsUpReadsEveryEventInOrderAndEndsAfterLoopEnded() {
     try (var session = session()) {
-      var early = Recorder.requestingAll();
-      session.events().subscribe(early);
+      var read = new ArrayList<QueryEvent>();
+      var stream = session.events();
+      var reader =
+          started(
+              () -> {
+                try (var events = stream) {
+                  for (var event : events) {
+                    read.add(event);
+                  }
+                }
+              });
+      session.send(UserMessage.text("hi"));
+      var terminal = Await.value("the session to reach its terminal", session.result());
+      Await.value("the reader to reach the end", reader);
+
+      assertEquals(
+          List.of(
+              QueryEvent.UserMessageReceived.class,
+              QueryEvent.AssistantText.class,
+              QueryEvent.TurnEnded.class,
+              QueryEvent.LoopEnded.class),
+          read.stream().map(Object::getClass).toList());
+      assertEquals(terminal, assertInstanceOf(QueryEvent.LoopEnded.class, read.getLast()).result());
+    }
+  }
+
+  @Test
+  void aStreamOpenedAfterTheResultSettledHoldsTheLoopEndedTheEarlyOneSaw() {
+    try (var session = session()) {
+      var early = new EventCollector().read(session.events());
       session.send(UserMessage.text("hi"));
       var terminal = Await.value("the session to reach its terminal", session.result());
 
-      var late = Recorder.requestingAll();
-      session.events().subscribe(late);
+      var replayed = assertInstanceOf(QueryEvent.LoopEnded.class, onlyEvent(session.events()));
 
-      var replayed = assertInstanceOf(QueryEvent.LoopEnded.class, onlyEvent(late));
-      assertSame(early.eventsOnceCompleted().getLast(), replayed);
+      early.awaitDone();
+      assertSame(early.events().getLast(), replayed);
       assertEquals(terminal, replayed.result());
     }
   }
 
   @Test
-  void aSubscriberAttachedWhileLoopEndedIsBeingDeliveredSeesItExactlyOnce() {
+  void aStreamOpenedWhileLoopEndedIsBeingReadSeesItExactlyOnce() {
     try (var session = session()) {
-      var late = Recorder.requestingAll();
+      var late = new FutureTask<QueryEvent>(() -> onlyEvent(session.events()));
       var early =
-          Recorder.requestingAll(
-              event -> {
-                if (event instanceof QueryEvent.LoopEnded) {
-                  session.events().subscribe(late);
-                }
-              });
-      session.events().subscribe(early);
+          new EventCollector(
+                  event -> {
+                    if (event instanceof QueryEvent.LoopEnded) {
+                      late.run();
+                    }
+                  })
+              .read(session.events());
       session.send(UserMessage.text("hi"));
       Await.value("the session to reach its terminal", session.result());
+      early.awaitDone();
 
-      assertSame(early.eventsOnceCompleted().getLast(), onlyEvent(late));
+      assertSame(early.events().getLast(), Await.value("the late stream", late));
     }
   }
 
   @Test
-  void aSubscriberAttachedAfterAPreStartCloseIsCompletedWithoutAnEvent() {
+  void aStreamOpenedAfterAPreStartCloseEndsAtOnce() {
     var session = session();
     session.close();
-    var subscriber = Recorder.requestingAll();
 
-    session.events().subscribe(subscriber);
-
-    assertEquals(List.of(), subscriber.eventsOnceCompleted());
+    assertEquals(List.of(), readToEnd(session.events()));
   }
 
   @Test
-  void aSubscriberAttachedAfterTheLoopEscapedWithAnErrorIsCompletedWithoutAnEvent() {
+  void aStreamOpenedAfterTheLoopEscapedWithAnErrorEndsAtOnce() {
     PreStopHook erroring =
         (response, ctx) -> {
           throw new AssertionError("simulated unrecoverable error");
@@ -366,95 +400,86 @@ final class SessionEventPublisherTest {
       assertInstanceOf(
           AssertionError.class,
           Await.failure("the result to settle exceptionally", session.result()));
-      var subscriber = Recorder.requestingAll();
 
-      session.events().subscribe(subscriber);
-
-      assertEquals(List.of(), subscriber.eventsOnceCompleted());
+      assertEquals(List.of(), readToEnd(session.events()));
     }
   }
 
-  private static void awaitUninterrupted(CountDownLatch latch) {
-    try {
-      latch.await();
-    } catch (InterruptedException e) {
-      throw new IllegalStateException("interrupted while stalled on a test latch", e);
+  @Test
+  void theTeardownEndsEveryOpenStreamBeforeTheResultSettles() {
+    try (var session = (AgentSessionImpl) session()) {
+      var stream = session.events();
+      assertEquals(1, session.lifecycle.events().openStreams());
+
+      session.send(UserMessage.text("hi"));
+      var terminal = Await.value("the session to reach its terminal", session.result());
+
+      assertEquals(0, session.lifecycle.events().openStreams());
+      var events = readToEnd(stream);
+      assertEquals(
+          terminal, assertInstanceOf(QueryEvent.LoopEnded.class, events.getLast()).result());
     }
   }
 
-  private static void blockUntilInterrupted(CountDownLatch interrupted) {
-    try {
-      new CountDownLatch(1).await();
-    } catch (InterruptedException e) {
-      interrupted.countDown();
-    }
+  private static QueryEvent text(int index) {
+    return new QueryEvent.AssistantText(SID, 0, AT, "t" + index);
   }
 
-  /** Collects what the publisher logs, at every level, until closed. */
-  private static LogCapture capturingLog(List<LogRecord> records) {
-    var logger = Logger.getLogger(SessionEventPublisher.class.getName());
-    var level = logger.getLevel();
-    var handler =
-        new Handler() {
-          @Override
-          public void publish(LogRecord logRecord) {
-            records.add(logRecord);
-          }
-
-          @Override
-          public void flush() {}
-
-          @Override
-          public void close() {}
-        };
-    handler.setLevel(Level.ALL);
-    logger.setLevel(Level.ALL);
-    logger.addHandler(handler);
-    return () -> {
-      logger.removeHandler(handler);
-      logger.setLevel(level);
-    };
+  private static String describe(LogRecord logRecord) {
+    return logRecord.getLevel() + " " + logRecord.getMessage();
   }
 
-  /**
-   * Emits from a thread other than the one that attached the subscriber, as a session does: its
-   * agent loop emits, its caller subscribes.
-   */
+  /** Emits from a thread of its own, as a session's loop does, and returns once it finished. */
   private static void emit(SessionEventPublisher publisher, QueryEvent... events) {
-    var emitting =
-        new FutureTask<Void>(
-            () -> {
-              for (var event : events) {
-                publisher.emit(event);
-              }
-              return null;
-            });
-    Thread.ofVirtual().start(emitting);
-    Await.value("the emitting thread to finish", emitting);
+    call(
+        () -> {
+          for (var event : events) {
+            publisher.emit(event);
+          }
+          return null;
+        });
   }
 
-  private static SessionEventPublisher endedPublisher() {
-    var publisher = new SessionEventPublisher(SID);
-    emit(publisher, ENDED);
-    publisher.close(NOT_REACHED);
-    return publisher;
+  private static <T> T call(Callable<T> work) {
+    return Await.value("the emitting thread to finish", started(work));
+  }
+
+  private static FutureTask<Void> started(Runnable work) {
+    return started(
+        () -> {
+          work.run();
+          return null;
+        });
+  }
+
+  private static <T> FutureTask<T> started(Callable<T> work) {
+    var task = new FutureTask<>(work);
+    Thread.ofVirtual().start(task);
+    return task;
+  }
+
+  private static void awaitBlocked(Thread thread) {
+    Await.until("the reader to block", () -> thread.getState() == Thread.State.WAITING);
+  }
+
+  /** Reads a stream whose session has ended, on the calling thread, to its end. */
+  private static List<QueryEvent> readToEnd(EventStream stream) {
+    var events = new ArrayList<QueryEvent>();
+    try (stream) {
+      stream.forEach(events::add);
+    }
+    return events;
+  }
+
+  private static QueryEvent onlyEvent(EventStream stream) {
+    var events = readToEnd(stream);
+    assertEquals(1, events.size(), () -> "expected exactly one event, got " + events);
+    return events.getFirst();
   }
 
   private static AgentSession session() {
     return AgentSession.create(
         SessionOptions.newBuilder().withModel(new OneReplyModel()).withSessionId(SID).build());
-  }
-
-  private static QueryEvent onlyEvent(Recorder subscriber) {
-    var events = subscriber.eventsOnceCompleted();
-    assertEquals(1, events.size(), () -> "expected exactly one event, got " + events);
-    return events.getFirst();
-  }
-
-  @FunctionalInterface
-  private interface LogCapture extends AutoCloseable {
-    @Override
-    void close();
   }
 
   private static final class OneReplyModel implements BlockingModel {
@@ -476,71 +501,6 @@ final class SessionEventPublisherTest {
     @Override
     public String provider() {
       return "test";
-    }
-  }
-
-  /** Records every signal; {@code done} settles on the first completion or error. */
-  private static final class Recorder implements Flow.Subscriber<QueryEvent> {
-
-    final List<QueryEvent> events = new CopyOnWriteArrayList<>();
-    final BlockingQueue<QueryEvent> received = new LinkedBlockingQueue<>();
-    final AtomicInteger completions = new AtomicInteger();
-    final CompletableFuture<Void> done = new CompletableFuture<>();
-    private final CompletableFuture<Flow.Subscription> subscription = new CompletableFuture<>();
-    private final long initialRequest;
-    private final Consumer<QueryEvent> afterEach;
-
-    private Recorder(long initialRequest, Consumer<QueryEvent> afterEach) {
-      this.initialRequest = initialRequest;
-      this.afterEach = afterEach;
-    }
-
-    static Recorder requestingAll() {
-      return requestingAll(event -> {});
-    }
-
-    static Recorder requestingAll(Consumer<QueryEvent> afterEach) {
-      return new Recorder(Long.MAX_VALUE, afterEach);
-    }
-
-    static Recorder requestingNothing() {
-      return new Recorder(0, event -> {});
-    }
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscribed) {
-      subscription.complete(subscribed);
-      if (initialRequest > 0) {
-        subscribed.request(initialRequest);
-      }
-    }
-
-    @Override
-    public void onNext(QueryEvent event) {
-      events.add(event);
-      received.add(event);
-      afterEach.accept(event);
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      done.completeExceptionally(throwable);
-    }
-
-    @Override
-    public void onComplete() {
-      completions.incrementAndGet();
-      done.complete(null);
-    }
-
-    Flow.Subscription subscription() {
-      return Await.value("onSubscribe", subscription);
-    }
-
-    List<QueryEvent> eventsOnceCompleted() {
-      Await.value("the event stream to complete", done);
-      assertEquals(1, completions.get(), "onComplete is signalled exactly once");
-      return List.copyOf(events);
     }
   }
 }

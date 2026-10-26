@@ -33,7 +33,7 @@ import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -63,10 +63,7 @@ final class SessionSecretRedactionTest {
   private static final String MARKER = "<redacted:API_KEY>";
 
   private record Run(
-      ResultMessage result,
-      CollectingSubscriber events,
-      ScriptedModel model,
-      SecretRegistry secrets) {
+      ResultMessage result, EventCollector events, ScriptedModel model, SecretRegistry secrets) {
 
     List<QueryEvent.ToolResult> toolResults() {
       return events.eventsOf(QueryEvent.ToolResult.class);
@@ -109,9 +106,9 @@ final class SessionSecretRedactionTest {
 
   private static Run run(SessionOptions.Builder options, ScriptedModel model) {
     var built = options.withModel(model).build();
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var session = AgentSession.create(built)) {
-      session.events().subscribe(events);
+      events.read(session.events());
       var result = session.runBlocking(UserMessage.text("go"));
       events.awaitDone();
       return new Run(result, events, model, built.secretRegistry());

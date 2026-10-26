@@ -25,7 +25,7 @@ import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -157,7 +157,7 @@ class JShellExecuteInSessionTest {
       script.withToolCallsTurn(Usage.of(1, 1), new ToolCall("c" + i, ExecuteTool.NAME, args));
     }
     var model = script.withTextTurn("done", Usage.of(1, 1)).build();
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
 
     try (var provider =
         JShellExecutionProvider.newBuilder()
@@ -175,7 +175,7 @@ class JShellExecuteInSessionTest {
                   SessionLimits.newBuilder().withToolTimeoutDefault(BEYOND_HANG_GUARD).build())
               .build();
       try (var session = AgentSession.create(options)) {
-        session.events().subscribe(events);
+        events.read(session.events());
         assertInstanceOf(
             ResultMessage.Success.class, session.runBlocking(UserMessage.text("run the snippets")));
         events.awaitDone();

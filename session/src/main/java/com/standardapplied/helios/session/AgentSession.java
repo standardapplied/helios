@@ -10,25 +10,23 @@ import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
 
 /**
  * A live, streamable, steerable agent session.
  *
  * <p>The session loop runs on a virtual thread that begins on the first {@link #send(UserMessage)}
- * call. Subscribe to {@link #events()} BEFORE the first {@code send} so the initial chunks reach
- * the subscriber: one that attaches while the session runs receives the events emitted from then
- * on, and no earlier event is replayed. One that attaches after the session emitted its terminal
- * {@link QueryEvent.LoopEnded} receives that same event once it requests, then {@code onComplete};
- * if the session ended without a {@code LoopEnded} (closed before it started, or the loop escaped
- * with an {@code Error}) it is completed at once. {@code events().subscribe(...)} never throws for
- * a non-null subscriber, and no subscriber sees {@code LoopEnded} twice.
+ * call. Open {@link #events()} BEFORE the first {@code send} so the initial chunks reach the
+ * reader: a stream opened while the session runs receives the events emitted from then on, and no
+ * earlier event is replayed. One opened after the session emitted its terminal {@link
+ * QueryEvent.LoopEnded} holds that same event once, then ends; if the session ended without a
+ * {@code LoopEnded} (closed before it started, or the loop escaped with an {@code Error}) it ends
+ * at once. No stream sees {@code LoopEnded} twice.
  *
  * <h2>Lifecycle</h2>
  *
  * <ol>
  *   <li>{@code AgentSession session = ... ;} construct via implementation factory.
- *   <li>{@code session.events().subscribe(subscriber);} attach observers.
+ *   <li>{@code try (var events = session.events()) { ... }} open a reader, read on its own thread.
  *   <li>{@code session.send(...);} steer the session — first call starts the loop.
  *   <li>{@code session.interrupt(...);} optional mid-run steering.
  *   <li>{@code ResultMessage r = session.result().get();} await terminal.
@@ -39,7 +37,8 @@ import java.util.concurrent.Flow;
  *
  * Implementations must be safe for the standard "many producers, one loop" pattern: HTTP/UI threads
  * call {@code send} / {@code interrupt} / {@code close} concurrently; the agent loop thread reads
- * the queue and writes to the publisher; subscribers observe via {@code events()}.
+ * the queue and offers each event to every open {@link EventStream}; readers drain them on their
+ * own threads.
  */
 public interface AgentSession extends AutoCloseable {
 
@@ -88,13 +87,24 @@ public interface AgentSession extends AutoCloseable {
   void interrupt(String reason);
 
   /**
-   * Stream of session events. Subscribe BEFORE the first {@link #send(UserMessage)} to observe
-   * every chunk. Implementations buffer per-subscriber so a slow subscriber back-pressures the
-   * agent loop rather than dropping events.
+   * Open a new stream of session events, attached before this returns. Open it BEFORE the first
+   * {@link #send(UserMessage)} to observe every chunk, and read it on a thread of its own:
    *
-   * @return a single-publisher to which any number of subscribers may attach
+   * <pre>{@code
+   * try (var events = session.events()) {
+   *   for (var event : events) {
+   *     ...
+   *   }
+   * }
+   * }</pre>
+   *
+   * <p>Each stream has its own bounded buffer. A routine event never waits for a reader: a stream
+   * whose buffer is full misses it, so a slow reader never stalls the loop. See {@link EventStream}
+   * for the buffer, the drop rule, the end and the late reader.
+   *
+   * @return a new, single-use stream
    */
-  Flow.Publisher<QueryEvent> events();
+  EventStream events();
 
   /**
    * Future that completes when the session reaches a terminal {@link ResultMessage} and its runtime
@@ -157,11 +167,11 @@ public interface AgentSession extends AutoCloseable {
    * calls to end; then it calls {@link
    * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} on a thread of its
    * own and waits the same grace for it to return; then it shuts the session's scheduler down and
-   * gives event subscribers the same grace to drain, and the result completes. A callback, tool
-   * call or {@code onSessionEnd} still running when its grace has passed is logged and left
-   * running: a tool that ignores both its token and interruption may still run, and its effects
-   * land, after the result settles. An {@link Error} such a tool throws then is logged; the result
-   * does not change.
+   * ends the event streams, without waiting for their readers, and the result completes. A
+   * callback, tool call or {@code onSessionEnd} still running when its grace has passed is logged
+   * and left running: a tool that ignores both its token and interruption may still run, and its
+   * effects land, after the result settles. An {@link Error} such a tool throws then is logged; the
+   * result does not change.
    */
   @Override
   void close();
@@ -194,8 +204,8 @@ public interface AgentSession extends AutoCloseable {
   List<AskUserQuestionRequest> pendingQuestions();
 
   /**
-   * Blocking convenience: send the message, then await the terminal {@link ResultMessage}.
-   * Subscribers — if any — observe the stream in the usual way.
+   * Blocking convenience: send the message, then await the terminal {@link ResultMessage}. Open
+   * event streams, if any, receive its events as usual.
    *
    * @param message the message; non-null
    * @return the terminal result

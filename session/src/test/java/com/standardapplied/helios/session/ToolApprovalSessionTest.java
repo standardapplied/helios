@@ -18,7 +18,7 @@ import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
@@ -204,7 +204,7 @@ final class ToolApprovalSessionTest {
     var model =
         ScriptedModel.newBuilder().withToolCallsTurn(write("/tmp/a")).withTextTurn("never").build();
     var events =
-        new CollectingSubscriber(
+        new EventCollector(
             event -> {
               if (event instanceof QueryEvent.QuestionAsked question) {
                 asked.complete(question.request().questionId());
@@ -213,7 +213,7 @@ final class ToolApprovalSessionTest {
     var options =
         options(Permission.empty(PermissionMode.DEFAULT)).withModel(model).withClock(clock);
     try (var session = AgentSession.create(options.build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send(UserMessage.text("go"));
       var questionId = Await.value("the approval question", asked);
       end.accept(session);

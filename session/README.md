@@ -5,7 +5,7 @@ Claude Code agent loop.
 
 Compared to `helios-core`'s `Agent` (single shot, you call `run(...)`, you get back a result), a
 session is a long-lived object that runs an agent loop on a virtual thread. You **send** messages
-into it, **subscribe** to its event stream, and optionally **interrupt** mid-turn. It hits its own
+into it, **read** its event stream with for-each, and optionally **interrupt** mid-turn. It hits its own
 terminal `ResultMessage` when the model is done — you can long-poll for it via
 `session.result()`, listen for the `LoopEnded` event, or just call `session.runBlocking(...)` and
 get the terminal synchronously.
@@ -66,7 +66,7 @@ try (var session = AgentSession.create(SessionPresets.minimal(model).build())) {
 
 `SessionPresets.minimal(model)` returns a `SessionOptions.Builder` already wired with the model
 and Helios defaults; chain any other `.with*` calls before `.build()`. `try-with-resources`
-guarantees the session's runtime (publisher, executor, in-flight tools) is shut down.
+guarantees the session's runtime (event streams, scheduler, in-flight tools) is shut down.
 
 ## Workspace agent — file tools + permissions + memory
 
@@ -92,28 +92,34 @@ provider)` adds `Execute` through the given `ExecutionProvider`, asked before ea
 
 ## Streaming events
 
-Subscribers see every lifecycle event as the loop produces it — perfect for a UI that wants to
-render tokens, tool calls, and hook decisions live:
+An `EventStream` sees every lifecycle event as the loop produces it — perfect for a UI that
+wants to render tokens, tool calls, and hook decisions live. Open it before the first `send` and
+read it with for-each on a thread of its own; it ends after the session's last event:
 
 ```java
-session.events().subscribe(new Flow.Subscriber<QueryEvent>() {
-  public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
-  public void onNext(QueryEvent event) {
-    switch (event) {
-      case QueryEvent.AssistantText t       -> System.out.print(t.text());
-      case QueryEvent.ToolUse u             -> System.out.println("\n[tool: " + u.call().name() + "]");
-      case QueryEvent.ToolResult r          -> System.out.println("[result: " + r.result().output() + "]");
-      case QueryEvent.MessageBlocked b      -> System.err.println("[blocked: " + b.reason() + "]");
-      case QueryEvent.LoopEnded e           -> System.out.println("\n— done —");
-      default -> {}
+var events = session.events();
+var printer = Thread.ofVirtual().start(() -> {
+  try (events) {
+    for (var event : events) {
+      switch (event) {
+        case QueryEvent.AssistantText t       -> System.out.print(t.text());
+        case QueryEvent.ToolUse u             -> System.out.println("\n[tool: " + u.call().name() + "]");
+        case QueryEvent.ToolResult r          -> System.out.println("[result: " + r.result().output() + "]");
+        case QueryEvent.MessageBlocked b      -> System.err.println("[blocked: " + b.reason() + "]");
+        case QueryEvent.LoopEnded e           -> System.out.println("\n— done —");
+        default -> {}
+      }
     }
   }
-  public void onError(Throwable t)    { t.printStackTrace(); }
-  public void onComplete()            { /* stream terminated */ }
 });
 session.send("Refactor the loop module's package-info comments.");
 var terminal = session.result().join();
+printer.join();
 ```
+
+Each stream buffers up to 256 events. A routine event never waits for a reader: a stream whose
+buffer is full misses it, so a slow reader never stalls the loop. `LoopEnded`, `QuestionAsked` and
+`Error` wait up to 30 s for room.
 
 The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `LoopEnded`, `Error`; see the [package
 Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — covers everything the loop emits.

@@ -20,7 +20,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -74,7 +74,7 @@ final class ProgressNotesSessionTest {
 
   @Test
   void progressNotesSurfaceAsAssistantThinkingAheadOfTheirToolCall() throws Exception {
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var server =
             StubHttpServer.start(
                 InetAddress.getLoopbackAddress(),
@@ -95,7 +95,7 @@ final class ProgressNotesSessionTest {
                     .withModel(model)
                     .withTools(new ToolRegistry(List.of(searchProfiles())))
                     .build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
 
       var terminal = session.runBlocking(UserMessage.text("Who should I meet?"));
       events.awaitDone();

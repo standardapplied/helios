@@ -14,9 +14,10 @@ import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 
 final class AgentSessionTest {
@@ -42,8 +43,16 @@ final class AgentSessionTest {
     }
 
     @Override
-    public Flow.Publisher<QueryEvent> events() {
-      return subscriber -> {};
+    public EventStream events() {
+      return new EventStream() {
+        @Override
+        public Iterator<QueryEvent> iterator() {
+          return Collections.emptyIterator();
+        }
+
+        @Override
+        public void close() {}
+      };
     }
 
     @Override

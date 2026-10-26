@@ -23,7 +23,6 @@ import com.standardapplied.helios.session.loop.TurnRunner;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -34,14 +33,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor, the loop through
  * {@link SessionWiring}, and notifies the execution provider last; its {@link SessionLifecycle}
  * defers starting the agent-loop virtual thread until the first {@link #send(UserMessage)} or
- * {@link #interrupt(String)} call so subscribers attached between construction and first send
- * observe every event. Open {@code AskUserQuestion} questions are its {@link PendingQuestions}.
+ * {@link #interrupt(String)} call so streams opened between construction and first send observe
+ * every event. Open {@code AskUserQuestion} questions are its {@link PendingQuestions}.
  *
  * <h2>Event delivery</h2>
  *
- * Events flow through the session's {@link SessionEventPublisher}: live fan-out with a bounded wait
- * on a slow subscriber, and replay of the terminal {@link QueryEvent.LoopEnded} to a subscriber
- * that attaches after the session ended.
+ * Events flow through the session's {@link SessionEventPublisher}: live fan-out into each reader's
+ * bounded {@link EventStream}, and replay of the terminal {@link QueryEvent.LoopEnded} to a stream
+ * opened after the session ended.
  *
  * <h2>Thread-safety</h2>
  *
@@ -170,8 +169,8 @@ public final class AgentSessionImpl implements AgentSession {
   }
 
   @Override
-  public Flow.Publisher<QueryEvent> events() {
-    return events;
+  public EventStream events() {
+    return events.open();
   }
 
   @Override

@@ -22,8 +22,9 @@ import java.util.logging.Logger;
  * cancels and interrupts every tool call still running, and the token's callbacks and the calls are
  * given {@link SessionLimits#stopGrace()} to end; the execution provider's {@code onSessionEnd}
  * runs on a thread of its own and is given the same grace to return; the scheduler is shut down;
- * event subscribers are given the same grace to drain. A tool call or {@code onSessionEnd} still
- * running when its grace has passed is logged as such, never taken for ended.
+ * the event streams are ended, never waited for, since readers drain them on their own threads. A
+ * tool call or {@code onSessionEnd} still running when its grace has passed is logged as such,
+ * never taken for ended.
  *
  * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
  * exception, is recorded by the session's {@link
@@ -120,7 +121,7 @@ final class SessionTeardown {
   /** Shut the scheduler down and close the event stream: what the session acquired first. */
   void release() {
     scheduler.shutdownNow();
-    events.close(grace);
+    events.close();
   }
 
   /**

@@ -16,7 +16,7 @@ import java.util.function.Function;
  * Glue between the agent loop's {@link QueryEvent} sink and its {@link HookRegistry}'s observe-only
  * {@link com.standardapplied.helios.session.hooks.OnStreamEventHook OnStreamEventHook} dispatch.
  * The agent loop and {@link TurnRunner} share one instance per session; every {@link
- * #emit(SessionState, QueryEvent)} call writes to the publisher and fires the stream-event hooks
+ * #emit(SessionState, QueryEvent)} call writes to the event sink and fires the stream-event hooks
  * against the same context.
  *
  * <p>{@link #emitHookFired(SessionState, String, String, String)} is a convenience for the common

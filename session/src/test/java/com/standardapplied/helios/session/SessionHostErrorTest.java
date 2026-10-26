@@ -31,7 +31,7 @@ import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
-import com.standardapplied.helios.session.test.CollectingSubscriber;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -572,9 +572,9 @@ final class SessionHostErrorTest {
   /** What a session's result fails with, and the {@code LoopEnded} events it emitted. */
   private static Map.Entry<Throwable, List<QueryEvent.LoopEnded>> endedRun(
       SessionOptions.Builder options) {
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
     try (var session = AgentSession.create(options.build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send("go");
       var failure = Await.failure("the result to fail", session.result());
       events.awaitDone();
@@ -608,11 +608,11 @@ final class SessionHostErrorTest {
             (args, ctx) -> {
               throw sentinel;
             });
-    var events = new CollectingSubscriber();
+    var events = new EventCollector();
 
     try (var session =
         AgentSession.create(callingTool(new RecordingProvider(order), tool).build())) {
-      session.events().subscribe(events);
+      events.read(session.events());
       session.send("go");
 
       assertSame(sentinel, Await.failure("the result to fail", session.result()));

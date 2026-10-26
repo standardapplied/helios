@@ -67,7 +67,8 @@ public final class SessionDemoMain {
     }
   }
 
-  private static void runExploreAndRememberScenario(Model model) throws IOException {
+  private static void runExploreAndRememberScenario(Model model)
+      throws IOException, InterruptedException {
     System.out.println("\n=== Scenario 1: explore + remember ===");
     var workspace = createFakeRepo();
     System.out.println("workspace: " + workspace);
@@ -75,14 +76,12 @@ public final class SessionDemoMain {
     var options = exploreAndRememberOptions(model, workspace).build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new ConsoleEventPrinter(System.out));
       var prompt =
           "You're looking at a tiny sample repo. Use the file tools to see what's in it (LS, Glob,"
               + " Grep, Read are available). Then write a one-line summary to"
               + " /memories/project/summary.md describing what the repo contains. Use MemoryWrite"
               + " with op=create. Keep it brief.";
-      var result = session.runBlocking(UserMessage.text(prompt));
-      printTerminal(result);
+      printTerminal(runPrinting(session, UserMessage.text(prompt)));
     }
 
     var summaryPath = workspace.resolve(".agent/memory/project/summary.md");
@@ -118,7 +117,22 @@ public final class SessionDemoMain {
         .withMemoryBackend(FileSystemMemoryBackend.of(ws));
   }
 
-  private static void runAttachmentScenario(Model model) throws IOException {
+  /**
+   * Run {@code message} to its terminal while a virtual thread prints the session's events, and
+   * return once both have ended.
+   */
+  private static ResultMessage runPrinting(AgentSession session, UserMessage message)
+      throws InterruptedException {
+    try (var events = session.events()) {
+      var printer =
+          Thread.ofVirtual().start(() -> new ConsoleEventPrinter(System.out).print(events));
+      var result = session.runBlocking(message);
+      printer.join();
+      return result;
+    }
+  }
+
+  private static void runAttachmentScenario(Model model) throws IOException, InterruptedException {
     System.out.println("\n=== Scenario 2: attachment ===");
     var tmp = Files.createTempDirectory("helios-session-demo-att-");
     var pngPath = tmp.resolve("color.png");
@@ -129,7 +143,6 @@ public final class SessionDemoMain {
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att").build();
 
     try (var session = AgentSession.create(options)) {
-      session.events().subscribe(new ConsoleEventPrinter(System.out));
       var msg =
           UserMessage.newBuilder()
               .withText(
@@ -137,8 +150,7 @@ public final class SessionDemoMain {
                       + " about it in one sentence.")
               .withAttachment(pngPath)
               .build();
-      var result = session.runBlocking(msg);
-      printTerminal(result);
+      printTerminal(runPrinting(session, msg));
     }
   }
 
