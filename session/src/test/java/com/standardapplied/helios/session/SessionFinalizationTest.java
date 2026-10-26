@@ -257,8 +257,8 @@ final class SessionFinalizationTest {
     session.send("go");
     Await.latch("the model call to start", entered);
     Await.until(
-        "the stream to wait on the session's token",
-        () -> token.activeCallbackCountForTests() == armed + 1);
+        "the wall clock and the stream to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 2);
     return session;
   }
 
@@ -316,8 +316,8 @@ final class SessionFinalizationTest {
     session.send("go");
     Await.latch("the turn to be retried", retried);
     Await.until(
-        "the back-off to wait on the session's token",
-        () -> token.activeCallbackCountForTests() == armed + 1);
+        "the wall clock and the back-off to wait on the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 2);
 
     session.close();
 
@@ -461,7 +461,6 @@ final class SessionFinalizationTest {
         events.awaitDone();
         assertEquals(Optional.empty(), events.error());
         assertEquals(0, session.lifecycle.events().openStreams());
-        Await.termination("the scheduler to end", session.lifecycle.scheduler());
       }
     }
     threads.forEach(thread -> Await.termination("thread " + thread.getName() + " to end", thread));

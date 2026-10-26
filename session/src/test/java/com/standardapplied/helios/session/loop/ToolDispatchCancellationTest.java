@@ -334,7 +334,7 @@ final class ToolDispatchCancellationTest {
     session.cancel("session ended");
     assertCancelled("session ended", running);
 
-    var waiting = new FutureTask<>(() -> d.awaitLiveCalls(NEVER));
+    var waiting = new FutureTask<>(() -> d.awaitLiveCalls(Await.hangGuardDeadline()));
     Thread.ofVirtual().start(waiting);
     fixture.release.countDown();
 
@@ -349,7 +349,7 @@ final class ToolDispatchCancellationTest {
     Await.latch("the tool to start", fixture.entered);
 
     Thread.currentThread().interrupt();
-    var live = d.awaitLiveCalls(NEVER);
+    var live = d.awaitLiveCalls(Await.hangGuardDeadline());
 
     assertTrue(Thread.interrupted(), "the wait keeps the caller's interrupt");
     assertEquals(List.of(DispatchFixture.call("slow")), live);

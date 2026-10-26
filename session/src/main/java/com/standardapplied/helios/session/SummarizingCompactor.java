@@ -19,9 +19,6 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -138,37 +135,32 @@ public final class SummarizingCompactor implements ContextCompactor {
    * timeout still ends the session.
    */
   private Optional<Response<Void>> invokeSummary(SessionState state, List<Message> request) {
-    var future = new CompletableFuture<Response<Void>>();
-    var worker =
-        Thread.ofVirtual()
-            .name("helios-compaction-summary")
-            .start(
-                () -> {
-                  try {
-                    future.complete(summaryModel.chat(request, List.of()));
-                  } catch (Exception | Error e) {
-                    state.ending().failWith(e);
-                    future.completeExceptionally(e);
-                  }
-                });
-    try {
-      return Optional.of(future.get(summaryTimeout.toMillis(), TimeUnit.MILLISECONDS));
-    } catch (TimeoutException e) {
-      worker.interrupt();
-      LOG.warning(() -> unchanged("summary timed out after " + summaryTimeout, state));
-      return Optional.empty();
-    } catch (ExecutionException e) {
-      if (e.getCause() instanceof Error error) {
-        throw error;
+    var summary =
+        BoundedTask.start(
+            "helios-compaction-summary",
+            () -> summaryModel.chat(request, List.of()),
+            state.ending());
+    if (summary.settlesBy(BoundedTask.deadlineAfter(summaryTimeout))) {
+      return Optional.of(valueOf(summary.outcome()));
+    }
+    summary.interrupt();
+    if (Thread.currentThread().isInterrupted()) {
+      throw new RuntimeException(
+          new InterruptedException("interrupted while waiting for the summary call"));
+    }
+    LOG.warning(() -> unchanged("summary timed out after " + summaryTimeout, state));
+    return Optional.empty();
+  }
+
+  private static <T> T valueOf(CompletableFuture<T> settled) {
+    var thrown = settled.handle((value, failure) -> failure).join();
+    switch (thrown) {
+      case null -> {
+        return settled.resultNow();
       }
-      if (e.getCause() instanceof RuntimeException re) {
-        throw re;
-      }
-      throw new RuntimeException(e.getCause());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      worker.interrupt();
-      throw new RuntimeException(e);
+      case Error error -> throw error;
+      case RuntimeException re -> throw re;
+      default -> throw new RuntimeException(thrown);
     }
   }
 

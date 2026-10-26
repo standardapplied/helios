@@ -83,7 +83,6 @@ class ArchitectureRulesTest {
   private static final String SESSION_JSON = HELIOS + ".session.SessionJson";
 
   /** The one owner of the session's start-up and shutdown. */
-  private static final String SESSION_LIFECYCLE = HELIOS + ".session.SessionLifecycle";
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
@@ -233,7 +232,7 @@ class ArchitectureRulesTest {
   }
 
   @Test
-  void sessionExecutorsAreCreatedOnlyByTheLifecycle() {
+  void sessionClassesCreateNoExecutors() {
     noClasses()
         .that()
         .resideInAPackage(HELIOS + ".session..")
@@ -242,7 +241,6 @@ class ArchitectureRulesTest {
             HELIOS + ".session.files..",
             HELIOS + ".session.memory..",
             HELIOS + ".session.execution..")
-        .and(not(name(SESSION_LIFECYCLE).or(nameStartingWith(SESSION_LIFECYCLE + "$"))))
         .should()
         .accessTargetWhere(
             targetOwner(type(Executors.class))
@@ -251,8 +249,8 @@ class ArchitectureRulesTest {
                     targetOwner(assignableTo(ExecutorService.class))
                         .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
         .because(
-            "every pool a session owns has one owner that shuts it down: the deadline scheduler"
-                + " is session.SessionLifecycle's; every other class is handed the pool it uses")
+            "a session owns no pool: its loop, its wall clock and every bounded wait run on"
+                + " virtual threads of their own, which end with the work they run")
         .check(LIBRARY);
   }
 

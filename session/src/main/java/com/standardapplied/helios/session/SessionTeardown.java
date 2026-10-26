@@ -8,23 +8,19 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The end of one session's runtime, in the reverse order of what the session acquired: the session
- * is cancelled ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which
- * cancels and interrupts every tool call still running, and the token's callbacks and the calls are
- * given {@link SessionLimits#stopGrace()} to end; the execution provider's {@code onSessionEnd}
- * runs on a thread of its own and is given the same grace to return; the scheduler is shut down;
- * the event streams are ended, never waited for, since readers drain them on their own threads. A
- * tool call or {@code onSessionEnd} still running when its grace has passed is logged as such,
- * never taken for ended.
+ * The end of one session's runtime, in the reverse order of what the session acquired, by one
+ * deadline, {@link SessionLimits#stopGrace()} from the teardown's start: the session is cancelled
+ * ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which cancels and
+ * interrupts every tool call still running, and the token's callbacks and the calls are waited for
+ * until the deadline; the execution provider's {@code onSessionEnd} runs on a thread of its own and
+ * is waited for until the same deadline; the event streams are ended, never waited for, since
+ * readers drain them on their own threads. Every step runs, but one after a step that used the
+ * deadline up is not waited for. A tool call or {@code onSessionEnd} still running at the deadline
+ * is logged as such, never taken for ended.
  *
  * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
  * exception, is recorded by the session's {@link
@@ -41,7 +37,6 @@ final class SessionTeardown {
   private final SessionContext sessionContext;
   private final ExecutionProvider executionProvider;
   private final SessionEventPublisher events;
-  private final ScheduledExecutorService scheduler;
   private final Duration grace;
   private volatile Exception sessionEndFailure;
 
@@ -50,18 +45,16 @@ final class SessionTeardown {
       SessionContext sessionContext,
       ExecutionProvider executionProvider,
       SessionEventPublisher events,
-      ScheduledExecutorService scheduler,
       Duration grace) {
     this.state = state;
     this.sessionContext = sessionContext;
     this.executionProvider = executionProvider;
     this.events = events;
-    this.scheduler = scheduler;
     this.grace = grace;
   }
 
   /**
-   * End the runtime, then seal the session's ending.
+   * End the runtime by one {@code stopGrace} deadline from now, then seal the session's ending.
    *
    * @param tools the session's tool dispatch, whose live calls are ended first
    * @return the {@link Error} the result settles with, or empty to settle it with its terminal
@@ -78,12 +71,21 @@ final class SessionTeardown {
 
   /**
    * End the runtime of a session whose provider accepted it, at start-up or after the session
-   * stopped waiting for it; in the latter case the runtime was already released, and releasing it
-   * again changes nothing. An exception {@code onSessionEnd} throws that the session's ending does
-   * not record is kept for {@link #endAndSeal}.
+   * stopped waiting for it, by one {@code stopGrace} deadline from now; in the latter case the
+   * runtime was already released, and releasing it again changes nothing.
    */
   void end(ToolDispatch tools) {
-    if (!settlesWithin(state.ending().cancel("session ended"))) {
+    end(tools, BoundedTask.deadlineAfter(grace));
+  }
+
+  /**
+   * End the runtime: every step runs, in order, and each waits only until {@code deadlineNanos}, a
+   * {@link System#nanoTime()} instant, so a step after one that used the deadline up is not waited
+   * for. An exception {@code onSessionEnd} throws that the session's ending does not record is kept
+   * for {@link #endAndSeal}.
+   */
+  void end(ToolDispatch tools, long deadlineNanos) {
+    if (!BoundedTask.settlesBy(state.ending().cancel("session ended"), deadlineNanos)) {
       LOGGER.warning(
           () ->
               "a callback of the cancellation of session "
@@ -91,7 +93,7 @@ final class SessionTeardown {
                   + " did not return within "
                   + grace);
     }
-    for (var call : tools.awaitLiveCalls(grace)) {
+    for (var call : tools.awaitLiveCalls(deadlineNanos)) {
       LOGGER.warning(
           () ->
               "tool '"
@@ -104,8 +106,12 @@ final class SessionTeardown {
                   + state.sessionId()
                   + " ended; its effects may land after the result settled");
     }
-    var sessionEnd = onSessionEnd();
-    if (!settlesWithin(sessionEnd)) {
+    var sessionEnd =
+        BoundedTask.start(
+            "helios-teardown-onSessionEnd-" + state.sessionId(),
+            this::onSessionEnd,
+            state.ending());
+    if (!sessionEnd.settlesBy(deadlineNanos)) {
       LOGGER.warning(
           () ->
               "onSessionEnd of "
@@ -118,53 +124,27 @@ final class SessionTeardown {
     release();
   }
 
-  /** Shut the scheduler down and close the event stream: what the session acquired first. */
+  /** End the event streams, never waiting for a reader: what the session acquired first. */
   void release() {
-    scheduler.shutdownNow();
     events.close();
   }
 
   /**
-   * Run {@code onSessionEnd} on a thread of its own, so one that never returns holds nothing up.
+   * Call {@code onSessionEnd}, logging and keeping an exception the session's ending does not
+   * record; an {@link Error} is the {@link BoundedTask}'s to record.
    */
-  private CompletableFuture<Void> onSessionEnd() {
-    var done = new CompletableFuture<Void>();
-    Thread.ofVirtual()
-        .name("helios-teardown-onSessionEnd-" + state.sessionId())
-        .start(
-            () -> {
-              try {
-                executionProvider.onSessionEnd(sessionContext);
-              } catch (Exception | Error e) {
-                if (!state.ending().failWith(e)) {
-                  LOGGER.log(
-                      Level.WARNING,
-                      "onSessionEnd threw — continuing shutdown",
-                      SerializedError.redactedForLog(e, sessionContext.secrets().redactor()));
-                  sessionEndFailure = (Exception) e;
-                }
-              } finally {
-                done.complete(null);
-              }
-            });
-    return done;
-  }
-
-  /**
-   * Wait up to the grace for {@code step}; an interrupt of the waiting thread ends the wait, its
-   * interrupt status kept.
-   *
-   * @return {@code true} if the step completed within the grace
-   */
-  private boolean settlesWithin(CompletableFuture<?> step) {
+  private Void onSessionEnd() {
     try {
-      step.get(grace.toNanos(), TimeUnit.NANOSECONDS);
-      return true;
-    } catch (ExecutionException | TimeoutException e) {
-      return false;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return false;
+      executionProvider.onSessionEnd(sessionContext);
+    } catch (Exception e) {
+      if (!state.ending().failWith(e)) {
+        LOGGER.log(
+            Level.WARNING,
+            "onSessionEnd threw — continuing shutdown",
+            SerializedError.redactedForLog(e, sessionContext.secrets().redactor()));
+        sessionEndFailure = e;
+      }
     }
+    return null;
   }
 }
