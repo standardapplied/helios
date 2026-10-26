@@ -113,7 +113,8 @@ final class BufferedEventStream implements EventStream {
 
   /**
    * Wait until an event is buffered or the stream has ended, then return the next event, removed
-   * from the buffer if {@code take}, or {@code null} at the end. An interrupt closes the stream.
+   * from the buffer if {@code take}, or {@code null} at the end. An interrupted reader closes the
+   * stream, even with events buffered.
    */
   private QueryEvent awaitHead(boolean take) {
     lock.lock();
@@ -121,11 +122,13 @@ final class BufferedEventStream implements EventStream {
       while (buffer.isEmpty() && !ended && !closed) {
         changed.await();
       }
-      if (take) {
-        changed.signalAll();
-        return buffer.poll();
+      if (!Thread.currentThread().isInterrupted()) {
+        if (take) {
+          changed.signalAll();
+          return buffer.poll();
+        }
+        return buffer.peek();
       }
-      return buffer.peek();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } finally {
