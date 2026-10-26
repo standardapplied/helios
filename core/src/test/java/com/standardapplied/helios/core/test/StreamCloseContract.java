@@ -174,7 +174,11 @@ public abstract class StreamCloseContract {
       return blocked;
     }
     assertEquals("Hello", Await.value("the first text", onItsOwnThread(() -> nextText(stream))));
-    return new BlockedRead(stream);
+    var blocked = new BlockedRead(stream);
+    Await.until(
+        "the read to wait for the next line",
+        () -> blocked.thread.getState() == Thread.State.TIMED_WAITING);
+    return blocked;
   }
 
   private void assertServesAnotherStream(Model model) {
