@@ -98,30 +98,29 @@ final class ToolRound {
     emitMutations(state, call, chain.mutations());
     var finalCall = chain.call();
     var hookName = chain.decision().firingHookName();
-    if (chain.decision().outcome() instanceof HookOutcome.Stop stop) {
-      effects.stop(state, hookName, PRE_TOOL_USE, stop);
-      return true;
-    }
-    var planned =
-        switch (chain.decision().outcome()) {
-          case HookOutcome.Block block -> {
-            emitter.emitHookFired(state, hookName, PRE_TOOL_USE, "Block");
-            yield block(state, finalCall, hookName, block.reason());
-          }
-          case HookOutcome.Inject inject -> {
-            effects.inject(state, hookName, PRE_TOOL_USE, inject);
-            yield new PlannedCall(
+    return switch (chain.decision().outcome()) {
+      case HookOutcome.Stop stop -> {
+        effects.stop(state, hookName, PRE_TOOL_USE, stop);
+        yield true;
+      }
+      case HookOutcome.Block block -> {
+        emitter.emitHookFired(state, hookName, PRE_TOOL_USE, "Block");
+        yield complete(state, block(state, finalCall, hookName, block.reason()), limits);
+      }
+      case HookOutcome.Inject inject -> {
+        effects.inject(state, hookName, PRE_TOOL_USE, inject);
+        yield complete(
+            state,
+            new PlannedCall(
                 finalCall,
                 ToolResult.rejected(hookName, "hook injected a user message"),
                 Map.of(),
-                ToolAuthorization.NOTHING_WITHHELD);
-          }
-          default -> authorize(state, finalCall);
-        };
-    var result =
-        planned.substitute() == null ? dispatch(state, planned, limits) : planned.substitute();
-    return afterTool(
-        state, planned.call(), emitRedacted(state, planned.call(), result, planned.redactions()));
+                ToolAuthorization.NOTHING_WITHHELD),
+            limits);
+      }
+      case HookOutcome.Continue _, HookOutcome.MutateArgs _ ->
+          complete(state, authorize(state, finalCall), limits);
+    };
   }
 
   /**
@@ -152,10 +151,11 @@ final class ToolRound {
    * QueryEvent.HookFired} and a {@link QueryEvent.ToolMutated} from the call as the hooks before
    * left it.
    */
-  private void emitMutations(SessionState state, ToolCall call, List<HookDecision> mutations) {
+  private void emitMutations(
+      SessionState state, ToolCall call, List<HookDecision<HookOutcome.MutateArgs>> mutations) {
     var before = call;
     for (var mutation : mutations) {
-      var args = ((HookOutcome.MutateArgs) mutation.outcome()).args();
+      var args = mutation.outcome().args();
       emitter.emitHookFired(state, mutation.firingHookName(), PRE_TOOL_USE, "MutateArgs");
       var shownBefore = RedactedArguments.of(before, collaborators.secrets());
       emitter.emit(
@@ -235,7 +235,15 @@ final class ToolRound {
     }
   }
 
-  private boolean afterTool(SessionState state, ToolCall call, ToolResult result) {
+  /**
+   * Run the planned call, or take its substitute, emit its redacted result and apply the {@code
+   * PostToolUse} hooks to it; returns {@code true} when a hook stopped the session.
+   */
+  private boolean complete(SessionState state, PlannedCall planned, SessionLimits limits) {
+    var call = planned.call();
+    var raw =
+        planned.substitute() == null ? dispatch(state, planned, limits) : planned.substitute();
+    var result = emitRedacted(state, call, raw, planned.redactions());
     var decision =
         collaborators.hooks().firePostToolUse(call, result, collaborators.hookContext(state));
     var hookName = decision.firingHookName();
@@ -250,7 +258,7 @@ final class ToolRound {
         state.setTerminal(StopClassifier.success(state, stop.result()));
         return true;
       }
-      default -> {}
+      case HookOutcome.Continue _ -> {}
     }
     append(state, call, kept);
     return false;

@@ -75,7 +75,7 @@ final class HookRegistryTest {
   private record NamedBy(Supplier<String> source) implements PreToolUseHook {
 
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return HookOutcome.cont();
     }
 
@@ -126,12 +126,12 @@ final class HookRegistryTest {
     private final AtomicInteger reads = new AtomicInteger();
 
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return HookOutcome.block("no");
     }
 
     @Override
-    public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+    public HookOutcome.PostToolUse afterTool(ToolCall call, ToolResult result, HookContext ctx) {
       return HookOutcome.mutateResult("x");
     }
 
@@ -328,7 +328,7 @@ final class HookRegistryTest {
     PreToolUseHook continueHook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             fired.add("continue");
             return HookOutcome.cont();
           }
@@ -341,7 +341,7 @@ final class HookRegistryTest {
     PreToolUseHook blockHook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             fired.add("block");
             return HookOutcome.block("nope");
           }
@@ -354,7 +354,7 @@ final class HookRegistryTest {
     PreToolUseHook neverFiresHook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             fired.add("after-block");
             return HookOutcome.cont();
           }
@@ -377,7 +377,7 @@ final class HookRegistryTest {
     PreToolUseHook later =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             fired.add("later");
             return HookOutcome.cont();
           }
@@ -390,7 +390,7 @@ final class HookRegistryTest {
     PreToolUseHook earlier =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             fired.add("earlier");
             return HookOutcome.cont();
           }
@@ -497,22 +497,6 @@ final class HookRegistryTest {
   }
 
   @Test
-  void aMutationVariantOfAnotherPhasePassesTheCallUnchanged() {
-    var seen = new ArrayList<ToolCall>();
-    PreToolUseHook wrongPhase = (call, ctx) -> HookOutcome.mutateText("ignored");
-    PreToolUseHook recording =
-        (call, ctx) -> {
-          seen.add(call);
-          return HookOutcome.cont();
-        };
-
-    var result = registry(List.of(wrongPhase, recording)).firePreToolUse(CALL, ctx());
-
-    assertEquals(List.of(CALL), seen);
-    assertEquals(new PreToolUseResult(CALL, List.of(), HookDecision.proceed()), result);
-  }
-
-  @Test
   void aBlockAfterAMutationEndsTheChainWithTheMutatedCall() {
     PreToolUseHook a = named("A", (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "a")));
     PreToolUseHook b = named("B", (call, ctx) -> HookOutcome.block("no"));
@@ -591,7 +575,7 @@ final class HookRegistryTest {
     PreToolUseHook hook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             throw failure;
           }
 
@@ -617,7 +601,8 @@ final class HookRegistryTest {
     PostToolUseHook hook =
         new PostToolUseHook() {
           @Override
-          public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+          public HookOutcome.PostToolUse afterTool(
+              ToolCall call, ToolResult result, HookContext ctx) {
             throw failure;
           }
 
@@ -640,7 +625,8 @@ final class HookRegistryTest {
     PostToolUseHook hook =
         new PostToolUseHook() {
           @Override
-          public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+          public HookOutcome.PostToolUse afterTool(
+              ToolCall call, ToolResult result, HookContext ctx) {
             return null;
           }
 
@@ -662,7 +648,7 @@ final class HookRegistryTest {
     PreToolUseHook hook =
         new PreToolUseHook() {
           @Override
-          public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+          public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
             return null;
           }
 

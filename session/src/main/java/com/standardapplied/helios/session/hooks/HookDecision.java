@@ -20,10 +20,12 @@ import java.util.Objects;
  * @param firingHookName the name of the hook whose non-Continue outcome won, or {@code null} if
  *     every hook returned {@link HookOutcome.Continue}
  * @param outcome the resolved outcome
+ * @param <O> the outcome type of the phase that decided
  */
-public record HookDecision(String firingHookName, HookOutcome outcome) {
+public record HookDecision<O extends HookOutcome>(String firingHookName, O outcome) {
 
-  private static final HookDecision PROCEED = new HookDecision(null, HookOutcome.cont());
+  private static final HookDecision<HookOutcome.Continue> PROCEED =
+      new HookDecision<>(null, HookOutcome.cont());
 
   /**
    * Canonical constructor.
@@ -48,12 +50,15 @@ public record HookDecision(String firingHookName, HookOutcome outcome) {
 
   /**
    * The shared "no hook decided anything" instance — used as the default return when every hook in
-   * the phase returned {@link HookOutcome.Continue}.
+   * the phase returned {@link HookOutcome.Continue}. Every phase type admits {@code Continue}, so
+   * the one instance serves them all.
    *
+   * @param <O> the phase's outcome type
    * @return the singleton proceed decision
    */
-  public static HookDecision proceed() {
-    return PROCEED;
+  @SuppressWarnings("unchecked")
+  public static <O extends HookOutcome> HookDecision<O> proceed() {
+    return (HookDecision<O>) PROCEED;
   }
 
   /**
@@ -61,16 +66,17 @@ public record HookDecision(String firingHookName, HookOutcome outcome) {
    *
    * @param firingHookName the firing hook's name; non-blank
    * @param outcome the non-Continue outcome; non-null
+   * @param <O> the phase's outcome type
    * @return a fresh decision
    * @throws NullPointerException if {@code outcome} is null
    * @throws IllegalArgumentException if {@code outcome} is {@link HookOutcome.Continue} (use {@link
    *     #proceed()} for that case), or {@code firingHookName} is null or blank
    */
-  public static HookDecision of(String firingHookName, HookOutcome outcome) {
+  public static <O extends HookOutcome> HookDecision<O> of(String firingHookName, O outcome) {
     if (outcome instanceof HookOutcome.Continue) {
       throw new IllegalArgumentException("use HookDecision.proceed() for Continue outcomes");
     }
-    return new HookDecision(firingHookName, outcome);
+    return new HookDecision<>(firingHookName, outcome);
   }
 
   /**

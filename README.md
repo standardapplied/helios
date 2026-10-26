@@ -336,6 +336,20 @@ The default `SummarizingCompactor` keeps the system prompt and the pending user 
 
 Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, turn compaction off with `ContextCompactor.disabled()` (it leaves the history unchanged, so a long session overflows and the provider's error ends it), or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
 
+To see the history on both sides of a compaction, wrap the default compactor; `QueryEvent.ContextEdited` carries the removed-block and token counts, and a `PreModelTurnHook` returning `Stop` ends the session after one:
+
+<!-- snippet: QuickStarts#archivingCompaction -->
+```java
+ContextCompactor archiving =
+    (history, context) -> {
+      archive.save(history);
+      var result = defaultCompactor.compact(history, context);
+      archive.saveCompacted(result.history());
+      return result;
+    };
+var options = SessionPresets.workspace(model, repo).withContextCompactor(archiving).build();
+```
+
 ## Resource Lifecycle
 
 `Model` is `AutoCloseable` and holds long-lived resources (HTTP connection pool, file descriptors). **Build it once at app startup, share across many sessions, close once at app shutdown.** The component that constructs a `Model` owns its lifecycle — a session does NOT close its `Model` because closing one model would break sibling sessions sharing it.

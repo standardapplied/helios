@@ -198,10 +198,11 @@ backing a filesystem memory store does not apply to it.
 
 ## Hooks
 
-Nine phase-specific hook surfaces — `OnUserMessageHook`, `PreModelTurnHook`,
-`PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `PreCompactHook`,
-`PostCompactHook`, `OnStreamEventHook` — each returning a `HookOutcome` (`Continue` /
-`MutateArgs` / `MutateHistory` / `MutateText` / `MutateResult` / `Block` / `Inject` / `Stop`).
+Seven phases: `OnUserMessage`, `PreModelTurn`, `PostModelTurn`, `PreToolUse`, `PostToolUse`,
+`PreStop` (each method returns its phase's outcome type, so the compiler lists what is legal) and
+the observe-only `OnStreamEvent`, the lossless tap. Hooks run by priority; the first
+non-`Continue` outcome wins. `PreToolUse` hooks chain `MutateArgs` and fail closed (throw or
+`null` = `Block`); other phases treat throw or `null` as `Continue`; an `Error` always escapes.
 Example: deny a tool call from a hook regardless of policy.
 
 <!-- snippet: QuickStarts#hooks -->
@@ -286,6 +287,8 @@ var session3 =
 For ad-hoc, hook-driven rewrites (no `ContextCompactor` subclass), register a
 `PreModelTurnHook` that returns `HookOutcome.mutateHistory(rewrittenHistory)`.
 The loop swaps the history and emits `HookFired` with `outcomeKind=MutateHistory`.
+To see the history on both sides of a compaction, wrap the default compactor and delegate to it,
+as the [root README](../README.md#context-compaction) shows.
 
 `SessionOptions.Builder.withTokenCounter(...)` swaps the estimator — wire a provider-specific
 tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.

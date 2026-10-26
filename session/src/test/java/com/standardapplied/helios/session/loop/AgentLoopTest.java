@@ -25,21 +25,15 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
-import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
-import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 final class AgentLoopTest {
@@ -842,7 +836,7 @@ final class AgentLoopTest {
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
     // Different list reference but same size — must still be treated as no-op so the loop
-    // doesn't fire ContextEdited or PostCompactHook.
+    // doesn't fire ContextEdited.
     ContextCompactor sameSize =
         (history, state) -> new CompactionResult(new ArrayList<>(history), Usage.of(0, 0), "");
     var result =
@@ -868,8 +862,6 @@ final class AgentLoopTest {
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
   }
 
-  // ── PreCompact / PostCompact hooks ───────────────────────────────────────
-
   private AgentLoop buildLoopWithHooks(
       Model model,
       SteeringQueue queue,
@@ -878,170 +870,5 @@ final class AgentLoopTest {
       HookRegistry hookRegistry) {
     return fixture.loop(
         fixture.collaborators(hookRegistry, dispatch, queue), model, counter, compactor);
-  }
-
-  /**
-   * Runs the loop over {@code messages} with {@code hook} registered, against a counter that puts
-   * every history at 96 tokens a message, so the 0.95 compaction trigger of a 100-token window
-   * fires and hands the history to {@code compactor}.
-   */
-  private ResultMessage runOverCompactionTrigger(
-      ContextCompactor compactor, Hook hook, String... messages) {
-    var queue = new SteeringQueue(8);
-    for (var message : messages) {
-      queue.offer(UserMessage.text(message));
-    }
-    TokenCounter trigger = msgs -> 96L * msgs.size();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    return buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            compactor,
-            new HookRegistry(List.of(hook), new SecretRegistry()))
-        .run(freshState(), limits);
-  }
-
-  private static ContextCompactor summarisingTo(String summary) {
-    return (history, state) ->
-        new CompactionResult(
-            List.of(Message.user("[Earlier context summary]\n" + summary)), Usage.of(0, 0), "");
-  }
-
-  @Test
-  void preCompactHookCanMutateHistoryHandedToCompactor() {
-    var compactorSawHistory = new AtomicReference<List<Message>>();
-    ContextCompactor capturing =
-        (history, state) -> {
-          compactorSawHistory.set(history);
-          return CompactionResult.noOp(history);
-        };
-    var replacement = List.<Message>of(Message.user("rewritten by hook"));
-    PreCompactHook mutator = (history, ctx) -> HookOutcome.mutateHistory(replacement);
-    runOverCompactionTrigger(capturing, mutator, "original");
-    var observed = compactorSawHistory.get();
-    assertEquals(1, observed.size(), "compactor must receive the rewritten history");
-    assertEquals("rewritten by hook", observed.get(0).content());
-    assertTrue(
-        events.stream()
-            .anyMatch(
-                e ->
-                    e instanceof QueryEvent.HookFired hf
-                        && "PreCompactHook".equals(hf.phase())
-                        && "MutateHistory".equals(hf.outcomeKind())),
-        "HookFired{PreCompactHook, MutateHistory} must be emitted");
-  }
-
-  @Test
-  void postCompactHookFiresWithBeforeAfterPayloadOnSuccessfulShrink() {
-    var payloadSeen = new AtomicReference<CompactionPayload>();
-    PostCompactHook observer =
-        (payload, ctx) -> {
-          payloadSeen.set(payload);
-          return HookOutcome.cont();
-        };
-    runOverCompactionTrigger(summarisingTo("the gist"), observer, "hi", "hi2");
-    var payload = payloadSeen.get();
-    assertTrue(payload != null, "PostCompactHook must fire on a real shrink");
-    assertTrue(payload.removedBlocks() > 0, "payload must report removed-block count");
-    assertEquals("the gist", payload.summary());
-  }
-
-  @Test
-  void postCompactHookNotFiredOnNoOpCompaction() {
-    ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
-    var fired = new AtomicInteger(0);
-    PostCompactHook observer =
-        (payload, ctx) -> {
-          fired.incrementAndGet();
-          return HookOutcome.cont();
-        };
-    runOverCompactionTrigger(noOp, observer, "hi");
-    assertEquals(0, fired.get(), "PostCompactHook must not fire when compactor returned no shrink");
-  }
-
-  @Test
-  void preCompactHookMutateHistoryWithEmptyListIsAccepted() {
-    var queue = new SteeringQueue(8);
-    queue.offer(UserMessage.text("u"));
-    TokenCounter trigger = msgs -> 96L * Math.max(msgs.size(), 1);
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    var observed = new ArrayList<List<Message>>();
-    ContextCompactor capturing =
-        (history, state) -> {
-          observed.add(history);
-          return CompactionResult.noOp(history);
-        };
-    PreCompactHook empty = (history, ctx) -> HookOutcome.mutateHistory(List.of());
-    var hookRegistry = new HookRegistry(List.of(empty), new SecretRegistry());
-    buildLoopWithHooks(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            trigger,
-            capturing,
-            hookRegistry)
-        .run(freshState(), limits);
-    assertTrue(!observed.isEmpty());
-    assertTrue(
-        observed.get(0).isEmpty(),
-        "compactor must receive the empty history when the hook supplies an empty list");
-  }
-
-  @Test
-  void preCompactHookUnsupportedOutcomesFallBackToContinue() {
-    // Block / Stop / Inject are not honored at this phase; assert each is logged + treated as
-    // Continue so the compactor still runs against the unmodified history.
-    var outcomes =
-        List.of(
-            HookOutcome.block("nope"),
-            HookOutcome.stop("would-stop"),
-            HookOutcome.inject("would-inject"));
-    for (var outcome : outcomes) {
-      var compactorInvoked = new AtomicInteger(0);
-      ContextCompactor capturing =
-          (history, state) -> {
-            compactorInvoked.incrementAndGet();
-            return CompactionResult.noOp(history);
-          };
-      PreCompactHook hook = (history, ctx) -> outcome;
-      runOverCompactionTrigger(capturing, hook, "hi");
-      assertTrue(
-          compactorInvoked.get() >= 1,
-          () ->
-              "compactor must still run when PreCompactHook returned unsupported outcome: "
-                  + outcome.getClass().getSimpleName());
-    }
-  }
-
-  @Test
-  void postCompactHookUnsupportedOutcomesFallBackToContinue() {
-    // Mutate / Block / Inject must NOT short-circuit the loop. ContextEdited still fires and the
-    // session terminates normally.
-    var outcomes =
-        List.of(
-            HookOutcome.mutateArgs(Map.of("ignored", "value")),
-            HookOutcome.block("nope"),
-            HookOutcome.inject("would-inject"));
-    for (var outcome : outcomes) {
-      PostCompactHook hook = (payload, ctx) -> outcome;
-      events.clear();
-      runOverCompactionTrigger(summarisingTo("short"), hook, "hi", "hi2");
-      assertTrue(
-          events.stream().anyMatch(e -> e instanceof QueryEvent.ContextEdited),
-          () ->
-              "ContextEdited must still fire when PostCompactHook returned unsupported outcome: "
-                  + outcome.getClass().getSimpleName());
-    }
-  }
-
-  @Test
-  void postCompactHookStopTerminatesSession() {
-    PostCompactHook stopper = (payload, ctx) -> HookOutcome.stop("post-compact veto");
-    var result = runOverCompactionTrigger(summarisingTo("short"), stopper, "hi", "hi2");
-    var success = assertInstanceOf(ResultMessage.Success.class, result);
-    assertEquals("post-compact veto", success.result());
-    assertTrue(
-        events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited),
-        "ContextEdited must not fire when PostCompactHook returned Stop");
   }
 }

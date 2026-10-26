@@ -21,11 +21,8 @@ import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
-import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
@@ -52,9 +49,8 @@ import org.junit.jupiter.api.Test;
  * Pins the complete observable behaviour of one scripted session that passes through every stage of
  * the loop: a steering message with an attachment, a pre-model-turn inject, a retried transient
  * stream failure, a tool round with mutate-args, block and post-tool mutate-result hooks, a
- * compaction with pre- and post-compact hooks, a schema self-correction and a pre-stop inject. The
- * same run then ends early by a wall-clock expiry, a cancellation and a hook that throws an {@link
- * Error}.
+ * compaction, a schema self-correction and a pre-stop inject. The same run then ends early by a
+ * wall-clock expiry, a cancellation and a hook that throws an {@link Error}.
  */
 class SessionRunCharacterizationTest {
 
@@ -65,12 +61,6 @@ class SessionRunCharacterizationTest {
   @Test
   void scriptedRunEmitsTheCompleteEventSequenceAndBuildsTheFinalHistory() {
     var run = new Run();
-    var postCompactPayload = new AtomicReference<CompactionPayload>();
-    run.postCompact =
-        (payload, ctx) -> {
-          postCompactPayload.set(payload);
-          return HookOutcome.cont();
-        };
 
     try (var session = run.start()) {
       var terminal = Await.value("the scripted run's terminal", session.result());
@@ -89,12 +79,7 @@ class SessionRunCharacterizationTest {
               .map(SessionRunCharacterizationTest::describe)
               .toList());
       assertEquals(5, run.model.calls().size());
-      var payload = postCompactPayload.get();
-      assertEquals(6, payload.historyBefore().size());
-      assertEquals(2, payload.historyAfter().size());
-      assertEquals(96L, payload.tokensBefore());
-      assertEquals(10L, payload.tokensAfter());
-      assertEquals(4, payload.removedBlocks());
+      assertEquals(5, run.compacted.get().size());
       assertShutDown(session);
     }
   }
@@ -183,8 +168,7 @@ class SessionRunCharacterizationTest {
           "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
           "TurnEnded turn=2 TOOL_CALLS",
           "ContextWarning turn=2 0.96",
-          "HookFired turn=2 SessionRunCharacterizationTest$Run PreCompactHook MutateHistory",
-          "ContextEdited turn=2 removed=4 96->10",
+          "ContextEdited turn=2 removed=3 96->10",
           "AssistantText turn=3 not json",
           "TurnEnded turn=3 TOOL_CALLS",
           "UserMessageReceived turn=3 Your structured output did not match the schema. Fix the listed fields and re-emit the structured output:\\n  - answer is required but missing\\n files=0",
@@ -199,7 +183,7 @@ class SessionRunCharacterizationTest {
   private static final List<String> EXPECTED_FINAL_MODEL_INPUT =
       List.of(
           "USER content=start toolCalls=[] toolCallId=null files=1",
-          "USER content=pre-compact note toolCalls=[] toolCallId=null files=0",
+          "USER content=compacted toolCalls=[] toolCallId=null files=0",
           "ASSISTANT content=not json toolCalls=[] toolCallId=null files=0",
           "USER content=Your structured output did not match the schema. Fix the listed fields and re-emit the structured output:\\n  - answer is required but missing\\n toolCalls=[] toolCallId=null files=0",
           "ASSISTANT content={\"answer\":\"draft\"} toolCalls=[] toolCallId=null files=0",
@@ -238,7 +222,7 @@ class SessionRunCharacterizationTest {
             call.id().equals("c1")
                 ? HookOutcome.mutateResult("post-mutated: " + result.output())
                 : HookOutcome.cont();
-    PostCompactHook postCompact = (payload, ctx) -> HookOutcome.cont();
+    final AtomicReference<List<Message>> compacted = new AtomicReference<>();
 
     SessionLimits.Builder limits() {
       if (limits == null) {
@@ -257,12 +241,6 @@ class SessionRunCharacterizationTest {
               call.id().equals("c1")
                   ? HookOutcome.mutateArgs(Map.of("v", "mutated"))
                   : HookOutcome.block("not allowed");
-      PreCompactHook preCompact =
-          (history, ctx) -> {
-            var mutated = new ArrayList<>(history);
-            mutated.add(Message.user("pre-compact note"));
-            return HookOutcome.mutateHistory(mutated);
-          };
       PreStopHook preStop =
           (response, ctx) ->
               preStopFired.compareAndSet(false, true)
@@ -271,11 +249,13 @@ class SessionRunCharacterizationTest {
       TokenCounter counter =
           messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L;
       ContextCompactor compactor =
-          (history, state) ->
-              new CompactionResult(
-                  List.of(history.getFirst(), history.getLast()),
-                  Usage.of(3, 4),
-                  "compactor-model");
+          (history, state) -> {
+            compacted.set(history);
+            return new CompactionResult(
+                List.of(history.getFirst(), Message.user("compacted")),
+                Usage.of(3, 4),
+                "compactor-model");
+          };
       InstantSource clock = now::get;
       var script = ScriptedModel.newBuilder();
       replies.forEach(script::withStreamTurn);
@@ -297,8 +277,6 @@ class SessionRunCharacterizationTest {
                   .withHook(preModelTurn)
                   .withHook(preToolUse)
                   .withHook(postToolUse)
-                  .withHook(preCompact)
-                  .withHook(postCompact)
                   .withHook(preStop)
                   .build());
       session.events().subscribe(events);

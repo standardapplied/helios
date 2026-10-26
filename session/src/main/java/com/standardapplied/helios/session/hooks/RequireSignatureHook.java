@@ -125,7 +125,7 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
   }
 
   @Override
-  public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+  public HookOutcome.PostToolUse afterTool(ToolCall call, ToolResult result, HookContext ctx) {
     Objects.requireNonNull(call, "call must not be null");
     for (var sig : signatures) {
       if (observed.contains(sig.name())) {
@@ -144,7 +144,7 @@ public final class RequireSignatureHook implements PostToolUseHook, PreStopHook 
   }
 
   @Override
-  public HookOutcome beforeStop(Response<?> stopResponse, HookContext ctx) {
+  public HookOutcome.PreStop beforeStop(Response<?> stopResponse, HookContext ctx) {
     var unmet = new ArrayList<Signature>(signatures.size());
     for (var sig : signatures) {
       if (!observed.contains(sig.name())) {

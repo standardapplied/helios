@@ -11,14 +11,12 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
-import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -41,14 +39,14 @@ final class CompactingSession {
    */
   static final String THINKING_BLOCKS_KEY = "anthropic.thinkingBlocks";
 
-  /** What one run produced: its terminal, its events and the compaction it made, if any. */
+  /** What one run produced: its terminal, its events and the history it compacted, if any. */
   record Run(
-      ResultMessage terminal, CollectingSubscriber events, Optional<CompactionPayload> compaction) {
+      ResultMessage terminal, CollectingSubscriber events, Optional<List<Message>> compacted) {
 
     /** Whether the first assistant turn of the compacted history held a signed thinking block. */
     boolean compactedASignedThinkingTurn() {
-      return compaction.stream()
-          .flatMap(payload -> payload.historyBefore().stream())
+      return compacted.stream()
+          .flatMap(List::stream)
           .filter(message -> message.role() == Role.ASSISTANT)
           .findFirst()
           .map(message -> message.metadata().containsKey(THINKING_BLOCKS_KEY))
@@ -60,11 +58,15 @@ final class CompactingSession {
 
   /** Run the session over {@code model} to its terminal. */
   static Run run(Model model) {
-    var compaction = new AtomicReference<CompactionPayload>();
-    PostCompactHook record =
-        (payload, ctx) -> {
-          compaction.set(payload);
-          return HookOutcome.cont();
+    var compacted = new AtomicReference<List<Message>>();
+    var defaultCompactor = SummarizingCompactor.newBuilder(model).build();
+    ContextCompactor recording =
+        (history, context) -> {
+          var result = defaultCompactor.compact(history, context);
+          if (result.history().size() < history.size()) {
+            compacted.set(history);
+          }
+          return result;
         };
     var options =
         SessionOptions.newBuilder()
@@ -75,7 +77,7 @@ final class CompactingSession {
             .withTokenCounter(CompactingSession::tokens)
             .withLimits(
                 SessionLimits.newBuilder().withMaxContextTokens(100L).withMaxTurns(2).build())
-            .withHook(record)
+            .withContextCompactor(recording)
             .build();
     try (var session = AgentSession.create(options)) {
       var events = new CollectingSubscriber(QuestionAnswers.selecting(session, "Deny"));
@@ -87,7 +89,7 @@ final class CompactingSession {
                       + " id, look that member up with get_profile, then tell me in one sentence"
                       + " who they are."));
       events.awaitDone();
-      return new Run(terminal, events, Optional.ofNullable(compaction.get()));
+      return new Run(terminal, events, Optional.ofNullable(compacted.get()));
     }
   }
 

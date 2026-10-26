@@ -26,11 +26,6 @@ import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
-import com.standardapplied.helios.session.hooks.CompactionPayload;
-import com.standardapplied.helios.session.hooks.Hook;
-import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.PostCompactHook;
-import com.standardapplied.helios.session.hooks.PreCompactHook;
 import com.standardapplied.helios.session.test.CollectingSubscriber;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolRegistry;
@@ -40,8 +35,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -121,7 +114,7 @@ final class CompactionIntegrationTest {
 
   @Test
   void compactedHistoryIsAcceptedByProvider(@TempDir Path tmp) throws Exception {
-    var run = runNotesTask(tmp, List.of());
+    var run = runNotesTask(tmp);
     var events = run.events();
 
     assertFalse(
@@ -156,68 +149,13 @@ final class CompactionIntegrationTest {
                 + providerErrors.size());
   }
 
-  @Test
-  void preAndPostCompactHooksFireAgainstRealProvider(@TempDir Path tmp) throws Exception {
-    var preCompactFires = new AtomicInteger(0);
-    var preCompactSawSize = new AtomicInteger(0);
-    PreCompactHook preHook =
-        (history, ctx) -> {
-          preCompactFires.incrementAndGet();
-          preCompactSawSize.set(history.size());
-          return HookOutcome.cont();
-        };
-
-    var postCompactPayload = new AtomicReference<CompactionPayload>();
-    var postCompactFires = new AtomicInteger(0);
-    PostCompactHook postHook =
-        (payload, ctx) -> {
-          postCompactFires.incrementAndGet();
-          postCompactPayload.set(payload);
-          return HookOutcome.cont();
-        };
-
-    var run = runNotesTask(tmp, List.of(preHook, postHook));
-    var result = run.result();
-
-    assertTrue(
-        result instanceof ResultMessage.Success || result instanceof ResultMessage.ErrorMaxTurns,
-        () -> "session must reach a clean terminal, got: " + result);
-
-    assertTrue(
-        preCompactFires.get() >= 1,
-        () -> "PreCompactHook must fire on every compactor invocation, got " + preCompactFires);
-    assertTrue(
-        preCompactSawSize.get() >= 3,
-        () ->
-            "PreCompactHook receives the pre-compaction history; with 3+ tool round-trips it"
-                + " should see at least 3 messages, got "
-                + preCompactSawSize);
-
-    assertTrue(
-        postCompactFires.get() >= 1,
-        () ->
-            "PostCompactHook must fire on every successful shrink. Either compaction never"
-                + " produced a real shrink or the wiring is broken. Fires: "
-                + postCompactFires
-                + ", events: "
-                + summariseEventKinds(run.events().events()));
-    var payload = postCompactPayload.get();
-    assertTrue(payload != null, "PostCompactHook must have received a payload");
-    assertTrue(
-        payload.removedBlocks() > 0,
-        () -> "PostCompactHook payload must report removed blocks, got " + payload);
-    assertTrue(
-        payload.historyAfter().size() < payload.historyBefore().size(),
-        "PostCompactHook payload must reflect a real shrink");
-  }
-
   private record Run(ResultMessage result, CollectingSubscriber events) {}
 
   /**
-   * Run {@link #NOTES_TASK} over a seeded workspace with {@code hooks} installed and a compactor
-   * that fires mid-run: each tool round adds two messages, and three messages cross the watermark.
+   * Run {@link #NOTES_TASK} over a seeded workspace with a compactor that fires mid-run: each tool
+   * round adds two messages, and three messages cross the watermark.
    */
-  private static Run runNotesTask(Path tmp, List<Hook> hooks) throws IOException {
+  private static Run runNotesTask(Path tmp) throws IOException {
     seedFiles(tmp);
     var ws = WorkspaceRoot.of(tmp);
     var tools =
@@ -240,7 +178,6 @@ final class CompactionIntegrationTest {
             .withTools(tools)
             .withTokenCounter(history -> 100L * history.size())
             .withContextCompactor(compactor)
-            .withHooks(hooks)
             .withLimits(limits)
             .build();
 

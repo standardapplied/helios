@@ -39,7 +39,7 @@ final class HookNamesSessionTest {
   private record NamedBy(Supplier<String> source) implements PreToolUseHook {
 
     @Override
-    public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+    public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
       return HookOutcome.block("no");
     }
 
@@ -98,7 +98,7 @@ final class HookNamesSessionTest {
         run(
             new PreToolUseHook() {
               @Override
-              public HookOutcome beforeTool(ToolCall call, HookContext ctx) {
+              public HookOutcome.PreToolUse beforeTool(ToolCall call, HookContext ctx) {
                 return HookOutcome.block("no");
               }
             });
@@ -115,7 +115,8 @@ final class HookNamesSessionTest {
         run(
             new PostToolUseHook() {
               @Override
-              public HookOutcome afterTool(ToolCall call, ToolResult result, HookContext ctx) {
+              public HookOutcome.PostToolUse afterTool(
+                  ToolCall call, ToolResult result, HookContext ctx) {
                 return HookOutcome.mutateResult("x");
               }
             });
