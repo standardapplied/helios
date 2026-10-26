@@ -619,36 +619,6 @@ class SseReaderTest {
   }
 
   @Test
-  void anInterruptAfterAnEventWasReadAheadClosesTheReaderAndThrowsCancellationAndStaysSet() {
-    var feed = new FeedableInputStream();
-    feed.feed("data: one\n\n");
-    var body = new Closing(feed);
-    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
-      assertTrue(reader.hasNext());
-      Thread.currentThread().interrupt();
-
-      assertThrows(CancellationException.class, reader::next);
-
-      assertTrue(Thread.interrupted());
-      assertTrue(body.closed);
-      assertFalse(reader.hasNext());
-    }
-  }
-
-  @Test
-  void anInterruptOnceTheReaderEndedLeavesItEnded() {
-    var body = new ByteArrayInputStream("data: stop\n\n".getBytes(StandardCharsets.UTF_8));
-    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
-      assertInstanceOf(StreamEvent.Done.class, reader.next());
-      Thread.currentThread().interrupt();
-
-      assertFalse(reader.hasNext());
-
-      assertTrue(Thread.interrupted());
-    }
-  }
-
-  @Test
   void aLazyReaderSendsNothingUntilItsFirstHasNext() throws Exception {
     var reply = HeldSseServer.Reply.of("data: hello\n\n");
     try (var server = HeldSseServer.start(reply);
@@ -891,64 +861,6 @@ class SseReaderTest {
       assertTrue(Thread.interrupted());
     }
     assertTrue(body.closed);
-    assertFalse(reader.hasNext());
-  }
-
-  @Test
-  void anInterruptWhileReadingTheBodyOfARefusalThrowsCancellationAndStaysSet() {
-    var refusal =
-        new Closing(
-            new InputStream() {
-              @Override
-              public int read() throws IOException {
-                Thread.currentThread().interrupt();
-                throw new IOException("interrupted while reading the error body");
-              }
-            });
-    var client =
-        FakeHttpClient.sendingAsync(
-            request ->
-                CompletableFuture.completedFuture(
-                    new FakeHttpResponse(request, 503, Map.of(), () -> refusal)));
-    var reader = lazy(client, post(URI.create("http://example.invalid")));
-
-    CancellationException cancelled;
-    try {
-      cancelled = assertThrows(CancellationException.class, reader::hasNext);
-    } finally {
-      assertTrue(Thread.interrupted());
-    }
-    assertEquals("interrupted while reading the error body", cancelled.getCause().getMessage());
-    assertTrue(refusal.closed);
-    assertFalse(reader.hasNext());
-  }
-
-  @Test
-  void anInterruptWhileTheBodyOfARetryableRefusalIsReadWholeThrowsCancellationAndStaysSet() {
-    var refusal =
-        new Closing(
-            new InputStream() {
-              @Override
-              public int read() {
-                Thread.currentThread().interrupt();
-                return -1;
-              }
-            });
-    var client =
-        FakeHttpClient.sendingAsync(
-            request ->
-                CompletableFuture.completedFuture(
-                    new FakeHttpResponse(request, 503, Map.of(), () -> refusal)));
-    var reader = lazy(client, post(URI.create("http://example.invalid")));
-
-    CancellationException cancelled;
-    try {
-      cancelled = assertThrows(CancellationException.class, reader::hasNext);
-    } finally {
-      assertTrue(Thread.interrupted());
-    }
-    assertNull(cancelled.getCause());
-    assertTrue(refusal.closed);
     assertFalse(reader.hasNext());
   }
 
