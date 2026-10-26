@@ -146,13 +146,10 @@ final class ModelCall {
   }
 
   /**
-   * Reads {@code stream} on a virtual thread of its own while this thread waits for the turn. When
-   * the session is cancelled the turn ends and the stream is closed; when this thread is
-   * interrupted the same, with the interrupt kept. Either close runs on a thread of its own, so a
-   * close that blocks holds up nothing. Once the turn ended the reader, which closes the stream as
-   * it ends, is waited for at most {@link SessionLimits#stopGrace()}, so what its close throws is
-   * recorded before the turn's outcome is acted on; one still running then is logged and left
-   * behind.
+   * Reads {@code stream} on a virtual thread of its own while this thread waits for the turn. The
+   * reader, which closes the stream as it ends, is then waited for at most {@link
+   * SessionLimits#stopGrace()}, so what its close throws is recorded before the turn's outcome is
+   * acted on.
    */
   private TurnOutcome read(
       SessionState state,
