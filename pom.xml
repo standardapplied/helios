@@ -157,7 +157,7 @@
             </plugin>
             <plugin>
                 <!--
-                  Quality gate, documented in CLAUDE.md. `check` and `aggregate-cpd-check` fork
+                  Quality gate, documented in AGENTS.md. `check` and `aggregate-cpd-check` fork
                   their own main-code analysis that reads only this plugin-level configuration,
                   so the main rule set, the PMD exclusions and the shared settings live here; the
                   test-code PMD analysis and the main-and-test CPD analysis are the explicit
@@ -265,7 +265,7 @@
             </plugin>
             <plugin>
                 <!--
-                  Dependency inventory, documented in CLAUDE.md, "Supply-chain gate". Two
+                  Dependency inventory, documented in AGENTS.md, "Supply-chain gate". Two
                   aggregate CycloneDX files at the reactor root: helios-runtime holds what the
                   deployed modules ship (compile and runtime scope), helios-build adds test scope
                   and the undeployed architecture and example modules, so a component only in
