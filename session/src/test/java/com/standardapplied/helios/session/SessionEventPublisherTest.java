@@ -256,6 +256,24 @@ final class SessionEventPublisherTest {
   }
 
   @Test
+  void anInterruptedReaderStopsWithEventsBufferedKeepsTheInterruptAndDetachesTheStream() {
+    try (var session = (AgentSessionImpl) session()) {
+      var stream = session.events();
+      emit(session.lifecycle.events(), TEXT);
+
+      var read =
+          call(
+              () -> {
+                Thread.currentThread().interrupt();
+                return List.of(stream.iterator().hasNext(), Thread.currentThread().isInterrupted());
+              });
+
+      assertEquals(List.of(false, true), read);
+      assertEquals(0, session.lifecycle.events().openStreams());
+    }
+  }
+
+  @Test
   void closeTwiceDoesNothingMore() {
     var publisher = new SessionEventPublisher(SID);
     var stream = publisher.open();
