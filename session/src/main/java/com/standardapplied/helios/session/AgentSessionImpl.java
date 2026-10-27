@@ -14,7 +14,9 @@ import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.loop.AgentLoop;
+import com.standardapplied.helios.session.loop.SessionJson;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StoredHistory;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -24,11 +26,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Concrete {@link AgentSession} implementation.
  *
  * <p>One instance per session. Builds the session's own {@link SessionState} (its history, its
- * token and its ending), the {@link SteeringQueue} and the {@link SessionLifecycle} in the
- * constructor, the loop through {@link SessionWiring}, and notifies the execution provider last.
- * The lifecycle's {@link SessionRuns} run one run at a time, each on a virtual thread of its own
- * with a {@link SessionState} of its own sharing the session's history. Open questions are its
- * {@link PendingQuestions}, each of which belongs to the run that asked it.
+ * token and its ending), loads the stored conversation into the history when the options name a
+ * store ({@link StoredHistory}), and builds the {@link SteeringQueue} and the {@link
+ * SessionLifecycle} in the constructor, the loop through {@link SessionWiring}, and notifies the
+ * execution provider last. The lifecycle's {@link SessionRuns} run one run at a time, each on a
+ * virtual thread of its own with a {@link SessionState} of its own sharing the session's history.
+ * Open questions are its {@link PendingQuestions}, each of which belongs to the run that asked it.
  *
  * <h2>Event delivery</h2>
  *
@@ -63,6 +66,8 @@ public final class AgentSessionImpl implements AgentSession {
    * @param options the configuration bundle; non-null
    * @throws NullPointerException if {@code options} is null
    * @throws SessionUnavailableException if the execution provider did not accept the session
+   * @throws com.standardapplied.helios.session.store.SessionStoreException if the store cannot load
+   *     the session; nothing was acquired
    */
   AgentSessionImpl(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
@@ -73,12 +78,22 @@ public final class AgentSessionImpl implements AgentSession {
     var cancellation = new CancellationToken();
     var state = new SessionState(sessionId, cancellation, clock);
     options.systemPrompt().ifPresent(prompt -> state.history().append(Message.system(prompt)));
+    var storedHistory =
+        options
+            .store()
+            .map(store -> StoredHistory.open(store, state))
+            .orElseGet(StoredHistory::none);
     var sessionContext =
         new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
     var steeringQueue = new SteeringQueue(options.maxQueuedUserMessages());
     this.lifecycle =
         new SessionLifecycle(
-            state, sessionContext, options.executionProvider(), options.limits(), steeringQueue);
+            state,
+            sessionContext,
+            options.executionProvider(),
+            options.limits(),
+            steeringQueue,
+            storedHistory);
     this.events = lifecycle.events();
     this.runs = lifecycle.runs();
     this.pendingQuestions = new PendingQuestions(Run::stateOfThisThread, events, clock);
@@ -86,7 +101,13 @@ public final class AgentSessionImpl implements AgentSession {
     try {
       loop =
           SessionWiring.agentLoop(
-              options, sessionContext, pendingQuestions, steeringQueue, events, state.ending());
+              options,
+              sessionContext,
+              pendingQuestions,
+              steeringQueue,
+              events,
+              state.ending(),
+              storedHistory);
     } catch (RuntimeException | Error e) {
       lifecycle.abandon();
       throw e;
@@ -131,7 +152,7 @@ public final class AgentSessionImpl implements AgentSession {
               + schema.type().getSimpleName());
     }
     return StructuredContentParser.parse(
-        success.result(), schema, SessionJson.STRUCTURED, rawOutputCapturePolicy);
+        success.result(), schema, SessionJson.BINDING, rawOutputCapturePolicy);
   }
 
   @Override

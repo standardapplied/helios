@@ -32,5 +32,6 @@ module com.standardapplied.helios.session {
   exports com.standardapplied.helios.session.hooks;
   exports com.standardapplied.helios.session.memory;
   exports com.standardapplied.helios.session.permissions;
+  exports com.standardapplied.helios.session.store;
   exports com.standardapplied.helios.session.tools;
 }

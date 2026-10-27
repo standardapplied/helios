@@ -79,7 +79,12 @@ final class LoopStagesTest {
             (modelId, usage) -> CostEstimate.ofMicroUsd(modelId.equals("summary") ? 7 : 1),
             null);
     return new AgentLoop(
-        collaborators, runner, new StopClassifier(new SecretRegistry()), counter, compactor);
+        collaborators,
+        runner,
+        new StopClassifier(new SecretRegistry()),
+        counter,
+        compactor,
+        StoredHistory.none());
   }
 
   private AgentLoop loop(Model model, Hook... hooks) {

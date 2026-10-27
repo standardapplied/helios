@@ -49,7 +49,10 @@ import java.util.concurrent.CompletableFuture;
 public interface AgentSession extends AutoCloseable {
 
   /**
-   * Open a session from the given options. For a session with an execution provider ({@code
+   * Open a session from the given options. With a store ({@code SessionOptions.Builder#withStore}),
+   * this is get-or-create: the conversation stored under the session id is loaded after the
+   * options' system prompt, before anything else starts, or the conversation starts empty when the
+   * store has none. For a session with an execution provider ({@code
    * SessionOptions.Builder#withExecutionProvider}), its {@code onSessionStart} runs before this
    * returns, within {@link SessionLimits#startTimeout()}. The session has no run until the first
    * {@link #send}.
@@ -59,6 +62,8 @@ public interface AgentSession extends AutoCloseable {
    * @throws NullPointerException if {@code options} is null
    * @throws SessionUnavailableException if the execution provider refused, returned {@code null},
    *     threw an {@link Exception} or did not return in time; nothing stays acquired
+   * @throws com.standardapplied.helios.session.store.SessionStoreException if the store cannot load
+   *     the session; nothing was acquired
    * @throws Error an {@link Error} {@code onSessionStart} threw, as itself
    */
   static AgentSession open(SessionOptions options) {
@@ -88,7 +93,8 @@ public interface AgentSession extends AutoCloseable {
    * @param message the message; non-null
    * @return the future of the run the message is part of
    * @throws NullPointerException if {@code message} is null
-   * @throws IllegalStateException if the session is closed, or a host {@link Error} failed it
+   * @throws IllegalStateException if the session is closed, its store refused a write, or a host
+   *     {@link Error} failed it
    * @throws SteeringQueueFullException if the steering queue is full; the message is not queued
    */
   CompletableFuture<ResultMessage> send(UserMessage message);
