@@ -155,23 +155,22 @@ public interface AgentSession extends AutoCloseable {
    * cooperatively and runs the teardown below on its own thread, and {@link #result()} completes
    * after that, which may be after this returns. For a session whose loop never started, this call
    * runs the teardown itself, on the caller's thread, and returns once {@link #result()} completed,
-   * with {@link ResultMessage.Cancelled} unless a host {@link Error} failed it: each of the
-   * teardown's waits below can hold the caller up to {@link SessionLimits#stopGrace()}, and an
-   * interrupt of the caller ends those waits early, its interrupt status kept. A session whose
-   * provider did not accept it at start completed its result then, and this call only cancels its
-   * token.
+   * with {@link ResultMessage.Cancelled} unless a host {@link Error} failed it: the teardown below
+   * can hold the caller up to {@link SessionLimits#stopGrace()}, and an interrupt of the caller
+   * ends its waits early, its interrupt status kept. A session whose provider did not accept it at
+   * start completed its result then, and this call only cancels its token.
    *
-   * <p>The teardown runs on every end, a natural one included: it cancels the session's token,
-   * which cancels and interrupts every tool call still running, and waits {@link
-   * SessionLimits#stopGrace()} for the token's callbacks and then up to that grace for the tool
-   * calls to end; then it calls {@link
+   * <p>The teardown runs on every end, a natural one included, and all its waits share one
+   * deadline, {@link SessionLimits#stopGrace()} from its start: it cancels the session's token,
+   * which cancels and interrupts every tool call still running, and waits until the deadline for
+   * the token's callbacks and the tool calls to end; then it calls {@link
    * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} on a thread of its
-   * own and waits the same grace for it to return; then it shuts the session's scheduler down and
-   * ends the event streams, without waiting for their readers, and the result completes. A
-   * callback, tool call or {@code onSessionEnd} still running when its grace has passed is logged
-   * and left running: a tool that ignores both its token and interruption may still run, and its
-   * effects land, after the result settles. An {@link Error} such a tool throws then is logged; the
-   * result does not change.
+   * own and waits until the same deadline for it to return; then it ends the event streams, without
+   * waiting for their readers, and the result completes. A step after one that used the deadline up
+   * still runs but is not waited for. A callback, tool call or {@code onSessionEnd} still running
+   * at the deadline is logged and left running: a tool that ignores both its token and interruption
+   * may still run, and its effects land, after the result settles. An {@link Error} such a tool
+   * throws then is logged; the result does not change.
    */
   @Override
   void close();

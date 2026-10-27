@@ -449,7 +449,7 @@ interrupts every call still running.
 | `ToolDispatch(sessionContext, registry, limits)`, `dispatch(call, cancellation, timeout)`; an `Error` thrown by a tool came back as a `Threw` result | `ToolDispatch(sessionContext, registry, ending)`, where `ending` is the session's `SessionState.ending()`; `dispatch(call, cancellation, timeout, stopGrace, withheld)`, whose caller waits for its one deadline itself. A tool's `Error` is rethrown from `dispatch` as the same instance |
 | `ToolOutcome.Rejected(by, reason)` came only from a hook | Also from the dispatcher: a call refused while an earlier call runs on after its caller stopped waiting is `Rejected("ToolDispatch", "tool '<name>' did not stop; no tool runs until it ends")`, text `blocked by ToolDispatch: tool '<name>' did not stop; no tool runs until it ends` |
 | A tool executor that returned `null` ended the session with `ErrorDuringExecution` (`NullPointerException` in the tool round) | `Threw("java.lang.NullPointerException")`, text `tool '<name>' threw: executor returned null`, and the session goes on. `ToolExecutor.execute` documents its result as non-null |
-| A `ScheduledExecutorService` deadline cancelled by the session (a stream-idle re-arm) stayed queued until its delay passed | the session's scheduler removes a cancelled deadline at once |
+| A `ScheduledExecutorService` deadline cancelled by the session (a stream-idle re-arm) stayed queued until its delay passed | the session holds no scheduler: its wall clock is a virtual thread that ends with the session |
 | A tool that ignored its token and interruption ran on past its timeout while later calls ran beside it, any number at a time | While such a call runs on, `stopGrace` past its deadline or after its caller stopped waiting, every later call of the session, of any category, is `Rejected` until it ends: a `READ` or `SEARCH` tool that never stops now blocks the rest of the session's tool calls |
 
 **`ConcurrencyLimits` is removed; the steering queue's capacity is a `SessionOptions` component.**
@@ -475,11 +475,11 @@ decides. A thread the session does not own (a model publisher's worker after its
 outside the sink: its `Error` reaches that thread's uncaught-exception handler. Every end of a
 session, a natural one included, then runs one teardown in the reverse order of what the session
 acquired: it cancels the session, which cancels and interrupts every tool call still running, and
-waits for those calls to end; it calls `onSessionEnd` and waits for it to return; it shuts the
-scheduler down and waits for event subscribers to drain. Each wait is bounded by the new
-`SessionLimits.stopGrace` (default 5 s, `Builder.withStopGrace`), the same grace a timed-out tool
-call is given to stop. A tool call or
-`onSessionEnd` still running when its wait ends is logged as a `WARNING` on the `AgentSessionImpl`
+waits for those calls to end; it calls `onSessionEnd` and waits for it to return; it ends the
+event streams without waiting for their readers. The waits share one deadline, the new
+`SessionLimits.stopGrace` (default 5 s, `Builder.withStopGrace`) from the teardown's start, the same
+grace a timed-out tool call is given to stop. A tool call or
+`onSessionEnd` still running at the deadline is logged as a `WARNING` on the `AgentSessionImpl`
 logger and left running, never treated as ended: a tool that ignores both its token and interruption
 may still run, and its effects land, after the result settles.
 
@@ -488,7 +488,7 @@ may still run, and its effects land, after the result settles.
 | An `Error` thrown by the model became a `FinishReason.ERROR` turn and an `ErrorDuringExecution` terminal; a tool's became a `ToolOutcome.Threw` result and the turn went on; one from a `FaultTolerance` timed operation was wrapped in a `RuntimeException`; one from the compaction summary call was wrapped and the compaction skipped; one the execution provider's future failed with became an `Execute: provider failed` tool result | Each is recorded as above and fails `result()` as the same instance: `dispatch` (even once the session it ended was cancelled), `FaultTolerance`, the compaction and `ExecuteTool` rethrow it as itself, and a model turn that ends with one rethrows it, so a model's `Error` leaves the loop as a tool's or a hook's does, with no `LoopEnded` event. An `Error` that `onSessionStart`, `onSessionEnd`, the model stream, a context compactor, the token counter or the compaction summary call throws as the cause of a `CompletionException` or `ExecutionException`, as `join` or `get` on a failed future does, counts as that `Error` (`SessionEnding.failWith`). An `Error` a `BlockingModel` call throws after its stream was closed reaches the stream's reader, which records it too. `ErrorDuringExecution` and `Threw` come only from an `Exception`; a hook's, a tool's or a cancellation callback's `CompletionException` stays one even when it carries an `Error` |
 | An `Error` from `onSessionEnd` was thrown on the loop thread, or from `close()` for a session never started, while `result()` completed with the terminal; a teardown step that threw skipped the steps after it | `result()` fails with the error, after every step has run; `close()` never throws. Any other exception of `onSessionEnd` is still only logged, and rides on a recorded `Error` as suppressed |
 | `onSessionEnd` ran on the loop thread with no bound, and nothing waited for tool calls still running; a run that ended on its own left the session's token uncancelled | the teardown above |
-| `onSessionStart` ran on the creating thread, before the rest of the session was built and with no bound, so a provider that never returned kept `AgentSession.create` from returning; a `null` outcome threw `NullPointerException` from `AgentSession.create`, and so did an `Error`; a refused start kept its event executor and scheduler until `close()` | `onSessionStart` is the last step of construction and runs on a thread of its own, waited for `SessionLimits.startTimeout` (default 60 s, `Builder.withStartTimeout`). A `null` outcome is a refusal (`ErrorProviderUnavailable`, reason `onSessionStart returned null`), and so is a start that has not returned by the timeout or when the creating thread is interrupted (`onSessionStart did not return within <timeout>`, `interrupted while waiting for onSessionStart`); an `Error` fails `result()`. Either way, and on a refusal, the event executor and scheduler are released before the result settles, `onSessionEnd` is never called and `isStarted()` is `true`. What the provider does after the session stopped waiting is logged; a late acceptance is ended by the session's teardown: its token is cancelled and `onSessionEnd` is waited for within `stopGrace`, and reported if it does not return |
+| `onSessionStart` ran on the creating thread, before the rest of the session was built and with no bound, so a provider that never returned kept `AgentSession.create` from returning; a `null` outcome threw `NullPointerException` from `AgentSession.create`, and so did an `Error`; a refused start kept its event executor and scheduler until `close()` | `onSessionStart` is the last step of construction and runs on a thread of its own, waited for `SessionLimits.startTimeout` (default 60 s, `Builder.withStartTimeout`). A `null` outcome is a refusal (`ErrorProviderUnavailable`, reason `onSessionStart returned null`), and so is a start that has not returned by the timeout or when the creating thread is interrupted (`onSessionStart did not return within <timeout>`, `interrupted while waiting for onSessionStart`); an `Error` fails `result()`. Either way, and on a refusal, the event streams are ended before the result settles, `onSessionEnd` is never called and `isStarted()` is `true`. What the provider does after the session stopped waiting is logged; a late acceptance is ended by the session's teardown: its token is cancelled and `onSessionEnd` is waited for within `stopGrace`, and reported if it does not return |
 | `SessionLimits` had eight components; the event publisher drained for a fixed 5 s | `SessionLimits(maxTurns, maxBudgetMicroUsd, maxWallClock, toolTimeoutDefault, stopGrace, maxContextTokens, streamRetryPolicy, startTimeout)`; the drain waits `stopGrace` |
 | `close()` cancelled the session's token on the caller's thread: a cancellation callback that threw an `Error` escaped `close()` and, for a session never started, left `result()` pending and the executors running; one that blocked blocked `close()`, and the wall-clock deadline ran callbacks on the scheduler's thread | the session is cancelled through the new `CancellationToken.cancelAsync(reason, onError)`: the token is cancelled when it returns, its callbacks run on a virtual thread of their own, each callback `Error` goes to `onError` (the session's ending) and the remaining callbacks still run, and the returned future completes once they all ran; the teardown waits for it within `stopGrace`. A turn reading the model stream, and the retry back-off between its attempts, also read the token as they wait, so a callback that blocks before their own cannot keep a closed session's stream open or its loop asleep |
 | A turn cancelled the model stream's subscription on the thread that ended it, with no bound, so a `cancel` that blocked kept the session from ever settling; an exception it threw on an idle timeout was lost on the scheduler | `cancel` runs on a thread of its own, waited for within `stopGrace`; one still running is interrupted and logged as a `WARNING` (`the stream is not known to be closed`), and the turn ends. An `Error` it throws is recorded whenever it is thrown; an exception is logged |
@@ -879,6 +879,15 @@ completes, and the reader drains it on its own thread.
 | `core.events.EventSinkPolicy` | removed; it had no use |
 | `examples.session.ConsoleEventPrinter` was a `Flow.Subscriber` | `new ConsoleEventPrinter(out).print(events)` prints an `Iterable<QueryEvent>` until it ends |
 
+**The teardown's waits share one `stopGrace` deadline.** Every end of a session waits for the
+token's callbacks, the live tool calls and `onSessionEnd` until one deadline, `stopGrace` (5 s)
+from the teardown's start, instead of up to `stopGrace` each: `close()` and every other end add at
+most `stopGrace`, not three times it. A step after one that used the deadline up (a callback or a
+tool that never returns) still runs, `onSessionEnd` is still called and the event streams still
+end, but it is not waited for: `onSessionEnd` may then still run when the result settles, and its
+`WARNING` is logged. `ToolDispatch.awaitLiveCalls(Duration grace)` →
+`awaitLiveCalls(long deadlineNanos)`, a `System.nanoTime()` instant.
+
 ### Added
 
 - **`ChunkDrain.drain(CloseableIterator<ModelChunk>)`** is the one drain of a model's chunk
@@ -1015,6 +1024,12 @@ completes, and the reader drains it on its own thread.
   and ASK rules then withhold its entries.
 
 ### Changed
+
+- **A session no longer holds a platform thread.** Its wall-clock deadline was a
+  `ScheduledThreadPoolExecutor` with one platform thread per session (`helios-deadline-<id>`); it
+  is now a virtual thread, `helios-wall-clock-<id>`, that waits on the session's token for
+  `maxWallClock` and ends with the session. Nothing a caller does to `result()`, such as
+  `orTimeout`, disarms it.
 
 - **A slow event reader never stalls the session.** A reader whose buffer is full misses a routine
   event at once, logged at FINE, instead of delaying the loop, or the turn's stream reader, by up to

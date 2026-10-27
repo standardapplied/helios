@@ -18,7 +18,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 /**
@@ -32,12 +31,12 @@ import java.util.function.Predicate;
  *
  * <p>Each call stays linked to the session's cancellation token until its worker ends, so closing
  * the session cancels and interrupts every call still running, including one already answered as
- * {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(Duration)} waits for them to end.
+ * {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(long)} waits for them to end.
  *
  * <h2>Thread-safety</h2>
  *
- * The agent loop dispatches one call at a time; {@link #awaitLiveCalls(Duration)} may run on
- * another thread, since the set of live calls is concurrent.
+ * The agent loop dispatches one call at a time; {@link #awaitLiveCalls(long)} may run on another
+ * thread, since the set of live calls is concurrent.
  */
 public final class ToolDispatch {
 
@@ -82,21 +81,18 @@ public final class ToolDispatch {
   }
 
   /**
-   * Wait up to {@code grace} for the work of every call still running to end: the calls whose
-   * worker or token cancellation has not ended, including calls answered as {@link
-   * ToolOutcome.Unknown}. Waiting cancels nothing; the session ends its calls by cancelling its
-   * token first. An interrupt of the waiting thread ends the wait, its interrupt status kept.
+   * Wait until {@code deadlineNanos}, a {@link System#nanoTime()} instant, for the work of every
+   * call still running to end: the calls whose worker or token cancellation has not ended,
+   * including calls answered as {@link ToolOutcome.Unknown}. Waiting cancels nothing; the session
+   * ends its calls by cancelling its token first. An interrupt of the waiting thread ends the wait,
+   * its interrupt status kept.
    *
-   * @param grace how long to wait; non-null, positive
+   * @param deadlineNanos when to stop waiting
    * @return the calls whose work had not ended when the wait ended, empty when none
-   * @throws NullPointerException if {@code grace} is null
-   * @throws IllegalArgumentException if {@code grace} is not positive
    */
-  public List<ToolCall> awaitLiveCalls(Duration grace) {
-    Validate.positiveDuration("grace", grace);
-    var until = System.nanoTime() + TimeUnit.NANOSECONDS.convert(grace);
+  public List<ToolCall> awaitLiveCalls(long deadlineNanos) {
     return List.copyOf(liveCalls).stream()
-        .filter(live -> !live.endsBy(until))
+        .filter(live -> !live.endsBy(deadlineNanos))
         .map(DispatchedCall::call)
         .toList();
   }
