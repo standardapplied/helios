@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,14 +22,18 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -356,6 +361,51 @@ final class SummarizingCompactorTest {
   }
 
   @Test
+  void anErrorTheSummarizerJoinsFromAFailedFutureLeavesTheCompactionAsItself() {
+    var sentinel = new AssertionError("host failure");
+    var compactor = compactorSummarizingWith(() -> CompletableFuture.failedFuture(sentinel).join());
+    var state = freshState();
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, state));
+
+    assertSame(sentinel, thrown);
+    assertSame(sentinel, state.ending().seal().orElseThrow());
+  }
+
+  @Test
+  void aCancellationTheSummarizerThrewIsLoggedWithItsReasonAndLeavesTheHistoryUnchanged() {
+    var cancelled = new CancellationException("summary transport cancelled");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw cancelled;
+            });
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+    }
+
+    var thrown = logged.getFirst().getThrown();
+    assertInstanceOf(CancellationException.class, thrown);
+    assertSame(cancelled, thrown.getCause());
+  }
+
+  @Test
+  void aSummaryTimeoutPastTheNanosecondRangeStillCompacts() {
+    var out =
+        SummarizingCompactor.newBuilder(summaryModel("the gist"))
+            .withSummaryTimeout(Duration.ofSeconds(Long.MAX_VALUE))
+            .build()
+            .compact(CONVERSATION, freshState());
+
+    assertEquals(
+        List.of(
+            Message.system("sys"), Message.user(SummarizingCompactor.SUMMARY_PREFIX + "the gist")),
+        out.history());
+  }
+
+  @Test
   void aCheckedExceptionTheSummarizerThrewUndeclaredLeavesTheHistoryUnchangedAtOnce() {
     var compactor = compactorSummarizingWith(() -> throwUndeclared(new IOException("undeclared")));
 
@@ -435,6 +485,56 @@ final class SummarizingCompactorTest {
     assertTrue(
         ex.getMessage().startsWith("modelId must be non-blank when usage reports any tokens"),
         ex.getMessage());
+  }
+
+  @Test
+  void aSummaryTimeoutIsLoggedAsATimeout() {
+    var interrupted = new CountDownLatch(1);
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      timingOut(blockingUntilInterrupted(interrupted)).compact(CONVERSATION, freshState());
+    }
+
+    Await.latch("the timed-out summary call to be interrupted", interrupted);
+    assertEquals(
+        List.of(
+            "Context compaction summary timed out after PT0.05S; leaving history unchanged."
+                + " Session sess-1 turn 0"),
+        logged.stream().map(LogRecord::getMessage).toList());
+  }
+
+  @Test
+  void anInterruptedCompactionIsLoggedAsAnInterruptNotATimeout() {
+    var interrupted = new CountDownLatch(1);
+    var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      Thread.currentThread().interrupt();
+      compactor.compact(CONVERSATION, freshState());
+      assertTrue(Thread.interrupted(), "the compaction keeps the interrupt");
+    }
+
+    Await.latch("the summary call to be interrupted", interrupted);
+    assertInstanceOf(InterruptedException.class, logged.getFirst().getThrown().getCause());
+  }
+
+  @Test
+  void aRuntimeExceptionTheSummarizerThrewIsLoggedAsItself() {
+    var thrown = new IllegalStateException("summary transport failed");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw thrown;
+            });
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+    }
+
+    assertSame(thrown, logged.getFirst().getThrown());
   }
 
   @SuppressWarnings("unchecked")

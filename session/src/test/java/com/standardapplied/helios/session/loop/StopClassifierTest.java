@@ -143,7 +143,7 @@ final class StopClassifierTest {
 
   @Test
   void wallClockExceededTakesPriorityOverCancellation() {
-    // The wall-clock deadline scheduler in AgentSessionImpl implements itself by cancelling the
+    // The wall-clock thread in SessionLifecycle implements itself by cancelling the
     // session token; without the priority ordering the resulting terminal would be Cancelled
     // instead of the more informative ErrorMaxWallClock. Pins the ordering.
     var token = new CancellationToken();

@@ -175,17 +175,6 @@ final class ToolDispatchTest {
     assertEquals("stopGrace must be strictly positive, got " + grace, ex.getMessage());
   }
 
-  @ParameterizedTest
-  @ValueSource(longs = {0, -1})
-  void awaitingLiveCallsRejectsANonPositiveGrace(long millis) {
-    var d = fixture.dispatcher();
-    var grace = Duration.ofMillis(millis);
-
-    var ex = assertThrows(IllegalArgumentException.class, () -> d.awaitLiveCalls(grace));
-
-    assertEquals("grace must be strictly positive, got " + grace, ex.getMessage());
-  }
-
   @Test
   void unknownToolReturnsNotFound() {
     var result =
@@ -214,7 +203,7 @@ final class ToolDispatchTest {
 
     assertEquals("user-stop", ex.getMessage());
     assertEquals(0, runs.get());
-    assertEquals(List.of(), d.awaitLiveCalls(SHORT));
+    assertEquals(List.of(), d.awaitLiveCalls(Await.passedDeadline()));
   }
 
   // ── a call that completes ─────────────────────────────────────────────────
@@ -384,7 +373,10 @@ final class ToolDispatchTest {
         fixture.dispatcher(
             binding("stuck", category, fixture.stuck(new AtomicInteger())), fixture.reader());
     answerStuckUnknown(d);
-    assertEquals(List.of(call("stuck")), d.awaitLiveCalls(SHORT), "the worker is still running");
+    assertEquals(
+        List.of(call("stuck")),
+        d.awaitLiveCalls(Await.passedDeadline()),
+        "the worker is still running");
 
     fixture.assertTheNextCallIsRefusedUntilTheStuckOneEnds(d);
   }

@@ -16,7 +16,7 @@
 
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
-        <helios.test.opens>--add-modules java.compiler --add-reads com.standardapplied.helios.session=java.compiler</helios.test.opens>
+        <helios.test.opens>--add-modules java.compiler,jdk.management --add-reads com.standardapplied.helios.session=java.compiler,java.management,jdk.management</helios.test.opens>
     </properties>
 
     <dependencies>
@@ -65,9 +65,9 @@
                         <configuration>
                             <compilerArgs>
                                 <arg>--add-modules</arg>
-                                <arg>java.compiler</arg>
+                                <arg>java.compiler,jdk.management</arg>
                                 <arg>--add-reads</arg>
-                                <arg>com.standardapplied.helios.session=java.compiler</arg>
+                                <arg>com.standardapplied.helios.session=java.compiler,java.management,jdk.management</arg>
                             </compilerArgs>
                         </configuration>
                     </execution>

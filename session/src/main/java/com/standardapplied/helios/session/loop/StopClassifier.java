@@ -23,9 +23,9 @@ import java.util.Optional;
  *
  * <ol>
  *   <li>Wall-clock ceiling — elapsed time exceeds {@code limits.maxWallClock()}. Checked
- *       <i>before</i> the cancellation branch because the wall-clock deadline scheduler implements
- *       itself by cancelling the session token; without this ordering the resulting terminal would
- *       be {@link ResultMessage.Cancelled} instead of the more informative {@link
+ *       <i>before</i> the cancellation branch because the wall-clock thread implements itself by
+ *       cancelling the session token; without this ordering the resulting terminal would be {@link
+ *       ResultMessage.Cancelled} instead of the more informative {@link
  *       ResultMessage.ErrorMaxWallClock}.
  *   <li>Budget exhaustion — accumulated cost exceeds {@code limits.maxBudgetMicroUsd()}.
  *   <li>Cancellation — the session's {@link
