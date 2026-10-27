@@ -21,10 +21,11 @@ import java.util.function.Supplier;
  * emits {@link QueryEvent.QuestionAsked} and blocks on a future keyed by question id, the listing
  * of the questions still open, and the answer and cancellation that complete those futures.
  *
- * <p>A question belongs to the run that asks it. Cancellation is wired via {@link
- * CancellationToken#onCancel(Runnable)} on that run's token — when the run ends or is cancelled,
- * the registered callback completes the pending future with a {@link CancellationException}, waking
- * {@code future.get()} immediately, and the question is no longer pending. No polling.
+ * <p>A question belongs to the run that asks it, and one asked after that run ended is never posed.
+ * Cancellation is wired via {@link CancellationToken#onCancel(Runnable)} on that run's token — when
+ * the run ends or is cancelled, the registered callback completes the pending future with a {@link
+ * CancellationException}, waking {@code future.get()} immediately, and the question is no longer
+ * pending. No polling.
  *
  * <p>{@link CompletableFuture#get()} special-cases {@code CancellationException}-shaped results and
  * re-throws them directly rather than wrapping in {@code ExecutionException}, so the only checked
@@ -41,7 +42,7 @@ final class PendingQuestions implements QuestionGateway {
   private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
 
   /**
-   * @param runs the state of the run in progress, whose token a question observes
+   * @param runs the state of the run asking, whose token a question observes
    */
   PendingQuestions(Supplier<SessionState> runs, SessionEventPublisher events, InstantSource clock) {
     this.runs = runs;
@@ -54,6 +55,7 @@ final class PendingQuestions implements QuestionGateway {
       throws InterruptedException, CancellationException {
     Objects.requireNonNull(request, "request must not be null");
     var state = runs.get();
+    state.cancellation().throwIfCancelled();
     var future = new CompletableFuture<AskUserQuestionResponse>();
     pending.put(request.questionId(), new Pending(request, future));
     var cancelRegistration =

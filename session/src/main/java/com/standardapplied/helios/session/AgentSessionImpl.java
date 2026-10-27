@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * constructor, the loop through {@link SessionWiring}, and notifies the execution provider last.
  * The lifecycle's {@link SessionRuns} run one run at a time, each on a virtual thread of its own
  * with a {@link SessionState} of its own sharing the session's history. Open questions are its
- * {@link PendingQuestions}, which belong to the run in progress.
+ * {@link PendingQuestions}, each of which belongs to the run that asked it.
  *
  * <h2>Event delivery</h2>
  *
@@ -50,7 +50,10 @@ public final class AgentSessionImpl implements AgentSession {
 
   private final SessionRuns runs;
   private final AtomicBoolean closed = new AtomicBoolean(false);
-  private final PendingQuestions pendingQuestions;
+
+  /** Package-private for tests that ask a question from a thread that outlived its run. */
+  final PendingQuestions pendingQuestions;
+
   private final RawOutputCapturePolicy rawOutputCapturePolicy;
   private final OutputSchema<?> outputSchema;
 
@@ -78,8 +81,7 @@ public final class AgentSessionImpl implements AgentSession {
             state, sessionContext, options.executionProvider(), options.limits(), steeringQueue);
     this.events = lifecycle.events();
     this.runs = lifecycle.runs();
-    this.pendingQuestions =
-        new PendingQuestions(() -> runs.activeRun().map(Run::state).orElse(state), events, clock);
+    this.pendingQuestions = new PendingQuestions(Run::stateOfThisThread, events, clock);
     AgentLoop loop;
     try {
       loop =
