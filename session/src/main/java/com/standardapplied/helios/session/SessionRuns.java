@@ -28,7 +28,10 @@ final class SessionRuns implements RunBoundary {
   private final SteeringQueue queue;
   private final SessionLimits limits;
   private final Consumer<Optional<Error>> teardown;
-  private final Object lock = new Object();
+
+  /** Package-private for tests that hold it to order a run's end against a host {@link Error}. */
+  final Object lock = new Object();
+
   private AgentLoop loop;
   private Run active;
   private CompletableFuture<ResultMessage> next;
@@ -192,10 +195,11 @@ final class SessionRuns implements RunBoundary {
   /**
    * Drive {@code run} to its end, leave it, so a completion callback of its future that sends finds
    * no run in progress, tear the session down once it closed or failed, then settle the futures, so
-   * none of their callbacks holds up the teardown. {@link AgentLoop#run} turns every {@link
-   * Exception} into a terminal, so only an {@link Error} escapes it, which goes to the session's
-   * ending; the run fails with the {@code Error} that failed the session, and this thread ends by
-   * throwing it to its uncaught-exception handler once the session is torn down. A {@link
+   * none of their callbacks holds up the teardown; a next run's future fails on a thread of its
+   * own, so a callback of either future may wait for the other. {@link AgentLoop#run} turns every
+   * {@link Exception} into a terminal, so only an {@link Error} escapes it, which goes to the
+   * session's ending; the run fails with the {@code Error} that failed the session, and this thread
+   * ends by throwing it to its uncaught-exception handler once the session is torn down. A {@link
    * RuntimeException} that escapes anyway fails the run as itself, so its future never stays
    * pending.
    */
@@ -220,8 +224,13 @@ final class SessionRuns implements RunBoundary {
       teardown.accept(error);
     }
     if (error.isPresent()) {
+      left.prevented()
+          .ifPresent(
+              prevented ->
+                  Thread.ofVirtual()
+                      .name("helios-fail-next-run-" + session.sessionId())
+                      .start(() -> prevented.completeExceptionally(error.get())));
       run.result().completeExceptionally(error.get());
-      left.prevented().ifPresent(next -> next.completeExceptionally(error.get()));
     } else if (crash != null) {
       run.result().completeExceptionally(crash);
     } else {
@@ -234,14 +243,16 @@ final class SessionRuns implements RunBoundary {
 
   /**
    * Leave the ended run: a host {@link Error} the session's ending recorded fails the session here
-   * too, since its {@link #failed} listener may not have run yet; a run that ended without deciding
-   * it, such as one a host {@code Error} ended, decides it now, so no message stays queued for it;
-   * then the next run starts if a message is waiting for one and the session is open, or else that
-   * run's future is returned, to fail with the {@code Error} that failed the session.
+   * too, since its {@link #failed} listener may not have run yet, and it is read under the lock
+   * {@code failed} takes, so an {@code Error} recorded later finds the session idle; a run that
+   * ended without deciding it, such as one a host {@code Error} ended, decides it now, so no
+   * message stays queued for it; then the next run starts if a message is waiting for one and the
+   * session is open, or else that run's future is returned, to fail with the {@code Error} that
+   * failed the session.
    */
   private Left leave() {
-    var recorded = session.ending().first();
     synchronized (lock) {
+      var recorded = session.ending().first();
       failure = recorded.orElse(failure);
       closed |= recorded.isPresent();
       if (!ending) {

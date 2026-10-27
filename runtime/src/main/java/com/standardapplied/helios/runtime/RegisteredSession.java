@@ -14,10 +14,11 @@ import java.util.logging.Logger;
 
 /**
  * One session of a {@link SessionTable}, its owner, the runs the runtime started on it and the
- * capacity it holds. It is <em>active</em> while the latest run started through {@link #send} has
- * not completed, and <em>idle</em> otherwise: from registration until its first run and from the
- * end of each run. Its charge is given back once: at once when it is evicted to make room, else
- * once its close returned and it is idle. Its mutable state is guarded by the table's lock.
+ * capacity it holds. It is <em>active</em> while a run started through {@link #send} has not
+ * completed, and <em>idle</em> otherwise: from registration until its first run and from the end of
+ * the last run in progress, so a run that still runs keeps it active after the close cancelled the
+ * run queued behind it. Its charge is given back once: at once when it is evicted to make room,
+ * else once its close returned and it is idle. Its mutable state is guarded by the table's lock.
  */
 final class RegisteredSession {
 
@@ -30,8 +31,8 @@ final class RegisteredSession {
   private final Runnable charge;
   private final CompletableFuture<ResultMessage> firstRun = new CompletableFuture<>();
   private CompletableFuture<ResultMessage> latest = firstRun;
+  private int pendingRuns;
   private Instant idleSince;
-  private boolean idle = true;
   private boolean closed;
   private boolean released;
 
@@ -75,8 +76,8 @@ final class RegisteredSession {
           run.whenComplete(this::firstRunEnded);
         }
         latest = run;
-        idle = false;
-        run.whenComplete((result, failure) -> ended(run));
+        pendingRuns++;
+        run.whenComplete((result, failure) -> ended());
       }
       return run;
     }
@@ -102,7 +103,7 @@ final class RegisteredSession {
 
   /** Whether no run the runtime started is in progress; called under the table's lock. */
   boolean isIdle() {
-    return idle;
+    return pendingRuns == 0;
   }
 
   /** When the session last became idle; called under the table's lock. */
@@ -144,13 +145,12 @@ final class RegisteredSession {
     }
   }
 
-  private void ended(CompletableFuture<ResultMessage> run) {
+  private void ended() {
     synchronized (lock) {
-      if (latest != run) {
+      if (--pendingRuns > 0) {
         return;
       }
       idleSince = clock.instant();
-      idle = true;
       if (closed) {
         release();
       }
