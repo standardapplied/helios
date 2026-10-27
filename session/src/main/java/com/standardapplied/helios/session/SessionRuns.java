@@ -233,13 +233,17 @@ final class SessionRuns implements RunBoundary {
   }
 
   /**
-   * Leave the ended run: a run that ended without deciding it, such as one a host {@link Error}
-   * ended, decides it now, so no message stays queued for it; then the next run starts if a message
-   * is waiting for one and the session is open, or else that run's future is returned, to fail with
-   * the {@code Error} that failed the session.
+   * Leave the ended run: a host {@link Error} the session's ending recorded fails the session here
+   * too, since its {@link #failed} listener may not have run yet; a run that ended without deciding
+   * it, such as one a host {@code Error} ended, decides it now, so no message stays queued for it;
+   * then the next run starts if a message is waiting for one and the session is open, or else that
+   * run's future is returned, to fail with the {@code Error} that failed the session.
    */
   private Left leave() {
+    var recorded = session.ending().first();
     synchronized (lock) {
+      failure = recorded.orElse(failure);
+      closed |= recorded.isPresent();
       if (!ending) {
         queue.drain();
       }
@@ -252,9 +256,7 @@ final class SessionRuns implements RunBoundary {
         return new Left(Optional.empty(), false, Optional.empty());
       }
       return new Left(
-          Optional.ofNullable(failure),
-          failure != null || closedByWorker,
-          Optional.ofNullable(prevented));
+          recorded, recorded.isPresent() || closedByWorker, Optional.ofNullable(prevented));
     }
   }
 
