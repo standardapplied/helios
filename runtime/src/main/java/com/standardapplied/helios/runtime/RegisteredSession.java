@@ -31,6 +31,7 @@ final class RegisteredSession {
   private final CompletableFuture<ResultMessage> firstRun = new CompletableFuture<>();
   private CompletableFuture<ResultMessage> latest = firstRun;
   private Instant idleSince;
+  private boolean idle = true;
   private boolean closed;
   private boolean released;
 
@@ -58,24 +59,27 @@ final class RegisteredSession {
 
   /**
    * Send {@code message} to the session and record the run it is part of, which keeps the session
-   * active until it completes; the first run recorded also completes the first-run future.
+   * active until it completes; the first run recorded also completes the first-run future. Sending
+   * and recording happen under the table's lock, so runs are recorded in the order the session
+   * started them, and no sweep sees a run started but not recorded.
    *
    * @return the future of the run the message is part of
    * @throws IllegalStateException if the session is closed or failed
    * @throws com.standardapplied.helios.session.SteeringQueueFullException if its queue is full
    */
   CompletableFuture<ResultMessage> send(UserMessage message) {
-    var run = session.send(message);
     synchronized (lock) {
+      var run = session.send(message);
       if (latest != run) {
         if (latest == firstRun) {
           run.whenComplete(this::firstRunEnded);
         }
         latest = run;
+        idle = false;
         run.whenComplete((result, failure) -> ended(run));
       }
+      return run;
     }
-    return run;
   }
 
   private void firstRunEnded(ResultMessage result, Throwable failure) {
@@ -98,7 +102,7 @@ final class RegisteredSession {
 
   /** Whether no run the runtime started is in progress; called under the table's lock. */
   boolean isIdle() {
-    return latest == firstRun || latest.isDone();
+    return idle;
   }
 
   /** When the session last became idle; called under the table's lock. */
@@ -146,6 +150,7 @@ final class RegisteredSession {
         return;
       }
       idleSince = clock.instant();
+      idle = true;
       if (closed) {
         release();
       }

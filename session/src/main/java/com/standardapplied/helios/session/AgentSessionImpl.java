@@ -100,7 +100,7 @@ public final class AgentSessionImpl implements AgentSession {
 
   @Override
   public void interrupt() {
-    runs.activeRun().ifPresent(run -> run.state().cancel("interrupted"));
+    runs.interrupt();
   }
 
   @Override

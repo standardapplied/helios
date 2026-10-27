@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * event streams are fed by hand and end at {@link #completeEvents()}, and the run completes through
  * {@link #terminate()}, standing for the end of the loop. A closed session refuses a message, as a
  * real one does, while a run already in progress keeps running until terminated. It counts its
- * closes and interrupts, runs {@link #onClose} on each close, and counts the event streams its
- * readers closed.
+ * closes and interrupts, runs {@link #onSend} on each accepted message and {@link #onClose} on each
+ * close, and counts the event streams its readers closed.
  */
 final class StubSession implements AgentSession {
 
@@ -37,6 +37,7 @@ final class StubSession implements AgentSession {
   final List<FedEventStream> streams = new CopyOnWriteArrayList<>();
   final AtomicInteger closes = new AtomicInteger();
   final AtomicInteger interrupts = new AtomicInteger();
+  volatile Runnable onSend = () -> {};
   volatile Runnable onClose = () -> {};
 
   private final String sessionId;
@@ -88,7 +89,9 @@ final class StubSession implements AgentSession {
       throw new SteeringQueueFullException("steering queue full");
     }
     started = true;
-    return result;
+    var run = result;
+    onSend.run();
+    return run;
   }
 
   @Override
