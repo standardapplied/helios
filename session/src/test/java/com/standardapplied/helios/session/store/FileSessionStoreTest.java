@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.test.SessionStoreContract;
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -19,6 +20,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -141,6 +143,49 @@ final class FileSessionStoreTest extends SessionStoreContract {
   }
 
   @Test
+  void aFileRecreatedAtTheSameSizeByAnotherStoreIsDetectedAsAnotherWriter() {
+    var first = FileSessionStore.of(directory());
+    var second = FileSessionStore.of(directory());
+    var two = List.of(added(Message.user("a")), added(Message.user("b")));
+    var padding = lineLength(two) - lineLength(List.of(added(Message.user(""))));
+    first.append(SID, 0, List.of(added(Message.user("x".repeat(padding)))));
+    var size = file().toFile().length();
+    second.delete(SID);
+    second.append(SID, 0, two);
+    assertEquals(size, file().toFile().length());
+
+    assertThrows(
+        SessionConflictException.class,
+        () -> first.append(SID, 1, List.of(added(Message.user("c")))));
+    assertEquals(two, first.entries(SID));
+  }
+
+  /**
+   * Closing any descriptor of a file releases this process's {@code FileLock} on it, so a read that
+   * ran during an append would let another process write: every read waits for the process lock an
+   * append holds.
+   */
+  @Test
+  void aReadWaitsForTheProcessLockOnTheSessionsFile() {
+    var store = FileSessionStore.of(directory());
+    store.append(SID, 0, List.of(added(Message.user("a"))));
+    var loaded = new CompletableFuture<StoredSession>();
+    var listed = new CompletableFuture<List<SessionEntry>>();
+    Thread loading;
+    Thread listing;
+    synchronized (store.lockOf(SID)) {
+      loading = Thread.ofPlatform().start(() -> loaded.complete(store.load(SID)));
+      listing = Thread.ofPlatform().start(() -> listed.complete(store.entries(SID)));
+      Await.until("the load to wait", () -> loading.getState() == Thread.State.BLOCKED);
+      Await.until("the listing to wait", () -> listing.getState() == Thread.State.BLOCKED);
+      assertFalse(loaded.isDone() || listed.isDone());
+    }
+
+    assertEquals(1, Await.value("load", loaded).lastSeq());
+    assertEquals(1, Await.value("entries", listed).size());
+  }
+
+  @Test
   void entriesAreTheWholeLogAndDeleteRemovesTheFile() {
     var store = FileSessionStore.of(directory());
     var log = List.of(added(Message.user("a")), replaced(Message.user("s")));
@@ -213,5 +258,9 @@ final class FileSessionStoreTest extends SessionStoreContract {
     assertEquals(new StoredSession(SID, 0, List.of()), store.load(SID));
     store.append(SID, 0, List.of(added(Message.user("a"))));
     assertEquals(1, Files.readAllLines(file()).size());
+  }
+
+  private static int lineLength(List<SessionEntry> entries) {
+    return SessionEntryJson.write(new SessionEntryJson.Batch(1, entries)).length();
   }
 }

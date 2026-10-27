@@ -9,9 +9,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 /**
  * A {@link SessionStore} that keeps each session in a JSON-lines file, {@code <sessionId>.jsonl},
@@ -20,24 +19,24 @@ import java.util.concurrent.ConcurrentHashMap;
  * atomicity. On a POSIX file system the directory is created {@code rwx------} and each file {@code
  * rw-------}, since a conversation is user data; a file is never opened through a symbolic link.
  *
- * <p>{@link #append} holds a lock of this process on the session's file and an exclusive {@link
- * java.nio.channels.FileLock} on it, so a second process writing the same directory is detected,
- * not corrupted. It takes the last sequence number from what it last read or wrote while the file
- * still has that size, and otherwise reads the file; it writes the batch in one write and forces it
- * to the device before it returns. A last line without its {@code \n} is a write that did not
- * finish: {@link #load} ignores it and the next {@code append} truncates it. Any other line that is
- * not a batch, or does not continue the sequence, fails the read, naming the file and the line.
+ * <p>Every read and write of a session's file holds a lock of this process on it, and {@link
+ * #append} also an exclusive {@link java.nio.channels.FileLock}, so a second process writing the
+ * same directory is detected, not corrupted. A read takes the process lock because closing any
+ * descriptor of a file releases this process's {@code FileLock} on it. {@code append} reads the
+ * file's last sequence number under the lock, writes the batch in one write and forces it to the
+ * device before it returns. A last line without its {@code \n} is a write that did not finish:
+ * {@link #load} ignores it and the next {@code append} truncates it. Any other line that is not a
+ * batch, or does not continue the sequence, fails the read, naming the file and the line.
  */
 public final class FileSessionStore implements SessionStore {
 
   /** The locks of this process on session files, shared by every instance and picked by path. */
-  private static final Object[] FILE_LOCKS = newLocks(64);
+  private static final Object[] FILE_LOCKS = Stream.generate(Object::new).limit(64).toArray();
 
   private static final String SUFFIX = ".jsonl";
 
   private final Path directory;
   private final FileAttribute<?>[] fileAttributes;
-  private final Map<String, SessionFile.Tail> tails = new ConcurrentHashMap<>();
 
   private FileSessionStore(Path directory, FileAttribute<?>[] fileAttributes) {
     this.directory = directory;
@@ -65,7 +64,7 @@ public final class FileSessionStore implements SessionStore {
 
   @Override
   public StoredSession load(String sessionId) {
-    var log = file(sessionId).read();
+    var log = read(sessionId);
     return StoredSession.fold(sessionId, log.lastSeq(), log.entries());
   }
 
@@ -74,12 +73,7 @@ public final class FileSessionStore implements SessionStore {
     var batch = AppendArguments.batch(sessionId, entries);
     var file = file(sessionId);
     synchronized (lockOf(sessionId)) {
-      try {
-        tails.put(sessionId, file.append(sessionId, expectedLastSeq, batch, tails.get(sessionId)));
-      } catch (SessionStoreException e) {
-        tails.remove(sessionId);
-        throw e;
-      }
+      file.append(sessionId, expectedLastSeq, batch);
     }
   }
 
@@ -91,7 +85,7 @@ public final class FileSessionStore implements SessionStore {
    * @throws SessionStoreException if the file cannot be read or holds a line that is not a batch
    */
   public List<SessionEntry> entries(String sessionId) {
-    return file(sessionId).read().entries();
+    return read(sessionId).entries();
   }
 
   /**
@@ -104,7 +98,6 @@ public final class FileSessionStore implements SessionStore {
   public boolean delete(String sessionId) {
     var path = path(sessionId);
     synchronized (lockOf(sessionId)) {
-      tails.remove(sessionId);
       try {
         return Files.deleteIfExists(path);
       } catch (IOException e) {
@@ -127,20 +120,18 @@ public final class FileSessionStore implements SessionStore {
     return directory.resolve(SessionStore.requireValidId(sessionId) + SUFFIX);
   }
 
+  private SessionFile.Log read(String sessionId) {
+    synchronized (lockOf(sessionId)) {
+      return file(sessionId).read();
+    }
+  }
+
   private SessionFile file(String sessionId) {
     return new SessionFile(path(sessionId), fileAttributes);
   }
 
   /** This process's lock on the session's file, shared by every store on the same directory. */
-  private Object lockOf(String sessionId) {
+  Object lockOf(String sessionId) {
     return FILE_LOCKS[Math.floorMod(path(sessionId).hashCode(), FILE_LOCKS.length)];
-  }
-
-  private static Object[] newLocks(int count) {
-    var locks = new Object[count];
-    for (var i = 0; i < count; i++) {
-      locks[i] = new Object();
-    }
-    return locks;
   }
 }
