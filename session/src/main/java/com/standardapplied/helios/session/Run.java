@@ -21,6 +21,9 @@ import java.util.concurrent.TimeUnit;
  */
 final class Run {
 
+  private static final InheritableThreadLocal<SessionState> CURRENT =
+      new InheritableThreadLocal<>();
+
   private final CancellationToken sessionToken;
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
@@ -66,8 +69,23 @@ final class Run {
     return settled;
   }
 
-  /** Start the wall clock on a virtual thread of its own. */
-  void startWallClock() {
+  /**
+   * The state of the run whose thread started the calling thread, directly or not, so work that
+   * outlives its run never acts for a later one.
+   *
+   * @throws IllegalStateException if no run started the calling thread
+   */
+  static SessionState stateOfThisThread() {
+    return Optional.ofNullable(CURRENT.get())
+        .orElseThrow(() -> new IllegalStateException("no run started this thread"));
+  }
+
+  /**
+   * Bind the calling thread, the run's own, and every thread it starts to this run, then start the
+   * wall clock on a virtual thread of its own.
+   */
+  void begin() {
+    CURRENT.set(state);
     BoundedTask.start(
         "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
   }

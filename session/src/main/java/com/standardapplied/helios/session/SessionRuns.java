@@ -204,7 +204,7 @@ final class SessionRuns implements RunBoundary {
    */
   private void execute(Run run) {
     WORKER.set(this);
-    run.startWallClock();
+    run.begin();
     ResultMessage terminal = null;
     RuntimeException crash = null;
     try {
