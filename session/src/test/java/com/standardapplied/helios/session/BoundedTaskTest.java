@@ -157,6 +157,24 @@ final class BoundedTaskTest {
     assertTrue(BoundedTask.settlesBy(failed, Await.passedDeadline()));
   }
 
+  @Test
+  void anErrorIsRecordedByTheSessionsEndingBeforeItSettlesTheOutcome() {
+    var task =
+        BoundedTask.<String>start(
+            "helios-test-recorded-first",
+            () -> {
+              release.await();
+              throw new AssertionError("host failure");
+            },
+            state.ending());
+    var cancelledAtSettlement =
+        task.outcome().handle((value, thrown) -> state.cancellation().isCancelled());
+
+    release.countDown();
+
+    assertTrue(Await.value("the outcome to settle", cancelledAtSettlement));
+  }
+
   private BoundedTask<String> blocking() {
     return BoundedTask.start(
         "helios-test-blocking",
