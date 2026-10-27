@@ -5,23 +5,18 @@
 package com.standardapplied.helios.session.tools;
 
 /**
- * Classification axis for tools. Drives default permission rules, audit attribution, and the
- * visibility lattice (e.g. "block all WRITE tools in dry-run mode"). Each tool registers exactly
- * one category — see spec §8.2.
+ * The kind of effect a tool has, which sets the permission policy's default for its calls when no
+ * rule decides them. Each tool registers exactly one category.
  */
 public enum ToolCategory {
-  /** File reads, directory listing, content search ({@code Read}, {@code LS}, {@code Grep}). */
+  /** File reads, directory listing and content search ({@code Read}, {@code LS}, {@code Grep}). */
   READ,
-  /** File writes and edits ({@code Write}, {@code Edit}, {@code MultiEdit}, memory writes). */
+  /** File writes and edits, memory writes included. */
   WRITE,
-  /** Domain-specific search tools (knowledge base, web search). */
-  SEARCH,
   /** Code execution dispatched through an {@code ExecutionProvider}. */
   EXECUTION,
-  /** Interactive control: {@code AskUserQuestion}, signature gates, approval prompts. */
-  CONTROL,
-  /** Outbound network access — HTTP fetch, external API calls. */
+  /** Outbound network access: HTTP fetch, external API calls. */
   NETWORK,
-  /** Sub-agent delegation tools (an Agent exposed via {@code asTool}). */
-  DELEGATION
+  /** Interaction with the session itself, such as {@code AskUserQuestion}. */
+  CONTROL
 }

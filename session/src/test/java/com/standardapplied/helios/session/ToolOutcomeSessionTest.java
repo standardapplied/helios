@@ -26,7 +26,6 @@ import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
@@ -78,7 +77,7 @@ final class ToolOutcomeSessionTest {
   }
 
   private static SessionOptions.Builder withTools(ToolBinding... tools) {
-    return SessionOptions.newBuilder().withTools(new ToolRegistry(List.of(tools)));
+    return SessionOptions.newBuilder().withTools(List.of(tools));
   }
 
   private static ToolResult resultOf(ToolExecutor executor) {

@@ -50,7 +50,6 @@ needs the time takes an `InstantSource` through `withClock(...)` and defaults it
 | `SessionOptions.Builder.withClock(Clock)` | `withClock(InstantSource)` |
 | `SessionContext(String, CancellationToken, Clock)`, `SessionContext.clock()` returns `Clock` | the component and accessor are `InstantSource` |
 | `SessionRegistry.Builder.withClock(Clock)` | removed from the public API; retention is measured on the system UTC clock |
-| `SessionState(String, CancellationToken, Clock)`, `AgentLoop(..., Clock, ...)`, `TurnRunner(..., Clock, ...)` | the parameter is `InstantSource` |
 
 A caller that passes a `Clock` compiles unchanged, because `Clock` implements `InstantSource`.
 Code that read the returned value as a `Clock` (`options.clock().getZone()`,
@@ -76,10 +75,8 @@ in main code.
 | Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
 | `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null)` |
 | `OpenAIModelId.supportsXhighEffort()` | `effortSupport() != EffortSupport.STANDARD` |
-| `StopClassifier.classify(state, limits, finishReason, assistantContent, streamError, streamAttempts, hasPendingMessages)` | `classify(state, limits, new TurnOutcome(finishReason, assistantContent, usage, metadata, streamError, streamAttempts), hasPendingMessages)` |
 | `ResultMessage.Success(sessionId, result, usage, cost, duration)` | `Success(sessionId, result, usage, cost, duration, List.of())` |
 | `ResultMessage.Refusal(sessionId, refusalText, usage, cost, duration)` | `Refusal(sessionId, refusalText, usage, cost, duration, null)` |
-| `TurnRunner(...)` nine-argument constructor and its process-wide default scheduler | the ten-argument constructor with a `ScheduledExecutorService` the caller owns and shuts down |
 | `UserMessage(text, attachments, null)` read as "no file references" | pass `List.of()`, or use `UserMessage(text, attachments)`; a null `fileReferences` throws `NullPointerException` |
 | `repl.sandbox.ExecutionResult` four-, five- and six-argument constructors | `ExecutionResult.newBuilder()`, or the canonical seven-component constructor |
 
@@ -173,7 +170,6 @@ Against earlier 3.0 snapshots, which published the stream as a `Flow.Publisher`:
 | `QueryEvent.AssistantThinking.signature` | removed (it was always empty); the SSE JSON of the event loses its `signature` field |
 | `ModelStreams.of` / `failing` / `stalled` → `Flow.Publisher<ModelChunk>`; `ScriptedModel.Builder.withStreamTurn(Flow.Publisher)` | they return a one-pass `CloseableIterator<ModelChunk>`, and `withStreamTurn` takes one |
 | `StreamingModel.chat` interrupted while waiting threw the provider's "Request interrupted" exception | throws `CancellationException`, the interrupt kept |
-| `new TurnRunner(collaborators, model, costCalculator, outputSchema, scheduler)` | `new TurnRunner(collaborators, model, costCalculator, outputSchema)` |
 
 **The provider model classes are removed; every provider returns a `Model`.** `AnthropicModel`,
 `OpenAIModel` and `GeminiModel` were one forwarding surface written three times. Each provider now
@@ -202,28 +198,6 @@ same `PgConfig`: `new PgAnnotationStore(pgConfig)`.
 | `pgTraceStore.findAnnotationsBySubject(subjectId)` | `pgAnnotationStore.findAnnotationsBySubject(subjectId)` |
 | `pgTraceStore.findAnnotationsBySubjects(subjectIds)` | `pgAnnotationStore.findAnnotationsBySubjects(subjectIds)` |
 | `pgTraceStore.listAnnotations(paginate, scimFilter)` | `pgAnnotationStore.listAnnotations(paginate, scimFilter)` |
-
-**The session loop's collaborators are one record, and `SessionState` exposes its parts.**
-`TurnRunner` and `AgentLoop` took ten constructor arguments, six of them the same objects; those
-six are now the new public record `loop.LoopCollaborators` (`newBuilder()` / `with*`), built once
-and passed to both. `SessionState` is composed of the new public types `loop.ConversationHistory`
-and `loop.SessionTotals` and exposes them instead of re-declaring their methods. Replacing the
-history and accumulating usage, cost and citations are no longer public: the loop owns history
-replacement and accounting. Events, hook outcomes, terminals, requests and log messages are
-unchanged.
-
-| 2.x | 3.0 |
-|---|---|
-| `new TurnRunner(model, hooks, toolDispatch, steeringQueue, eventSink, hookContextFactory, clock, costCalculator, outputSchema, scheduler)` | `new TurnRunner(collaborators, model, costCalculator, outputSchema, scheduler)` with `collaborators = LoopCollaborators.newBuilder().withHooks(hooks).withToolDispatch(toolDispatch).withSteeringQueue(steeringQueue).withEventSink(eventSink).withHookContextFactory(hookContextFactory).withClock(clock).build()` |
-| `new AgentLoop(turnRunner, classifier, hooks, toolDispatch, steeringQueue, eventSink, hookContextFactory, clock, tokenCounter, contextCompactor)` | `new AgentLoop(collaborators, turnRunner, classifier, tokenCounter, contextCompactor)`, the same `collaborators` as the turn runner's |
-| `state.historySnapshot()` | `state.history().snapshot()` |
-| `state.appendMessage(message)` | `state.history().append(message)` |
-| `state.usage()`, `state.cost()`, `state.citations()` | `state.totals().usage()`, `state.totals().cost()`, `state.totals().citations()` |
-| `state.replaceHistory(messages)` | removed from the public API: compaction and a `PreModelTurnHook` returning `MutateHistory` replace the history |
-| `state.accumulateUsage(u)`, `state.accumulateCost(c)`, `state.accumulateCitations(cs)` | removed from the public API: the loop accumulates every model call's totals |
-| `state.tryFireContextWarning()`, `state.resetContextWarningFlag()`, `state.contextWarningFired()` | removed from the public API: the context watermark is the loop's |
-| `state.startedAt()` | removed: nothing read it; `state.elapsed()` is the time since the state was built |
-| `AgentSession.JacksonJsonAdapter` | removed: it had a private constructor and a package-private instance, so no caller could use it; typed `runBlocking` parses through the session module's one Jackson mapper |
 
 **`JShellExecutionProvider.singleSandbox` is removed.** It was a second shortcut for the builder,
 and its name suggested one sandbox where the provider spawns one per session.
@@ -358,7 +332,7 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
 
 | 2.x | 3.0 |
 |---|---|
-| `repl.codeact.CodeActPreset.typed(...)` | `JShellExecutionProvider` as the session's `ExecutionProvider`, `ExecuteTool.binding(provider)` in its `ToolRegistry`, and the task's own system prompt; the final answer is the model's last message, through `runBlocking(message, OutputSchema)` for a typed one |
+| `repl.codeact.CodeActPreset.typed(...)` | `JShellExecutionProvider` as the session's `ExecutionProvider` (`withExecutionProvider`, which registers `Execute`), and the task's own system prompt; the final answer is the model's last message, through `runBlocking(message, OutputSchema)` for a typed one |
 | `repl.codeact.CodeActPreset.withSubLm(...)` (RLM: `predict(...)` / `submit(...)` in the sandbox) | no replacement in 3.0; sub-agents in 3.1 replace sub-model fan-out. A host-side call the snippet needs is a custom `HostFunction` registered through `ReplConfig.Builder.withHostFunction` |
 | the rest of `repl.codeact` (`CodeActStrategy`, `RlmStrategy`, `PromptRendering`, `PredictFunction`, `PredictTool`, `SubmitFunction`, `SubmitTool`, `SubmitValidation`, `SubmittedValueHolder`, `OnSubmitStopHook`, `RequireExecuteCodeHook`, `InputFunction`, `OwnedExecutionProvider`) and the package's JPMS export | removed with the presets |
 | `repl.CodeExecutionTool` | `Execute` with `runtime: JSHELL` through `JShellExecutionProvider` |
@@ -396,8 +370,6 @@ REPL's bindings listener is gone.
 | 2.x | 3.0 |
 |---|---|
 | Each component held its own `SecretRegistry`; sessions had none | `SessionOptions` gains a `secretRegistry` component and `Builder.withSecretRegistry(SecretRegistry)` (default: a new empty registry). `SessionContext` gains a `secrets` component, `SessionContext(sessionId, cancellation, clock, secrets)`; `SessionContext.forTesting` uses a new empty registry. Tools reach it as `ToolContext.sessionContext().secrets()` |
-| `StopClassifier()` | `StopClassifier(SecretRegistry)`: the session's registry, which its error terminals are redacted against |
-| `new HookRegistry(hooks)` | `new HookRegistry(hooks, secrets)`: the session's registry, which a logged hook failure is redacted against; `HookRegistry.empty()` uses an empty one |
 | `ReadTool.binding(workspace, tracker, Redactor)`, `GrepTool.binding(workspace, Redactor)` | removed; `ReadTool.binding(workspace, tracker)` and `GrepTool.binding(workspace)`, whose output the session redacts |
 | `LocalProcessExecutionProvider.defaultPosix(SecretRegistry)`, `Builder.withSecretRegistry`, `secretRegistry()` | `defaultPosix()`; the other two removed. Stdout and stderr are returned raw |
 | `JShellExecutionProvider.Builder.withSecretRegistry`, `secretRegistry()` | removed. Stdout and stderr are returned raw |
@@ -424,7 +396,6 @@ drift.
 | A `PreToolUse` `Block`: `blocked by hook: <reason>` | `Rejected(by, reason)`, text `blocked by <by>: <reason>`, where `by` is the name `ToolBlocked` carries. A permission denial is `Rejected("Permission", reason)` too |
 | A `PreToolUse` `Inject`: `tool skipped: hook injected user message` | `Rejected(by, "hook injected a user message")`, text `blocked by <by>: hook injected a user message` |
 | A `PostToolUse` `MutateResult` became a successful result with no attachments | the result keeps its outcome and attachments and replaces only its output: a hook changes what the model reads, not what happened |
-| `ToolDispatch.dispatch` accepted a zero timeout | the timeout must be positive, like `SessionLimits.toolTimeoutDefault` |
 | SSE `ToolResult` event: `"result":{"success":true,...}` | `"result":{"outcome":{"kind":"Succeeded"},...}`; the outcome object carries `kind` (the record's simple name) and the record's components, e.g. `{"kind":"TimedOut","limit":"PT1M"}`. The runtime adds the serializer to whatever `ObjectMapper` it is given |
 | JSONL `ToolCallCompleted`: `success` | `success` plus `"outcome":"<kind>"` |
 
@@ -446,11 +417,10 @@ interrupts every call still running.
 |---|---|
 | A timed-out call was interrupted and reported `TimedOut` at once, and its category permit was given back while the tool could still be running. The tool's `ctx.cancellation()` was the session's token, which the timeout never cancelled; permit wait and result wait ended only on interruption | At the deadline the call's token is cancelled and its worker interrupted. A tool that never started is `TimedOut`, and so is one that stops within the new `SessionLimits.stopGrace` (default 5 s, `Builder.withStopGrace`). One still running after it is the new `ToolOutcome.Unknown(limit)`, text `tool '<name>' timed out after <limit> and did not stop; it may still be running and its effects may still land` (`ToolResult.unknown(toolName, limit)`; SSE `{"kind":"Unknown","limit":"PT2M"}`). Session cancellation during either wait, or during the stop grace, ends the call, woken by the call's link to the session's token |
 | `ToolContext(sessionContext, deadline)`, `ToolContext.of(sessionContext, deadline)`; `ctx.cancellation()` was `sessionContext().cancellation()` | `ToolContext(sessionContext, cancellation, deadline)`; `ctx.cancellation()` is the call's own token. Session-scoped cleanup registers on `ctx.sessionContext().cancellation()`, which one call's timeout never cancels. `ToolContext.of` is removed |
-| `ToolDispatch(sessionContext, registry, limits)`, `dispatch(call, cancellation, timeout)`; an `Error` thrown by a tool came back as a `Threw` result | `ToolDispatch(sessionContext, registry, ending)`, where `ending` is the session's `SessionState.ending()`; `dispatch(call, cancellation, timeout, stopGrace, withheld)`, whose caller waits for its one deadline itself. A tool's `Error` is rethrown from `dispatch` as the same instance |
 | `ToolOutcome.Rejected(by, reason)` came only from a hook | Also from the dispatcher: a call refused while an earlier call runs on after its caller stopped waiting is `Rejected("ToolDispatch", "tool '<name>' did not stop; no tool runs until it ends")`, text `blocked by ToolDispatch: tool '<name>' did not stop; no tool runs until it ends` |
 | A tool executor that returned `null` ended the session with `ErrorDuringExecution` (`NullPointerException` in the tool round) | `Threw("java.lang.NullPointerException")`, text `tool '<name>' threw: executor returned null`, and the session goes on. `ToolExecutor.execute` documents its result as non-null |
 | A `ScheduledExecutorService` deadline cancelled by the session (a stream-idle re-arm) stayed queued until its delay passed | the session holds no scheduler: its wall clock is a virtual thread that ends with the session |
-| A tool that ignored its token and interruption ran on past its timeout while later calls ran beside it, any number at a time | While such a call runs on, `stopGrace` past its deadline or after its caller stopped waiting, every later call of the session, of any category, is `Rejected` until it ends: a `READ` or `SEARCH` tool that never stops now blocks the rest of the session's tool calls |
+| A tool that ignored its token and interruption ran on past its timeout while later calls ran beside it, any number at a time | While such a call runs on, `stopGrace` past its deadline or after its caller stopped waiting, every later call of the session, of any category, is `Rejected` until it ends: a `READ` tool that never stops now blocks the rest of the session's tool calls |
 
 **`ConcurrencyLimits` is removed; the steering queue's capacity is a `SessionOptions` component.**
 The loop runs one tool call at a time, so the three tool caps bounded nothing a session did beyond
@@ -624,8 +594,7 @@ the blank name and ended the session with `ErrorDuringExecution`.
 
 | 2.x | 3.0 |
 |---|---|
-| `HookRegistry` never checked a hook's `name()` and called it again at every decision, so a blank or throwing `name()` ended the session at the hook's first decisive outcome, and a `null` one fell back to the phase name, such as `PreToolUseHook`, at some decisions and ended the session at others | `HookRegistry` (and so `AgentSession.create`) reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
-| `HookDecision(Hook firingHook, HookOutcome outcome)`, `HookDecision.of(Hook, HookOutcome)`, `HookDecision.firingHookOptional()` | `HookDecision(String firingHookName, HookOutcome outcome)` and `HookDecision.of(String, HookOutcome)`; read the name through `firingHookName()`, `null` only on a `Continue` decision |
+| `HookRegistry` never checked a hook's `name()` and called it again at every decision, so a blank or throwing `name()` ended the session at the hook's first decisive outcome, and a `null` one fell back to the phase name, such as `PreToolUseHook`, at some decisions and ended the session at others | `AgentSession.create` reads each hook's `name()` once and rejects a `null` (`NullPointerException`) or blank (`IllegalArgumentException`) one, and an exception `name()` throws propagates; that name is the one every event, decision and log line carries. An anonymous hook's default name is its binary class name, such as `com.acme.Policies$1` |
 
 **Tool authorization is mandatory, fails closed and runs on the call that executes.** The
 permission evaluator was an ordinary `PreToolUse` hook, so a throwing permission-key extractor, or
@@ -635,18 +604,15 @@ final immutable call, then dispatch of that same call. Only an `ALLOW` admits it
 including a failure and a permission key carrying a secret of the session's `SecretRegistry`, is
 `ToolOutcome.Rejected("Permission", reason)` with a `ToolBlocked` event. That reason and a hook's
 `Block` reason are redacted through the session's `SecretRegistry` and cut at 1024 characters; an
-`ApprovalRequest`'s reason is redacted too, but not cut. A call naming no registered tool skips the
+approval prompt's reason is redacted too. A call naming no registered tool skips the
 stage and ends `NotFound`.
 
 | 2.x | 3.0 |
 |---|---|
-| The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook; its refusals carry the name `Permission`, which `HookRegistry` (and so `AgentSession.create`) rejects for a hook (`IllegalArgumentException`) |
+| The permission evaluator is a `PreToolUseHook` at priority 50 | a fixed stage after every `PreToolUse` hook; its refusals carry the name `Permission`, which `AgentSession.create` rejects for a hook (`IllegalArgumentException`) |
 | A `PreToolUseHook` that throws or returns `null` is `Continue` | it refuses the call, `Rejected(by = the hook)`, with reason `hook threw <exception class>: <message>` or `hook returned null`, logged at `WARNING` with the exception's redacted copy; later `PreToolUse` hooks do not run |
 | The first `PreToolUse` `MutateArgs` ends the chain | it passes the new arguments to the next hook; `Block`, `Inject` and `Stop` end the chain |
-| `HookRegistry.firePreToolUse` returns `HookDecision` | returns `PreToolUseResult(call, mutations, decision)` |
-| `DefaultPermissionEvaluator.Builder.withQuestionGateway(QuestionGateway)` | `withApprover(ToolApprover)`; `ToolApprover.askingUser(gateway)` is the old prompt |
-| `new DefaultPermissionEvaluator(permission, tools)` | `DefaultPermissionEvaluator.newBuilder(permission, tools).build()`, with `withSecretRegistry` for the registry that redacts an approval's reason |
-| `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | `authorize(ToolCall)` returns an `ALLOW` or `DENY` `PermissionDecision`; no priority, since no hook runs after it |
+| `DefaultPermissionEvaluator` implements `PreToolUseHook`: `beforeTool`, `priority()`, `name()`, `Builder.withPriority(int)` | the session runs its policy as a fixed stage after every `PreToolUse` hook; no priority, since no hook runs after it; `Permission.evaluate(key, category)` dry-runs the policy |
 | `PermissionDecision(effect, reason)`; deny reasons read `permission: deny rule for <tool>` | `PermissionDecision(effect, reason, rule)`; reasons name the tool, key and rule or default that decided, such as `deny rule Write(/etc/**) matched Write(/etc/passwd)` |
 
 **A path tool's permission key is the canonical path it touches.** `Read`, `LS`, `Glob`, `Grep`,
@@ -659,8 +625,6 @@ spelling.
 | 2.x | 3.0 |
 |---|---|
 | `ToolBinding.permissionKey(Map)` | `ToolBinding.canonicalize(ToolCall)` → `CanonicalCall(call, key)` |
-| `DefaultPermissionEvaluator.authorize(ToolCall)` | `authorize(ToolBinding.CanonicalCall)`, deciding on the canonical call's key |
-| `LoopCollaborators(hooks, toolDispatch, authorization, steeringQueue, eventSink, hookContextFactory, clock)`, `authorization` a `Function<ToolCall, PermissionDecision>` | `authorization` is a `Function<ToolBinding.CanonicalCall, PermissionDecision>`, followed by the required `Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision`, set with `Builder.withRuleDecision` |
 | Path tools key on the raw `path` argument | keys are canonical: `.`, `./a/b`, `/memories/a/b`; a trusted workspace's outside target by its absolute real path |
 | A rule glob is matched as written, whatever it could match | a rule for a path tool whose glob can never match a canonical key fails `AgentSession.create` |
 | `X/**` does not match `X`; `/**/` needs one segment | `X/**` matches `X`; `/**/` and a leading `**/` match zero segments |
@@ -668,7 +632,6 @@ spelling.
 | A non-string `path`, JSON `null` included, is treated as missing (`"."` for `LS`, `Glob`, `Grep`) | refused |
 | `Glob`, `Grep`, `LS` and `MemoryRead` `list` return every entry below their path | they withhold entries their own DENY rules match (and, for `Grep`, which returns contents, entries a `Read` DENY or ASK rule decides, without asking), never descend into a withheld directory, and end with `[withheld by permission policy: <n>]` |
 | `new ToolContext(SessionContext, CancellationToken, Duration)` | `ToolContext(SessionContext, CancellationToken, Duration, Predicate<String> withheld)`; `ToolContext.noop()` withholds nothing |
-| `ToolDispatch.dispatch(ToolCall, CancellationToken, Duration, Duration)` | `dispatch(ToolCall, CancellationToken, Duration, Duration, Predicate<String> withheld)` |
 | A permission-key extractor that throws is refused as `permission key of <tool> failed: <class>: <message>` under a `Permission`, and is never called without one | refused before authorization as `<tool>: <message>` |
 
 **`Execute`'s permission key is the whole script, and the approval prompt shows the arguments.**
@@ -685,7 +648,6 @@ sandbox. Real control is `ASK`, whose prompt shows every argument.
 | Before | 3.0 |
 |---|---|
 | `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
-| `ApprovalRequest(call, key, category, rule, reason)` | `ApprovalRequest(call, arguments, key, category, rule, reason)`: `arguments` is display text, the call's arguments as compact JSON with every session secret redacted, its line separators and format characters escaped, cut at 1024 characters with a line `Arguments cut: <n> more chars not shown`; `call` is still the exact call that runs |
 | The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show as JSON string text through `JsonSnapshot.escape` (`"`, `\`, controls, line separators and format characters such as bidi overrides and zero-width characters escaped), cut at 1024 characters, so a script cannot fake a line of the question |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
 
@@ -699,10 +661,10 @@ argument. The presets no longer register `MemoryWrite` themselves; the session r
 | Before | 3.0 |
 |---|---|
 | `withPreset(SessionPresets.minimal())` | `SessionPresets.minimal(model)`, or `SessionOptions.newBuilder().withModel(model)` |
-| `withModel(model).withPreset(SessionPresets.readOnly(path))`, `workspace(path)`, `openEnded(path, provider)` | `SessionPresets.readOnly(model, path)`, `workspace(model, path)`, `openEnded(model, path, provider)` |
-| `SessionPresets.readOnly(WorkspaceRoot)`, for a trusted root (`new WorkspaceRoot(path, false)`) or another curated root | `SessionOptions.newBuilder().withModel(model).withTools(new ToolRegistry(List.of(ReadTool.binding(root), GlobTool.binding(root), GrepTool.binding(root), LsTool.binding(root)))).withPermission(Permission.planMode())` |
+| `withModel(model).withPreset(SessionPresets.readOnly(path))`, `workspace(path)`, `openEnded(path, provider)` | `SessionPresets.readOnly(model, path)`, `workspace(model, path)`, `workspace(model, path).withExecutionProvider(provider)` |
+| `SessionPresets.readOnly(WorkspaceRoot)`, for a trusted root (`new WorkspaceRoot(path, false)`) or another curated root | `SessionOptions.newBuilder().withModel(model).withTools(List.of(ReadTool.binding(root), GlobTool.binding(root), GrepTool.binding(root), LsTool.binding(root))).withPermission(Permission.planMode())` |
 | `SessionPresets.workspace(WorkspaceRoot)` | the same four bindings, `.withPermission(Permission.defaultInWorkspace()).withMemoryBackend(FileSystemMemoryBackend.of(root))` |
-| `SessionPresets.openEnded(WorkspaceRoot, ExecutionProvider)` | the `workspace` wiring above with `ExecuteTool.binding(provider)` added to the bindings, plus `.withExecutionProvider(provider)` |
+| `SessionPresets.openEnded(WorkspaceRoot, ExecutionProvider)` | the `workspace` wiring above plus `.withExecutionProvider(provider)`, which registers `Execute` |
 | A custom `SessionPreset` (`b -> b.withHook(hook)`) | an ordinary method that takes and returns a `SessionOptions.Builder` |
 
 **A failed turn has no side effects, and the turn limit admits its last turn.** A turn runs the
@@ -827,7 +789,7 @@ evaluate to `ALLOW`.
 | `PermissionRule(effect, toolName, argPattern)`, `PermissionRule.withGlob(effect, tool, glob)` / `any(effect, tool)`, `PermissionRule.effect()` | `PermissionRule(toolName, argPattern)`, `PermissionRule.of(tool, glob)` / `any(tool)`; the list a rule sits in is its effect |
 | `Permission.firstRuleFor(tool)` | removed: it ignored globs; inspect `allow()`, `ask()` and `deny()` |
 | `Permission.planMode()` allowed `Read`, `LS`, `Glob`, `Grep` on `./**` | `Permission.empty(PLAN)`, deciding every call as before |
-| `Permission.defaultInWorkspace()` allowed the read tools, `MemoryRead` and `MemoryWrite`, and asked for `Write`, `Edit`, `MultiEdit` and `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask's `ApprovalRequest.rule()` is empty (the category default asks) |
+| `Permission.defaultInWorkspace()` allowed the read tools, `MemoryRead` and `MemoryWrite`, and asked for `Write`, `Edit`, `MultiEdit` and `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask names no rule (the category default asks) |
 
 **The session drops its dead layers.** The file tracker, `StopReason`, the second "off"
 implementations and an implementation detail on `AgentSession` are gone. A typed `runBlocking` on
@@ -859,7 +821,6 @@ the compactor does their job.
 | 2.x | 3.0 |
 |---|---|
 | Hook methods return `HookOutcome` | each returns its phase type (`HookOutcome.OnUserMessage`, `PreModelTurn`, `PostModelTurn`, `PreStop`, `PreToolUse`, `PostToolUse`); a hook returning an outcome its phase ignored no longer compiles. `HookOutcome.cont()`, `block(...)`, `inject(...)`, `stop(...)` and the `mutate*(...)` factories return their record types |
-| `HookDecision`, `HookDecision.proceed()` | `HookDecision<O extends HookOutcome>`; each `HookRegistry.fire*` returns its phase's decision, and `PreToolUseResult` holds `List<HookDecision<HookOutcome.MutateArgs>>` mutations and a `HookDecision<HookOutcome.PreToolUse>` decision. `proceed()` is removed, because one shared instance cannot be typed for every phase without an unchecked cast; build a phase's Continue decision with `new HookDecision<>(null, HookOutcome.cont())` |
 | `PreCompactHook`, `PostCompactHook`, `CompactionPayload`, `HookRegistry.firePreCompact`, `firePostCompact` | wrap the compactor (`SessionOptions.Builder.withContextCompactor`) to see the history before and after, and observe `QueryEvent.ContextEdited` for the counts; to stop after a compaction, return `Stop` from a `PreModelTurnHook` |
 
 **`AgentSession.events()` returns an `EventStream`, not a `Flow.Publisher`.** `EventStream` is an
@@ -885,8 +846,29 @@ from the teardown's start, instead of up to `stopGrace` each: `close()` and ever
 most `stopGrace`, not three times it. A step after one that used the deadline up (a callback or a
 tool that never returns) still runs, `onSessionEnd` is still called and the event streams still
 end, but it is not waited for: `onSessionEnd` may then still run when the result settles, and its
-`WARNING` is logged. `ToolDispatch.awaitLiveCalls(Duration grace)` →
-`awaitLiveCalls(long deadlineNanos)`, a `System.nanoTime()` instant.
+`WARNING` is logged.
+
+**The session's public surface is what a user configures.** Tools append like hooks; setting an
+execution provider registers `Execute`, as a memory backend registers the memory tools, and
+`AskUserQuestion` is opt-in. Two tool categories that behaved exactly like two others are merged
+into them. The agent loop, the permission evaluator, the approval prompt and the hook registry are
+no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor gets the hooks'
+`HookContext` instead of the loop's state.
+
+| 2.x | 3.0 |
+|---|---|
+| `SessionOptions.Builder.withTools(ToolRegistry)`; `SessionOptions.tools()` → `ToolRegistry` | `withTool(ToolBinding)` appends, `withTools(List<ToolBinding>)` replaces the list; `tools()` → `List<ToolBinding>`. `ToolRegistry` is internal. Two tools with one name, a built-in included, still fail `AgentSession.create` with `duplicate tool name in registry: <name>` |
+| `ToolCategory.SEARCH`, `ToolCategory.DELEGATION` | `READ` and `CONTROL`, which they behaved exactly like; `Grep` and `Glob` are `READ`, and a default decision's reason reads `default-allow READ (...)` |
+| `NoopExecutionProvider`, the default execution provider | set no provider: the session then has no `Execute` tool and no start or end step |
+| `SessionOptions.executionProvider()` → `ExecutionProvider` | `Optional<ExecutionProvider>`; `withExecutionProvider(p)` registers `Execute` over `p` and runs its `onSessionStart` and `onSessionEnd` with the session |
+| `ExecuteTool.binding(p)` in the tools next to `withExecutionProvider(p)` | delete the binding; registering both fails `AgentSession.create` with `duplicate tool name in registry: Execute`, and a tool named `Execute` without a provider fails it too, since its provider would never be started |
+| `SessionPresets.openEnded(model, root, provider)` | `SessionPresets.workspace(model, root).withExecutionProvider(provider)` |
+| `AskUserQuestion` registered in every session | registered only with `SessionOptions.Builder.withAskUserQuestion()`; a permission `ASK` still asks through `QuestionAsked` without it |
+| the `session.loop` package (`AgentLoop`, `TurnRunner`, `ToolDispatch`, `StopClassifier`, `SessionState`, `ConversationHistory`, `SessionTotals`, `SessionEnding`, `TurnOutcome`) was exported | internal; no replacement needed |
+| `ContextCompactor.compact(List<Message>, SessionState)` | `compact(List<Message>, HookContext)`, the context the session's hooks get at that turn |
+| `DefaultPermissionEvaluator`, its `evaluate(key, category)` and `ruleDecision(key)` | internal; dry-run a policy with `Permission.evaluate(key, category)`, which carries the deciding rule in `rule()` |
+| `RuleMatcher`, `HookDecision`, `HookRegistry` (with `countOf`) | internal; `countOf` is removed |
+| Automated approval through a hand-built evaluator's approver | answer the `QuestionAsked` event with `AgentSession.answer`, or decide the call in a `PreToolUseHook` |
 
 ### Added
 
@@ -1000,27 +982,22 @@ end, but it is not waited for: `onSessionEnd` may then still run when the result
   characters, never inside a surrogate pair, then appends `note` formatted with how many were cut.
   Redacting before the cut means a secret the cut falls across is never partly shown. A refusal's
   reason, an approval's arguments and the approval prompt's key and reason are bounded through it.
-- **`ToolApprover`, `ApprovalRequest`, `PermissionDecision.rule()` and
-  `DefaultPermissionEvaluator.Builder.withSecretRegistry`.** A `ToolApprover` decides a call the
-  policy answered with ASK, from an `ApprovalRequest(call, arguments, key, category, rule, reason)`
-  for the final immutable call, whose `rule` is the ask rule that matched (empty when a mode or
-  category default asked) and whose `arguments` display the call, redacted and bounded. Only its
-  `ALLOW` admits the call. `ToolApprover.askingUser(gateway)` is the human approver the session
-  wires over `AgentSession.answer`, under a fresh question id per request, so an answer resolves one
-  call only. `PermissionDecision.rule()` is the rule that decided; `withSecretRegistry` takes the
-  registry that redacts an approval's reason and arguments.
+- **`PermissionDecision.rule()` and `Permission.evaluate(key, category)`.** `rule()` is the rule
+  that decided, empty when a mode or category default did. `evaluate` is the policy's pure decision
+  for one key, the one the session enforces, so a host unit-tests its policy without a session: no
+  question is asked and nothing runs. A call the policy asks about is asked through `QuestionAsked`
+  for the final immutable call, its arguments shown redacted and bounded, under a fresh question id
+  per request, so an answer resolves one call only.
 - **`PathSpace`, `ToolBinding.PathArgument`, `ToolBinding.Builder.withPathArgument`,
   `WorkspaceRoot.canonical`, `WorkspaceRoot.spell`, `WorkspaceRoot.resolveCanonical`,
-  `session.tools.Withholding`, `ToolContext.withholds`, `DefaultPermissionEvaluator.ruleDecision`,
-  `ToolBinding.PathArgument.withContentRulesOf`, `LoopCollaborators.ruleDecision`,
-  `LoopCollaborators.Builder.withRuleDecision`.** A `PathSpace` defines a path argument's canonical
+  `session.tools.Withholding`, `ToolContext.withholds`,
+  `ToolBinding.PathArgument.withContentRulesOf`.** A `PathSpace` defines a path argument's canonical
   spelling (`canonical`), says whether a rule glob can match one (`admits`) and gives a sample
   (`example`); `WorkspaceRoot` is the workspace's, and memory has its own. A binding declares its
   path argument with `PathArgument.required(name, space)` or `optional(name, default, space)`.
   `Withholding` is the one filter a walking tool applies to each entry, through the call's
-  `ToolContext.withholds`; `ruleDecision` is the decision of the rule that decides a key in
-  `evaluate`'s order, and
-  `withContentRulesOf` names the tools whose content a walk returns (`Read` for `Grep`), whose DENY
+  `ToolContext.withholds`, withholding an entry a rule decides (`Permission.evaluate(...).rule()`
+  present), and `withContentRulesOf` names the tools whose content a walk returns (`Read` for `Grep`), whose DENY
   and ASK rules then withhold its entries.
 
 ### Changed

@@ -17,8 +17,8 @@ package com.standardapplied.helios.session.hooks;
  *
  * <p>A hook that throws a {@link RuntimeException} or returns {@code null} cannot abort the
  * session: a {@link PreToolUseHook} fails closed as a {@link HookOutcome.Block}, any other hook is
- * treated as {@link HookOutcome.Continue}, and {@link HookRegistry} logs the failure. An {@link
- * Error} escapes.
+ * treated as {@link HookOutcome.Continue}, and the session logs the failure. An {@link Error}
+ * escapes.
  */
 public sealed interface Hook
     permits PreToolUseHook,
@@ -33,9 +33,9 @@ public sealed interface Hook
    * The hook's name, surfaced in audit events, log lines and the {@link
    * com.standardapplied.helios.session.QueryEvent.HookFired HookFired}, {@link
    * com.standardapplied.helios.session.QueryEvent.ToolBlocked ToolBlocked} and {@link
-   * com.standardapplied.helios.session.QueryEvent.ToolMutated ToolMutated} events. {@link
-   * HookRegistry} reads it once, when it is built, and uses that name for the hook's lifetime; it
-   * rejects a null or blank name and the reserved {@link
+   * com.standardapplied.helios.session.QueryEvent.ToolMutated ToolMutated} events. The session
+   * reads it once, when it is built, and uses that name for the hook's lifetime; it rejects a null
+   * or blank name and the reserved {@link
    * com.standardapplied.helios.session.permissions.Permission#NAME Permission}, so a session with
    * such a hook fails to be created. Each phase interface defaults it to the implementing class's
    * simple name, or to its binary name (e.g. {@code com.acme.Policies$1}) for an anonymous class.

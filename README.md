@@ -292,12 +292,13 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 - `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open.
 - `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to `SessionLimits.stopGrace` (5 s). Every end of a session runs one teardown, bounded by one `stopGrace` deadline, before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls and `onSessionEnd` until that deadline; then end the event streams without waiting for their readers. A step after one that used the deadline up still runs but is not waited for. A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
 
-`SessionPresets` ships four curated factories, each returning a `SessionOptions.Builder` that already holds the model:
+`SessionPresets` ships three curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
 - `minimal(model)` — model only, defaults for everything else.
 - `readOnly(model, root)` — `Read` / `Glob` / `Grep` / `LS` rooted at the workspace, gated by `Permission.planMode()`.
 - `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
-- `openEnded(model, root, provider)` — `workspace` plus `Execute` through the given `ExecutionProvider`; `defaultInWorkspace()` asks before each execution.
+
+Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), and `withAskUserQuestion()` adds `AskUserQuestion`. Two tools with one name fail `AgentSession.create`.
 
 Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
 
@@ -390,7 +391,6 @@ var weatherTool = Tool.newBuilder()
 ```java
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 
 var registry = new SecretRegistry();
 var gh = CommandGrant.builder("gh")
@@ -407,8 +407,7 @@ var gh = CommandGrant.builder("gh")
 var options = SessionOptions.newBuilder()
     .withModel(model)
     .withSecretRegistry(registry)                     // the same instance
-    .withTools(new ToolRegistry(List.of(
-        ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())))
+    .withTool(ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())
     .build();
 ```
 
@@ -420,14 +419,12 @@ The session's `Read` / `Grep` / `Glob` tools accept any `WorkspaceRoot`, not jus
 
 ```java
 var corpus  = WorkspaceRoot.of(Path.of("/var/kb/support"));
-var tools   = new ToolRegistry(List.of(
-    ReadTool.binding(corpus),
-    GrepTool.binding(corpus),
-    GlobTool.binding(corpus)));
 var options = SessionOptions.newBuilder()
     .withModel(model)
     .withSecretRegistry(registry)
-    .withTools(tools)
+    .withTool(ReadTool.binding(corpus))
+    .withTool(GrepTool.binding(corpus))
+    .withTool(GlobTool.binding(corpus))
     .withPermission(Permission.planMode())
     .build();
 ```
@@ -535,7 +532,7 @@ mode and persists sensitive content verbatim; it is unsuitable for customer-medi
 
 ## Sandboxed Code Execution (`helios-repl`)
 
-The `helios-repl` module runs Java snippets in a JVM subprocess sandbox. A session reaches it through the `Execute` tool with `runtime: JSHELL`: wire `JShellExecutionProvider` as the session's execution provider and bind `ExecuteTool`. Each session gets its own sandbox, so variables, imports and classes persist across its `Execute` calls. The sandbox reaches the host only through the custom host functions you register on `ReplConfig`:
+The `helios-repl` module runs Java snippets in a JVM subprocess sandbox. A session reaches it through the `Execute` tool with `runtime: JSHELL`: wire `JShellExecutionProvider` as the session's execution provider, which registers `Execute` over it. Each session gets its own sandbox, so variables, imports and classes persist across its `Execute` calls. The sandbox reaches the host only through the custom host functions you register on `ReplConfig`:
 
 ```java
 var quote = new HostFunction(
@@ -549,7 +546,6 @@ try (var executionProvider = JShellExecutionProvider.create(
      var session = AgentSession.create(
          SessionOptions.newBuilder()
              .withModel(model)
-             .withTools(new ToolRegistry(List.of(ExecuteTool.binding(executionProvider))))
              .withExecutionProvider(executionProvider)
              .withPermission(Permission.lockedDown())
              .build())) {

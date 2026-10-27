@@ -6,11 +6,11 @@ import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.Set;
@@ -64,7 +64,7 @@ final class ToolAuthorization {
    *
    * @param tools the registry dispatch looks the call up in
    * @param authorization the session's permission check of a canonical call
-   * @param ruleDecision the decision of the policy rule that decides a key, if one does
+   * @param permission the session's policy, whose rules decide what the call withholds
    * @param secrets the session's secrets, which no permission key may carry
    * @param call the final call
    * @return the canonical call with what it withholds, or why it is refused
@@ -72,7 +72,7 @@ final class ToolAuthorization {
   static Verdict admit(
       ToolRegistry tools,
       Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
-      Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision,
+      Permission permission,
       SecretRegistry secrets,
       ToolCall call) {
     var registered = tools.get(call.name());
@@ -92,7 +92,7 @@ final class ToolAuthorization {
     }
     return refusal(authorization, canonical)
         .<Verdict>map(Refused::new)
-        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, ruleDecision)));
+        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, permission)));
   }
 
   private static Optional<String> refusal(
@@ -121,27 +121,26 @@ final class ToolAuthorization {
 
   /**
    * True for a key that a DENY rule of the call's tool decides, or a DENY or ASK rule of a tool its
-   * path argument names in {@link ToolBinding.PathArgument#contentRulesOf}.
+   * path argument names in {@link ToolBinding.PathArgument#contentRulesOf}. A rule's decision does
+   * not depend on the category, so each key is evaluated with the walking tool's own.
    */
-  private static Predicate<String> withheld(
-      ToolBinding binding, Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision) {
+  private static Predicate<String> withheld(ToolBinding binding, Permission permission) {
     var contentTools =
         binding.pathArgument().map(ToolBinding.PathArgument::contentRulesOf).orElse(Set.of());
     return key ->
-        decidedBy(ruleDecision, binding.name(), key, OWN_RULES)
+        decidedBy(permission, binding, binding.name(), key, OWN_RULES)
             || contentTools.stream()
-                .anyMatch(tool -> decidedBy(ruleDecision, tool, key, CONTENT_RULES));
+                .anyMatch(tool -> decidedBy(permission, binding, tool, key, CONTENT_RULES));
   }
 
   private static boolean decidedBy(
-      Function<ToolPermissionKey, Optional<PermissionDecision>> ruleDecision,
+      Permission permission,
+      ToolBinding walking,
       String tool,
       String key,
       Set<PermissionEffect> effects) {
-    return ruleDecision
-        .apply(new ToolPermissionKey(tool, key))
-        .filter(decision -> effects.contains(decision.effect()))
-        .isPresent();
+    var decision = permission.evaluate(new ToolPermissionKey(tool, key), walking.category());
+    return decision.rule().isPresent() && effects.contains(decision.effect());
   }
 
   /**

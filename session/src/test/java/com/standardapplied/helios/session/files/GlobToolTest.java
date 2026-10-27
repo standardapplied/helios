@@ -94,9 +94,9 @@ final class GlobToolTest {
   }
 
   @Test
-  void categoryIsSearch(@TempDir Path tmp) {
+  void categoryIsRead(@TempDir Path tmp) {
     var binding = GlobTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(ToolCategory.SEARCH, binding.category());
+    assertEquals(ToolCategory.READ, binding.category());
     assertEquals("Glob", binding.name());
     assertEquals("Glob", GlobTool.NAME);
   }

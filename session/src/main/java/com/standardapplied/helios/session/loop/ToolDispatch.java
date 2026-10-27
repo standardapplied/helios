@@ -11,7 +11,6 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -46,20 +45,11 @@ public final class ToolDispatch {
   private final SessionEnding ending;
   private volatile DispatchedCall abandoned;
 
-  /**
-   * Build a dispatcher.
-   *
-   * @param sessionContext per-session metadata stamped on every {@link ToolContext} built by this
-   *     dispatcher; non-null
-   * @param registry the bindings the dispatcher will look calls up against; non-null
-   * @param ending the session's ending, which records every {@link Error} the work of a call
-   *     throws, a callback on a call's own token included; non-null
-   * @throws NullPointerException if any argument is null
-   */
+  /** {@code ending} records every {@link Error} the work of a call throws. */
   public ToolDispatch(SessionContext sessionContext, ToolRegistry registry, SessionEnding ending) {
-    this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext must not be null");
-    this.registry = Objects.requireNonNull(registry, "registry must not be null");
-    this.ending = Objects.requireNonNull(ending, "ending must not be null");
+    this.sessionContext = sessionContext;
+    this.registry = registry;
+    this.ending = ending;
   }
 
   /**

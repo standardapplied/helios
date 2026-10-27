@@ -8,21 +8,23 @@
  * com.standardapplied.helios.core.tool.Tool}s the model can call, with the per-tool metadata the
  * loop, hooks, and permission system need.
  *
- * <p>{@link com.standardapplied.helios.session.tools.ToolRegistry} is the immutable, name-keyed bag
- * of {@link com.standardapplied.helios.session.tools.ToolBinding}s the session advertises. Each
- * binding wraps one {@code Tool} with:
+ * <p>A session's tools are the {@link com.standardapplied.helios.session.tools.ToolBinding}s added
+ * with {@code SessionOptions.Builder.withTool}, followed by the built-in tools its options switch
+ * on; two with one name fail the session's creation. Each binding wraps one {@code Tool} with:
  *
  * <ul>
  *   <li>a {@link com.standardapplied.helios.session.tools.ToolCategory} ({@code READ} / {@code
- *       SEARCH} / {@code WRITE} / {@code EXECUTION} / {@code NETWORK} / {@code CONTROL} / {@code
- *       DELEGATION}) — drives the default-by-category branch of the permission evaluator;
+ *       WRITE} / {@code EXECUTION} / {@code NETWORK} / {@code CONTROL}) — sets the permission
+ *       policy's default for the tool's calls;
  *   <li>an optional {@code permissionKey} extractor that derives a {@link
  *       com.standardapplied.helios.session.tools.ToolPermissionKey} from the call's arguments —
  *       lets glob rules like {@code "Edit:./src/**"} fire against the path arg of an edit call;
  *   <li>an optional {@code visibility} predicate keyed on a {@link
- *       com.standardapplied.helios.session.tools.ToolVisibilityContext}, so a tool can be hidden
- *       from the model on some turns (e.g. only expose {@code Edit} after the user has confirmed
- *       plan mode).
+ *       com.standardapplied.helios.session.tools.ToolVisibilityContext}, so a tool is advertised to
+ *       the model only on some turns (e.g. only expose {@code Edit} after the user has confirmed
+ *       plan mode). Visibility decides what a turn advertises, not what may run: a hidden tool the
+ *       model names still runs; refuse a call with a deny rule or a {@code PreToolUse} {@code
+ *       Block}.
  * </ul>
  *
  * <p>{@link com.standardapplied.helios.session.tools.ToolArgs} is the shared helper for safely

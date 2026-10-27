@@ -16,14 +16,13 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.session.ask.AskUserQuestionTool;
+import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.time.Clock;
@@ -453,12 +452,12 @@ final class SessionStartTest {
   @Test
   void aSessionWhoseWiringFailsNeverStartsTheProvider() {
     var provider = new RecordingProvider(order);
-    var clashing = binding(AskUserQuestionTool.NAME);
-    var options = withProvider(provider).withTools(new ToolRegistry(List.of(clashing))).build();
+    var clashing = binding(ExecuteTool.NAME);
+    var options = withProvider(provider).withTools(List.of(clashing)).build();
 
     var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
 
-    assertEquals("duplicate tool name in registry: AskUserQuestion", thrown.getMessage());
+    assertEquals("duplicate tool name in registry: Execute", thrown.getMessage());
     assertEquals(0, provider.starts.get());
   }
 

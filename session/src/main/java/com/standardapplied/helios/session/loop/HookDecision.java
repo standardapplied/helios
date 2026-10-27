@@ -2,9 +2,10 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.session.hooks;
+package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.Objects;
 
 /**

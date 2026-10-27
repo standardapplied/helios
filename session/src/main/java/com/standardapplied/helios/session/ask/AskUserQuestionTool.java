@@ -14,7 +14,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +40,10 @@ import java.util.concurrent.CancellationException;
  * QuestionGateway#ask(AskUserQuestionRequest)}, blocks the executing virtual thread on the gateway,
  * and returns a {@link ToolResult} whose output is a line per selection plus any free-text the user
  * supplied. {@link ToolCategory#CONTROL} — default-allow under the permission system.
+ *
+ * <p>A session registers it only when built with {@code
+ * SessionOptions.Builder.withAskUserQuestion()}. Permission approvals do not need it: a call the
+ * policy answers with {@code ASK} is asked through the same gateway either way.
  */
 public final class AskUserQuestionTool {
 
@@ -95,10 +98,7 @@ public final class AskUserQuestionTool {
             .withIdempotent(false)
             .withExecutor((args, ctx) -> execute(ctx, gateway, args))
             .build();
-    return ToolBinding.newBuilder(tool)
-        .withCategory(ToolCategory.CONTROL)
-        .withPermissionKeyExtractor(args -> ToolPermissionKey.of(NAME))
-        .build();
+    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.CONTROL).build();
   }
 
   private static ToolResult execute(

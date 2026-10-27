@@ -25,8 +25,6 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
-import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -65,40 +63,6 @@ final class TurnRunnerTest {
 
   private TurnRunner runner(Model model) {
     return fixture.runner(fixture.collaborators(hooks, dispatch, queue), model);
-  }
-
-  @Test
-  void nullCollaboratorsRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new TurnRunner(null, model, CostCalculator.ZERO, null));
-    assertEquals("collaborators must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullModelRejected() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new TurnRunner(
-                    fixture.collaborators(hooks, dispatch, queue),
-                    null,
-                    CostCalculator.ZERO,
-                    null));
-    assertEquals("model must not be null", ex.getMessage());
-  }
-
-  @Test
-  void nullCostCalculatorRejected() {
-    var model = textModel("x", FinishReason.STOP, Usage.of(1, 1));
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new TurnRunner(fixture.collaborators(hooks, dispatch, queue), model, null, null));
-    assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
   @Test

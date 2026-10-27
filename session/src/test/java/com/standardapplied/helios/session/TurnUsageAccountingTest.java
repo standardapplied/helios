@@ -23,7 +23,6 @@ import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
@@ -116,7 +115,7 @@ class TurnUsageAccountingTest {
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withCostCalculator(RATES)
-                .withTools(new ToolRegistry(List.of(echo())))
+                .withTools(List.of(echo()))
                 .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100L).build())
                 .withTokenCounter(
                     messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L)
@@ -136,7 +135,7 @@ class TurnUsageAccountingTest {
     return SessionOptions.newBuilder()
         .withModel(model)
         .withCostCalculator(RATES)
-        .withTools(new ToolRegistry(List.of(echo())))
+        .withTools(List.of(echo()))
         .withHook(stoppingHook);
   }
 

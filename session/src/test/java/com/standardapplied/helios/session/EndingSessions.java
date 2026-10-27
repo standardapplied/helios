@@ -14,7 +14,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.List;
@@ -54,7 +53,7 @@ final class EndingSessions {
   static SessionOptions.Builder callingTool(RecordingProvider provider, ToolBinding tool) {
     var call = new ToolCall("c-" + tool.name(), tool.name(), Map.of());
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call).withTextTurn("done").build();
-    return withProvider(provider, model).withTools(new ToolRegistry(List.of(tool)));
+    return withProvider(provider, model).withTools(List.of(tool));
   }
 
   static SessionLimits grace() {

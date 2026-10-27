@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -131,7 +130,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withSecretRegistry(secrets)
-                    .withTools(new ToolRegistry(List.of(tool)))
+                    .withTools(List.of(tool))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));

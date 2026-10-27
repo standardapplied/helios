@@ -5,7 +5,7 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.hooks.HookContext;
 import java.util.List;
 
 /**
@@ -44,8 +44,7 @@ import java.util.List;
  * <h2>Thread-safety</h2>
  *
  * Implementations are called from the single-virtual-thread agent loop; concurrent invocations on
- * one instance do not occur. {@code SessionState} is mutated by the loop and may be read inside
- * {@code compact} without external synchronisation.
+ * one instance do not occur.
  */
 @FunctionalInterface
 public interface ContextCompactor {
@@ -58,13 +57,13 @@ public interface ContextCompactor {
    * CompactionResult(history, Usage.of(0, 0))}.
    *
    * @param history the current conversation history; non-null, may be empty
-   * @param state the per-session state; non-null. Carries the running {@code sessionId}, {@code
-   *     currentTurnIndex}, accumulated {@code usage}, etc.
+   * @param context the session's id, current turn index, cancellation token and model, as hooks get
+   *     them at this turn; non-null
    * @return the result carrying the new history + usage consumed; non-null. The result's history
    *     may be the supplied {@code history} unchanged when nothing was dropped — the loop detects
    *     the no-shrink and does not emit {@code ContextEdited}
    */
-  CompactionResult compact(List<Message> history, SessionState state);
+  CompactionResult compact(List<Message> history, HookContext context);
 
   /**
    * A compactor that leaves the history unchanged. The agent loop still emits {@code
@@ -76,6 +75,6 @@ public interface ContextCompactor {
    * @return a thread-safe compactor that never compacts; never null
    */
   static ContextCompactor disabled() {
-    return (history, state) -> CompactionResult.noOp(history);
+    return (history, context) -> CompactionResult.noOp(history);
   }
 }

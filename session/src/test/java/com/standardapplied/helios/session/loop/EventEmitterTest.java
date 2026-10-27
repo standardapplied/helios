@@ -19,7 +19,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import java.time.Clock;
 import java.time.Instant;

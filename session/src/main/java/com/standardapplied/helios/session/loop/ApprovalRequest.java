@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package com.standardapplied.helios.session.permissions;
+package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.Objects;

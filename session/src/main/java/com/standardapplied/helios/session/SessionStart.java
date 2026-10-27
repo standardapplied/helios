@@ -57,7 +57,7 @@ final class SessionStart {
         BoundedTask.start(
             "helios-session-start-" + state.sessionId(),
             () -> executionProvider.onSessionStart(sessionContext),
-            state.ending());
+            state.ending()::failWith);
     if (task.settlesBy(BoundedTask.deadlineAfter(bound))) {
       return judged(task.outcome().handle(SessionStart::settled).join());
     }

@@ -22,7 +22,6 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import java.time.Clock;

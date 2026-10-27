@@ -15,11 +15,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Start-up and shutdown of one session's runtime. Acquires the session's event stream, notifies the
- * {@link ExecutionProvider} that the session starts once everything else is built ({@link
- * SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the agent-loop virtual
- * thread on first use and, beside it, the wall-clock virtual thread; its {@link SessionTeardown}
- * releases all of it in reverse order, by one {@link SessionLimits#stopGrace()} deadline, before
- * the result future settles.
+ * {@link ExecutionProvider}, if the session has one, that the session starts once everything else
+ * is built ({@link SessionStart}, bounded by {@link SessionLimits#startTimeout()}), starts the
+ * agent-loop virtual thread on first use and, beside it, the wall-clock virtual thread; its {@link
+ * SessionTeardown} releases all of it in reverse order, by one {@link SessionLimits#stopGrace()}
+ * deadline, before the result future settles.
  *
  * <p>The runtime ends exactly once: a start-up the provider does not accept, {@link #startIfNeeded}
  * and {@link #close} share one compare-and-set, so exactly one path tears the runtime down and
@@ -31,7 +31,7 @@ final class SessionLifecycle {
   private final SessionLimits limits;
   private final CompletableFuture<ResultMessage> result;
   private final SessionEventPublisher events;
-  private final SessionStart start;
+  private final Optional<SessionStart> start;
   private final SessionTeardown teardown;
   private final AtomicBoolean started = new AtomicBoolean(false);
   private AgentLoop loop;
@@ -39,7 +39,7 @@ final class SessionLifecycle {
   SessionLifecycle(
       SessionState state,
       SessionContext sessionContext,
-      ExecutionProvider executionProvider,
+      Optional<ExecutionProvider> executionProvider,
       SessionLimits limits,
       CompletableFuture<ResultMessage> result) {
     this.state = state;
@@ -49,8 +49,10 @@ final class SessionLifecycle {
     this.teardown =
         new SessionTeardown(state, sessionContext, executionProvider, events, limits.stopGrace());
     this.start =
-        new SessionStart(
-            state, sessionContext, executionProvider, () -> teardown.end(loop.toolDispatch()));
+        executionProvider.map(
+            provider ->
+                new SessionStart(
+                    state, sessionContext, provider, () -> teardown.end(loop.toolDispatch())));
   }
 
   /** The session's event stream, which the shutdown closes. */
@@ -68,9 +70,9 @@ final class SessionLifecycle {
   }
 
   /**
-   * Bind the loop and notify the execution provider that the session starts, the last step of the
-   * session's construction, waiting for it within {@code startTimeout}. A start the provider does
-   * not accept ({@link SessionStart}) ends the session with its {@link
+   * Bind the loop and notify the execution provider, if any, that the session starts, the last step
+   * of the session's construction, waiting for it within {@code startTimeout}. A start the provider
+   * does not accept ({@link SessionStart}) ends the session with its {@link
    * ResultMessage.ErrorProviderUnavailable}, or with the {@link Error} {@code onSessionStart}
    * threw, once what the lifecycle acquired is released. {@code onSessionEnd} is called only if the
    * provider accepts after the session stopped waiting, by the {@link SessionTeardown} that ends
@@ -78,7 +80,7 @@ final class SessionLifecycle {
    */
   void open(AgentLoop loop) {
     this.loop = loop;
-    start.await(limits.startTimeout()).ifPresent(this::refuse);
+    start.flatMap(provider -> provider.await(limits.startTimeout())).ifPresent(this::refuse);
   }
 
   private void refuse(ResultMessage refusal) {
@@ -101,7 +103,7 @@ final class SessionLifecycle {
   void startIfNeeded() {
     if (started.compareAndSet(false, true)) {
       BoundedTask.start(
-          "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending());
+          "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
       Thread.ofVirtual().name("helios-agent-loop-" + state.sessionId()).start(this::runLoop);
     }
   }

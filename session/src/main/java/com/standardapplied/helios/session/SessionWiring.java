@@ -2,29 +2,32 @@
 
 package com.standardapplied.helios.session;
 
-import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.ask.QuestionGateway;
-import com.standardapplied.helios.session.hooks.DefaultHookContext;
-import com.standardapplied.helios.session.hooks.HookRegistry;
+import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.loop.AgentLoop;
+import com.standardapplied.helios.session.loop.DefaultPermissionEvaluator;
+import com.standardapplied.helios.session.loop.HookRegistry;
 import com.standardapplied.helios.session.loop.LoopCollaborators;
 import com.standardapplied.helios.session.loop.SessionEnding;
+import com.standardapplied.helios.session.loop.SessionHookContext;
 import com.standardapplied.helios.session.loop.StopClassifier;
+import com.standardapplied.helios.session.loop.ToolApprover;
 import com.standardapplied.helios.session.loop.ToolDispatch;
+import com.standardapplied.helios.session.loop.ToolRegistry;
 import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
-import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
-import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
 
 /**
- * Builds one session's agent loop from its options: the tool registry with the built-in tools, the
- * tool dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
+ * Builds one session's agent loop from its options: the tool registry, the options' tools followed
+ * by the built-in tools the options switch on (the memory tools for a memory backend, {@code
+ * Execute} for an execution provider, {@code AskUserQuestion} when asked for), refusing a hand
+ * {@code Execute} binding without a provider, whose start and end would never run; the tool
+ * dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
  * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
  * questions, with the rules that decide a key withholding what walking tools return. It acquires
@@ -41,24 +44,24 @@ final class SessionWiring {
       SteeringQueue steeringQueue,
       SessionEventPublisher events,
       SessionEnding ending) {
-    var combinedTools = withBuiltins(options.tools(), options, pendingQuestions);
-    var toolDispatch = new ToolDispatch(sessionContext, combinedTools, ending);
+    var tools = registry(options, pendingQuestions);
     var model = options.model();
-    var evaluator = evaluator(options, combinedTools, pendingQuestions, sessionContext.secrets());
+    var evaluator =
+        new DefaultPermissionEvaluator(
+            options.permission(),
+            tools,
+            ToolApprover.askingUser(pendingQuestions),
+            sessionContext.secrets());
     var collaborators =
-        LoopCollaborators.newBuilder()
-            .withHooks(new HookRegistry(options.hooks(), sessionContext.secrets()))
-            .withToolDispatch(toolDispatch)
-            .withAuthorization(evaluator::authorize)
-            .withRuleDecision(evaluator::ruleDecision)
-            .withSteeringQueue(steeringQueue)
-            .withEventSink(events::emit)
-            .withHookContextFactory(
-                s ->
-                    new DefaultHookContext(
-                        s.sessionId(), s.currentTurnIndex(), s.cancellation(), model))
-            .withClock(options.clock())
-            .build();
+        new LoopCollaborators(
+            new HookRegistry(options.hooks(), sessionContext.secrets()),
+            new ToolDispatch(sessionContext, tools, ending),
+            evaluator::authorize,
+            options.permission(),
+            steeringQueue,
+            events::emit,
+            state -> SessionHookContext.of(state, model),
+            options.clock());
     var turnRunner =
         new TurnRunner(
             collaborators, model, options.costCalculator(), options.outputSchema().orElse(null));
@@ -70,27 +73,24 @@ final class SessionWiring {
         options.contextCompactor());
   }
 
-  /** The evaluator of the session's permission; building it refuses a rule no path can match. */
-  private static DefaultPermissionEvaluator evaluator(
-      SessionOptions options, ToolRegistry tools, QuestionGateway gateway, SecretRegistry secrets) {
-    return DefaultPermissionEvaluator.newBuilder(options.permission(), tools)
-        .withApprover(ToolApprover.askingUser(gateway))
-        .withSecretRegistry(secrets)
-        .build();
-  }
-
-  private static ToolRegistry withBuiltins(
-      ToolRegistry userTools, SessionOptions options, QuestionGateway gateway) {
-    var combined = new ArrayList<ToolBinding>(userTools.bindings().size() + 3);
-    combined.addAll(userTools.bindings());
-    combined.add(AskUserQuestionTool.binding(gateway));
+  private static ToolRegistry registry(SessionOptions options, QuestionGateway gateway) {
+    if (options.executionProvider().isEmpty()
+        && options.tools().stream().anyMatch(tool -> ExecuteTool.NAME.equals(tool.name()))) {
+      throw new IllegalArgumentException(
+          "Execute requires withExecutionProvider(provider); remove the hand Execute binding");
+    }
+    var tools = new ArrayList<ToolBinding>(options.tools());
     options
         .memoryBackend()
         .ifPresent(
-            b -> {
-              combined.add(MemoryReadTool.binding(b));
-              combined.add(MemoryWriteTool.binding(b));
+            backend -> {
+              tools.add(MemoryReadTool.binding(backend));
+              tools.add(MemoryWriteTool.binding(backend));
             });
-    return new ToolRegistry(combined);
+    options.executionProvider().ifPresent(provider -> tools.add(ExecuteTool.binding(provider)));
+    if (options.askUserQuestion()) {
+      tools.add(AskUserQuestionTool.binding(gateway));
+    }
+    return new ToolRegistry(tools);
   }
 }

@@ -126,7 +126,7 @@ public final class GrepTool {
             .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)
-        .withCategory(ToolCategory.SEARCH)
+        .withCategory(ToolCategory.READ)
         .withPathArgument(
             ToolBinding.PathArgument.optional("path", ".", workspace)
                 .withContentRulesOf(ReadTool.NAME))

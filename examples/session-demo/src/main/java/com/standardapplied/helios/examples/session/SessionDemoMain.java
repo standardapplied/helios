@@ -16,7 +16,6 @@ import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -104,12 +103,8 @@ public final class SessionDemoMain {
   static SessionOptions.Builder exploreAndRememberOptions(Model model, Path workspace) {
     var ws = WorkspaceRoot.of(workspace);
     var tools =
-        new ToolRegistry(
-            List.of(
-                ReadTool.binding(ws),
-                LsTool.binding(ws),
-                GlobTool.binding(ws),
-                GrepTool.binding(ws)));
+        List.of(
+            ReadTool.binding(ws), LsTool.binding(ws), GlobTool.binding(ws), GrepTool.binding(ws));
     return SessionOptions.newBuilder()
         .withModel(model)
         .withTools(tools)
