@@ -25,6 +25,7 @@ final class Run {
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
   private final CompletableFuture<Optional<Error>> left = new CompletableFuture<>();
+  private final CompletableFuture<Void> settled = new CompletableFuture<>();
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
 
@@ -55,6 +56,14 @@ final class Run {
    */
   CompletableFuture<Optional<Error>> left() {
     return left;
+  }
+
+  /**
+   * Completes once the run's thread settled {@link #result} and the callbacks of it that thread ran
+   * returned. As {@link #left}, only the session waits on it.
+   */
+  CompletableFuture<Void> settled() {
+    return settled;
   }
 
   /** Start the wall clock on a virtual thread of its own. */

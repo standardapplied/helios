@@ -177,7 +177,7 @@ public final class AgentLoop {
    * The classifier's and the pre-stop hooks' verdict on a turn, decided through {@code boundary}: a
    * {@code Success} that holds only while no message is queued gives way to a message sent
    * meanwhile, and the turn is classified again as one with a message queued. A cancellation that
-   * arrived while the hooks ran overrides their verdict.
+   * arrived while the hooks ran, or before the boundary decided the end, overrides their verdict.
    */
   private Optional<ResultMessage> classify(
       SessionState state, SessionLimits limits, RunBoundary boundary, TurnOutcome outcome) {
@@ -188,9 +188,11 @@ public final class AgentLoop {
     }
     var hookVerdict = preStop.resolve(state, verdict.get(), outcome);
     var resolved =
-        state.cancellation().isCancelled()
-            ? classifier.classify(state, limits, outcome, true)
-            : hookVerdict.or(() -> classifier.classify(state, limits, outcome, true));
+        unlessCancelled(
+            state,
+            limits,
+            outcome,
+            hookVerdict.or(() -> classifier.classify(state, limits, outcome, true)));
     if (resolved.isEmpty()) {
       return Optional.empty();
     }
@@ -200,8 +202,22 @@ public final class AgentLoop {
           .classify(state, limits, outcome, true)
           .map(limit -> decided(state, boundary, limit));
     }
+    if (!natural) {
+      boundary.end(false);
+    }
     return Optional.of(
-        natural ? terminal(state, resolved.get()) : decided(state, boundary, resolved.get()));
+        terminal(state, unlessCancelled(state, limits, outcome, resolved).orElseThrow()));
+  }
+
+  /** {@code verdict}, or the classifier's verdict on the turn once the run was cancelled. */
+  private Optional<ResultMessage> unlessCancelled(
+      SessionState state,
+      SessionLimits limits,
+      TurnOutcome outcome,
+      Optional<ResultMessage> verdict) {
+    return state.cancellation().isCancelled()
+        ? classifier.classify(state, limits, outcome, true)
+        : verdict;
   }
 
   /** Decide through {@code boundary} that the run ends with {@code result}, a non-natural stop. */
