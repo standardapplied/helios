@@ -14,13 +14,14 @@
  * com.standardapplied.helios.session.AgentSession#answer(String,
  * com.standardapplied.helios.session.ask.AskUserQuestionResponse)}. The {@link
  * com.standardapplied.helios.session.ask.QuestionGateway} is the per-session bridge between the
- * asking side (eg. {@link com.standardapplied.helios.session.permissions.ToolApprover#askingUser},
- * which decides the permission policy's ASK calls) and the answering side; the agent loop wires a
- * default {@code SessionQuestionGateway} that blocks the asking virtual thread on a {@link
+ * asking side (the session's approval prompt, which decides the permission policy's ASK calls, and
+ * {@code AskUserQuestion}) and the answering side; the agent loop wires a default {@code
+ * SessionQuestionGateway} that blocks the asking virtual thread on a {@link
  * java.util.concurrent.CompletableFuture} until the host answers.
  *
  * <p>{@link com.standardapplied.helios.session.ask.AskUserQuestionTool} is the model-facing
- * wrapper: when bound on a session, the LLM can call it directly to ask the user a question
- * mid-turn (used by the "interview" pattern).
+ * wrapper, registered only on a session built with {@code
+ * SessionOptions.Builder.withAskUserQuestion()}: the LLM can then call it directly to ask the user
+ * a question mid-turn (used by the "interview" pattern).
  */
 package com.standardapplied.helios.session.ask;

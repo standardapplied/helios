@@ -23,7 +23,6 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
@@ -93,7 +92,7 @@ final class ProgressNotesSessionTest {
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withModel(model)
-                    .withTools(new ToolRegistry(List.of(searchProfiles())))
+                    .withTools(List.of(searchProfiles()))
                     .build())) {
       events.read(session.events());
 
@@ -133,6 +132,6 @@ final class ProgressNotesSessionTest {
             .withIdempotent(true)
             .withExecutor((args, ctx) -> ToolResult.success("ids: p7"))
             .build();
-    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.SEARCH).build();
+    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();
   }
 }

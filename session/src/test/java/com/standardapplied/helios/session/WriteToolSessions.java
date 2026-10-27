@@ -13,7 +13,6 @@ import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
@@ -69,9 +68,7 @@ final class WriteToolSessions {
 
   /** Options of a session holding {@link #writeTool()} under {@code permission}. */
   SessionOptions.Builder options(Permission permission) {
-    return SessionOptions.newBuilder()
-        .withTools(new ToolRegistry(List.of(writeTool())))
-        .withPermission(permission);
+    return SessionOptions.newBuilder().withTools(List.of(writeTool())).withPermission(permission);
   }
 
   static ToolCall write(String path) {

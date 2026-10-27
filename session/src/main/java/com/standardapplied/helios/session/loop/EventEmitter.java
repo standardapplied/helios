@@ -6,7 +6,6 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.HookContext;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import java.time.InstantSource;
 import java.util.Objects;
 import java.util.function.Consumer;

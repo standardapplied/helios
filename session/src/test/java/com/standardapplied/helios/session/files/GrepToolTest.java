@@ -58,9 +58,9 @@ final class GrepToolTest {
   }
 
   @Test
-  void categoryIsSearch(@TempDir Path tmp) {
+  void categoryIsRead(@TempDir Path tmp) {
     var binding = GrepTool.binding(WorkspaceRoot.of(tmp));
-    assertEquals(ToolCategory.SEARCH, binding.category());
+    assertEquals(ToolCategory.READ, binding.category());
     assertEquals("Grep", binding.name());
     assertEquals("Grep", GrepTool.NAME);
   }

@@ -39,7 +39,6 @@ import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.SampleDocuments;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -104,10 +103,9 @@ final class RecordedSessionTest {
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withTools(
-                        new ToolRegistry(
-                            List.of(
-                                search("search_profiles", "query", "location"),
-                                search("get_profile", "id"))))
+                        List.of(
+                            search("search_profiles", "query", "location"),
+                            search("get_profile", "id")))
                     .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived())));
 
     var success = assertInstanceOf(ResultMessage.Success.class, replay.terminal());
@@ -276,7 +274,7 @@ final class RecordedSessionTest {
               .build());
     }
     var built = tool.withExecutor((arguments, context) -> ToolResult.success("ids: p7")).build();
-    return ToolBinding.newBuilder(built).withCategory(ToolCategory.SEARCH).build();
+    return ToolBinding.newBuilder(built).withCategory(ToolCategory.READ).build();
   }
 
   private static SecretRegistry secrets() {
@@ -285,11 +283,10 @@ final class RecordedSessionTest {
     return registry;
   }
 
-  private static ToolRegistry fileTools(Path corpus) {
+  private static List<ToolBinding> fileTools(Path corpus) {
     var workspace = WorkspaceRoot.of(corpus);
-    return new ToolRegistry(
-        List.of(
-            ReadTool.binding(workspace), GrepTool.binding(workspace), GlobTool.binding(workspace)));
+    return List.of(
+        ReadTool.binding(workspace), GrepTool.binding(workspace), GlobTool.binding(workspace));
   }
 
   private static void seed(Path corpus) throws IOException {

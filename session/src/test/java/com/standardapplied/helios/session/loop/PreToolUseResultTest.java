@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package com.standardapplied.helios.session.hooks;
+package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

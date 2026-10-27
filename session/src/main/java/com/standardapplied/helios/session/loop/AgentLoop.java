@@ -13,7 +13,6 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,30 +65,15 @@ public final class AgentLoop {
   private final ContextCompaction compaction;
   private final PreStopDecision preStop;
 
-  /**
-   * Build an agent loop.
-   *
-   * @param collaborators the collaborators shared with the {@link TurnRunner}; non-null
-   * @param turnRunner the per-turn worker; non-null
-   * @param classifier terminal-result classifier; non-null
-   * @param tokenCounter estimator used before and after each model turn to detect when running
-   *     history approaches the context window; non-null. {@link TokenCounter#charBased()} is the
-   *     default
-   * @param contextCompactor invoked when usage crosses the compaction watermark; non-null. Pass
-   *     {@link ContextCompactor#disabled()} to opt out of automatic compaction
-   * @throws NullPointerException if any argument is null
-   */
   public AgentLoop(
       LoopCollaborators collaborators,
       TurnRunner turnRunner,
       StopClassifier classifier,
       TokenCounter tokenCounter,
       ContextCompactor contextCompactor) {
-    this.collaborators = Objects.requireNonNull(collaborators, "collaborators must not be null");
-    this.turnRunner = Objects.requireNonNull(turnRunner, "turnRunner must not be null");
-    this.classifier = Objects.requireNonNull(classifier, "classifier must not be null");
-    Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
-    Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
+    this.collaborators = collaborators;
+    this.turnRunner = turnRunner;
+    this.classifier = classifier;
     this.emitter = collaborators.emitter();
     this.steeringDrain =
         new SteeringDrain(

@@ -33,7 +33,6 @@ import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
@@ -444,10 +443,7 @@ final class SessionHostErrorTest {
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
             AgentSession.create(
-                options(model)
-                    .withTools(new ToolRegistry(List.of(tool)))
-                    .withLimits(limits)
-                    .build())) {
+                options(model).withTools(List.of(tool)).withLimits(limits).build())) {
       session.send("go");
       Await.latch("the second model turn to wait on its stalled stream", secondTurn);
       lateTool.countDown();

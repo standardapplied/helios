@@ -18,7 +18,6 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.EventCollector;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -76,7 +75,7 @@ final class HookNamesSessionTest {
     var tool = binding("t", (args, ctx) -> ToolResult.success("ran"));
     return SessionOptions.newBuilder()
         .withModel(model)
-        .withTools(new ToolRegistry(List.of(tool)))
+        .withTools(List.of(tool))
         .withHook(hook)
         .build();
   }

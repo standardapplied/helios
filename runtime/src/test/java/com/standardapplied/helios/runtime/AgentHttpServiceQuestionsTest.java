@@ -15,7 +15,6 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.http.HeaderNames;
 import io.helidon.webserver.http.ServerRequest;
@@ -387,7 +386,8 @@ final class AgentHttpServiceQuestionsTest {
     return SessionOptions.newBuilder()
         .withModel(model)
         .withSessionId(request.sessionId())
-        .withTools(new ToolRegistry(List.of(binding)))
+        .withTools(List.of(binding))
+        .withAskUserQuestion()
         .withPermission(Permission.empty(PermissionMode.DEFAULT))
         .build();
   }

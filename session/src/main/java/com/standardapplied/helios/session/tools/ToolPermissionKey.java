@@ -56,4 +56,14 @@ public record ToolPermissionKey(String toolName, String canonicalArgs) {
   public static ToolPermissionKey of(String toolName) {
     return new ToolPermissionKey(toolName, "");
   }
+
+  /**
+   * The {@code <tool>(<canonical args>)} form of this key, as permission reasons and approval
+   * prompts show it; just the tool name when the args are empty.
+   *
+   * @return the display form
+   */
+  public String describe() {
+    return toolName + (canonicalArgs.isEmpty() ? "" : "(" + canonicalArgs + ")");
+  }
 }

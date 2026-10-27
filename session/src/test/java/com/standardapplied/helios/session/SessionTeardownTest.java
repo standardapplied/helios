@@ -16,11 +16,12 @@ import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.ToolDispatch;
+import com.standardapplied.helios.session.loop.ToolRegistry;
 import com.standardapplied.helios.session.test.LogCapture;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -237,7 +238,7 @@ final class SessionTeardownTest {
   }
 
   private SessionTeardown newTeardown(RecordingProvider provider, Duration grace) {
-    return new SessionTeardown(state, context, provider, events, grace);
+    return new SessionTeardown(state, context, Optional.of(provider), events, grace);
   }
 
   private ToolDispatch tools() {

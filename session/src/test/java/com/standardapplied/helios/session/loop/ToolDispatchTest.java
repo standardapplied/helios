@@ -30,7 +30,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,30 +67,6 @@ final class ToolDispatchTest {
   }
 
   // ── construction ──────────────────────────────────────────────────────────
-
-  @Test
-  void constructorRejectsNullSessionContext() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new ToolDispatch(null, ToolRegistry.empty(), fixture.ending));
-    assertEquals("sessionContext must not be null", ex.getMessage());
-  }
-
-  @Test
-  void constructorRejectsNullRegistry() {
-    var ex =
-        assertThrows(NullPointerException.class, () -> new ToolDispatch(CTX, null, fixture.ending));
-    assertEquals("registry must not be null", ex.getMessage());
-  }
-
-  @Test
-  void constructorRejectsNullEnding() {
-    var ex =
-        assertThrows(
-            NullPointerException.class, () -> new ToolDispatch(CTX, ToolRegistry.empty(), null));
-    assertEquals("ending must not be null", ex.getMessage());
-  }
 
   @Test
   void accessorsReturnTheConstructorValues() {
@@ -232,7 +207,7 @@ final class ToolDispatchTest {
         fixture.dispatcher(
             binding(
                 "walk",
-                ToolCategory.SEARCH,
+                ToolCategory.READ,
                 (args, ctx) ->
                     ToolResult.success(
                         Stream.of("./docs", "./secrets")

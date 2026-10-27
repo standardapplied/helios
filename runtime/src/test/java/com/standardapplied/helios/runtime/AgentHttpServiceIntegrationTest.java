@@ -20,7 +20,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -143,11 +142,10 @@ final class AgentHttpServiceIntegrationTest {
                     SessionOptions.newBuilder()
                         .withModel(callingOnce(new ToolCall("c1", "slow", Map.of())))
                         .withTools(
-                            new ToolRegistry(
-                                List.of(
-                                    ToolBinding.newBuilder(slow)
-                                        .withCategory(ToolCategory.READ)
-                                        .build())))
+                            List.of(
+                                ToolBinding.newBuilder(slow)
+                                    .withCategory(ToolCategory.READ)
+                                    .build()))
                         .withSessionId(request.sessionId())
                         .build())
             .withPort(0)

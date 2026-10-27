@@ -17,7 +17,6 @@ import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -56,13 +55,12 @@ final class PathToolSessions {
   }
 
   /** The workspace path tools, {@code Read} counting its runs. */
-  ToolRegistry tools(WorkspaceRoot on) {
-    return new ToolRegistry(
-        List.of(
-            countingRuns(ReadTool.binding(on)),
-            LsTool.binding(on),
-            GlobTool.binding(on),
-            GrepTool.binding(on)));
+  List<ToolBinding> tools(WorkspaceRoot on) {
+    return List.of(
+        countingRuns(ReadTool.binding(on)),
+        LsTool.binding(on),
+        GlobTool.binding(on),
+        GrepTool.binding(on));
   }
 
   private ToolBinding countingRuns(ToolBinding read) {

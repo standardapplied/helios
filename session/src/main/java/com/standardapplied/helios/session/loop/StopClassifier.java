@@ -59,14 +59,9 @@ public final class StopClassifier {
 
   private final SecretRegistry secrets;
 
-  /**
-   * Build a classifier for one session.
-   *
-   * @param secrets the session's secret registry, which error text is redacted against; non-null
-   * @throws NullPointerException if {@code secrets} is null
-   */
+  /** {@code secrets} is the session's registry, which error text is redacted against. */
   public StopClassifier(SecretRegistry secrets) {
-    this.secrets = Objects.requireNonNull(secrets, "secrets must not be null");
+    this.secrets = secrets;
   }
 
   /**

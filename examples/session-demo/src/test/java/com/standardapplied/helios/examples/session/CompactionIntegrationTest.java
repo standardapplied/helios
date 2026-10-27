@@ -28,7 +28,6 @@ import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -159,12 +158,8 @@ final class CompactionIntegrationTest {
     seedFiles(tmp);
     var ws = WorkspaceRoot.of(tmp);
     var tools =
-        new ToolRegistry(
-            List.of(
-                ReadTool.binding(ws),
-                LsTool.binding(ws),
-                GlobTool.binding(ws),
-                GrepTool.binding(ws)));
+        List.of(
+            ReadTool.binding(ws), LsTool.binding(ws), GlobTool.binding(ws), GrepTool.binding(ws));
 
     var compactor = SummarizingCompactor.newBuilder(SUMMARY_MODEL).build();
 
