@@ -128,4 +128,14 @@ final class RegisteredSessionTest {
     assertEquals(0, stub.queue.size());
     assertFalse(stub.isRunning());
   }
+
+  @Test
+  void theLatestRunOfASessionThatNeverRanCompletesWithItsFirstRun() {
+    var waiting = registered.latest();
+
+    registered.send(UserMessage.text("go"));
+    stub.terminate();
+
+    assertSame(stub.result.join(), Await.value("the first run", waiting));
+  }
 }
