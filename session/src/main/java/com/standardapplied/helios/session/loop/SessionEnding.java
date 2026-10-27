@@ -40,10 +40,11 @@ public final class SessionEnding {
   }
 
   /**
-   * Cancel the session's token, the one way the session is cancelled: by its close, its wall-clock
-   * deadline, its teardown and a recorded {@link Error}. The token is cancelled when this returns;
-   * its callbacks run on a thread of their own, each {@code Error} they throw recorded by {@link
-   * #fail}. The first call's {@code reason} wins, and every call returns the same future.
+   * Cancel the session's token, the one way the session is cancelled: by its close, its teardown
+   * and a recorded {@link Error}. The token of the run in progress follows it. The token is
+   * cancelled when this returns; its callbacks run on a thread of their own, each {@code Error}
+   * they throw recorded by {@link #fail}. The first call's {@code reason} wins, and every call
+   * returns the same future.
    *
    * @param reason why the session is cancelled; non-blank
    * @return a future that completes once every callback of the token has run
@@ -74,10 +75,7 @@ public final class SessionEnding {
     if (recorded) {
       cancel("host error " + error.getClass().getName());
     } else {
-      LOGGER.log(
-          Level.SEVERE,
-          "an Error reached session " + sessionId + " after its result settled",
-          error);
+      LOGGER.log(Level.SEVERE, "an Error reached session " + sessionId + " after it ended", error);
     }
   }
 
@@ -103,6 +101,16 @@ public final class SessionEnding {
       fail(error);
     }
     return error != null;
+  }
+
+  /**
+   * The first {@link Error} recorded so far, without sealing the sink: a run that ends with one
+   * fails with it before the session tears down.
+   *
+   * @return the first recorded {@code Error}, or empty when none was recorded
+   */
+  public synchronized Optional<Error> first() {
+    return errors.stream().findFirst();
   }
 
   /**

@@ -43,7 +43,7 @@ import java.util.Optional;
  * @param tools the tools the loop advertises to the model and dispatches against, before the
  *     built-in tools the options switch on (the memory tools, {@code Execute}, {@code
  *     AskUserQuestion}); copied, non-null with no null element, defaults to none. Two tools with
- *     one name, a built-in included, fail {@link AgentSession#create}
+ *     one name, a built-in included, fail {@link AgentSession#open}
  * @param hooks the hooks fired at lifecycle phases (pre/post-model-turn, pre/post-tool-use,
  *     pre-stop, on-user-message, on-stream-event); non-null, defaults to {@link List#of()}
  * @param permission the permission policy; an internal {@code DefaultPermissionEvaluator}
@@ -298,7 +298,7 @@ public record SessionOptions(
 
     /**
      * Append a single tool. A preset's tools stay; two tools with one name, a built-in included,
-     * fail {@link AgentSession#create}.
+     * fail {@link AgentSession#open}.
      *
      * @param tool non-null binding
      * @return this builder
@@ -388,8 +388,8 @@ public record SessionOptions(
      * Set the execution provider, such as {@code LocalProcessExecutionProvider.defaultPosix()}. The
      * session registers {@code Execute} over it and runs its {@code onSessionStart} and {@code
      * onSessionEnd} with the session; registering {@code ExecuteTool.binding} by hand as well fails
-     * {@link AgentSession#create} with a duplicate tool name. Unset by default: the session has no
-     * {@code Execute} tool, and a tool named {@code Execute} fails {@link AgentSession#create}.
+     * {@link AgentSession#open} with a duplicate tool name. Unset by default: the session has no
+     * {@code Execute} tool, and a tool named {@code Execute} fails {@link AgentSession#open}.
      *
      * @param executionProvider non-null provider
      * @return this builder

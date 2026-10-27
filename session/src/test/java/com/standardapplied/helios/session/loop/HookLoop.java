@@ -90,7 +90,7 @@ final class HookLoop {
             fixture.clock);
     return fixture
         .loop(collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled())
-        .run(state, SessionLimits.defaults());
+        .run(state, SessionLimits.defaults(), natural -> true);
   }
 
   /** The history the run built. */

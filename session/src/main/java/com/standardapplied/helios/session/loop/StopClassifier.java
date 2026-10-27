@@ -84,10 +84,14 @@ public final class StopClassifier {
     Objects.requireNonNull(state, "state must not be null");
     Objects.requireNonNull(limits, "limits must not be null");
     Objects.requireNonNull(outcome, "outcome must not be null");
-    if (state.elapsed().compareTo(limits.maxWallClock()) > 0) {
+    if (state.totals().elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
-              state.sessionId(), state.totals().usage(), state.totals().cost(), state.elapsed()));
+              state.sessionId(),
+              state.runId(),
+              state.totals().usage(),
+              state.totals().cost(),
+              state.totals().elapsed()));
     }
 
     if (limits.maxBudgetMicroUsd().isPresent()
@@ -95,20 +99,22 @@ public final class StopClassifier {
       return Optional.of(
           new ResultMessage.ErrorMaxBudgetUsd(
               state.sessionId(),
+              state.runId(),
               state.totals().cost().microUsd(),
               state.totals().usage(),
               state.totals().cost(),
-              state.elapsed()));
+              state.totals().elapsed()));
     }
 
     if (state.cancellation().isCancelled()) {
       return Optional.of(
           new ResultMessage.Cancelled(
               state.sessionId(),
+              state.runId(),
               state.cancellation().reason().orElseThrow(),
               state.totals().usage(),
               state.totals().cost(),
-              state.elapsed()));
+              state.totals().elapsed()));
     }
 
     return byFinishReason(state, outcome, hasPendingMessages).or(() -> turnCeiling(state, limits));
@@ -128,10 +134,11 @@ public final class StopClassifier {
   static ResultMessage.Success success(SessionState state, String result) {
     return new ResultMessage.Success(
         state.sessionId(),
+        state.runId(),
         result,
         state.totals().usage(),
         state.totals().cost(),
-        state.elapsed(),
+        state.totals().elapsed(),
         state.totals().citations());
   }
 
@@ -146,7 +153,12 @@ public final class StopClassifier {
   static ResultMessage.ErrorDuringExecution errorDuringExecution(
       SessionState state, SerializedError error) {
     return new ResultMessage.ErrorDuringExecution(
-        state.sessionId(), error, state.totals().usage(), state.totals().cost(), state.elapsed());
+        state.sessionId(),
+        state.runId(),
+        error,
+        state.totals().usage(),
+        state.totals().cost(),
+        state.totals().elapsed());
   }
 
   private Optional<ResultMessage> byFinishReason(
@@ -183,10 +195,11 @@ public final class StopClassifier {
     return Optional.of(
         new ResultMessage.ErrorMaxTurns(
             state.sessionId(),
+            state.runId(),
             Math.toIntExact(state.currentTurnIndex()),
             state.totals().usage(),
             state.totals().cost(),
-            state.elapsed()));
+            state.totals().elapsed()));
   }
 
   /**
@@ -199,11 +212,12 @@ public final class StopClassifier {
     var explanation = outcome.metadata().get(Response.REFUSAL_EXPLANATION_KEY);
     return new ResultMessage.Refusal(
         state.sessionId(),
+        state.runId(),
         Strings.orDefault(
             explanation, Strings.orDefault(outcome.assistantContent(), "[refused without text]")),
         state.totals().usage(),
         state.totals().cost(),
-        state.elapsed(),
+        state.totals().elapsed(),
         outcome.metadata().get(Response.REFUSAL_CATEGORY_KEY));
   }
 
@@ -233,12 +247,13 @@ public final class StopClassifier {
     if (streamError instanceof TransientStreamException tse) {
       return new ResultMessage.ErrorTransientStream(
           state.sessionId(),
+          state.runId(),
           tse.providerName(),
           streamAttempts,
           redacted(SerializedError.of(tse)),
           state.totals().usage(),
           state.totals().cost(),
-          state.elapsed());
+          state.totals().elapsed());
     }
     if (streamError != null) {
       return errorDuringExecution(state, redacted(SerializedError.of(streamError)));

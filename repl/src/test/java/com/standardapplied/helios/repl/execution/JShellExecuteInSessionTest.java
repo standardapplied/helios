@@ -172,11 +172,11 @@ class JShellExecuteInSessionTest {
               .withLimits(
                   SessionLimits.newBuilder().withToolTimeoutDefault(BEYOND_HANG_GUARD).build())
               .build();
-      try (var session = AgentSession.create(options)) {
+      try (var session = AgentSession.open(options)) {
         events.read(session.events());
         assertInstanceOf(
             ResultMessage.Success.class, session.runBlocking(UserMessage.text("run the snippets")));
-        events.awaitDone();
+        events.awaitRunEnded();
       }
     }
 

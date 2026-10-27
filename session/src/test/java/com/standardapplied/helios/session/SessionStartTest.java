@@ -18,6 +18,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
@@ -28,6 +29,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -47,11 +49,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 /**
  * How a session starts: the execution provider's {@code onSessionStart} is the last step of its
  * construction, waited for within {@link SessionLimits#startTimeout()}; a start it does not accept
- * releases what the session acquired and never ends the provider, an {@link Error} fails the result
- * as itself, and a start that settles after the session stopped waiting is reported, a late
- * acceptance ended by the session's bounded teardown and a late {@code Error} logged. Every start
- * or end that hangs blocks on {@link #released}, opened after each test; the start timeout and
- * teardown grace under test are {@link #SHORT_START}.
+ * makes {@code open} throw {@link SessionUnavailableException}, releases what the session acquired
+ * and never ends the provider, an {@link Error} propagates from {@code open} as itself, and a start
+ * that settles after the session stopped waiting is reported, a late acceptance ended by the
+ * session's bounded teardown and a late {@code Error} logged. Every start or end that hangs blocks
+ * on {@link #released}, opened after each test; the start timeout and teardown grace under test are
+ * {@link #SHORT_START}.
  */
 final class SessionStartTest {
 
@@ -69,31 +72,26 @@ final class SessionStartTest {
   }
 
   @Test
-  void anErrorAtStartUpFailsTheResultAndEndsTheSession() {
+  void anErrorAtStartUpPropagatesFromOpenAsItself() {
     var sentinel = new AssertionError("start failure");
     var provider = new RecordingProvider(order);
     provider.start =
         () -> {
           throw sentinel;
         };
+    var options = withProvider(provider).build();
 
-    var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    var refused = assertThrows(IllegalStateException.class, () -> session.send("go"));
-    assertEquals("session is terminal", refused.getMessage());
-    assertTrue(session.isStarted(), "a session that ended at start-up can never start");
+    assertSame(sentinel, assertThrows(AssertionError.class, () -> AgentSession.open(options)));
   }
 
   @Test
-  void anErrorOnSessionStartJoinsFromAFailedFutureFailsTheResultAsItself() {
+  void anErrorOnSessionStartJoinsFromAFailedFuturePropagatesAsItself() {
     var sentinel = new AssertionError("start failure");
     var provider = new RecordingProvider(order);
     provider.start = () -> CompletableFuture.<SessionStartOutcome>failedFuture(sentinel).join();
+    var options = withProvider(provider).build();
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    }
+    assertSame(sentinel, assertThrows(AssertionError.class, () -> AgentSession.open(options)));
   }
 
   @Test
@@ -104,28 +102,9 @@ final class SessionStartTest {
           throw new CompletionException("start failed", null);
         };
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart threw CompletionException: start failed", refusal.reason());
-    }
-  }
-
-  @Test
-  void aSessionWhoseResultFailedRefusesAnInterrupt() {
-    var provider = new RecordingProvider(order);
-    provider.start =
-        () -> {
-          throw new AssertionError("start failure");
-        };
-    var session = AgentSession.create(withProvider(provider).build());
-    Await.failure("the result to fail", session.result());
-
-    var refused = assertThrows(IllegalStateException.class, () -> session.interrupt("stop"));
-
-    assertEquals("session is terminal", refused.getMessage());
+    assertEquals(
+        refusedBy("onSessionStart threw CompletionException: start failed"),
+        refusal(withProvider(provider)).getMessage());
   }
 
   static Stream<Arguments> startUpsNotAccepted() {
@@ -158,11 +137,13 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start = start;
 
-    var session = (AgentSessionImpl) AgentSession.create(withProvider(provider).build());
+    var lifecycle = lifecycle(provider, SessionLimits.defaults());
+    var events = lifecycle.events().open();
 
-    assertEventsEnded(session);
-    assertTrue(session.result().isDone(), kind + " settles the result");
-    session.close();
+    assertThrows(Throwable.class, () -> lifecycle.open(loop(lifecycle, provider)));
+
+    assertFalse(Await.value("the stream to end", reading(events)), kind + " ends the events");
+    assertFalse(lifecycle.runs().isRunning(), kind + " starts no run");
     assertEquals(0, provider.ends.get());
   }
 
@@ -171,16 +152,9 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start = acceptingOnceOpened(released);
 
-    var session =
-        (AgentSessionImpl)
-            AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
-
-    var refusal =
-        assertInstanceOf(
-            ResultMessage.ErrorProviderUnavailable.class,
-            Await.value("the result", session.result()));
-    assertEquals("onSessionStart did not return within PT0.05S", refusal.reason());
-    assertEventsEnded(session);
+    assertEquals(
+        refusedBy("onSessionStart did not return within PT0.05S"),
+        refusal(withProvider(provider).withLimits(shortStart())).getMessage());
   }
 
   @Test
@@ -189,20 +163,16 @@ final class SessionStartTest {
     provider.start = acceptingOnceOpened(released);
 
     Thread.currentThread().interrupt();
-    AgentSession session;
+    SessionUnavailableException refused;
     boolean interrupted;
     try {
-      session = AgentSession.create(withProvider(provider).build());
+      refused = refusal(withProvider(provider));
     } finally {
       interrupted = Thread.interrupted();
     }
 
-    assertTrue(interrupted, "create keeps the caller's interrupt");
-    var refusal =
-        assertInstanceOf(
-            ResultMessage.ErrorProviderUnavailable.class,
-            Await.value("the result", session.result()));
-    assertEquals("interrupted while waiting for onSessionStart", refusal.reason());
+    assertTrue(interrupted, "open keeps the caller's interrupt");
+    assertEquals(refusedBy("interrupted while waiting for onSessionStart"), refused.getMessage());
   }
 
   @Test
@@ -213,8 +183,7 @@ final class SessionStartTest {
     provider.start = acceptingOnceOpened(accepting);
     provider.end = ended::countDown;
 
-    var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
-    Await.value("the refusal", session.result());
+    refusal(withProvider(provider).withLimits(shortStart()));
     accepting.countDown();
 
     Await.latch("onSessionEnd", ended);
@@ -251,9 +220,7 @@ final class SessionStartTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      var session =
-          AgentSession.create(withProvider(provider).withLimits(shortStartSlowTeardown()).build());
-      Await.value("the refusal", session.result());
+      refusal(withProvider(provider).withLimits(shortStartSlowTeardown()));
       accepting.countDown();
       Await.latch("onSessionEnd of the late acceptance", endEntered);
       ending.countDown();
@@ -326,8 +293,7 @@ final class SessionStartTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
-      Await.value("the refusal", session.result());
+      refusal(withProvider(provider).withLimits(shortStart()));
       refusing.countDown();
 
       awaitReported(
@@ -351,8 +317,7 @@ final class SessionStartTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
-      Await.value("the refusal", session.result());
+      refusal(withProvider(provider).withLimits(shortStart()));
 
       var reported =
           awaitReported(
@@ -375,13 +340,10 @@ final class SessionStartTest {
         };
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      var session = AgentSession.create(withProvider(provider).withLimits(shortStart()).build());
-      assertInstanceOf(
-          ResultMessage.ErrorProviderUnavailable.class,
-          Await.value("the refusal", session.result()));
+      refusal(withProvider(provider).withLimits(shortStart()));
       failing.countDown();
 
-      var reported = awaitReported("an Error reached session " + SID + " after its result settled");
+      var reported = awaitReported("an Error reached session " + SID + " after it ended");
       assertEquals(
           List.of(Level.SEVERE, failure), List.of(reported.getLevel(), reported.getThrown()));
     }
@@ -412,7 +374,7 @@ final class SessionStartTest {
               throw failure;
             },
             shortStart(),
-            "an Error reached session " + SID + " after its result settled");
+            "an Error reached session " + SID + " after it ended");
 
     assertEquals(
         List.of(Level.SEVERE, failure), List.of(reported.getLevel(), reported.getThrown()));
@@ -423,13 +385,8 @@ final class SessionStartTest {
     var provider = new RecordingProvider(order);
     provider.start = () -> null;
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart returned null", refusal.reason());
-    }
+    assertEquals(
+        refusedBy("onSessionStart returned null"), refusal(withProvider(provider)).getMessage());
   }
 
   @Test
@@ -440,13 +397,9 @@ final class SessionStartTest {
           throw new CancellationException("start cancelled");
         };
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart threw CancellationException: start cancelled", refusal.reason());
-    }
+    assertEquals(
+        refusedBy("onSessionStart threw CancellationException: start cancelled"),
+        refusal(withProvider(provider)).getMessage());
   }
 
   @Test
@@ -455,27 +408,22 @@ final class SessionStartTest {
     var clashing = binding(ExecuteTool.NAME);
     var options = withProvider(provider).withTools(List.of(clashing)).build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("duplicate tool name in registry: Execute", thrown.getMessage());
     assertEquals(0, provider.starts.get());
   }
 
   @Test
-  void aRefusalEndsTheSessionWithItsReasonAndProviderAndRefusesASend() {
+  void aRefusalFailsTheOpenNamingTheProviderAndItsReasonWithNoCause() {
     var provider = new RecordingProvider(order);
     provider.start = () -> SessionStartOutcome.refuse("pool saturated");
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals(
-          List.of("pool saturated", "RecordingProvider"),
-          List.of(refusal.reason(), refusal.providerName()));
-      assertThrows(IllegalStateException.class, () -> session.send("hi"));
-    }
+    var refused = refusal(withProvider(provider));
+
+    assertEquals(
+        "RecordingProvider refused session " + SID + ": pool saturated", refused.getMessage());
+    assertEquals(null, refused.getCause());
   }
 
   @Test
@@ -486,17 +434,12 @@ final class SessionStartTest {
           throw new IllegalStateException("auth failed");
         };
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart threw IllegalStateException: auth failed", refusal.reason());
-      var cause = refusal.causeOpt().orElseThrow();
-      assertEquals(
-          List.of(IllegalStateException.class.getName(), "auth failed"),
-          List.of(cause.kind(), cause.message()));
-    }
+    var refused = refusal(withProvider(provider));
+
+    assertEquals(
+        refusedBy("onSessionStart threw IllegalStateException: auth failed"), refused.getMessage());
+    var cause = assertInstanceOf(IllegalStateException.class, refused.getCause());
+    assertEquals("auth failed", cause.getMessage());
   }
 
   @Test
@@ -507,43 +450,23 @@ final class SessionStartTest {
           throw new IllegalStateException();
         };
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      assertEquals("onSessionStart threw IllegalStateException: (no message)", refusal.reason());
-    }
+    assertEquals(
+        refusedBy("onSessionStart threw IllegalStateException: (no message)"),
+        refusal(withProvider(provider)).getMessage());
   }
 
   @Test
-  void aRefusalWithACauseCarriesItsWholeCauseChain() {
+  void aRefusalWithACauseCarriesItAsTheCause() {
     var root = new IOException("Cannot run program 'java': No such file or directory");
     var wrapper = new RuntimeException("Failed to start JVM sandbox subprocess", root);
     var provider = new RecordingProvider(order);
     provider.start = () -> SessionStartOutcome.refuse("failed to spawn sandbox", wrapper);
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      var refusal =
-          assertInstanceOf(
-              ResultMessage.ErrorProviderUnavailable.class,
-              Await.value("the result", session.result()));
-      var cause = refusal.causeOpt().orElseThrow();
-      var rootCause = cause.causeOpt().orElseThrow();
-      assertEquals(
-          List.of(
-              "failed to spawn sandbox",
-              RuntimeException.class.getName(),
-              "Failed to start JVM sandbox subprocess",
-              IOException.class.getName(),
-              "Cannot run program 'java': No such file or directory"),
-          List.of(
-              refusal.reason(),
-              cause.kind(),
-              cause.message(),
-              rootCause.kind(),
-              rootCause.message()));
-    }
+    var refused = refusal(withProvider(provider));
+
+    assertEquals(refusedBy("failed to spawn sandbox"), refused.getMessage());
+    assertSame(wrapper, refused.getCause());
+    assertSame(root, refused.getCause().getCause());
   }
 
   private static SessionOptions.Builder withProvider(RecordingProvider provider) {
@@ -553,11 +476,47 @@ final class SessionStartTest {
         .withExecutionProvider(provider);
   }
 
-  /** A stream opened on a session whose fan-out was closed ends at once instead of blocking. */
-  private static void assertEventsEnded(AgentSession session) {
-    var reading = new FutureTask<>(() -> session.events().iterator().hasNext());
+  private static String refusedBy(String reason) {
+    return "RecordingProvider refused session " + SID + ": " + reason;
+  }
+
+  /** What {@code open} throws for a session built from {@code options}. */
+  private static SessionUnavailableException refusal(SessionOptions.Builder options) {
+    var built = options.build();
+    return assertThrows(SessionUnavailableException.class, () -> AgentSession.open(built));
+  }
+
+  /** A lifecycle of a session of {@code provider}, before its start. */
+  private static SessionLifecycle lifecycle(RecordingProvider provider, SessionLimits limits) {
+    var token = new CancellationToken();
+    var context = new SessionContext(SID, token, Clock.systemUTC(), new SecretRegistry());
+    return new SessionLifecycle(
+        new SessionState(SID, token, Clock.systemUTC()),
+        context,
+        Optional.of(provider),
+        limits,
+        new SteeringQueue(4));
+  }
+
+  private static AgentLoop loop(SessionLifecycle lifecycle, RecordingProvider provider) {
+    var options = withProvider(provider).build();
+    var token = new CancellationToken();
+    var context = new SessionContext(SID, token, Clock.systemUTC(), new SecretRegistry());
+    var state = new SessionState(SID, token, Clock.systemUTC());
+    return SessionWiring.agentLoop(
+        options,
+        context,
+        new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
+        new SteeringQueue(4),
+        lifecycle.events(),
+        state.ending());
+  }
+
+  /** Whether {@code events} holds an event, read on a thread of its own. */
+  private static FutureTask<Boolean> reading(EventStream events) {
+    var reading = new FutureTask<>(() -> events.iterator().hasNext());
     Thread.ofVirtual().start(reading);
-    assertFalse(Await.value("a stream opened after the release to end", reading));
+    return reading;
   }
 
   private static SessionLimits shortStart() {
@@ -602,8 +561,7 @@ final class SessionStartTest {
     provider.start = acceptingOnceOpened(accepting);
     provider.end = end;
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      var session = AgentSession.create(withProvider(provider).withLimits(limits).build());
-      Await.value("the refusal", session.result());
+      refusal(withProvider(provider).withLimits(limits));
       accepting.countDown();
       return awaitReported(warning);
     }

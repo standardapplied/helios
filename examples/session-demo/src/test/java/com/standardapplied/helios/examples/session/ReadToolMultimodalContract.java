@@ -68,7 +68,7 @@ abstract class ReadToolMultimodalContract {
     var read = ReadTool.binding(WorkspaceRoot.of(workspace));
     try (var model = createModel(ToolChoice.any());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionPresets.readOnly(model, workspace)
                     .withTools(List.of(read))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
@@ -76,7 +76,7 @@ abstract class ReadToolMultimodalContract {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       events.read(session.events());
       var terminal = session.runBlocking(UserMessage.text("Read the file '" + file + "'."));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertTrue(
           terminal instanceof ResultMessage.Success

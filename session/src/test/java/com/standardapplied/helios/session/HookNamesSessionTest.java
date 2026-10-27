@@ -82,11 +82,11 @@ final class HookNamesSessionTest {
 
   private static Run run(Hook hook) {
     var events = new EventCollector();
-    try (var session = AgentSession.create(options(hook))) {
+    try (var session = AgentSession.open(options(hook))) {
       events.read(session.events());
-      session.send(UserMessage.text("go"));
-      var terminal = Await.value("the session to end", session.result());
-      events.awaitDone();
+      var future = session.send(UserMessage.text("go"));
+      var terminal = Await.value("the session to end", future);
+      events.awaitRunEnded();
       return new Run(events, terminal);
     }
   }
@@ -130,7 +130,7 @@ final class HookNamesSessionTest {
   void aNullNameStopsTheSessionBeingCreated() {
     var options = options(new NamedBy(() -> null));
 
-    var ex = assertThrows(NullPointerException.class, () -> AgentSession.create(options));
+    var ex = assertThrows(NullPointerException.class, () -> AgentSession.open(options));
 
     assertEquals("hook " + NamedBy.class.getName() + " returned a null name", ex.getMessage());
   }
@@ -139,7 +139,7 @@ final class HookNamesSessionTest {
   void aBlankNameStopsTheSessionBeingCreated() {
     var options = options(new NamedBy(() -> " \t"));
 
-    var ex = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var ex = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("hook " + NamedBy.class.getName() + " returned a blank name", ex.getMessage());
   }
@@ -148,7 +148,7 @@ final class HookNamesSessionTest {
   void theReservedNamePermissionStopsTheSessionBeingCreated() {
     var options = options(new NamedBy(() -> "Permission"));
 
-    var ex = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var ex = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals(
         "hook " + NamedBy.class.getName() + " uses the reserved name Permission", ex.getMessage());
@@ -164,7 +164,7 @@ final class HookNamesSessionTest {
                   throw failure;
                 }));
 
-    var ex = assertThrows(IllegalStateException.class, () -> AgentSession.create(options));
+    var ex = assertThrows(IllegalStateException.class, () -> AgentSession.open(options));
 
     assertSame(failure, ex);
   }

@@ -32,7 +32,7 @@ import java.util.logging.Logger;
  * attempt in history and asking the model to correct it.
  *
  * <p>Each attempt reads the turn's stream on a virtual thread of its own, {@code
- * helios-model-stream-<sessionId>}, while the loop thread waits for it; the session's cancellation
+ * helios-model-stream-<sessionId>}, while the loop thread waits for it; the run's cancellation
  * closes the stream. When the session has an {@link OutputSchema}, every call goes through {@link
  * Model#chatStream(List, List, OutputSchema)} so the schema rides the provider's native channel; it
  * is dormant on tool-calling turns and activates on text-output turns.
@@ -96,6 +96,7 @@ final class ModelCall {
           state,
           new QueryEvent.TurnRetried(
               state.sessionId(),
+              state.runId(),
               state.currentTurnIndex(),
               collaborators.clock().instant(),
               attempt,

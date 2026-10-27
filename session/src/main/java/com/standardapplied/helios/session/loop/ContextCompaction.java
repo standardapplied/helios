@@ -100,6 +100,7 @@ final class ContextCompaction {
           state,
           new QueryEvent.ContextWarning(
               state.sessionId(),
+              state.runId(),
               state.currentTurnIndex(),
               collaborators.clock().instant(),
               usagePct));
@@ -188,6 +189,7 @@ final class ContextCompaction {
         state,
         new QueryEvent.ContextEdited(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             removedBlocks,

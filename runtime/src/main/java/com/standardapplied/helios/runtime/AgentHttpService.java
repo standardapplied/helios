@@ -29,13 +29,14 @@ import java.util.logging.Logger;
  * the embedding that does this for you.
  *
  * <ul>
- *   <li>{@code POST /sessions} — create a fresh session; returns {@code {sessionId, eventsUrl}}
- *       with {@code 201 Created}.
- *   <li>{@code POST /sessions/{sessionId}/messages} — body {@code {text: "..."}}; queues the
- *       message and returns {@code 202 Accepted}; {@code 429} when the session's steering queue is
- *       full.
- *   <li>{@code POST /sessions/{sessionId}/interrupt} — body {@code {reason: "..."}}; queues a
- *       synthetic interrupt message and returns {@code 202 Accepted}.
+ *   <li>{@code POST /sessions} — open a fresh session; returns {@code {sessionId, eventsUrl}} with
+ *       {@code 201 Created}; {@code 503} with {@code {"error":"session unavailable"}} when the
+ *       session's execution provider does not accept it.
+ *   <li>{@code POST /sessions/{sessionId}/messages} — body {@code {text: "..."}}; steers the run in
+ *       progress or starts the next run, and returns {@code 202 Accepted}; {@code 429} when the
+ *       session's steering queue is full.
+ *   <li>{@code POST /sessions/{sessionId}/interrupt} — no body; cancels the run in progress, if
+ *       any, keeping the session, and returns {@code 202 Accepted}.
  *   <li>{@code GET /sessions/{sessionId}/questions} — returns {@code 200 OK} with a JSON array of
  *       the session's {@linkplain AgentSession#pendingQuestions() pending questions}, each as its
  *       {@code QuestionAsked} event carried it: {@code questionId}, {@code header}, {@code
@@ -47,15 +48,17 @@ import java.util.logging.Logger;
  *       ["Allow"], customText: "..."}}, {@code customText} optional; answers that question and
  *       returns {@code 202 Accepted}; {@code 404} when it is not pending, already answered or
  *       unknown. The answer names no tool or arguments, so it cannot widen what an approval covers.
- *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s. The
- *       handler reads the session's {@link com.standardapplied.helios.session.EventStream} on the
- *       request thread until it ends, the client disconnects, or the caller's identity ends.
+ *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s of
+ *       every run of the session. The handler reads the session's {@link
+ *       com.standardapplied.helios.session.EventStream} on the request thread until the session is
+ *       closed, the client disconnects, or the caller's identity ends.
  *   <li>{@code GET /sessions/{sessionId}/result?timeout=<seconds>} — long-poll for the terminal
- *       {@link com.standardapplied.helios.session.ResultMessage ResultMessage}. Returns {@code 200
- *       OK} with body {@code {type: "<SubtypeName>", result: <record-fields>}} when terminal;
- *       {@code 204 No Content} when the {@code timeout} elapses with no terminal. {@code timeout}
- *       defaults to 60 s and is clamped to {@code [0, 300]} so a single request cannot pin a server
- *       thread longer than five minutes.
+ *       {@link com.standardapplied.helios.session.ResultMessage ResultMessage} of the latest run:
+ *       the run in progress; else the last run, at once; else, for a session that never ran, its
+ *       first run. Returns {@code 200 OK} with body {@code {type: "<SubtypeName>", runId: "...",
+ *       result: <record-fields>}} when that run ended; {@code 204 No Content} when the {@code
+ *       timeout} elapses first. {@code timeout} defaults to 60 s and is clamped to {@code [0, 300]}
+ *       so a single request cannot pin a server thread longer than five minutes.
  *   <li>{@code DELETE /sessions/{sessionId}} — closes and unregisters the session; returns {@code
  *       204 No Content}.
  * </ul>
@@ -119,7 +122,7 @@ import java.util.logging.Logger;
  * tenant or subject, and produces a fully-populated {@link SessionOptions} for exactly that id;
  * options for any other id are refused, so a factory can never attach a request to another session.
  * A {@code 500} body carries a fixed message, never an exception's; a {@code 409} tells the owner
- * why its own session, closed or terminal, refused a message, interrupt or answer.
+ * why its own session, closed after it was looked up, refused a message or answer.
  *
  * <h2>Thread-safety</h2>
  *
@@ -188,14 +191,10 @@ public final class AgentHttpService implements HttpService {
         "/sessions/{sessionId}/events",
         authenticated(
             owned(
-                (session, caller, req, resp) ->
-                    SessionEventStream.stream(session, resp, JsonBody.MAPPER, caller.ended()))));
-    rules.get(
-        "/sessions/{sessionId}/result",
-        authenticated(
-            owned(
-                (session, caller, req, resp) ->
-                    ResultLongPoll.respond(session, req, resp, JsonBody.MAPPER, caller))));
+                (registered, caller, req, resp) ->
+                    SessionEventStream.stream(
+                        registered.session(), resp, JsonBody.MAPPER, caller.ended()))));
+    rules.get("/sessions/{sessionId}/result", authenticated(owned(this::result)));
     rules.delete("/sessions/{sessionId}", authenticated(owned(this::delete)));
   }
 
@@ -259,17 +258,25 @@ public final class AgentHttpService implements HttpService {
 
   private CallerHandler owned(SessionHandler handler) {
     return (caller, req, resp) -> {
-      var session = registry.find(req.path().pathParameters().get("sessionId"), caller.principal());
-      if (session.isEmpty()) {
+      var registered =
+          registry.lookup(req.path().pathParameters().get("sessionId"), caller.principal());
+      if (registered.isEmpty()) {
         JsonBody.send(resp, Status.NOT_FOUND_404, NOT_FOUND);
         return;
       }
-      handler.handle(session.get(), caller, req, resp);
+      handler.handle(registered.get(), caller, req, resp);
     };
   }
 
-  private void delete(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
-    registry.close(session.sessionId(), caller.principal());
+  private void result(
+      RegisteredSession registered, Caller caller, ServerRequest req, ServerResponse resp) {
+    ResultLongPoll.respond(
+        registered.session(), registered.latest(), req, resp, JsonBody.MAPPER, caller);
+  }
+
+  private void delete(
+      RegisteredSession registered, Caller caller, ServerRequest req, ServerResponse resp) {
+    registry.close(registered.session().sessionId(), caller.principal());
     resp.status(Status.NO_CONTENT_204).send();
   }
 
@@ -282,6 +289,7 @@ public final class AgentHttpService implements HttpService {
   /** A route's work once its caller is admitted and the session is found among the caller's own. */
   @FunctionalInterface
   private interface SessionHandler {
-    void handle(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp);
+    void handle(
+        RegisteredSession registered, Caller caller, ServerRequest req, ServerResponse resp);
   }
 }

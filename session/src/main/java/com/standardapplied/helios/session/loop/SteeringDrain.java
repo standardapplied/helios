@@ -15,9 +15,9 @@ import java.util.List;
 /**
  * Drains the steering queue into the history at an iteration boundary. Each pending {@link
  * UserMessage} fires the on-user-message hooks — {@link HookOutcome.Block Block} drops the message,
- * {@link HookOutcome.MutateText MutateText} rewrites its text, {@link HookOutcome.Stop Stop}
- * terminates the session. Surviving messages emit {@link QueryEvent.UserMessageReceived} and
- * compose, with their attachments and file references, into a single user-role message.
+ * {@link HookOutcome.MutateText MutateText} rewrites its text, {@link HookOutcome.Stop Stop} ends
+ * the run. Surviving messages emit {@link QueryEvent.UserMessageReceived} and compose, with their
+ * attachments and file references, into a single user-role message.
  */
 final class SteeringDrain {
 
@@ -33,11 +33,15 @@ final class SteeringDrain {
     this.effects = effects;
   }
 
-  /** Drain the queue and append what survives the hooks; stops early on a hook's {@code Stop}. */
-  void drainInto(SessionState state) {
+  /**
+   * Drain the queue and append what survives the hooks; stops early on a hook's {@code Stop}.
+   *
+   * @return whether a user message was appended to the history
+   */
+  boolean drainInto(SessionState state) {
     var drained = collaborators.steeringQueue().drain();
     if (drained.isEmpty()) {
-      return;
+      return false;
     }
     var accepted = new ArrayList<UserMessage>();
     for (var message : drained) {
@@ -50,13 +54,13 @@ final class SteeringDrain {
         case HookOutcome.Block block -> block(state, message, hookName, block);
         case HookOutcome.Stop stop -> {
           effects.stop(state, hookName, PHASE, stop);
-          return;
+          return false;
         }
         case HookOutcome.Continue _ -> accepted.add(receive(state, message));
       }
     }
     if (accepted.isEmpty()) {
-      return;
+      return false;
     }
     state
         .history()
@@ -67,13 +71,18 @@ final class SteeringDrain {
                 .withInlineFiles(collectAttachments(accepted))
                 .withFileReferences(collectFileReferences(accepted))
                 .build());
+    return true;
   }
 
   private UserMessage receive(SessionState state, UserMessage message) {
     emitter.emit(
         state,
         new QueryEvent.UserMessageReceived(
-            state.sessionId(), state.currentTurnIndex(), collaborators.clock().instant(), message));
+            state.sessionId(),
+            state.runId(),
+            state.currentTurnIndex(),
+            collaborators.clock().instant(),
+            message));
     return message;
   }
 
@@ -92,6 +101,7 @@ final class SteeringDrain {
         state,
         new QueryEvent.MessageBlocked(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             message,

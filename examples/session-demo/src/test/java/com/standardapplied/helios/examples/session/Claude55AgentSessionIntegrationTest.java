@@ -12,6 +12,7 @@ import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicPricing;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
 import com.standardapplied.helios.anthropic.CachePolicy;
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
@@ -26,11 +27,14 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -102,6 +106,65 @@ final class Claude55AgentSessionIntegrationTest {
   }
 
   /**
+   * Two runs of one session on Opus 5.5 at high effort: the first states a fact and may read a
+   * profile, the second asks about that fact. The API accepts both runs, each ends in an accepted
+   * terminal with no {@code Error} event, and the second run's first request carries the first
+   * run's messages; what the model answers is not asserted. {@code SessionRunsTest} proves the
+   * conversation carried offline.
+   */
+  @Test
+  void opus55SecondRunOfASessionCarriesTheFirstRunsConversation() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+            .withMaxOutputTokens(16_000)
+            .build();
+    var histories = new CopyOnWriteArrayList<List<Message>>();
+    PreModelTurnHook recording =
+        (history, ctx) -> {
+          if (ctx.turnIndex() == 1) {
+            histories.add(history);
+          }
+          return HookOutcome.cont();
+        };
+    var first =
+        "My project's code name is Heliotrope. Read profile p7 with get_profile and tell me in one"
+            + " sentence who it is.";
+    try (var model =
+            new AnthropicProvider()
+                .create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config, CachePolicy.shortLived());
+        var session =
+            AgentSession.open(
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withTools(List.of(getProfile()))
+                    .withHook(recording)
+                    .withLimits(SessionLimits.newBuilder().withMaxTurns(6).build())
+                    .build())) {
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
+
+      var runOne = session.send(first).join();
+      var runTwo = session.send("What is my project's code name?").join();
+
+      for (var terminal : List.of(runOne, runTwo)) {
+        assertTrue(
+            terminal instanceof ResultMessage.Success
+                || terminal instanceof ResultMessage.ErrorMaxTurns,
+            () -> "claude-opus-5-5 ended a run as " + terminal);
+      }
+      session.close();
+      events.awaitDone();
+      assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
+      assertEquals(2, events.eventsOf(QueryEvent.RunEnded.class).size());
+      assertTrue(
+          histories.get(1).stream().anyMatch(message -> first.equals(message.content())),
+          "the second run's first request carries the first run's message");
+    }
+  }
+
+  /**
    * Runs the matchmaking session and asserts what holds whatever the model does: the run ends in
    * success or at the turn limit, no turn failed, and the run is priced. That it called its tools
    * is the model's choice, so a run that did not skips.
@@ -116,7 +179,7 @@ final class Claude55AgentSessionIntegrationTest {
     try (var model =
             new AnthropicProvider().create(modelId.id(), config, CachePolicy.shortLived());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withTools(List.of(searchProfiles(), getProfile()))
@@ -128,7 +191,7 @@ final class Claude55AgentSessionIntegrationTest {
       events.read(session.events());
 
       var terminal = session.runBlocking(UserMessage.text(VIEWER));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertTrue(
           terminal instanceof ResultMessage.Success

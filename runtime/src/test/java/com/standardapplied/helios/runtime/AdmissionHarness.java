@@ -84,6 +84,14 @@ final class AdmissionHarness implements AutoCloseable {
     return (String) mapper.readValue(resp.body(), Map.class).get("sessionId");
   }
 
+  /** Create a session of {@code token}'s principal and start a run on it, which stays active. */
+  String createRunning(RuntimeServer server, String token) {
+    var sessionId = create(server, token);
+    var sent = sendAdmitted(server, "POST", messages(sessionId), token);
+    assertEquals(202, sent.statusCode(), sent::body);
+    return sessionId;
+  }
+
   /**
    * Send until the principal's request bound admits the request. A request gives its slot back just
    * after its response is sent, so a request sent as soon as the client has that response may still

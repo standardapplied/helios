@@ -43,7 +43,7 @@ final class SessionStateTest {
     var state = new SessionState(SID, cancellation, Clock.fixed(fixed, ZoneOffset.UTC));
     assertEquals(SID, state.sessionId());
     assertSame(cancellation, state.cancellation());
-    assertEquals(Duration.ZERO, state.elapsed());
+    assertEquals(Duration.ZERO, state.totals().elapsed());
     assertEquals(0, state.currentTurnIndex());
     assertEquals(Usage.of(0, 0), state.totals().usage());
     assertEquals(CostEstimate.zero(), state.totals().cost());
@@ -233,7 +233,7 @@ final class SessionStateTest {
   @Test
   void elapsedIsZeroForFixedClock() {
     var state = buildAt(Instant.parse("2026-05-14T19:00:00Z"));
-    assertEquals(Duration.ZERO, state.elapsed());
+    assertEquals(Duration.ZERO, state.totals().elapsed());
   }
 
   @Test
@@ -259,7 +259,7 @@ final class SessionStateTest {
           }
         };
     var state = new SessionState(SID, new CancellationToken(), movingClock);
-    assertEquals(Duration.ofSeconds(7), state.elapsed());
+    assertEquals(Duration.ofSeconds(7), state.totals().elapsed());
   }
 
   @Test
@@ -267,10 +267,10 @@ final class SessionStateTest {
     var state = build();
     var first =
         new ResultMessage.Success(
-            SID, "ok", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
+            SID, "run-1", "ok", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
     var second =
         new ResultMessage.Cancelled(
-            SID, "user-stop", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
+            SID, "run-1", "user-stop", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
     assertTrue(state.setTerminal(first));
     assertFalse(state.setTerminal(second));
     assertTrue(state.isTerminal());

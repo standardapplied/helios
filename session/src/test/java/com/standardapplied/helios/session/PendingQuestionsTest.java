@@ -37,7 +37,7 @@ final class PendingQuestionsTest {
 
   private final SessionState state = new SessionState("pending", new CancellationToken(), CLOCK);
   private final SessionEventPublisher events = new SessionEventPublisher("pending");
-  private final PendingQuestions questions = new PendingQuestions(state, events, CLOCK);
+  private final PendingQuestions questions = new PendingQuestions(() -> state, events, CLOCK);
 
   @AfterEach
   void closeEvents() {

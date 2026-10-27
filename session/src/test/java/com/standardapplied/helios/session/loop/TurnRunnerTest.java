@@ -316,11 +316,11 @@ final class TurnRunnerTest {
 
   @Test
   void elapsedDurationReadable() {
-    // Lightweight smoke that state.elapsed() works after a turn completes.
+    // Lightweight smoke that state.totals().elapsed() works after a turn completes.
     var state = freshState();
     runner(textModel("ok", FinishReason.STOP, Usage.of(1, 1)))
         .runTurn(state, SessionLimits.defaults());
-    assertEquals(Duration.ZERO, state.elapsed());
+    assertEquals(Duration.ZERO, state.totals().elapsed());
   }
 
   // ── outputSchema dispatch: schema is transmitted to the model when configured ──

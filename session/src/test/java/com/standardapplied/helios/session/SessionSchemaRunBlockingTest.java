@@ -27,7 +27,7 @@ final class SessionSchemaRunBlockingTest {
       ScriptedModel.newBuilder().withTextTurn("{\"name\":\"alice\",\"score\":42}").build();
 
   private AgentSession session() {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder()
             .withModel(model)
             .withOutputSchema(OutputSchema.of(Verdict.class))
@@ -58,7 +58,7 @@ final class SessionSchemaRunBlockingTest {
               + Verdict.class.getName(),
           refused.getMessage());
       assertEquals(List.of(), model.calls());
-      assertFalse(session.isStarted());
+      assertFalse(session.isRunning());
     }
   }
 

@@ -36,8 +36,8 @@ import java.util.concurrent.Future;
  * <p>{@link #onSessionStart} returns a {@link SessionStartOutcome}: {@link
  * SessionStartOutcome#accept()} for the common case, {@link SessionStartOutcome#refuse(String)
  * Refuse} when the provider cannot accept the session (pool saturated, auth failed, in-flight
- * close). Refusal short-circuits the loop — the session's terminal is {@link
- * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable}.
+ * close). Refusal fails the session's open — {@code AgentSession.open} throws {@link
+ * com.standardapplied.helios.session.SessionUnavailableException}.
  *
  * <h2>Dispatch contract</h2>
  *
@@ -76,10 +76,10 @@ public interface ExecutionProvider {
    * <p>Defaults to {@link SessionStartOutcome#accept()} — stateless providers (a local subprocess
    * fork) need no per-session bookkeeping.
    *
-   * <p>If the returned outcome is a {@link SessionStartOutcome.Refuse}, the agent loop never
-   * starts; the session terminates immediately with {@link
-   * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable}. Use {@code Refuse}
-   * for transient "cannot accept right now" cases (pool saturated, rate-limited); throw a {@link
+   * <p>If the returned outcome is a {@link SessionStartOutcome.Refuse}, the session never opens:
+   * {@code AgentSession.open} throws {@link
+   * com.standardapplied.helios.session.SessionUnavailableException}. Use {@code Refuse} for
+   * transient "cannot accept right now" cases (pool saturated, rate-limited); throw a {@link
    * RuntimeException} only for genuinely unrecoverable misconfigurations.
    *
    * @param ctx session metadata; non-null

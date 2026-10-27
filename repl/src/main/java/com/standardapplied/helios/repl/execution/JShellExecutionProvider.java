@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>{@link #onSessionStart} forks a fresh JShell sandbox subprocess and keeps it alive for the
  *       entire Helios session, keyed by {@link SessionContext#sessionId()}. If the configured
  *       concurrency cap is exhausted the start is refused with {@link
- *       SessionStartOutcome#refuse(String) Refuse} so the agent loop terminates cleanly via {@code
- *       ResultMessage.ErrorProviderUnavailable}.
+ *       SessionStartOutcome#refuse(String) Refuse} so {@code AgentSession.open} fails cleanly with
+ *       {@code SessionUnavailableException}.
  *   <li>{@link #execute} routes each {@code Runtime.JSHELL} request to that session's existing
  *       {@code ReplSession}, so variables defined in turn 1 are still visible in turn 7. The
  *       sandbox's JIT warms up once per session, not once per call.

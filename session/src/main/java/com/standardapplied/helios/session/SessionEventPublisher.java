@@ -10,16 +10,13 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * One session's event fan-out: every event {@link #emit}ted is offered, on the emitting thread, to
- * each {@link EventStream} opened before it, and a stream opened after the session emitted its
- * terminal {@link QueryEvent.LoopEnded} receives that event alone. Every stream sees {@code
- * LoopEnded} at most once, and exactly once if the session emitted it and the stream had room: a
- * stream is admitted either to the live fan-out, before the terminal event is recorded, or to the
- * replay, after; the two are decided under one lock that is never held while an event is offered. A
- * stream opened after a session ended without a {@code LoopEnded} ends at once.
+ * One session's event fan-out across its runs: every event {@link #emit}ted is offered, on the
+ * emitting thread, to each {@link EventStream} opened before it and not yet ended. {@link #close}
+ * ends every stream, and a stream opened after it ends at once; the lock that admits a stream is
+ * never held while an event is offered.
  *
  * <p>A routine event never waits: a stream whose buffer is full misses it, and the number of
- * streams that missed it is logged at FINE. The critical control events ({@code LoopEnded}, {@link
+ * streams that missed it is logged at FINE. The critical control events ({@code RunEnded}, {@link
  * QueryEvent.QuestionAsked}, {@link QueryEvent.Error}) wait up to 30 s for room in each full
  * stream, and a drop is logged as a WARNING.
  */
@@ -32,7 +29,6 @@ final class SessionEventPublisher {
   private final long criticalWaitNanos;
   private final Object admission = new Object();
   private final Set<BufferedEventStream> streams = new LinkedHashSet<>();
-  private QueryEvent.LoopEnded terminal;
   private boolean closed;
 
   SessionEventPublisher(String sessionId) {
@@ -45,19 +41,14 @@ final class SessionEventPublisher {
     this.criticalWaitNanos = criticalEmitTimeout.toNanos();
   }
 
-  /** Open a stream that receives every event emitted from now on, or the replay once ended. */
+  /** Open a stream that receives every event emitted from now on, or one already ended. */
   EventStream open() {
     var stream = new BufferedEventStream(this::detach);
-    QueryEvent.LoopEnded replayed;
     synchronized (admission) {
-      if (terminal == null && !closed) {
+      if (!closed) {
         streams.add(stream);
         return stream;
       }
-      replayed = terminal;
-    }
-    if (replayed != null) {
-      stream.offer(replayed, 0);
     }
     stream.end();
     return stream;
@@ -67,9 +58,6 @@ final class SessionEventPublisher {
   void emit(QueryEvent event) {
     List<BufferedEventStream> targets;
     synchronized (admission) {
-      if (event instanceof QueryEvent.LoopEnded ended) {
-        terminal = ended;
-      }
       targets = List.copyOf(streams);
     }
     var critical = isCritical(event);
@@ -115,7 +103,7 @@ final class SessionEventPublisher {
   }
 
   private static boolean isCritical(QueryEvent event) {
-    return event instanceof QueryEvent.LoopEnded
+    return event instanceof QueryEvent.RunEnded
         || event instanceof QueryEvent.QuestionAsked
         || event instanceof QueryEvent.Error;
   }

@@ -80,14 +80,16 @@ final class AgentLoopTest {
   void runRejectsNullState() {
     var queue = new SteeringQueue(8);
     var loop = buildLoop(fixedModel("x", FinishReason.STOP, Usage.of(1, 1)), queue);
-    assertThrows(NullPointerException.class, () -> loop.run(null, SessionLimits.defaults()));
+    assertThrows(
+        NullPointerException.class,
+        () -> loop.run(null, SessionLimits.defaults(), natural -> true));
   }
 
   @Test
   void runRejectsNullLimits() {
     var queue = new SteeringQueue(8);
     var loop = buildLoop(fixedModel("x", FinishReason.STOP, Usage.of(1, 1)), queue);
-    assertThrows(NullPointerException.class, () -> loop.run(freshState(), null));
+    assertThrows(NullPointerException.class, () -> loop.run(freshState(), null, natural -> true));
   }
 
   @Test
@@ -112,7 +114,7 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("hi"));
     var loop = buildLoop(fixedModel("hello back", FinishReason.STOP, Usage.of(3, 2)), queue);
 
-    var result = loop.run(freshState(), SessionLimits.defaults());
+    var result = loop.run(freshState(), SessionLimits.defaults(), natural -> true);
 
     var success = assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals("hello back", success.result());
@@ -120,7 +122,7 @@ final class AgentLoopTest {
     assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.UserMessageReceived));
     assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.AssistantText));
     assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.TurnEnded));
-    assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.LoopEnded));
+    assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.RunEnded));
   }
 
   @Test
@@ -132,7 +134,7 @@ final class AgentLoopTest {
     var state = freshState();
     var loop = buildLoop(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue);
 
-    loop.run(state, SessionLimits.defaults());
+    loop.run(state, SessionLimits.defaults(), natural -> true);
 
     var received = events.stream().filter(e -> e instanceof QueryEvent.UserMessageReceived).count();
     assertEquals(3, received, "one UserMessageReceived per original message");
@@ -149,10 +151,10 @@ final class AgentLoopTest {
   void emptyQueueAndEmptyHistoryProducesErrorDuringExecution() {
     var queue = new SteeringQueue(8);
     var loop = buildLoop(fixedModel("never called", FinishReason.STOP, Usage.of(0, 0)), queue);
-    var result = loop.run(freshState(), SessionLimits.defaults());
+    var result = loop.run(freshState(), SessionLimits.defaults(), natural -> true);
 
     var err = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
-    assertEquals("EmptyHistory", err.error().kind());
+    assertEquals("NoUserMessage", err.error().kind());
   }
 
   // ── max turns ─────────────────────────────────────────────────────────────
@@ -171,7 +173,7 @@ final class AgentLoopTest {
             .build();
     var loop = buildLoop(model, queue);
     var limits = SessionLimits.newBuilder().withMaxTurns(3).build();
-    var result = loop.run(freshState(), limits);
+    var result = loop.run(freshState(), limits, natural -> true);
     var t = assertInstanceOf(ResultMessage.ErrorMaxTurns.class, result);
     assertEquals(3, t.turnsUsed());
   }
@@ -201,7 +203,7 @@ final class AgentLoopTest {
             });
     var state = freshState();
     var loop = buildLoop(adaptive, queue);
-    var result = loop.run(state, SessionLimits.defaults());
+    var result = loop.run(state, SessionLimits.defaults(), natural -> true);
 
     assertEquals(2, script.calls().size());
     var success = assertInstanceOf(ResultMessage.Success.class, result);
@@ -219,7 +221,7 @@ final class AgentLoopTest {
     token.cancel("user-stop");
     var loop = buildLoop(fixedModel("x", FinishReason.STOP, Usage.of(1, 1)), queue);
 
-    var result = loop.run(state, SessionLimits.defaults());
+    var result = loop.run(state, SessionLimits.defaults(), natural -> true);
     var c = assertInstanceOf(ResultMessage.Cancelled.class, result);
     assertEquals("user-stop", c.reason());
   }
@@ -231,8 +233,8 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     var loop = buildLoop(fixedModel("hello", FinishReason.STOP, Usage.of(1, 1)), queue);
-    loop.run(freshState(), SessionLimits.defaults());
-    assertInstanceOf(QueryEvent.LoopEnded.class, events.get(events.size() - 1));
+    loop.run(freshState(), SessionLimits.defaults(), natural -> true);
+    assertInstanceOf(QueryEvent.RunEnded.class, events.get(events.size() - 1));
   }
 
   @Test
@@ -241,7 +243,7 @@ final class AgentLoopTest {
     queue.offer(UserMessage.text("hi"));
     var state = freshState();
     buildLoop(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue)
-        .run(state, SessionLimits.defaults());
+        .run(state, SessionLimits.defaults(), natural -> true);
     assertTrue(state.isTerminal());
     assertInstanceOf(ResultMessage.Success.class, state.terminal().orElseThrow());
   }
@@ -264,14 +266,16 @@ final class AgentLoopTest {
                 Authorizations.NO_RULE,
                 queue,
                 e -> {
-                  throw new RuntimeException("sink boom");
+                  if (!(e instanceof QueryEvent.RunStarted || e instanceof QueryEvent.RunEnded)) {
+                    throw new RuntimeException("sink boom");
+                  }
                 },
                 fixture::hookContext,
                 fixture.clock),
             runner,
             TokenCounter.charBased(),
             ContextCompactor.disabled());
-    var result = sabotaged.run(freshState(), SessionLimits.defaults());
+    var result = sabotaged.run(freshState(), SessionLimits.defaults(), natural -> true);
     var err = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     assertEquals("java.lang.RuntimeException", err.error().kind());
     assertEquals("sink boom", err.error().message());
@@ -282,10 +286,10 @@ final class AgentLoopTest {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     buildLoop(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue)
-        .run(freshState(), SessionLimits.defaults());
+        .run(freshState(), SessionLimits.defaults(), natural -> true);
     // With an empty registry every non-Continue hook outcome path is unreachable; verify the loop
-    // ran cleanly to LoopEnded.
-    assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.LoopEnded));
+    // ran cleanly to RunEnded.
+    assertTrue(events.stream().anyMatch(e -> e instanceof QueryEvent.RunEnded));
   }
 
   // ── context watermark ────────────────────────────────────────────────────
@@ -298,7 +302,7 @@ final class AgentLoopTest {
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     var loop =
         buildLoopWithCounter(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud);
-    loop.run(freshState(), limits);
+    loop.run(freshState(), limits, natural -> true);
     var warnings = events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).toList();
     assertEquals(1, warnings.size());
     var warn = (QueryEvent.ContextWarning) warnings.get(0);
@@ -315,7 +319,7 @@ final class AgentLoopTest {
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     var loop =
         buildLoopWithCounter(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, quiet);
-    loop.run(freshState(), limits);
+    loop.run(freshState(), limits, natural -> true);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextWarning));
   }
 
@@ -328,7 +332,7 @@ final class AgentLoopTest {
     var loop =
         buildLoopWithCounter(
             fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, atThreshold);
-    loop.run(freshState(), limits);
+    loop.run(freshState(), limits, natural -> true);
     assertEquals(1, events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count());
   }
 
@@ -341,7 +345,7 @@ final class AgentLoopTest {
         LoopModels.onEachCall(steps(5), n -> queue.offer(UserMessage.text("turn-" + n)));
     TokenCounter alwaysOver = msgs -> 95L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).withMaxTurns(5).build();
-    buildLoopWithCounter(neverStops, queue, alwaysOver).run(freshState(), limits);
+    buildLoopWithCounter(neverStops, queue, alwaysOver).run(freshState(), limits, natural -> true);
     assertEquals(
         1,
         events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count(),
@@ -369,7 +373,7 @@ final class AgentLoopTest {
             });
     TokenCounter alwaysOver = msgs -> 90L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
-    buildLoopWithCounter(adaptive, queue, alwaysOver).run(state, limits);
+    buildLoopWithCounter(adaptive, queue, alwaysOver).run(state, limits, natural -> true);
     assertEquals(
         2,
         events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count(),
@@ -390,7 +394,7 @@ final class AgentLoopTest {
     // verifies the threshold math, not the auto-resolution path (covered separately).
     var limits = SessionLimits.newBuilder().withMaxContextTokens(Long.MAX_VALUE).build();
     buildLoopWithCounter(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, counter)
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextWarning));
     assertTrue(sentinel.get() >= 1, "counter still called for observability");
   }
@@ -411,7 +415,7 @@ final class AgentLoopTest {
           return CompactionResult.noOp(List.of(history.get(history.size() - 1)));
         };
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, perMessage, shrinking)
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertEquals(1, compactorCalled.get(), "compactor must be invoked at 0.95");
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).toList();
     assertEquals(1, edits.size(), "ContextEdited must fire after a successful compaction");
@@ -437,7 +441,7 @@ final class AgentLoopTest {
           return CompactionResult.noOp(history);
         };
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, mid, neverShrinks)
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertEquals(0, compactorCalled.get(), "compactor must not fire below 0.95");
     assertEquals(1, events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count());
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
@@ -451,7 +455,7 @@ final class AgentLoopTest {
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor noOp = (history, state) -> CompactionResult.noOp(history);
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, noOp)
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited),
         "no-shrink result must not emit ContextEdited");
@@ -467,7 +471,7 @@ final class AgentLoopTest {
         (history, state) ->
             CompactionResult.noOp(new ArrayList<>(history)); // same size — must be ignored
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, swap)
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited),
         "same-size result must not emit ContextEdited");
@@ -485,7 +489,7 @@ final class AgentLoopTest {
         };
     var result =
         buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, broken)
-            .run(freshState(), limits);
+            .run(freshState(), limits, natural -> true);
     // Loop completes cleanly — a thrown compactor must be swallowed.
     assertInstanceOf(ResultMessage.Success.class, result);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
@@ -508,7 +512,7 @@ final class AgentLoopTest {
             broken,
             ContextCompactor.disabled());
 
-    var result = loop.run(freshState(), SessionLimits.defaults());
+    var result = loop.run(freshState(), SessionLimits.defaults(), natural -> true);
 
     var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result).error();
     assertEquals("counter saw <redacted:API_KEY>", error.message());
@@ -531,7 +535,7 @@ final class AgentLoopTest {
     ContextCompactor shrinking =
         (history, state) ->
             CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
-    buildLoopWith(multi, queue, loud, shrinking).run(freshState(), limits);
+    buildLoopWith(multi, queue, loud, shrinking).run(freshState(), limits, natural -> true);
     var warnings = events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count();
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).count();
     assertTrue(warnings >= 2, "warning flag must reset after compaction (got " + warnings + ")");
@@ -557,7 +561,7 @@ final class AgentLoopTest {
             ContextCompactor.disabled(),
             hookRegistry);
     var state = freshState();
-    loop.run(state, SessionLimits.defaults());
+    loop.run(state, SessionLimits.defaults(), natural -> true);
     var history = state.history().snapshot();
     assertEquals(replacement.size() + 1, history.size(), "history rewritten; assistant appended");
     assertEquals("compacted system", history.get(0).content());
@@ -588,7 +592,8 @@ final class AgentLoopTest {
           return CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
         };
     var recorder = LoopModels.answering("ok", FinishReason.STOP, Usage.of(1, 1));
-    buildLoopWith(recorder, queue, perMessage, shrinking).run(freshState(), limits);
+    buildLoopWith(recorder, queue, perMessage, shrinking)
+        .run(freshState(), limits, natural -> true);
     // Pre-turn check fires BEFORE the model call. Counter returns 96*size; after drainAndAppend
     // history has 1 message → tokens=96, usage=0.96 ≥ 0.95 → compactor invoked at PRE-TURN.
     assertTrue(compacted.get() >= 1, "pre-turn compaction must fire");
@@ -611,7 +616,7 @@ final class AgentLoopTest {
                 "summary-model");
     var state = freshState();
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, reporting)
-        .run(state, limits);
+        .run(state, limits, natural -> true);
     // Model turn contributes 1+1, compaction contributes 200+40.
     assertTrue(
         state.totals().usage().inputTokens() >= 200, "compaction input tokens must accumulate");
@@ -630,7 +635,7 @@ final class AgentLoopTest {
             CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
     var state = freshState();
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, pureTrim)
-        .run(state, limits);
+        .run(state, limits, natural -> true);
     // Only the model turn's 1+1 contributes; compactor reports zero usage.
     assertEquals(1, state.totals().usage().inputTokens());
     assertEquals(1, state.totals().usage().outputTokens());
@@ -720,7 +725,7 @@ final class AgentLoopTest {
     TokenCounter near85pct = msgs -> 70_000L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(0L).build();
     buildLoopWith(modelWithContextWindow(100_000), queue, near85pct, ContextCompactor.disabled())
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().anyMatch(e -> e instanceof QueryEvent.ContextWarning),
         "ContextWarning must fire once tokens cross 0.85 of the model-derived window");
@@ -747,7 +752,7 @@ final class AgentLoopTest {
             queue,
             cumulative,
             ContextCompactor.disabled())
-        .run(freshState(), limits);
+        .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().anyMatch(e -> e instanceof QueryEvent.ContextWarning),
         "watermark must measure cumulative history — a 2-message history of 50 tokens each"
@@ -791,7 +796,7 @@ final class AgentLoopTest {
             staged,
             reporting);
     var state = freshState();
-    loop.run(state, limits);
+    loop.run(state, limits, natural -> true);
     // 1_000_000 input × (10_000_000 μUSD / 1M tokens) + 100_000 output × (10/M) = 11_000_000 μUSD.
     // The pre-fix code priced at the main rate (100/M) → 110_000_000 μUSD. The order-of-magnitude
     // assertion isolates the routing fix from the exact firing count.
@@ -814,7 +819,7 @@ final class AgentLoopTest {
         (history, state) -> new CompactionResult(new ArrayList<>(history), Usage.of(0, 0), "");
     var result =
         buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, sameSize)
-            .run(freshState(), limits);
+            .run(freshState(), limits, natural -> true);
     assertInstanceOf(ResultMessage.Success.class, result);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));
   }
@@ -829,7 +834,7 @@ final class AgentLoopTest {
     var result =
         buildLoopWith(
                 fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, nullReturning)
-            .run(freshState(), limits);
+            .run(freshState(), limits, natural -> true);
     // Loop completes cleanly — a compactor that returned null must be treated as a no-op.
     assertInstanceOf(ResultMessage.Success.class, result);
     assertTrue(events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited));

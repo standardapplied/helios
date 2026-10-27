@@ -97,7 +97,7 @@ final class ModelCallTest {
             sink,
             s ->
                 new DefaultHookContext(
-                    s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
+                    s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
     state.history().append(Message.user("hello"));
     state.beginTurn();

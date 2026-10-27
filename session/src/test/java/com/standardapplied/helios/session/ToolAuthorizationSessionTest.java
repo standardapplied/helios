@@ -364,10 +364,10 @@ final class ToolAuthorizationSessionTest {
                     .withTextTurn("never")
                     .build());
 
-    try (var session = AgentSession.create(options.build())) {
-      session.send(UserMessage.text("go"));
+    try (var session = AgentSession.open(options.build())) {
+      var future = session.send(UserMessage.text("go"));
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
     assertEquals(List.of(), executed);
   }

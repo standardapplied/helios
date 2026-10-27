@@ -42,8 +42,9 @@ final class DefaultHookContextTest {
   void happyPathExposesAllFields() {
     var tok = new CancellationToken();
     var model = stubModel();
-    var ctx = new DefaultHookContext("sess-1", 3L, tok, model);
+    var ctx = new DefaultHookContext("sess-1", "run-1", 3L, tok, model);
     assertEquals("sess-1", ctx.sessionId());
+    assertEquals("run-1", ctx.runId());
     assertEquals(3L, ctx.turnIndex());
     assertSame(tok, ctx.cancellation());
     assertSame(model, ctx.model());
@@ -51,7 +52,7 @@ final class DefaultHookContextTest {
 
   @Test
   void zeroTurnIndexIsAccepted() {
-    new DefaultHookContext("sess", 0L, new CancellationToken(), stubModel());
+    new DefaultHookContext("sess", "run-1", 0L, new CancellationToken(), stubModel());
   }
 
   @Test
@@ -59,7 +60,7 @@ final class DefaultHookContextTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new DefaultHookContext(null, 0L, new CancellationToken(), stubModel()));
+            () -> new DefaultHookContext(null, "run-1", 0L, new CancellationToken(), stubModel()));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
@@ -68,15 +69,33 @@ final class DefaultHookContextTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new DefaultHookContext("  ", 0L, new CancellationToken(), stubModel()));
+            () -> new DefaultHookContext("  ", "run-1", 0L, new CancellationToken(), stubModel()));
     assertEquals("sessionId must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void nullRunIdRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new DefaultHookContext("sess", null, 0L, new CancellationToken(), stubModel()));
+    assertEquals("runId must not be null", ex.getMessage());
+  }
+
+  @Test
+  void blankRunIdRejected() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new DefaultHookContext("sess", " ", 0L, new CancellationToken(), stubModel()));
+    assertEquals("runId must not be blank", ex.getMessage());
   }
 
   @Test
   void emptySessionIdRejected() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DefaultHookContext("", 0L, new CancellationToken(), stubModel()));
+        () -> new DefaultHookContext("", "run-1", 0L, new CancellationToken(), stubModel()));
   }
 
   @Test
@@ -84,7 +103,8 @@ final class DefaultHookContextTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new DefaultHookContext("sess", -1L, new CancellationToken(), stubModel()));
+            () ->
+                new DefaultHookContext("sess", "run-1", -1L, new CancellationToken(), stubModel()));
     assertEquals("turnIndex must be non-negative, got -1", ex.getMessage());
   }
 
@@ -93,7 +113,7 @@ final class DefaultHookContextTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new DefaultHookContext("sess", 0L, null, stubModel()));
+            () -> new DefaultHookContext("sess", "run-1", 0L, null, stubModel()));
     assertEquals("cancellation must not be null", ex.getMessage());
   }
 
@@ -102,7 +122,7 @@ final class DefaultHookContextTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new DefaultHookContext("sess", 0L, new CancellationToken(), null));
+            () -> new DefaultHookContext("sess", "run-1", 0L, new CancellationToken(), null));
     assertEquals("model must not be null", ex.getMessage());
   }
 }

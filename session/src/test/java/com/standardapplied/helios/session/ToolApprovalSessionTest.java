@@ -212,13 +212,13 @@ final class ToolApprovalSessionTest {
             });
     var options =
         options(Permission.empty(PermissionMode.DEFAULT)).withModel(model).withClock(clock);
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       events.read(session.events());
-      session.send(UserMessage.text("go"));
+      var future = session.send(UserMessage.text("go"));
       var questionId = Await.value("the approval question", asked);
       end.accept(session);
-      var terminal = Await.value("the session to end", session.result());
-      events.awaitDone();
+      var terminal = Await.value("the session to end", future);
+      events.awaitRunEnded();
       return new Unanswered(
           new WriteToolSessions.Run(events, model, terminal), answer(session, questionId, "Allow"));
     }

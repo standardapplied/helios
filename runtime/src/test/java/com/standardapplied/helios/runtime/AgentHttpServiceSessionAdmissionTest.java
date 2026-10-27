@@ -76,7 +76,7 @@ final class AgentHttpServiceSessionAdmissionTest {
   @Test
   void aPrincipalAtItsOwnCapIsAnswered429AndLeavesTheRestToOthers() {
     var server = harness.server(harness.registry().withMaxSessionsPerPrincipal(1));
-    harness.create(server, "alice");
+    harness.createRunning(server, "alice");
 
     var refused = harness.send(server, "POST", "/sessions", "alice");
     harness.create(server, "eve");
@@ -90,7 +90,7 @@ final class AgentHttpServiceSessionAdmissionTest {
   void aPrincipalAtItsCapIsAnsweredTheSameWhenAnotherFillsTheServersCap() {
     var server =
         harness.server(harness.registry().withMaxSessionsPerPrincipal(1).withMaxSessions(2));
-    harness.create(server, "alice");
+    harness.createRunning(server, "alice");
 
     var alone = harness.send(server, "POST", "/sessions", "alice");
     harness.create(server, "eve");
@@ -114,8 +114,8 @@ final class AgentHttpServiceSessionAdmissionTest {
     var younger = harness.sessions.get(harness.create(crowded, "alice"));
     younger.terminate();
     var ownOnly = harness.server(harness.registry().withMaxSessions(2));
-    harness.create(ownOnly, "eve");
-    harness.create(ownOnly, "eve");
+    harness.createRunning(ownOnly, "eve");
+    harness.createRunning(ownOnly, "eve");
 
     var amongOthers = harness.send(crowded, "POST", "/sessions", "eve");
     var amongOwn = harness.send(ownOnly, "POST", "/sessions", "eve");
@@ -151,7 +151,7 @@ final class AgentHttpServiceSessionAdmissionTest {
     assertEquals(204, harness.send(server, "DELETE", path, "alice").statusCode());
     assertEquals(404, harness.send(server, "DELETE", path, "alice").statusCode());
 
-    harness.create(server, "alice");
-    assertEquals(503, harness.send(server, "POST", "/sessions", "alice").statusCode());
+    harness.createRunning(server, "alice");
+    assertEquals(503, harness.send(server, "POST", "/sessions", "eve").statusCode());
   }
 }

@@ -40,7 +40,7 @@ final class AgentHttpServiceLoggingTest {
 
   private static final String SESSION_ID = "sess-logging";
   private static final QueryEvent EVENT =
-      new QueryEvent.AssistantText(SESSION_ID, 0L, Instant.EPOCH, "hello");
+      new QueryEvent.AssistantText(SESSION_ID, "run-1", 0L, Instant.EPOCH, "hello");
 
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Await.HANG_GUARD).build();
   private final LogCapture log = LogCapture.of(AgentHttpService.class);
@@ -82,6 +82,7 @@ final class AgentHttpServiceLoggingTest {
 
     ResultLongPoll.respond(
         session,
+        session.result,
         ServerStubs.request("timeout=5"),
         new ServerStubs.RecordingResponse().response,
         JsonBody.MAPPER,

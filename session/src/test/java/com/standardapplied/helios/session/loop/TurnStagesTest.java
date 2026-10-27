@@ -68,7 +68,7 @@ final class TurnStagesTest {
 
   private static HookContext context(SessionState s) {
     return new DefaultHookContext(
-        s.sessionId(), s.currentTurnIndex(), s.cancellation(), new MockModel("unused"));
+        s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), new MockModel("unused"));
   }
 
   @Test

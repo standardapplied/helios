@@ -144,12 +144,11 @@ class DefaultCompactionSessionTest {
 
   private static EventCollector runToSuccess(SessionOptions.Builder options) {
     var events = new EventCollector();
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       events.read(session.events());
-      session.send(UserMessage.text("go"));
+      var future = session.send(UserMessage.text("go"));
 
-      assertInstanceOf(
-          ResultMessage.Success.class, Await.value("the session's result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the session's result", future));
     }
     events.awaitDone();
     return events;

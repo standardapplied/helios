@@ -55,7 +55,11 @@ final class EventEmitterTest {
   private static Function<SessionState, HookContext> ctxFactory(Model model) {
     return state ->
         new DefaultHookContext(
-            state.sessionId(), state.currentTurnIndex(), state.cancellation(), model);
+            state.sessionId(),
+            state.runId(),
+            state.currentTurnIndex(),
+            state.cancellation(),
+            model);
   }
 
   private static SessionState newState() {
@@ -108,7 +112,7 @@ final class EventEmitterTest {
             ctxFactory(stubModel()),
             CLOCK);
     var state = newState();
-    var event = new QueryEvent.AssistantText("sess-emit", 0L, FIXED, "hi");
+    var event = new QueryEvent.AssistantText("sess-emit", "run-1", 0L, FIXED, "hi");
     emitter.emit(state, event);
     assertEquals(1, sinkEvents.size());
     assertEquals(1, hookEvents.size());

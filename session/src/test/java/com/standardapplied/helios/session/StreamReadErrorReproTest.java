@@ -123,7 +123,7 @@ class StreamReadErrorReproTest {
   void transientStreamTerminalPreservesUnderlyingIoExceptionCauseChain() {
     var model = new TransientStreamFailureModel(providerStyleException());
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-cause-chain")
@@ -161,7 +161,7 @@ class StreamReadErrorReproTest {
   void retryIssuesAttemptsUpToTheConfiguredBudget() {
     var model = new TransientStreamFailureModel(providerStyleException());
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-bounded-retry")
@@ -213,7 +213,7 @@ class StreamReadErrorReproTest {
           }
         };
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(failTwiceThenSucceed)
                 .withSessionId("repro-retry-recovers")
@@ -239,14 +239,14 @@ class StreamReadErrorReproTest {
             .build();
     var events = new EventCollector();
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withLimits(limitsWithFastRetry(2))
                 .build())) {
       events.read(session.events());
       var terminal = session.runBlocking(UserMessage.text("hi"));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertEquals("Hello", assertInstanceOf(ResultMessage.Success.class, terminal).result());
       assertEquals(
@@ -287,7 +287,7 @@ class StreamReadErrorReproTest {
 
     var model = new TransientStreamFailureModel(providerStyleException());
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-distinct-subtype")
@@ -310,7 +310,7 @@ class StreamReadErrorReproTest {
   void retryDisabledTerminatesOnFirstFailureWithoutRetrying() {
     var model = new TransientStreamFailureModel(providerStyleException());
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-retry-disabled")
@@ -338,7 +338,7 @@ class StreamReadErrorReproTest {
     var model = new TransientStreamFailureModel(providerStyleException());
     var unreachableBackoff = new StreamRetryPolicy(5, Backoff.fixed(Duration.ofHours(1)), 0.0);
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId("repro-cancel-during-backoff")
@@ -357,13 +357,12 @@ class StreamReadErrorReproTest {
       Thread.startVirtualThread(run);
 
       Await.latch("the loop to announce the retry it is about to back off for", retryAnnounced);
-      session.interrupt("operator cancellation during retry back-off");
-      session.close();
+      session.interrupt();
 
       var cancelled =
           assertInstanceOf(
               ResultMessage.Cancelled.class, Await.value("the cancelled run to return", run));
-      assertEquals("session closed", cancelled.reason());
+      assertEquals("interrupted", cancelled.reason());
       assertEquals(
           1,
           model.chatStreamInvocations.get(),

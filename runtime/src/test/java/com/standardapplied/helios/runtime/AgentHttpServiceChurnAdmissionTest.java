@@ -31,7 +31,8 @@ import org.junit.jupiter.api.Test;
 final class AgentHttpServiceChurnAdmissionTest {
 
   private static final QueryEvent.AssistantText LARGE =
-      new QueryEvent.AssistantText("held", 0L, Instant.EPOCH, "x".repeat(32 * 1024 * 1024));
+      new QueryEvent.AssistantText(
+          "held", "run-1", 0L, Instant.EPOCH, "x".repeat(32 * 1024 * 1024));
 
   private final AdmissionHarness harness = new AdmissionHarness();
 

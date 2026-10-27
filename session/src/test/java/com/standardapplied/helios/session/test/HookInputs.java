@@ -37,7 +37,7 @@ public final class HookInputs {
    * @return the context
    */
   public static HookContext context() {
-    return new DefaultHookContext("sess", 0, new CancellationToken(), MODEL);
+    return new DefaultHookContext("sess", "run-1", 0, new CancellationToken(), MODEL);
   }
 
   /**

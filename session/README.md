@@ -3,12 +3,25 @@
 The v2 agentic SDK for the JVM. Open-ended, streamable, steerable sessions modelled on the
 Claude Code agent loop.
 
-Compared to `helios-core`'s `Agent` (single shot, you call `run(...)`, you get back a result), a
-session is a long-lived object that runs an agent loop on a virtual thread. You **send** messages
-into it, **read** its event stream with for-each, and optionally **interrupt** mid-turn. It hits its own
-terminal `ResultMessage` when the model is done — you can long-poll for it via
-`session.result()`, listen for the `LoopEnded` event, or just call `session.runBlocking(...)` and
-get the terminal synchronously.
+A session is a conversation that runs many times. A *run* is one execution, from the message that
+starts it to its terminal `ResultMessage`; a *turn* is one model call and its tool round. You
+**send** messages into it — each `send` steers the run in progress or starts the next one, and
+returns that run's `CompletableFuture<ResultMessage>` — **read** its event stream with for-each,
+and **interrupt** the current run when you need to, keeping the conversation. A session runs again
+after any ending until you close it:
+
+<!-- snippet: QuickStarts#chat -->
+```java
+try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
+  var answer = session.send("Which classes form the session's public API?").join();
+  var followUp = session.send("Which of them does a chat application need?").join();
+  System.out.println(answer + "\n" + followUp);
+}
+```
+
+`session.interrupt()` cancels the run in progress (`ResultMessage.Cancelled`, reason
+`"interrupted"`); the next `send` starts a new run on the same conversation. `maxTurns`,
+`maxBudgetMicroUsd` and `maxWallClock` count per run.
 
 ## Why sessions
 
@@ -55,7 +68,7 @@ var model =
             AnthropicModelId.CLAUDE_SONNET_4_6.id(),
             ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
 
-try (var session = AgentSession.create(SessionPresets.minimal(model).build())) {
+try (var session = AgentSession.open(SessionPresets.minimal(model).build())) {
   var terminal = session.runBlocking(UserMessage.text("What is the capital of France?"));
   switch (terminal) {
     case ResultMessage.Success s -> System.out.println(s.result());
@@ -73,7 +86,7 @@ guarantees the session's runtime (event streams, scheduler, in-flight tools) is 
 <!-- snippet: QuickStarts#workspaceSession -->
 ```java
 try (var session =
-    AgentSession.create(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
+    AgentSession.open(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
   var terminal =
       session.runBlocking(UserMessage.text("Summarise the public API of the session module."));
   System.out.println(((ResultMessage.Success) terminal).result());
@@ -96,7 +109,8 @@ session; `withAskUserQuestion()` adds the model's `AskUserQuestion` tool.
 
 An `EventStream` sees every lifecycle event as the loop produces it — perfect for a UI that
 wants to render tokens, tool calls, and hook decisions live. Open it before the first `send` and
-read it with for-each on a thread of its own; it ends after the session's last event:
+read it with for-each on a thread of its own; it spans every run, `RunStarted` and `RunEnded`
+bracketing each, and ends once the session is closed:
 
 ```java
 var events = session.events();
@@ -108,22 +122,22 @@ var printer = Thread.ofVirtual().start(() -> {
         case QueryEvent.ToolUse u             -> System.out.println("\n[tool: " + u.call().name() + "]");
         case QueryEvent.ToolResult r          -> System.out.println("[result: " + r.result().output() + "]");
         case QueryEvent.MessageBlocked b      -> System.err.println("[blocked: " + b.reason() + "]");
-        case QueryEvent.LoopEnded e           -> System.out.println("\n— done —");
+        case QueryEvent.RunEnded e            -> System.out.println("\n— run done —");
         default -> {}
       }
     }
   }
 });
-session.send("Refactor the loop module's package-info comments.");
-var terminal = session.result().join();
+var terminal = session.send("Refactor the loop module's package-info comments.").join();
+session.close();
 printer.join();
 ```
 
 Each stream buffers up to 256 events. A routine event never waits for a reader: a stream whose
-buffer is full misses it, so a slow reader never stalls the loop. `LoopEnded`, `QuestionAsked` and
+buffer is full misses it, so a slow reader never stalls the loop. `RunEnded`, `QuestionAsked` and
 `Error` wait up to 30 s for room.
 
-The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `LoopEnded`, `Error`; see the [package
+The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `RunStarted`, `RunEnded`, `Error`, each naming its run; see the [package
 Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — covers everything the loop emits.
 
 ## Cost tracking + budget cap
@@ -137,7 +151,7 @@ var limits =
         .build();
 
 try (var session =
-    AgentSession.create(
+    AgentSession.open(
         SessionPresets.workspace(model, root)
             .withCostCalculator(CostCalculator.staticTable(pricing))
             .withLimits(limits)
@@ -164,7 +178,7 @@ var policy =
         List.of(PermissionRule.of("Read", "**/secrets.*")));
 
 try (var session =
-    AgentSession.create(SessionPresets.workspace(model, root).withPermission(policy).build())) {
+    AgentSession.open(SessionPresets.workspace(model, root).withPermission(policy).build())) {
   session.runBlocking(UserMessage.text("Summarise the public API under src."));
 }
 ```
@@ -195,7 +209,7 @@ match that spelling: a trailing `/**` matches the path before it and everything 
 matches `.`), `/**/` and a leading `**/` match zero or more segments, `*` and `?` stay within a
 segment. Rules name real paths: a rule written through a symlink, such as `./link/**`, never
 matches, since a key never goes through one, and creation cannot detect that. A rule for a path tool
-that no canonical path can match, such as `Read("secrets/**")`, fails `AgentSession.create`. A call
+that no canonical path can match, such as `Read("secrets/**")`, fails `AgentSession.open`. A call
 whose key carries a registered secret is refused. `Glob`, `Grep`, `LS`
 and a `MemoryRead` listing withhold every entry below their path that one of their own DENY rules
 matches (for `Grep`, which returns contents, also every entry a `Read` DENY or ASK rule decides,
@@ -226,7 +240,7 @@ PreToolUseHook denyShell =
     };
 
 var session =
-    AgentSession.create(SessionPresets.workspace(model, root).withHook(denyShell).build());
+    AgentSession.open(SessionPresets.workspace(model, root).withHook(denyShell).build());
 ```
 
 Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
@@ -236,14 +250,15 @@ Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
 
 `SessionLimits.newBuilder()` exposes every cap:
 
-- `withMaxTurns(int)` — hard loop-iteration ceiling (default 100)
-- `withMaxBudgetMicroUsd(long)` — USD spend cap (default unset; opt-in)
-- `withMaxWallClock(Duration)` — wall-clock ceiling (default 1h)
+- `withMaxTurns(int)` — turns per run (default 100)
+- `withMaxBudgetMicroUsd(long)` — USD spend cap per run (default unset; opt-in)
+- `withMaxWallClock(Duration)` — wall-clock ceiling per run (default 1h)
 - `withToolTimeoutDefault(Duration)` — per-tool execution timeout (default 2 min)
 - `withMaxContextTokens(long)` — soft trigger for compaction (default 0 = auto: the model's window minus the output reserve)
 
 Each cap maps to its own terminal `ResultMessage` subtype (`ErrorMaxTurns`,
-`ErrorMaxBudgetUsd`, `ErrorMaxWallClock`, etc.).
+`ErrorMaxBudgetUsd`, `ErrorMaxWallClock`, etc.) that ends the run; the next `send` starts a new run
+with fresh limits.
 
 ## Context compaction
 
@@ -274,7 +289,7 @@ Three library-user tiers of control:
 <!-- snippet: QuickStarts#compaction -->
 ```java
 // 1) Default — SummarizingCompactor bound to the session's model
-var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
+var session = AgentSession.open(SessionPresets.workspace(model, repo).build());
 
 // 2) BYO compactor — a cheaper summary model or prompt, or any ContextCompactor of your own
 var custom =
@@ -283,12 +298,12 @@ var custom =
         .withSummaryTimeout(Duration.ofSeconds(30)) // bound the summary call
         .build();
 var session2 =
-    AgentSession.create(
+    AgentSession.open(
         SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
 
 // 3) Opt out wholesale — long sessions overflow naturally with an ErrorDuringExecution
 var session3 =
-    AgentSession.create(
+    AgentSession.open(
         SessionPresets.workspace(model, repo)
             .withContextCompactor(ContextCompactor.disabled())
             .build());
