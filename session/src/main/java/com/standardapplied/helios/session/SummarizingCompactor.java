@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -133,10 +134,11 @@ public final class SummarizingCompactor implements ContextCompactor {
   /**
    * Run the summary call on a virtual thread under the configured timeout. On timeout the worker
    * thread is interrupted (best effort) and this returns empty. What the call throws is rethrown as
-   * itself, an {@link Error} included, and a checked exception it throws undeclared wrapped in a
-   * {@link RuntimeException}; an {@code Error}, or one it carries as a joined future's cause, is
-   * first recorded by the session's ending when {@code context} is the session's, so one thrown
-   * after the timeout still ends the session.
+   * itself, an {@link Error} included, an {@code Error} it carries as a joined future's cause as
+   * that {@code Error}, and a checked exception it throws undeclared wrapped in a {@link
+   * RuntimeException}; an {@code Error}, or one it carries as a joined future's cause, is first
+   * recorded by the session's ending when {@code context} is the session's, so one thrown after the
+   * timeout still ends the session.
    */
   private Optional<Response<Void>> invokeSummary(HookContext context, List<Message> request) {
     Consumer<Throwable> failures =
@@ -162,6 +164,7 @@ public final class SummarizingCompactor implements ContextCompactor {
     }
     switch (settled.exceptionNow()) {
       case Error error -> throw error;
+      case ExecutionException wrapped when wrapped.getCause() instanceof Error error -> throw error;
       case RuntimeException re -> throw re;
       case Throwable thrown -> throw new RuntimeException(thrown);
     }
