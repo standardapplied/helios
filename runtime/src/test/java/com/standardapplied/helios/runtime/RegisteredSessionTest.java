@@ -5,6 +5,7 @@ package com.standardapplied.helios.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
@@ -22,7 +23,8 @@ import org.junit.jupiter.api.Test;
 /**
  * A {@link RegisteredSession} records the runs its sends start in the order the session started
  * them, publishes a run's end and the time it became idle together, under the table's lock, and
- * holds its capacity until every run it recorded completed.
+ * holds its capacity until every run it recorded completed, and starts no run once its capacity was
+ * given back.
  */
 final class RegisteredSessionTest {
 
@@ -107,5 +109,23 @@ final class RegisteredSessionTest {
     synchronized (lock) {
       assertTrue(registered.isIdle());
     }
+  }
+
+  @Test
+  void aSendThroughAnEntryAnEvictionRacedStartsNoRunOnCapacityGivenAway() {
+    var alice = new Principal("acme", "alice");
+    var table = new SessionTable(new SessionQuota(1, 1), now::get, RETENTION);
+    table.reserve(alice);
+    assertTrue(table.register("s1", stub, alice));
+    var retained = table.lookup("s1", alice).orElseThrow();
+
+    var victim = table.reserve(alice).orElseThrow();
+
+    assertSame(retained, victim);
+    var refused =
+        assertThrows(IllegalStateException.class, () -> retained.send(UserMessage.text("go")));
+    assertEquals("session is closed", refused.getMessage());
+    assertEquals(0, stub.queue.size());
+    assertFalse(stub.isRunning());
   }
 }
