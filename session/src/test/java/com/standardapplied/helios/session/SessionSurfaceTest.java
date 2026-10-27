@@ -181,6 +181,18 @@ final class SessionSurfaceTest {
     assertEquals(0, provider.starts.get());
   }
 
+  @Test
+  void aHandExecuteBindingWithoutAProviderFailsTheSessionsCreationBeforeItStarts() {
+    var options = minimal(answering()).withTool(ExecuteTool.binding(provider)).build();
+
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+
+    assertEquals(
+        "Execute requires withExecutionProvider(provider); remove the hand Execute binding",
+        thrown.getMessage());
+    assertEquals(0, provider.starts.get());
+  }
+
   // ── AskUserQuestion is opt-in ────────────────────────────────────────────
 
   @Test

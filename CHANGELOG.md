@@ -861,7 +861,7 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 | `ToolCategory.SEARCH`, `ToolCategory.DELEGATION` | `READ` and `CONTROL`, which they behaved exactly like; `Grep` and `Glob` are `READ`, and a default decision's reason reads `default-allow READ (...)` |
 | `NoopExecutionProvider`, the default execution provider | set no provider: the session then has no `Execute` tool and no start or end step |
 | `SessionOptions.executionProvider()` → `ExecutionProvider` | `Optional<ExecutionProvider>`; `withExecutionProvider(p)` registers `Execute` over `p` and runs its `onSessionStart` and `onSessionEnd` with the session |
-| `ExecuteTool.binding(p)` in the tools next to `withExecutionProvider(p)` | delete the binding; registering both fails `AgentSession.create` with `duplicate tool name in registry: Execute` |
+| `ExecuteTool.binding(p)` in the tools next to `withExecutionProvider(p)` | delete the binding; registering both fails `AgentSession.create` with `duplicate tool name in registry: Execute`, and a tool named `Execute` without a provider fails it too, since its provider would never be started |
 | `SessionPresets.openEnded(model, root, provider)` | `SessionPresets.workspace(model, root).withExecutionProvider(provider)` |
 | `AskUserQuestion` registered in every session | registered only with `SessionOptions.Builder.withAskUserQuestion()`; a permission `ASK` still asks through `QuestionAsked` without it |
 | the `session.loop` package (`AgentLoop`, `TurnRunner`, `ToolDispatch`, `StopClassifier`, `SessionState`, `ConversationHistory`, `SessionTotals`, `SessionEnding`, `TurnOutcome`) was exported | internal; no replacement needed |

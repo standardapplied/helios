@@ -25,9 +25,10 @@ import java.util.ArrayList;
 /**
  * Builds one session's agent loop from its options: the tool registry, the options' tools followed
  * by the built-in tools the options switch on (the memory tools for a memory backend, {@code
- * Execute} for an execution provider, {@code AskUserQuestion} when asked for); the tool dispatch,
- * the hooks, the permission stage, the loop collaborators and the turn runner. The permission stage
- * is the {@link DefaultPermissionEvaluator} of the session's {@link
+ * Execute} for an execution provider, {@code AskUserQuestion} when asked for), refusing a hand
+ * {@code Execute} binding without a provider, whose start and end would never run; the tool
+ * dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
+ * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
  * questions, with the rules that decide a key withholding what walking tools return. It acquires
  * nothing, so a failure here leaves only what the caller acquired to release.
@@ -73,6 +74,11 @@ final class SessionWiring {
   }
 
   private static ToolRegistry registry(SessionOptions options, QuestionGateway gateway) {
+    if (options.executionProvider().isEmpty()
+        && options.tools().stream().anyMatch(tool -> ExecuteTool.NAME.equals(tool.name()))) {
+      throw new IllegalArgumentException(
+          "Execute requires withExecutionProvider(provider); remove the hand Execute binding");
+    }
     var tools = new ArrayList<ToolBinding>(options.tools());
     options
         .memoryBackend()
