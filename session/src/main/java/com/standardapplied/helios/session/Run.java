@@ -5,6 +5,7 @@ package com.standardapplied.helios.session;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +24,7 @@ final class Run {
   private final CancellationToken sessionToken;
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
+  private final CompletableFuture<Optional<Error>> left = new CompletableFuture<>();
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
 
@@ -44,6 +46,15 @@ final class Run {
 
   CompletableFuture<ResultMessage> result() {
     return result;
+  }
+
+  /**
+   * Completes once the run's thread left the run, with the host {@link Error} that failed the
+   * session, if any. Only the session waits on it: a wait on {@link #result} may run a caller's
+   * callback of that future on the waiting thread.
+   */
+  CompletableFuture<Optional<Error>> left() {
+    return left;
   }
 
   /** Start the wall clock on a virtual thread of its own. */
