@@ -174,7 +174,7 @@ final class ContextCompaction {
       return;
     }
     var compactionUsage = result.usage();
-    if (compactionUsage.inputTokens() > 0 || compactionUsage.outputTokens() > 0) {
+    if (compactionUsage.reportsTokens()) {
       turnRunner.accounting().add(state, result.modelId(), compactionUsage);
     }
     var historyAfter = result.history();

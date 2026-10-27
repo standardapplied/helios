@@ -37,6 +37,8 @@ import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 final class SummarizingCompactorTest {
 
@@ -476,15 +478,16 @@ final class SummarizingCompactorTest {
         NullPointerException.class, () -> new CompactionResult(List.of(), Usage.of(0, 0), null));
   }
 
-  @Test
-  void compactionResultRejectsUsageWithoutModelId() {
+  @ParameterizedTest
+  @CsvSource({"10, 5, 0, 0", "0, 0, 0, 900", "0, 0, 900, 0"})
+  void compactionResultRejectsUsageWithoutModelId(
+      int input, int output, int cacheWrites, int cacheReads) {
+    var usage = Usage.of(input, output, cacheWrites, cacheReads);
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new CompactionResult(List.of(), Usage.of(10, 5), ""));
-    assertTrue(
-        ex.getMessage().startsWith("modelId must be non-blank when usage reports any tokens"),
-        ex.getMessage());
+            IllegalArgumentException.class, () -> new CompactionResult(List.of(), usage, " "));
+    assertEquals(
+        "modelId must be non-blank when usage reports any tokens; got " + usage, ex.getMessage());
   }
 
   @Test
