@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
  */
 final class Run {
 
+  private final CancellationToken sessionToken;
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
   private final CancellationToken.Registration link;
@@ -30,11 +31,11 @@ final class Run {
    * session is cancelled, at once if it already is.
    */
   Run(SessionState session, CompletableFuture<ResultMessage> result, Duration maxWallClock) {
-    var sessionToken = session.cancellation();
+    this.sessionToken = session.cancellation();
     this.state = new SessionState(session, new CancellationToken());
     this.result = result;
     this.maxWallClock = maxWallClock;
-    this.link = sessionToken.onCancel(() -> state.cancel(sessionToken.reason().orElseThrow()));
+    this.link = sessionToken.onCancel(this::followSession);
   }
 
   SessionState state() {
@@ -49,6 +50,14 @@ final class Run {
   void startWallClock() {
     BoundedTask.start(
         "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
+  }
+
+  /**
+   * Cancel the run with the reason of the session's cancelled token, as the link does once its
+   * callback runs; a close calls it so the run is cancelled before the close returns.
+   */
+  void followSession() {
+    state.cancel(sessionToken.reason().orElseThrow());
   }
 
   /** Stop following the session's token, once the run has ended. */

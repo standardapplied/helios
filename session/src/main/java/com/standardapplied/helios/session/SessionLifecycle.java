@@ -114,6 +114,7 @@ final class SessionLifecycle {
     closeDeadline = deadline;
     var run = runs.close(deadline);
     session.ending().cancel("session closed");
+    run.ifPresent(Run::followSession);
     Optional<Error> carried = Optional.empty();
     if (run.isPresent()) {
       if (runs.isWorkerThread()) {
