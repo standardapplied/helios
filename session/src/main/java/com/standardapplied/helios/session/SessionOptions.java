@@ -389,7 +389,7 @@ public record SessionOptions(
      * session registers {@code Execute} over it and runs its {@code onSessionStart} and {@code
      * onSessionEnd} with the session; registering {@code ExecuteTool.binding} by hand as well fails
      * {@link AgentSession#create} with a duplicate tool name. Unset by default: the session has no
-     * {@code Execute} tool.
+     * {@code Execute} tool, and a tool named {@code Execute} fails {@link AgentSession#create}.
      *
      * @param executionProvider non-null provider
      * @return this builder

@@ -428,7 +428,7 @@ User-visible release-by-release breaking changes — including DDL deltas for `h
 ## REPL Module (the sandbox behind `Execute(JSHELL)`)
 
 Sandboxed JShell execution, and the one way to run Java snippets: a session wires
-`JShellExecutionProvider` as its `ExecutionProvider` and binds `ExecuteTool`; a call with
+`JShellExecutionProvider` with `withExecutionProvider`, which registers `Execute`; a call with
 `runtime: JSHELL` runs in that session's own `ReplSession`, whose `JvmSandbox` subprocess keeps
 variables, imports and classes across calls. The pieces are `JShellExecutionProvider`, `JvmSandbox`,
 `JvmSandboxBootstrap`, `ReplSession`, `ReplConfig`, `SandboxPrelude`, the sandbox policy verifier and
