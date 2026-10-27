@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,12 +15,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
  * A {@link RegisteredSession} records the runs its sends start in the order the session started
- * them, and publishes a run's end and the time it became idle together, under the table's lock.
+ * them, publishes a run's end and the time it became idle together, under the table's lock, and
+ * holds its capacity until every run it recorded completed.
  */
 final class RegisteredSessionTest {
 
@@ -28,8 +31,10 @@ final class RegisteredSessionTest {
   private final Object lock = new Object();
   private final AtomicReference<Instant> now = new AtomicReference<>(Instant.EPOCH);
   private final StubSession stub = new StubSession("s1");
+  private final AtomicInteger releases = new AtomicInteger();
   private final RegisteredSession registered =
-      new RegisteredSession(stub, new Principal("acme", "alice"), lock, now::get, () -> {});
+      new RegisteredSession(
+          stub, new Principal("acme", "alice"), lock, now::get, releases::incrementAndGet);
 
   @Test
   void aSendThatStartsALaterRunWaitsForAnEarlierSendToRecordItsRun() {
@@ -79,6 +84,28 @@ final class RegisteredSessionTest {
       assertFalse(registered.expired(now.get(), RETENTION));
       now.set(now.get().plus(RETENTION));
       assertTrue(registered.expired(now.get(), RETENTION));
+    }
+  }
+
+  @Test
+  void aClosedSessionHoldsItsCapacityWhileARunBeforeTheCancelledNextOneStillRuns() {
+    var first = stub.result;
+    registered.send(UserMessage.text("one"));
+    var next = new CompletableFuture<ResultMessage>();
+    stub.result = next;
+    registered.send(UserMessage.text("two"));
+
+    registered.close();
+    next.cancel(false);
+
+    assertEquals(0, releases.get());
+    synchronized (lock) {
+      assertFalse(registered.isIdle());
+    }
+    first.complete(stub.success());
+    assertEquals(1, releases.get());
+    synchronized (lock) {
+      assertTrue(registered.isIdle());
     }
   }
 }

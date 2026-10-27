@@ -402,7 +402,21 @@ final class SessionRunsTest {
   }
 
   @Test
-  void aNextRunWaitingForARunAnErrorEndsFailsWithThatError() {
+  void aCallbackOfARunAnErrorEndsCanWaitForTheNextRunThatErrorFails() {
+    failARunWithANextOneQueued(false);
+  }
+
+  @Test
+  void aCallbackOfTheNextRunAnErrorFailsCanWaitForTheRunBeforeIt() {
+    failARunWithANextOneQueued(true);
+  }
+
+  /**
+   * Fail run 1 with an {@link Error} while a next run waits behind it and a callback of one of the
+   * two futures, the next run's when {@code nextWaits}, waits for the other: both fail with that
+   * {@code Error}, the callback returns, and the next run never called the model.
+   */
+  private static void failARunWithANextOneQueued(boolean nextWaits) {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var sentinel = new AssertionError("callback failure");
     var ending = new CountDownLatch(1);
@@ -423,10 +437,15 @@ final class SessionRunsTest {
       var first = session.send("go");
       Await.latch("the run to decide its end", ending);
       var next = session.send("next");
+      var waiting = nextWaits ? next : first;
+      var awaited = nextWaits ? first : next;
+      var chained =
+          waiting.whenComplete((result, failure) -> awaited.handle((value, error) -> error).join());
       release.countDown();
 
       assertSame(sentinel, Await.failure("run 1", first));
       assertSame(sentinel, Await.failure("the next run", next));
+      assertSame(sentinel, Await.failure("the callback", chained));
       assertEquals(1, model.calls().size());
     }
   }
@@ -783,6 +802,52 @@ final class SessionRunsTest {
       Await.until(
           "the Error no run carries to be logged",
           () -> logged.stream().anyMatch(record -> record.getThrown() == sentinel));
+    }
+  }
+
+  @Test
+  void anErrorRecordedWhileTheRunsThreadWaitsToLeaveTheRunFailsItAndEndsTheSession() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var sentinel = new AssertionError("late callback failure");
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var runThread = new AtomicReference<Thread>();
+    var callbackThread = new AtomicReference<Thread>();
+    var model = ScriptedModel.newBuilder().withTextTurn("one").build();
+    PreStopHook failingLate =
+        (response, ctx) -> {
+          runThread.set(Thread.currentThread());
+          ctx.cancellation()
+              .onCancel(
+                  () -> {
+                    callbackThread.set(Thread.currentThread());
+                    ending.countDown();
+                    Uninterruptible.await(release);
+                    throw sentinel;
+                  });
+          return HookOutcome.cont();
+        };
+    var options =
+        options(model)
+            .withExecutionProvider(provider)
+            .withHook(failingLate)
+            .withLimits(SessionLimits.newBuilder().withStopGrace(SHORT_GRACE).build());
+
+    try (var session = AgentSession.open(options.build())) {
+      var run = session.send("go");
+      Await.latch("the run to end", ending);
+      synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
+        Await.until(
+            "the run's thread to wait to leave the run",
+            () -> runThread.get().getState() == Thread.State.BLOCKED);
+        release.countDown();
+        Await.until(
+            "the Error to wait to fail the session",
+            () -> callbackThread.get().getState() == Thread.State.BLOCKED);
+      }
+
+      assertSame(sentinel, Await.failure("the run", run));
+      Await.until("the session to end its provider", () -> provider.ends.get() == 1);
     }
   }
 
