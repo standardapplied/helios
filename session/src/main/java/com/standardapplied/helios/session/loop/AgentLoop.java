@@ -35,9 +35,9 @@ import java.util.logging.Logger;
  *       MutateText}), or end the run ({@link HookOutcome.Stop Stop}). Surviving messages emit
  *       {@link QueryEvent.UserMessageReceived} and compose into a single user-role message appended
  *       to history.
- *   <li>Before the run's first turn, if no message reached the history (every one was blocked), end
- *       with {@link ResultMessage.ErrorDuringExecution} of kind {@code NoUserMessage}: a run calls
- *       the model only after a user message of its own.
+ *   <li>Before the run's first turn, if no message reached the history (every one was blocked) and
+ *       none was sent meanwhile, end with {@link ResultMessage.ErrorDuringExecution} of kind {@code
+ *       NoUserMessage}: a run calls the model only after a user message of its own.
  *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)}.
  *   <li>If the turn left a terminal value on {@link SessionState} (hook-driven stop), respect it.
  *       Otherwise hand the outcome to {@link StopClassifier}; if it returns terminal, fire {@link
@@ -160,10 +160,12 @@ public final class AgentLoop {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
     if (!received && state.currentTurnIndex() == 0) {
+      if (!boundary.end(true)) {
+        return Optional.empty();
+      }
       var noUserMessage = SerializedError.of("NoUserMessage", NO_USER_MESSAGE);
       return Optional.of(
-          decided(
-              state, limits, boundary, StopClassifier.errorDuringExecution(state, noUserMessage)));
+          finished(state, limits, StopClassifier.errorDuringExecution(state, noUserMessage)));
     }
     state.beginTurn();
     compaction.check(state, limits);

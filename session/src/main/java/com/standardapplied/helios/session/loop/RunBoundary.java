@@ -15,8 +15,9 @@ public interface RunBoundary {
    * none is. Once the run ends, a message still queued for it is discarded, and the next message
    * sent starts the next run.
    *
-   * @param naturalStop whether the run's verdict is the {@code Success} of a turn that stopped with
-   *     no message queued, which a queued message overturns
+   * @param naturalStop whether the run's verdict is one a queued message overturns: the {@code
+   *     Success} of a turn that stopped with no message queued, or a first turn with no user
+   *     message
    * @return {@code true} if the run ends; {@code false} if a message is queued and the run goes on
    */
   boolean end(boolean naturalStop);
