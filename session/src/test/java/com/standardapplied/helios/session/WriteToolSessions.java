@@ -99,12 +99,12 @@ final class WriteToolSessions {
       ScriptedModel model,
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions) {
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       var events = new EventCollector(reactions.apply(session));
       events.read(session.events());
-      session.send(UserMessage.text("go"));
-      var terminal = Await.value("the session to end", session.result());
-      events.awaitDone();
+      var future = session.send(UserMessage.text("go"));
+      var terminal = Await.value("the session to end", future);
+      events.awaitRunEnded();
       return new Run(events, model, terminal);
     }
   }

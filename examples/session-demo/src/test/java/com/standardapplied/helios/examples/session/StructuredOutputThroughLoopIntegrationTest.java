@@ -81,7 +81,7 @@ final class StructuredOutputThroughLoopIntegrationTest {
             .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var typed =
           session.runBlocking(
               UserMessage.text(
@@ -123,7 +123,7 @@ final class StructuredOutputThroughLoopIntegrationTest {
             .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var rec =
           session.runBlocking(
               UserMessage.text(

@@ -15,9 +15,9 @@ package com.standardapplied.helios.session;
  * }</pre>
  *
  * <p>{@link AgentSession#events()} opens a new stream per call, attached before it returns: the
- * stream receives every event the session emits after that. A stream opened after the session ended
- * holds the session's {@link QueryEvent.LoopEnded} once and then ends, or ends at once when the
- * session ended without one (closed before it started, or ended by a host {@link Error}).
+ * stream receives every event the session emits after that, across every run, until the session is
+ * closed; a stream opened after the session closed ends at once. A run's result is the future
+ * {@link AgentSession#send} returned for it, never a replayed event.
  *
  * <p>{@link #iterator()} may be called once; a second call throws {@link IllegalStateException}.
  * The iterator's {@code hasNext()} blocks until an event is buffered or the stream has ended, and
@@ -27,13 +27,13 @@ package com.standardapplied.helios.session;
  * status kept.
  *
  * <p>A session's stream holds up to 256 events. A routine event never waits for a reader: a stream
- * whose buffer is full misses it. {@link QueryEvent.LoopEnded}, {@link QueryEvent.QuestionAsked}
- * and {@link QueryEvent.Error} wait up to 30 s for room, then are dropped from that stream with a
- * WARNING; the terminal stays readable through {@link AgentSession#result()} and an open question
- * through {@link AgentSession#pendingQuestions()}. Every emitted event is in each open stream's
- * buffer, or missed by it, before {@link AgentSession#result()} completes; the session never waits
- * for a reader to read it, so a reader that must have handled an event before {@code result()}
- * returns synchronises with its own reading thread.
+ * whose buffer is full misses it. {@link QueryEvent.RunEnded}, {@link QueryEvent.QuestionAsked} and
+ * {@link QueryEvent.Error} wait up to 30 s for room, then are dropped from that stream with a
+ * WARNING; a run's terminal stays readable through the future {@link AgentSession#send} returned
+ * and an open question through {@link AgentSession#pendingQuestions()}. Every emitted event is in
+ * each open stream's buffer, or missed by it, before the run's future completes; the session never
+ * waits for a reader to read it, so a reader that must have handled an event before the future
+ * completes synchronises with its own reading thread.
  */
 public interface EventStream extends Iterable<QueryEvent>, AutoCloseable {
 

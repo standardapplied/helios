@@ -20,7 +20,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.hooks.PreStopHook;
-import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,11 +36,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The fan-out offers each event to every open {@link EventStream} without waiting for a routine
- * one, waits a bounded time for room for a critical one, and replays the terminal {@code LoopEnded}
- * exactly once to a stream opened after it. The first group drives the fan-out directly, emitting
- * from a thread of its own as a session's loop does; the last group drives a real session, where
- * "after" is forced by opening a stream from inside another reader's handling of {@code LoopEnded}
- * or after the result has settled.
+ * one, waits a bounded time for room for a critical one, and ends every stream once the session
+ * closes; a stream receives the events emitted after it opened, across runs, and nothing is
+ * replayed. The first group drives the fan-out directly, emitting from a thread of its own as a
+ * session's loop does; the last group drives a real session.
  */
 final class SessionEventPublisherTest {
 
@@ -52,6 +50,7 @@ final class SessionEventPublisherTest {
   private static final QueryEvent QUESTION =
       new QueryEvent.QuestionAsked(
           SID,
+          "run-1",
           0,
           AT,
           new AskUserQuestionRequest(
@@ -62,13 +61,14 @@ final class SessionEventPublisherTest {
                   new AskUserQuestionOption("a", "first"),
                   new AskUserQuestionOption("b", "second")),
               false));
-  private static final QueryEvent.LoopEnded ENDED =
-      new QueryEvent.LoopEnded(
+  private static final QueryEvent.RunEnded ENDED =
+      new QueryEvent.RunEnded(
           SID,
+          "run-1",
           0,
           AT,
           new ResultMessage.Cancelled(
-              SID, "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO));
+              SID, "run-1", "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO));
 
   @Test
   void aStalledReaderDoesNotSlowTheEmitterAndKeepsTheEventsItHadRoomFor() {
@@ -117,7 +117,7 @@ final class SessionEventPublisherTest {
     try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
       emit(
           publisher,
-          new QueryEvent.Error(SID, 0, AT, SerializedError.of("Boom", "boom")),
+          new QueryEvent.Error(SID, "run-1", 0, AT, SerializedError.of("Boom", "boom")),
           QUESTION,
           ENDED);
     }
@@ -128,7 +128,7 @@ final class SessionEventPublisherTest {
         List.of(
             "WARNING dropped Error for 1 full event stream(s) on session " + SID,
             "WARNING dropped QuestionAsked for 1 full event stream(s) on session " + SID,
-            "WARNING dropped LoopEnded for 1 full event stream(s) on session " + SID),
+            "WARNING dropped RunEnded for 1 full event stream(s) on session " + SID),
         logged.stream().map(SessionEventPublisherTest::describe).toList());
   }
 
@@ -290,15 +290,16 @@ final class SessionEventPublisherTest {
   }
 
   @Test
-  void aStreamOpenedAfterTheTerminalHoldsOnlyThatEventThenEnds() {
+  void aStreamReceivesOnlyTheEventsEmittedAfterItOpenedAcrossRunsUntilThePublisherCloses() {
     var publisher = new SessionEventPublisher(SID);
     emit(publisher, TEXT, ENDED);
-    var beforeClose = publisher.open();
+    var opened = publisher.open();
+    emit(publisher, text(1), ENDED);
     publisher.close();
     var afterClose = publisher.open();
 
-    assertEquals(List.of(ENDED), readToEnd(beforeClose));
-    assertEquals(List.of(ENDED), readToEnd(afterClose));
+    assertEquals(List.of(text(1), ENDED), readToEnd(opened));
+    assertEquals(List.of(), readToEnd(afterClose));
     assertEquals(0, publisher.openStreams());
   }
 
@@ -312,7 +313,7 @@ final class SessionEventPublisherTest {
   }
 
   @Test
-  void aReaderThatKeepsUpReadsEveryEventInOrderAndEndsAfterLoopEnded() {
+  void aReaderThatKeepsUpReadsEveryEventInOrderAndEndsOnceTheSessionCloses() {
     try (var session = session()) {
       var read = new ArrayList<QueryEvent>();
       var stream = session.events();
@@ -325,53 +326,20 @@ final class SessionEventPublisherTest {
                   }
                 }
               });
-      session.send(UserMessage.text("hi"));
-      var terminal = Await.value("the session to reach its terminal", session.result());
+      var future = session.send(UserMessage.text("hi"));
+      var terminal = Await.value("the session to reach its terminal", future);
+      session.close();
       Await.value("the reader to reach the end", reader);
 
       assertEquals(
           List.of(
+              QueryEvent.RunStarted.class,
               QueryEvent.UserMessageReceived.class,
               QueryEvent.AssistantText.class,
               QueryEvent.TurnEnded.class,
-              QueryEvent.LoopEnded.class),
+              QueryEvent.RunEnded.class),
           read.stream().map(Object::getClass).toList());
-      assertEquals(terminal, assertInstanceOf(QueryEvent.LoopEnded.class, read.getLast()).result());
-    }
-  }
-
-  @Test
-  void aStreamOpenedAfterTheResultSettledHoldsTheLoopEndedTheEarlyOneSaw() {
-    try (var session = session()) {
-      var early = new EventCollector().read(session.events());
-      session.send(UserMessage.text("hi"));
-      var terminal = Await.value("the session to reach its terminal", session.result());
-
-      var replayed = assertInstanceOf(QueryEvent.LoopEnded.class, onlyEvent(session.events()));
-
-      early.awaitDone();
-      assertSame(early.events().getLast(), replayed);
-      assertEquals(terminal, replayed.result());
-    }
-  }
-
-  @Test
-  void aStreamOpenedWhileLoopEndedIsBeingReadSeesItExactlyOnce() {
-    try (var session = session()) {
-      var late = new FutureTask<QueryEvent>(() -> onlyEvent(session.events()));
-      var early =
-          new EventCollector(
-                  event -> {
-                    if (event instanceof QueryEvent.LoopEnded) {
-                      late.run();
-                    }
-                  })
-              .read(session.events());
-      session.send(UserMessage.text("hi"));
-      Await.value("the session to reach its terminal", session.result());
-      early.awaitDone();
-
-      assertSame(early.events().getLast(), Await.value("the late stream", late));
+      assertEquals(terminal, assertInstanceOf(QueryEvent.RunEnded.class, read.getLast()).result());
     }
   }
 
@@ -390,39 +358,40 @@ final class SessionEventPublisherTest {
           throw new AssertionError("simulated unrecoverable error");
         };
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(new OneReplyModel())
                 .withSessionId(SID)
                 .withHook(erroring)
                 .build())) {
-      session.send(UserMessage.text("hi"));
+      var future = session.send(UserMessage.text("hi"));
       assertInstanceOf(
-          AssertionError.class,
-          Await.failure("the result to settle exceptionally", session.result()));
+          AssertionError.class, Await.failure("the result to settle exceptionally", future));
 
       assertEquals(List.of(), readToEnd(session.events()));
     }
   }
 
   @Test
-  void theTeardownEndsEveryOpenStreamBeforeTheResultSettles() {
+  void aRunsEndLeavesEveryStreamOpenAndTheCloseEndsIt() {
     try (var session = (AgentSessionImpl) session()) {
       var stream = session.events();
       assertEquals(1, session.lifecycle.events().openStreams());
 
-      session.send(UserMessage.text("hi"));
-      var terminal = Await.value("the session to reach its terminal", session.result());
+      var future = session.send(UserMessage.text("hi"));
+      var terminal = Await.value("the session to reach its terminal", future);
 
+      assertEquals(1, session.lifecycle.events().openStreams());
+      session.close();
       assertEquals(0, session.lifecycle.events().openStreams());
       var events = readToEnd(stream);
       assertEquals(
-          terminal, assertInstanceOf(QueryEvent.LoopEnded.class, events.getLast()).result());
+          terminal, assertInstanceOf(QueryEvent.RunEnded.class, events.getLast()).result());
     }
   }
 
   private static QueryEvent text(int index) {
-    return new QueryEvent.AssistantText(SID, 0, AT, "t" + index);
+    return new QueryEvent.AssistantText(SID, "run-1", 0, AT, "t" + index);
   }
 
   private static String describe(LogRecord logRecord) {
@@ -478,7 +447,7 @@ final class SessionEventPublisherTest {
   }
 
   private static AgentSession session() {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder().withModel(new OneReplyModel()).withSessionId(SID).build());
   }
 

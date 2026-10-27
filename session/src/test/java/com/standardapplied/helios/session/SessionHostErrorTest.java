@@ -29,7 +29,9 @@ import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -50,9 +52,10 @@ import org.junit.jupiter.api.Test;
 /**
  * A host {@link Error} caught on any thread the session runs work on — the loop, the model stream's
  * signals and its cancel, a tool's worker, a cancellation callback, {@code onSessionEnd} — ends the
- * session, and the result fails with the first one recorded, the rest suppressed on it, never with
- * another model or tool call after it; one that arrives after the result settled is logged. Every
- * fixture that hangs blocks on {@link #released}, opened after each test.
+ * session, and the run in progress fails with the first one recorded, the rest suppressed on it,
+ * never with another model or tool call after it; one that reaches a session no run carries it on,
+ * while it closes or after it closed, is logged. Every fixture that hangs blocks on {@link
+ * #released}, opened after each test.
  */
 final class SessionHostErrorTest {
 
@@ -74,10 +77,10 @@ final class SessionHostErrorTest {
             .withTextTurn("never")
             .build();
 
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(options(model).build())) {
+      var future = session.send("go");
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
     assertEquals(1, model.calls().size());
   }
@@ -88,10 +91,10 @@ final class SessionHostErrorTest {
     var calls = new AtomicInteger();
     var model = throwingModel(calls, sentinel);
 
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(options(model).build())) {
+      var future = session.send("go");
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
     assertEquals(1, calls.get());
   }
@@ -181,7 +184,7 @@ final class SessionHostErrorTest {
     var sentinel = new AssertionError("model failure");
     var calling = new CountDownLatch(1);
     var session =
-        AgentSession.create(
+        AgentSession.open(
             withProvider(
                     new RecordingProvider(order),
                     model(
@@ -198,12 +201,12 @@ final class SessionHostErrorTest {
                                 })))
                 .withLimits(slowGrace())
                 .build());
-    session.send("go");
+    var future = session.send("go");
     Await.latch("the model call to start", calling);
 
     session.close();
 
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    assertSame(sentinel, Await.failure("the result to fail", future));
   }
 
   @Test
@@ -229,21 +232,21 @@ final class SessionHostErrorTest {
             });
 
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             callingTool(new RecordingProvider(order), tool).withLimits(slowGrace()).build())) {
-      session.send("go");
+      var future = session.send("go");
       Await.latch("the tool to start", started);
       session.close();
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
   }
 
   @Test
-  void anErrorACancellationCallbackThrowsOnCloseFailsTheResultAndCloseReturns() {
+  void anErrorACancellationCallbackThrowsOnCloseIsLoggedAndCloseReturns() {
     var sentinel = new AssertionError("callback failure");
     var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).build());
+    var session = AgentSession.open(withProvider(provider).build());
     provider
         .context
         .cancellation()
@@ -252,17 +255,19 @@ final class SessionHostErrorTest {
               throw sentinel;
             });
 
-    session.close();
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      session.close();
+    }
 
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    assertSame(sentinel, closingError().getThrown());
     assertEquals(1, provider.ends.get());
   }
 
   @Test
-  void anErrorACancellationCallbackThrewBeforeALaterOneThatNeverReturnsFailsTheResult() {
+  void anErrorACancellationCallbackThrewBeforeALaterOneThatNeverReturnsIsLogged() {
     var sentinel = new AssertionError("callback failure");
     var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
+    var session = AgentSession.open(withProvider(provider).withLimits(grace()).build());
     var cancellation = provider.context.cancellation();
     cancellation.onCancel(
         () -> {
@@ -272,12 +277,13 @@ final class SessionHostErrorTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       session.close();
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
     }
+
+    assertSame(sentinel, closingError().getThrown());
   }
 
   @Test
-  void anErrorOnSessionEndThrowsFailsTheResultAsItself() {
+  void anErrorOnSessionEndThrowsIsLoggedAndLeavesTheRunsResult() {
     var sentinel = new AssertionError("end failure");
     var provider = new RecordingProvider(order);
     provider.end =
@@ -285,40 +291,27 @@ final class SessionHostErrorTest {
           throw sentinel;
         };
 
-    try (var session =
-        AgentSession.create(withProvider(provider).withLimits(slowGrace()).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      var session = AgentSession.open(withProvider(provider).withLimits(slowGrace()).build());
+      var future = session.send("go");
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
+      session.close();
     }
+
+    assertSame(sentinel, closingError().getThrown());
   }
 
   @Test
-  void anErrorOnSessionEndThrowsForASessionClosedBeforeItStartedFailsTheResult() {
-    var sentinel = new AssertionError("end failure");
-    var provider = new RecordingProvider(order);
-    provider.end =
-        () -> {
-          throw sentinel;
-        };
-    var session = AgentSession.create(withProvider(provider).withLimits(slowGrace()).build());
-
-    session.close();
-
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-  }
-
-  @Test
-  void anErrorOnSessionEndJoinsFromAFailedFutureFailsTheResultAsItself() {
+  void anErrorOnSessionEndJoinsFromAFailedFutureIsLoggedAsItself() {
     var sentinel = new AssertionError("end failure");
     var provider = new RecordingProvider(order);
     provider.end = () -> CompletableFuture.failedFuture(sentinel).join();
 
-    try (var session = AgentSession.create(withProvider(provider).build())) {
-      session.send("go");
-
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      AgentSession.open(withProvider(provider).build()).close();
     }
+
+    assertSame(sentinel, closingError().getThrown());
   }
 
   @Test
@@ -351,7 +344,7 @@ final class SessionHostErrorTest {
   }
 
   @Test
-  void aModelStreamErrorLeavesTheLoopAsAToolErrorDoesWithoutALoopEnded() {
+  void aModelStreamErrorLeavesTheRunAsAToolErrorDoesWithoutARunEnded() {
     var modelFailure = new AssertionError("model failure");
     var toolFailure = new AssertionError("tool failure");
 
@@ -388,11 +381,11 @@ final class SessionHostErrorTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 failingAtStop(withProvider(provider), primary).withLimits(slowGrace()).build())) {
-      session.send("go");
+      var future = session.send("go");
 
-      assertSame(primary, Await.failure("the result to fail", session.result()));
+      assertSame(primary, Await.failure("the result to fail", future));
     }
     assertEquals(List.of(cleanup), List.of(primary.getSuppressed()));
   }
@@ -407,11 +400,10 @@ final class SessionHostErrorTest {
           throw cleanup;
         };
 
-    try (var session =
-        AgentSession.create(failingAtStop(withProvider(provider), primary).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(failingAtStop(withProvider(provider), primary).build())) {
+      var future = session.send("go");
 
-      assertSame(primary, Await.failure("the result to fail", session.result()));
+      assertSame(primary, Await.failure("the result to fail", future));
     }
     assertEquals(List.of(cleanup), List.of(primary.getSuppressed()));
   }
@@ -442,19 +434,18 @@ final class SessionHostErrorTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(
-                options(model).withTools(List.of(tool)).withLimits(limits).build())) {
-      session.send("go");
+            AgentSession.open(options(model).withTools(List.of(tool)).withLimits(limits).build())) {
+      var future = session.send("go");
       Await.latch("the second model turn to wait on its stalled stream", secondTurn);
       lateTool.countDown();
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
     assertEquals(2, model.calls().size());
   }
 
   @Test
-  void anErrorAToolThrowsAfterTheResultSettledIsLoggedAndChangesNothing() {
+  void anErrorAToolThrowsAfterTheSessionClosedIsLoggedAndChangesNothing() {
     var sentinel = new AssertionError("tool failure after the result");
     var started = new CountDownLatch(1);
     var throwing = new CountDownLatch(1);
@@ -466,19 +457,25 @@ final class SessionHostErrorTest {
               Uninterruptible.await(throwing);
               throw sentinel;
             });
+    var limits =
+        SessionLimits.newBuilder()
+            .withToolTimeoutDefault(SHORT_GRACE)
+            .withStopGrace(SHORT_GRACE)
+            .build();
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(
-                callingTool(new RecordingProvider(order), tool).withLimits(grace()).build())) {
-      session.send("go");
+            AgentSession.open(
+                callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
+      var future = session.send("go");
       Await.latch("the tool to start", started);
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
+      Await.until("the session to leave the run", () -> !session.isRunning());
       session.close();
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
 
       throwing.countDown();
 
-      var severe = "an Error reached session " + SID + " after its result settled";
+      var severe = "an Error reached session " + SID + " after it ended";
       Await.until(
           "the late Error to be logged",
           () -> logged.stream().anyMatch(record -> severe.equals(record.getMessage())));
@@ -487,26 +484,25 @@ final class SessionHostErrorTest {
       assertEquals(
           List.of(Level.SEVERE, sentinel),
           List.of(reported.orElseThrow().getLevel(), reported.orElseThrow().getThrown()));
-      assertInstanceOf(ResultMessage.Cancelled.class, session.result().join());
+      assertInstanceOf(ResultMessage.Success.class, future.join());
     }
   }
 
   @Test
-  void aSessionWhoseLoopEndedWithAnErrorRefusesASend() {
-    try (var session = failedByAHook()) {
+  void aSessionARunsErrorFailedRefusesASendNamingTheError() {
+    var provider = new RecordingProvider(order);
+    var sentinel = new AssertionError("hook failure");
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+    try (var session =
+        AgentSession.open(failingAtStop(withProvider(provider, model), sentinel).build())) {
+      assertSame(sentinel, Await.failure("the result to fail", session.send("go")));
+      Await.until("the session to end its provider", () -> provider.ends.get() == 1);
+
       var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
 
-      assertEquals("session is terminal", refused.getMessage());
+      assertEquals("session failed: java.lang.AssertionError", refused.getMessage());
     }
-  }
-
-  @Test
-  void aSessionWhoseLoopEndedWithAnErrorRefusesAnInterrupt() {
-    try (var session = failedByAHook()) {
-      var refused = assertThrows(IllegalStateException.class, () -> session.interrupt("stop"));
-
-      assertEquals("session is terminal", refused.getMessage());
-    }
+    assertEquals(1, provider.ends.get());
   }
 
   @Test
@@ -515,19 +511,22 @@ final class SessionHostErrorTest {
     var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(() -> {})).build();
     var provider = new RecordingProvider(order);
     var limits = SessionLimits.newBuilder().withMaxWallClock(SHORT_GRACE).build();
+    PreModelTurnHook throwingOnCancel =
+        (history, ctx) -> {
+          ctx.cancellation()
+              .onCancel(
+                  () -> {
+                    throw sentinel;
+                  });
+          return HookOutcome.cont();
+        };
 
     try (var session =
-        AgentSession.create(withProvider(provider, model).withLimits(limits).build())) {
-      provider
-          .context
-          .cancellation()
-          .onCancel(
-              () -> {
-                throw sentinel;
-              });
-      session.send("go");
+        AgentSession.open(
+            withProvider(provider, model).withLimits(limits).withHook(throwingOnCancel).build())) {
+      var future = session.send("go");
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
   }
 
@@ -539,14 +538,14 @@ final class SessionHostErrorTest {
     var previous = Thread.getDefaultUncaughtExceptionHandler();
     Thread.setDefaultUncaughtExceptionHandler(
         (thread, error) -> {
-          if (thread.getName().equals("helios-agent-loop-" + sessionId)) {
+          if (thread.getName().equals("helios-agent-run-" + sessionId)) {
             uncaught.complete(error);
           }
         });
     var model = ScriptedModel.newBuilder().withTextTurn("done").build();
 
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             failingAtStop(options(model), sentinel).withSessionId(sessionId).build())) {
       session.send("go");
 
@@ -556,25 +555,26 @@ final class SessionHostErrorTest {
     }
   }
 
-  private static AgentSession failedByAHook() {
-    var sentinel = new AssertionError("hook failure");
-    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
-    var session = AgentSession.create(failingAtStop(options(model), sentinel).build());
-    session.send("go");
-    assertSame(sentinel, Await.failure("the result to fail", session.result()));
-    return session;
+  /** The {@code SEVERE} record of an {@link Error} that reached the session while it closed. */
+  private LogRecord closingError() {
+    var severe = "an Error reached session " + SID + " while it closed";
+    return logged.stream()
+        .filter(record -> record.getLevel() == Level.SEVERE && severe.equals(record.getMessage()))
+        .findFirst()
+        .orElseThrow();
   }
 
-  /** What a session's result fails with, and the {@code LoopEnded} events it emitted. */
-  private static Map.Entry<Throwable, List<QueryEvent.LoopEnded>> endedRun(
+  /** What a run's result fails with, and the {@code RunEnded} events it emitted. */
+  private static Map.Entry<Throwable, List<QueryEvent.RunEnded>> endedRun(
       SessionOptions.Builder options) {
     var events = new EventCollector();
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       events.read(session.events());
-      session.send("go");
-      var failure = Await.failure("the result to fail", session.result());
+      var future = session.send("go");
+      var failure = Await.failure("the result to fail", future);
+      session.close();
       events.awaitDone();
-      return Map.entry(failure, events.eventsOf(QueryEvent.LoopEnded.class));
+      return Map.entry(failure, events.eventsOf(QueryEvent.RunEnded.class));
     }
   }
 
@@ -606,12 +606,11 @@ final class SessionHostErrorTest {
             });
     var events = new EventCollector();
 
-    try (var session =
-        AgentSession.create(callingTool(new RecordingProvider(order), tool).build())) {
+    try (var session = AgentSession.open(callingTool(new RecordingProvider(order), tool).build())) {
       events.read(session.events());
-      session.send("go");
+      var future = session.send("go");
 
-      assertSame(sentinel, Await.failure("the result to fail", session.result()));
+      assertSame(sentinel, Await.failure("the result to fail", future));
     }
     events.awaitDone();
     assertEquals(List.of(), events.eventsOf(QueryEvent.ToolResult.class));

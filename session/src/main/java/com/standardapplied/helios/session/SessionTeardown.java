@@ -13,21 +13,21 @@ import java.util.logging.Logger;
 
 /**
  * The end of one session's runtime, in the reverse order of what the session acquired, by one
- * deadline, {@link SessionLimits#stopGrace()} from the teardown's start: the session is cancelled
- * ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which cancels and
- * interrupts every tool call still running, and the token's callbacks and the calls are waited for
- * until the deadline; the execution provider's {@code onSessionEnd}, if the session has a provider,
- * runs on a thread of its own and is waited for until the same deadline; the event streams are
- * ended, never waited for, since readers drain them on their own threads. Every step runs, but one
- * after a step that used the deadline up is not waited for. A tool call or {@code onSessionEnd}
- * still running at the deadline is logged as such, never taken for ended.
+ * deadline, {@link SessionLimits#stopGrace()} from the start of the session's close: the session is
+ * cancelled ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which cancels
+ * the run in progress and so cancels and interrupts every tool call still running, and the token's
+ * callbacks and the calls are waited for until the deadline; the execution provider's {@code
+ * onSessionEnd}, if the session has a provider, runs on a thread of its own and is waited for until
+ * the same deadline; the event streams are ended, never waited for, since readers drain them on
+ * their own threads. Every step runs, but one after a step that used the deadline up is not waited
+ * for. A tool call or {@code onSessionEnd} still running at the deadline is logged as such, never
+ * taken for ended.
  *
  * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
  * exception, is recorded by the session's {@link
  * com.standardapplied.helios.session.loop.SessionEnding#failWith}; any other exception is logged
- * and fails nothing on its own. The result settles with what sealing the session's ending returns:
- * the first recorded {@code Error}, carrying every later one, and an exception of {@code
- * onSessionEnd}, as suppressed.
+ * and fails nothing on its own. Sealing the session's ending returns the first recorded {@code
+ * Error}, carrying every later one, and an exception of {@code onSessionEnd}, as suppressed.
  */
 final class SessionTeardown {
 
@@ -54,13 +54,16 @@ final class SessionTeardown {
   }
 
   /**
-   * End the runtime by one {@code stopGrace} deadline from now, then seal the session's ending.
+   * End the runtime by {@code deadlineNanos}, a {@link System#nanoTime()} instant, then seal the
+   * session's ending.
    *
    * @param tools the session's tool dispatch, whose live calls are ended first
-   * @return the {@link Error} the result settles with, or empty to settle it with its terminal
+   * @param deadlineNanos when every wait of the teardown ends
+   * @return the first {@link Error} recorded, carrying every later one and an exception of {@code
+   *     onSessionEnd} as suppressed, or empty when none was recorded
    */
-  Optional<Error> endAndSeal(ToolDispatch tools) {
-    end(tools);
+  Optional<Error> endAndSeal(ToolDispatch tools, long deadlineNanos) {
+    end(tools, deadlineNanos);
     var settling = state.ending().seal();
     var failure = sessionEndFailure;
     if (failure != null) {
@@ -92,19 +95,7 @@ final class SessionTeardown {
                   + " did not return within "
                   + grace);
     }
-    for (var call : tools.awaitLiveCalls(deadlineNanos)) {
-      LOGGER.warning(
-          () ->
-              "tool '"
-                  + call.name()
-                  + "' (call "
-                  + call.id()
-                  + ") still runs "
-                  + grace
-                  + " after session "
-                  + state.sessionId()
-                  + " ended; its effects may land after the result settled");
-    }
+    tools.endLiveCalls(deadlineNanos, grace, "session " + state.sessionId());
     executionProvider.ifPresent(provider -> endProvider(provider, deadlineNanos));
     events.close();
   }

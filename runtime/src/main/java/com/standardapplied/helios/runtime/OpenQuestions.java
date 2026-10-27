@@ -34,12 +34,12 @@ final class OpenQuestions {
   }
 
   /** Answer {@code 200} with the session's pending questions as a JSON array. */
-  void list(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
-    JsonBody.send(resp, Status.OK_200, session.pendingQuestions());
+  void list(RegisteredSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+    JsonBody.send(resp, Status.OK_200, session.session().pendingQuestions());
   }
 
   /** Hand the body's response to the question the path names, or answer why not. */
-  void answer(AgentSession session, Caller caller, ServerRequest req, ServerResponse resp) {
+  void answer(RegisteredSession session, Caller caller, ServerRequest req, ServerResponse resp) {
     var body = JsonBody.read(req, resp, maxRequestBytes, JsonBody.MAPPER);
     if (body.isEmpty()) {
       return;
@@ -65,7 +65,7 @@ final class OpenQuestions {
       return;
     }
     try {
-      session.answer(response.questionId(), response);
+      session.session().answer(response.questionId(), response);
     } catch (IllegalArgumentException e) {
       JsonBody.send(resp, Status.NOT_FOUND_404, Map.of("error", e.getMessage()));
       return;

@@ -81,8 +81,8 @@ public final class ConsoleEventPrinter {
       case QueryEvent.ToolBlocked blocked ->
           out.println("[blocked] " + blocked.call().name() + ": " + blocked.reason());
       case QueryEvent.TurnEnded ended -> out.println("\n[turn-ended] " + ended.reason());
-      case QueryEvent.LoopEnded ended ->
-          out.println("[loop-ended] " + ended.result().getClass().getSimpleName());
+      case QueryEvent.RunEnded ended ->
+          out.println("[run-ended] " + ended.result().getClass().getSimpleName());
       default -> {}
     }
   }

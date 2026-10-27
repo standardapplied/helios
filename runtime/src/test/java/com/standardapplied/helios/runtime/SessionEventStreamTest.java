@@ -28,9 +28,9 @@ import tools.jackson.databind.ObjectMapper;
 final class SessionEventStreamTest {
 
   private static final QueryEvent EVENT =
-      new QueryEvent.AssistantText("sess-1", 0L, Instant.EPOCH, "hello");
+      new QueryEvent.AssistantText("sess-1", "run-1", 0L, Instant.EPOCH, "hello");
   private static final String EVENT_LINE =
-      "AssistantText:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+      "AssistantText:{\"sessionId\":\"sess-1\",\"runId\":\"run-1\",\"turnIndex\":0,"
           + "\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}";
 
   @Test
@@ -53,6 +53,7 @@ final class SessionEventStreamTest {
         ToolOutcomeSerializer.addTo(new ObjectMapper()),
         new QueryEvent.ToolResult(
             "sess-1",
+            "run-1",
             0L,
             Instant.EPOCH,
             new ToolCall("c1", "leak", Map.of()),
@@ -62,7 +63,7 @@ final class SessionEventStreamTest {
     assertEquals(
         List.of(
             "Ready:{}",
-            "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+            "ToolResult:{\"sessionId\":\"sess-1\",\"runId\":\"run-1\",\"turnIndex\":0,"
                 + "\"timestamp\":\"1970-01-01T00:00:00Z\","
                 + "\"call\":{\"id\":\"c1\",\"name\":\"leak\",\"arguments\":{}},"
                 + "\"result\":{\"outcome\":{\"kind\":\"Succeeded\"},"
@@ -77,13 +78,14 @@ final class SessionEventStreamTest {
     var event =
         new QueryEvent.ToolResult(
             "sess-1",
+            "run-1",
             0L,
             Instant.EPOCH,
             new ToolCall("c1", "slow", Map.of()),
             ToolResult.timedOut("slow", Duration.ofMinutes(1)),
             Map.of());
     var expected =
-        "ToolResult:{\"sessionId\":\"sess-1\",\"turnIndex\":0,"
+        "ToolResult:{\"sessionId\":\"sess-1\",\"runId\":\"run-1\",\"turnIndex\":0,"
             + "\"timestamp\":\"1970-01-01T00:00:00Z\","
             + "\"call\":{\"id\":\"c1\",\"name\":\"slow\",\"arguments\":{}},"
             + "\"result\":{\"outcome\":{\"kind\":\"TimedOut\",\"limit\":\"PT1M\"},"

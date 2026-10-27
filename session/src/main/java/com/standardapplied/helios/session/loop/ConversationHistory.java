@@ -3,17 +3,20 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Role;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
- * The conversation history of one session: the messages sent to the model on every turn, appended
- * by the session and the loop and replaced wholesale only by the loop (compaction, or a {@code
- * PreModelTurnHook} returning {@code MutateHistory}). It also records whether the session's {@code
- * ContextWarning} has fired for this history: at most once, until a replacement re-arms it.
+ * The conversation history of one session, which every run of it shares: the messages sent to the
+ * model on every turn, appended by the session and the loop and replaced wholesale only by the loop
+ * (compaction, or a {@code PreModelTurnHook} returning {@code MutateHistory}). It also records
+ * whether the session's {@code ContextWarning} has fired for this history: at most once, until a
+ * replacement re-arms it.
  *
  * <h2>Thread-safety</h2>
  *
@@ -25,6 +28,30 @@ public final class ConversationHistory {
   private final AtomicBoolean contextWarningFired = new AtomicBoolean(false);
 
   ConversationHistory() {}
+
+  /**
+   * Close the open tool round, if any: when the last assistant message with tool calls has calls no
+   * tool message answers, append one tool message per unanswered call, in call order, with {@code
+   * content}. A provider rejects a history whose tool calls go unanswered, so a run that ended
+   * mid-round leaves the next run a history it accepts.
+   */
+  void closeOpenRound(String content) {
+    var snapshot = snapshot();
+    for (var i = snapshot.size() - 1; i >= 0; i--) {
+      var message = snapshot.get(i);
+      if (message.role() == Role.ASSISTANT && message.hasToolCalls()) {
+        var answered =
+            snapshot.subList(i + 1, snapshot.size()).stream()
+                .filter(later -> later.role() == Role.TOOL)
+                .map(Message::toolCallId)
+                .collect(Collectors.toSet());
+        message.toolCalls().stream()
+            .filter(call -> !answered.contains(call.id()))
+            .forEach(call -> append(Message.tool(call.id(), call.name(), content)));
+        return;
+      }
+    }
+  }
 
   /**
    * Append a message to the conversation history.

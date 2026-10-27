@@ -101,9 +101,10 @@ final class TurnReaderTest {
     assertEquals(List.of(cite), turn.citations());
     assertEquals(
         List.of(
-            new QueryEvent.AssistantThinking("sess", 0, Instant.EPOCH, "Hm."),
-            new QueryEvent.AssistantText("sess", 0, Instant.EPOCH, "Checking."),
-            new QueryEvent.AssistantCitations("sess", 0, Instant.EPOCH, List.of(cite))),
+            new QueryEvent.AssistantThinking("sess", state.runId(), 0, Instant.EPOCH, "Hm."),
+            new QueryEvent.AssistantText("sess", state.runId(), 0, Instant.EPOCH, "Checking."),
+            new QueryEvent.AssistantCitations(
+                "sess", state.runId(), 0, Instant.EPOCH, List.of(cite))),
         events);
     assertTrue(stream.closed.get());
   }
@@ -297,7 +298,7 @@ final class TurnReaderTest {
             HookRegistry.empty(),
             s ->
                 new DefaultHookContext(
-                    s.sessionId(), s.currentTurnIndex(), s.cancellation(), model),
+                    s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), model),
             CLOCK);
     return new TurnReader(state, emitter, CLOCK);
   }

@@ -150,7 +150,7 @@ final class AgentHttpServiceRequestAdmissionTest {
   @Test
   void anOpenStreamAndAWaitingPollShareTheSlotsOfEveryRoute() {
     var server = harness.server(harness.registry(), 2);
-    var sessionId = harness.create(server, "alice");
+    var sessionId = harness.createRunning(server, "alice");
     var session = harness.sessions.get(sessionId);
     var poll = waitingPoll(server, sessionId);
     harness.openEventsAdmitted(server, sessionId, "alice");
@@ -168,7 +168,7 @@ final class AgentHttpServiceRequestAdmissionTest {
       assertEquals(429, refused.statusCode());
       assertRefused(refused, TOO_MANY_REQUESTS);
     }
-    assertEquals(0, session.queue.size());
+    assertEquals(1, session.queue.size());
     assertEquals(0, session.closes.get());
     assertEquals(1, harness.sessions.size());
     session.terminate();
@@ -259,10 +259,28 @@ final class AgentHttpServiceRequestAdmissionTest {
   }
 
   @Test
+  void aMessageToASessionClosedOutsideTheRegistryIsAnswered409() {
+    var server = harness.server(harness.registry());
+    var sessionId = harness.create(server, "alice");
+    harness.sessions.get(sessionId).close();
+
+    var refused = harness.send(server, "POST", messages(sessionId), "alice");
+
+    assertEquals(409, refused.statusCode());
+    assertEquals("{\"error\":\"session is closed\"}", refused.body());
+  }
+
+  @Test
   void aResultPollThatFailsGivesItsSlotBack() {
     var server = harness.server(harness.registry(), AdmissionHarness.limits(1));
     var sessionId = harness.create(server, "alice");
-    harness.sessions.get(sessionId).resultFailure = new IllegalStateException("result failed");
+    assertEquals(
+        202, harness.sendAdmitted(server, "POST", messages(sessionId), "alice").statusCode());
+    harness
+        .sessions
+        .get(sessionId)
+        .result
+        .completeExceptionally(new IllegalStateException("failed"));
 
     var statuses =
         List.of(
@@ -287,8 +305,9 @@ final class AgentHttpServiceRequestAdmissionTest {
 
     assertEquals(2, statuses.stream().filter(status -> status == 202).count());
     assertEquals(BURST - 2, statuses.stream().filter(status -> status == 429).count());
-    assertRefused(interrupt, "{\"error\":\"session message queue full\"}");
+    assertEquals(202, interrupt.statusCode());
     assertEquals(2, harness.sessions.get(sessionId).queue.size());
+    assertEquals(1, harness.sessions.get(sessionId).interrupts.get());
   }
 
   /** Send a result poll of alice and return once it waits on the session's result. */

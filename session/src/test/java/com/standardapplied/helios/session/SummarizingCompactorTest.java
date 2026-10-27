@@ -475,7 +475,11 @@ final class SummarizingCompactorTest {
     var state = freshState();
     var context =
         new DefaultHookContext(
-            state.sessionId(), state.currentTurnIndex(), state.cancellation(), summaryModel("x"));
+            state.sessionId(),
+            state.runId(),
+            state.currentTurnIndex(),
+            state.cancellation(),
+            summaryModel("x"));
 
     var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
 
@@ -492,7 +496,11 @@ final class SummarizingCompactorTest {
     var state = freshState();
     var context =
         new DefaultHookContext(
-            state.sessionId(), state.currentTurnIndex(), state.cancellation(), summaryModel("x"));
+            state.sessionId(),
+            state.runId(),
+            state.currentTurnIndex(),
+            state.cancellation(),
+            summaryModel("x"));
 
     var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
 

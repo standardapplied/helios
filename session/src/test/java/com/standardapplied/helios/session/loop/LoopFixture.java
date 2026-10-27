@@ -53,7 +53,11 @@ final class LoopFixture {
   /** The hook context of {@code state}'s current turn. */
   HookContext hookContext(SessionState state) {
     return new DefaultHookContext(
-        state.sessionId(), state.currentTurnIndex(), state.cancellation(), hookModel);
+        state.sessionId(),
+        state.runId(),
+        state.currentTurnIndex(),
+        state.cancellation(),
+        hookModel);
   }
 
   /** Collaborators that admit every call and emit into {@link #events}, on this fixture's clock. */

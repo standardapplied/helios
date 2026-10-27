@@ -13,12 +13,11 @@ import java.util.Optional;
  * session (returns {@link #accept()}) or refuses it with a reason (returns {@link #refuse(String)
  * Refuse}).
  *
- * <p>A {@link Refuse} outcome short-circuits session construction — the agent loop never starts;
- * the session's terminal becomes {@link
- * com.standardapplied.helios.session.ResultMessage.ErrorProviderUnavailable} carrying the reason.
- * This is the canonical signal for "provider is saturated" (warm pool exhausted), "auth failed for
- * this session" (per-session API keys), or "this provider does not accept new work right now"
- * (in-flight close).
+ * <p>A {@link Refuse} outcome fails the session's open — {@code AgentSession.open} throws {@link
+ * com.standardapplied.helios.session.SessionUnavailableException} carrying the reason. This is the
+ * canonical signal for "provider is saturated" (warm pool exhausted), "auth failed for this
+ * session" (per-session API keys), or "this provider does not accept new work right now" (in-flight
+ * close).
  *
  * <p>Mirrors the {@link com.standardapplied.helios.session.hooks.HookOutcome} pattern — sealed sum
  * type that pattern-matches cleanly inside the session loop.
@@ -44,7 +43,7 @@ public sealed interface SessionStartOutcome
    * The provider refuses this session with a reason and no underlying cause.
    *
    * @param reason a human-readable explanation surfaced through the resulting {@code
-   *     ErrorProviderUnavailable}; non-blank
+   *     SessionUnavailableException}; non-blank
    * @return a fresh {@link Refuse}
    * @throws NullPointerException if {@code reason} is null
    * @throws IllegalArgumentException if {@code reason} is blank
@@ -76,9 +75,10 @@ public sealed interface SessionStartOutcome
   record Accept() implements SessionStartOutcome {}
 
   /**
-   * The provider refuses the session. The {@code reason} flows into the session's terminal so
-   * callers can surface it without parsing a stack trace; the optional {@code cause} preserves the
-   * underlying throwable for callers that want to inspect or log the original failure.
+   * The provider refuses the session. The {@code reason} flows into the message of the {@code
+   * SessionUnavailableException} {@code AgentSession.open} throws, so callers can surface it
+   * without parsing a stack trace; the optional {@code cause} is that exception's cause, for
+   * callers that want to inspect or log the original failure.
    *
    * @param reason non-blank explanation
    * @param cause the underlying throwable that triggered the refusal, or {@code null} when the

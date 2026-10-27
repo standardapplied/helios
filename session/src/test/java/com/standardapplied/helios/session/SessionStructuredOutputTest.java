@@ -43,7 +43,7 @@ final class SessionStructuredOutputTest {
       Clock.fixed(Instant.parse("2026-05-14T19:00:00Z"), ZoneOffset.UTC);
 
   private static AgentSession buildSession(Model model) {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder().withModel(model).withSessionId(SID).withClock(CLOCK).build());
   }
 
@@ -162,7 +162,7 @@ final class SessionStructuredOutputTest {
               IllegalStateException.class,
               () -> s.runBlocking(UserMessage.text("hi"), OutputSchema.of(Person.class)));
       assertEquals(
-          "session ended with Success but produced no result to parse as Person", ex.getMessage());
+          "run ended with Success but produced no result to parse as Person", ex.getMessage());
     }
   }
 
@@ -192,7 +192,7 @@ final class SessionStructuredOutputTest {
     var schema = OutputSchema.of(Sample.class);
     var model = streamingJson("{\"field\":\"typed-with-schema\"}");
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId(SID)
@@ -216,7 +216,7 @@ final class SessionStructuredOutputTest {
   void sessionWithoutOutputSchemaUsesTheUnconstrainedDispatch() throws Exception {
     var model = streamingJson("{\"field\":\"untyped\"}");
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId(SID)

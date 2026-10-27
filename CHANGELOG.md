@@ -6,6 +6,35 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**A session is a conversation that runs many times.** `send` steers the run in progress or starts
+the next one, and returns that run's `ResultMessage` future; a session runs again after any
+ending until it is closed. `maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run, as do
+a result's usage, cost and duration; the history, hooks, permissions and their approvals, the
+secret registry, the execution provider and the memory backend stay per session.
+
+| Before | 3.0 |
+|---|---|
+| `AgentSession.create(options)` | `AgentSession.open(options)`; `AgentSessionImpl`'s constructor is no longer public |
+| `void send(message)`, then `result()` | `CompletableFuture<ResultMessage> send(message)`: the future of the run the message is part of |
+| `result()` | removed: the future `send` returns |
+| `interrupt(reason)` queued `"[interrupted by user: …]"` | `interrupt()` cancels the run in progress (`Cancelled`, reason `"interrupted"`) and keeps the session |
+| `isStarted()` | `isRunning()`: whether a run is in progress; `currentTurnIndex()` is that run's, `0` between runs |
+| `QueryEvent.LoopEnded` | `QueryEvent.RunEnded`, the last event of each run; `QueryEvent.RunStarted` is the first |
+| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`; `HookContext` gains `runId()` |
+| `ResultMessage.ErrorProviderUnavailable` | `AgentSession.open` throws `SessionUnavailableException` (message: the provider and its redacted reason; cause: the provider's exception) |
+| `ErrorDuringExecution` kind `EmptyHistory` | kind `NoUserMessage`: every message queued for a run's first turn was blocked |
+| `send` on a terminal session threw `IllegalStateException("session is terminal")` | it starts the next run; `send` on a session a host `Error` failed throws `IllegalStateException("session failed: <Error class>")` |
+| `maxTurns`, `maxBudgetMicroUsd`, `maxWallClock` per session | per run |
+| `events()` ended at the session's terminal, and a late reader got `LoopEnded` once | a stream spans every run and ends when the session is closed; nothing is replayed |
+| `onSessionEnd` ran at the end of the loop | at `close()`, or after a host `Error`; a sandbox lives across runs |
+| `SessionState(...)`'s `elapsed()` | `state.totals().elapsed()`, the run's; `new SessionState(session, runToken)` builds a session's next run |
+| `AgentLoop.run(state, limits)` | `run(state, limits, boundary)`, the session's `RunBoundary` |
+| runtime: a message after the session's terminal was `409` | it starts the next run (`202`); `409` only for a session closed after it was looked up |
+| runtime: `POST .../interrupt` with `{"reason": …}` queued a message | no body; cancels the run in progress and answers `202` |
+| runtime: `GET .../result` answered the session's terminal | the latest run's: the run in progress, else the last, else the first; the body is `{type, runId, result}` |
+| runtime: a provider refusal at create ended the session `ErrorProviderUnavailable` | `POST /sessions` answers `503 {"error":"session unavailable"}` |
+| runtime: `SessionRegistry` held "terminal" sessions | it holds idle ones: a session is active only while a run the HTTP service started is in progress; eviction, the caps and retention count idleness, from a run's end or from registration |
+
 **Root package, JPMS modules and Maven coordinates renamed to `com.standardapplied`.** The
 project moved from the `singlr-ai` organisation to Standard Applied Intelligence Labs. Maven
 `groupId` `ai.singlr` → `com.standardapplied`; artifact ids are unchanged (`helios-core`,
@@ -872,6 +901,12 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 
 ### Added
 
+- **A session is a conversation that runs many times.** `send` steers the run in progress or
+  starts the next one and returns that run's result future; a session runs again after any ending
+  until it is closed; `interrupt()` stops the current run and keeps the session; events carry
+  `runId`, and `RunStarted`/`RunEnded` bracket each run. A run that ends with tool calls
+  unanswered (a hook's `Stop`, a cancel, an error) answers each with a "not run" tool message, so
+  the next run's history is one a provider accepts.
 - **`ChunkDrain.drain(CloseableIterator<ModelChunk>)`** is the one drain of a model's chunk
   stream into its response: text and thinking joined, completed tool calls in order, and the
   `MessageStop`'s finish reason, usage, metadata and citations; what the stream throws is thrown
@@ -1017,6 +1052,10 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 
 ### Fixed
 
+- **A blocked first message still called the model.** When an `OnUserMessageHook` blocked the only
+  queued message, a session with a system prompt called the model with the system prompt alone.
+  A run now calls the model only after a user message of its own reached the history, and ends in
+  `ErrorDuringExecution` kind `NoUserMessage` otherwise.
 - **The session's usage, cost and budget missed spend that had already happened.** A
   `PreToolUseHook` or `PostToolUseHook` `Stop` ended with the totals from before the turn that
   called the tool, a schema self-correction turn was never counted, and a compaction whose summary
@@ -3481,7 +3520,7 @@ The Phase 6c spec suggested the default compactor would read `state.model()`; th
 
 ### Added — `helios-session` (new published artifact)
 
-The v2 SDK surface. `AgentSession.create(SessionOptions)` returns a session that runs an agent loop on a virtual thread; `send(UserMessage)` queues steering input; `events()` is a `Flow.Publisher<QueryEvent>`; `result()` resolves to a typed terminal `ResultMessage`. Curated builder factories ship as `SessionPresets.minimal(...)` / `.readOnly(...)` / `.workspace(...)` / `.openEnded(...)`. Hook surface is seven phase-specific interfaces (`OnUserMessageHook`, `PreModelTurnHook`, `PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `OnStreamEventHook`) with five outcomes (`Continue` / `MutateInput` / `Block` / `Inject` / `Stop`). Declarative permission system (`Permission.defaultInWorkspace()` / `.lockedDown()` / `.planMode()`), file tools rooted in `WorkspaceRoot`, `FileSystemMemoryBackend`, fault-tolerant tool dispatch, currency in integer micro-USD.
+The v2 SDK surface. `AgentSession.open(SessionOptions)` returns a session that runs an agent loop on a virtual thread; `send(UserMessage)` queues steering input; `events()` is a `Flow.Publisher<QueryEvent>`; `result()` resolves to a typed terminal `ResultMessage`. Curated builder factories ship as `SessionPresets.minimal(...)` / `.readOnly(...)` / `.workspace(...)` / `.openEnded(...)`. Hook surface is seven phase-specific interfaces (`OnUserMessageHook`, `PreModelTurnHook`, `PostModelTurnHook`, `PreToolUseHook`, `PostToolUseHook`, `PreStopHook`, `OnStreamEventHook`) with five outcomes (`Continue` / `MutateInput` / `Block` / `Inject` / `Stop`). Declarative permission system (`Permission.defaultInWorkspace()` / `.lockedDown()` / `.planMode()`), file tools rooted in `WorkspaceRoot`, `FileSystemMemoryBackend`, fault-tolerant tool dispatch, currency in integer micro-USD.
 
 ### Added — `helios-runtime` (new published artifact)
 

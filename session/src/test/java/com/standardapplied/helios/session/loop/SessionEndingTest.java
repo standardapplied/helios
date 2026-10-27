@@ -57,6 +57,42 @@ final class SessionEndingTest {
   }
 
   @Test
+  void theFirstFailureListenerHearsOnlyTheFirstErrorBeforeTheSessionIsCancelled() {
+    var first = new AssertionError("first");
+    var heard = new CopyOnWriteArrayList<List<Object>>();
+    ending.onFirstFailure(error -> heard.add(List.of(error, state.cancellation().isCancelled())));
+
+    ending.fail(first);
+    ending.fail(new AssertionError("second"));
+
+    assertEquals(List.of(List.of(first, false)), heard);
+  }
+
+  @Test
+  void aFirstFailureListenerAddedAfterAnErrorHearsItAtOnce() {
+    var first = new AssertionError("first");
+    ending.fail(first);
+    var heard = new CopyOnWriteArrayList<Error>();
+
+    ending.onFirstFailure(heard::add);
+
+    assertEquals(List.of(first), heard);
+  }
+
+  @Test
+  void aSealedEndingCallsNoFirstFailureListener() {
+    var heard = new CopyOnWriteArrayList<Error>();
+    ending.onFirstFailure(heard::add);
+    ending.seal();
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, new CopyOnWriteArrayList<>())) {
+      ending.fail(new AssertionError("late"));
+    }
+
+    assertEquals(List.of(), heard);
+  }
+
+  @Test
   void anErrorAfterTheSealIsLoggedSevereAndChangesNothing() {
     var first = new AssertionError("first");
     var late = new AssertionError("late");
@@ -70,8 +106,7 @@ final class SessionEndingTest {
 
     assertEquals(0, first.getSuppressed().length);
     assertEquals(
-        List.of(
-            Level.SEVERE, "an Error reached session sess-ending after its result settled", late),
+        List.of(Level.SEVERE, "an Error reached session sess-ending after it ended", late),
         List.of(
             logged.getFirst().getLevel(),
             logged.getFirst().getMessage(),

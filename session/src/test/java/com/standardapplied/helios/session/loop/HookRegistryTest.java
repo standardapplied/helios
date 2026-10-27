@@ -52,7 +52,7 @@ final class HookRegistryTest {
 
   private static HookContext ctx() {
     return new DefaultHookContext(
-        "sess", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
+        "sess", "run-1", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
   }
 
   private static HookRegistry registry(List<? extends Hook> hooks) {
@@ -229,7 +229,8 @@ final class HookRegistryTest {
   @Test
   void fireOnStreamEventEmptyIsNoOp() {
     HookRegistry.empty()
-        .fireOnStreamEvent(new QueryEvent.AssistantText("sess", 1, Instant.now(), "x"), ctx());
+        .fireOnStreamEvent(
+            new QueryEvent.AssistantText("sess", "run-1", 1, Instant.now(), "x"), ctx());
   }
 
   // ── null-arg guards ──────────────────────────────────────────────────────
@@ -324,7 +325,7 @@ final class HookRegistryTest {
   @Test
   void fireOnStreamEventRejectsNullCtx() {
     var registry = HookRegistry.empty();
-    var event = new QueryEvent.AssistantText("sess", 0, Instant.now(), "x");
+    var event = new QueryEvent.AssistantText("sess", "run-1", 0, Instant.now(), "x");
     assertThrows(NullPointerException.class, () -> registry.fireOnStreamEvent(event, null));
   }
 
@@ -423,7 +424,8 @@ final class HookRegistryTest {
         };
     OnStreamEventHook other = (event, ctx) -> fired.add("other");
     registry(List.of(good, bad, other))
-        .fireOnStreamEvent(new QueryEvent.AssistantText("s", 1, Instant.now(), "x"), ctx());
+        .fireOnStreamEvent(
+            new QueryEvent.AssistantText("s", "run-1", 1, Instant.now(), "x"), ctx());
     assertEquals(List.of("good", "bad", "other"), fired);
   }
 
@@ -689,7 +691,7 @@ final class HookRegistryTest {
           }
         };
     var registry = registry(List.of(hook));
-    var event = new QueryEvent.AssistantText("sess", 0, Instant.EPOCH, "x");
+    var event = new QueryEvent.AssistantText("sess", "run-1", 0, Instant.EPOCH, "x");
 
     var logged = onlyWarning(() -> registry.fireOnStreamEvent(event, ctx()));
 

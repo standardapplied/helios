@@ -140,7 +140,7 @@ class TurnUsageAccountingTest {
   }
 
   private static ResultMessage.Success runToSuccess(SessionOptions.Builder options) {
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       return assertInstanceOf(
           ResultMessage.Success.class, session.runBlocking(UserMessage.text("go")));
     }

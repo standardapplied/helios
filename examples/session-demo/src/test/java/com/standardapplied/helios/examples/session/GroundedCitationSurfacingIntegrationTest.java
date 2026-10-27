@@ -65,7 +65,7 @@ final class GroundedCitationSurfacingIntegrationTest {
             .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var sub = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       sub.read(session.events());
 
@@ -75,7 +75,7 @@ final class GroundedCitationSurfacingIntegrationTest {
                   "What were the major AI announcements at Google I/O 2025? Summarize with"
                       + " specific facts and cite where each came from."));
 
-      sub.awaitDone();
+      sub.awaitRunEnded();
 
       assertTrue(
           terminal instanceof ResultMessage.Success

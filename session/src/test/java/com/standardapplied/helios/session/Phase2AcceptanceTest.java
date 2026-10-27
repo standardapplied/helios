@@ -118,7 +118,7 @@ final class Phase2AcceptanceTest {
             .withAskUserQuestion()
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var answered = new AtomicBoolean(false);
       var sub =
           new EventCollector(
@@ -132,7 +132,7 @@ final class Phase2AcceptanceTest {
       sub.read(session.events());
 
       var result = session.runBlocking(UserMessage.text("explore the repo"));
-      sub.awaitDone();
+      sub.awaitRunEnded();
       assertTrue(answered.get(), "AskUserQuestion was never answered");
 
       // Verify terminal Success.

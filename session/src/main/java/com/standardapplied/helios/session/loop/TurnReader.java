@@ -163,17 +163,26 @@ final class TurnReader {
           emitter.emit(
               state,
               new QueryEvent.AssistantText(
-                  state.sessionId(), state.currentTurnIndex(), clock.instant(), text));
+                  state.sessionId(),
+                  state.runId(),
+                  state.currentTurnIndex(),
+                  clock.instant(),
+                  text));
       case ModelChunk.ThinkingDelta(String text) ->
           emitter.emit(
               state,
               new QueryEvent.AssistantThinking(
-                  state.sessionId(), state.currentTurnIndex(), clock.instant(), text));
+                  state.sessionId(),
+                  state.runId(),
+                  state.currentTurnIndex(),
+                  clock.instant(),
+                  text));
       case ModelChunk.MessageStop messageStop when !messageStop.citations().isEmpty() ->
           emitter.emit(
               state,
               new QueryEvent.AssistantCitations(
                   state.sessionId(),
+                  state.runId(),
                   state.currentTurnIndex(),
                   clock.instant(),
                   messageStop.citations()));

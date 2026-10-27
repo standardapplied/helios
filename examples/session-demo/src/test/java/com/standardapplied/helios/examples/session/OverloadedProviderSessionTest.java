@@ -54,13 +54,12 @@ final class OverloadedProviderSessionTest {
     var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(overload.reply(Map.of()), served));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
-        var session = AgentSession.create(retrying(model, 3, Duration.ZERO))) {
+        var session = AgentSession.open(retrying(model, 3, Duration.ZERO))) {
       events.read(session.events());
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
-      var success =
-          assertInstanceOf(ResultMessage.Success.class, StreamingSessionTest.result(session));
-      events.awaitDone();
+      var success = assertInstanceOf(ResultMessage.Success.class, StreamingSessionTest.result(run));
+      events.awaitRunEnded();
 
       assertEquals("Hello, world.", success.result());
       var retried = events.eventsOf(QueryEvent.TurnRetried.class);
@@ -79,15 +78,15 @@ final class OverloadedProviderSessionTest {
         new StubHttpServer.Reply(429, Map.of("Retry-After", "2"), overload.reply(Map.of()).body());
     try (var server = serving(SseReplies.inOrder(rateLimited));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri())) {
-      var session = AgentSession.create(retrying(model, 100, Duration.ofHours(1)));
+      var session = AgentSession.open(retrying(model, 100, Duration.ofHours(1)));
       var retries = StreamingSessionTest.queued(session, QueryEvent.TurnRetried.class);
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
       var first = Await.next("the first retry", retries);
       session.close();
 
       assertEquals(Duration.ofSeconds(2), first.backoff());
-      assertInstanceOf(ResultMessage.Cancelled.class, StreamingSessionTest.result(session));
+      assertInstanceOf(ResultMessage.Cancelled.class, StreamingSessionTest.result(run));
     }
   }
 
@@ -98,14 +97,14 @@ final class OverloadedProviderSessionTest {
     var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(refused));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
-        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
+        var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build())) {
       events.read(session.events());
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
       var failed =
           assertInstanceOf(
-              ResultMessage.ErrorDuringExecution.class, StreamingSessionTest.result(session));
-      events.awaitDone();
+              ResultMessage.ErrorDuringExecution.class, StreamingSessionTest.result(run));
+      events.awaitRunEnded();
 
       assertEquals(overload.exception().getName(), failed.error().kind());
       assertEquals(List.of(), events.eventsOf(QueryEvent.TurnRetried.class));
@@ -120,14 +119,14 @@ final class OverloadedProviderSessionTest {
     var events = new EventCollector();
     try (var server = serving(SseReplies.inOrder(overload.reply(Map.of())));
         var model = StreamingSessionTest.modelAt(overload.provider(), server.uri());
-        var session = AgentSession.create(retrying(model, 2, Duration.ZERO))) {
+        var session = AgentSession.open(retrying(model, 2, Duration.ZERO))) {
       events.read(session.events());
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
       var failed =
           assertInstanceOf(
-              ResultMessage.ErrorTransientStream.class, StreamingSessionTest.result(session));
-      events.awaitDone();
+              ResultMessage.ErrorTransientStream.class, StreamingSessionTest.result(run));
+      events.awaitRunEnded();
 
       assertEquals(2, failed.attemptsMade());
       assertEquals(overload.provider(), failed.providerName());

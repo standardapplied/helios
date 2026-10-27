@@ -43,7 +43,7 @@ class SchemaParseSelfCorrectionReproTest {
 
   private static ResultMessage run(ScriptedModel model, SessionLimits limits) {
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId(SID)
