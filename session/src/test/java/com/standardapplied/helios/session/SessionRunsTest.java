@@ -596,6 +596,29 @@ final class SessionRunsTest {
     }
   }
 
+  @Test
+  void aMessageSentWhileTheRunsOnlyQueuedMessageIsBlockedIsTheRunsUserMessage() {
+    var model = ScriptedModel.newBuilder().withTextTurn("answered").build();
+    var session = new AtomicReference<AgentSession>();
+    OnUserMessageHook blockingWhileAnotherArrives =
+        (message, ctx) -> {
+          if (message.text().equals("blocked")) {
+            session.get().send("allowed");
+            return HookOutcome.block("not allowed");
+          }
+          return HookOutcome.cont();
+        };
+
+    try (var opened =
+        AgentSession.open(options(model).withHook(blockingWhileAnotherArrives).build())) {
+      session.set(opened);
+      var run = Await.value("the run", opened.send("blocked"));
+
+      assertInstanceOf(ResultMessage.Success.class, run);
+      assertEquals(List.of(List.of(Message.user("allowed"))), model.calls());
+    }
+  }
+
   // ── 10. events ───────────────────────────────────────────────────────────
 
   @Test
