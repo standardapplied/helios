@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -23,13 +24,14 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.execution.NoopExecutionProvider;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -103,12 +105,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -131,12 +134,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -157,12 +161,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -183,12 +188,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -209,12 +215,13 @@ final class SessionOptionsTest {
                     null,
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -236,12 +243,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     capacity,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -262,12 +270,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     null,
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -293,7 +302,8 @@ final class SessionOptionsTest {
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -314,12 +324,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     null,
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -340,12 +351,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     null,
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -366,12 +378,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     null,
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -392,12 +405,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     null,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -418,12 +432,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
                     null,
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -444,12 +459,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     null,
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -470,12 +486,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     null,
                     TokenCounter.charBased(),
@@ -496,12 +513,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     null,
@@ -522,12 +540,13 @@ final class SessionOptionsTest {
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
-                    ToolRegistry.empty(),
+                    List.of(),
                     List.of(),
                     Permission.empty(PermissionMode.DEFAULT),
                     Optional.empty(),
                     CostCalculator.ZERO,
-                    NoopExecutionProvider.INSTANCE,
+                    Optional.empty(),
+                    false,
                     Optional.empty(),
                     Optional.empty(),
                     TokenCounter.charBased(),
@@ -661,9 +680,17 @@ final class SessionOptionsTest {
   record SampleOutput(String value) {}
 
   @Test
-  void builderDefaultsExecutionProviderToNoop() {
+  void builderDefaultsToNoExecutionProviderAndNoAskUserQuestion() {
     var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
-    assertSame(NoopExecutionProvider.INSTANCE, opts.executionProvider());
+    assertEquals(Optional.empty(), opts.executionProvider());
+    assertFalse(opts.askUserQuestion());
+  }
+
+  @Test
+  void withAskUserQuestionIsThreadedThroughBuildAndToBuilder() {
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).withAskUserQuestion().build();
+    assertTrue(opts.askUserQuestion());
+    assertTrue(opts.toBuilder().build().askUserQuestion());
   }
 
   @Test
@@ -675,13 +702,11 @@ final class SessionOptionsTest {
 
   @Test
   void withExecutionProviderIsThreadedThroughBuildAndToBuilder() {
+    var provider = new RecordingProvider(new ArrayList<>());
     var opts =
-        SessionOptions.newBuilder()
-            .withModel(stubModel())
-            .withExecutionProvider(NoopExecutionProvider.INSTANCE)
-            .build();
-    assertSame(NoopExecutionProvider.INSTANCE, opts.executionProvider());
-    assertSame(NoopExecutionProvider.INSTANCE, opts.toBuilder().build().executionProvider());
+        SessionOptions.newBuilder().withModel(stubModel()).withExecutionProvider(provider).build();
+    assertSame(provider, opts.executionProvider().orElseThrow());
+    assertSame(provider, opts.toBuilder().build().executionProvider().orElseThrow());
   }
 
   @Test
@@ -891,10 +916,61 @@ final class SessionOptionsTest {
   }
 
   @Test
-  void builderHonorsCustomTools() {
-    var custom = ToolRegistry.empty();
-    var opts = SessionOptions.newBuilder().withModel(stubModel()).withTools(custom).build();
-    assertSame(custom, opts.tools());
+  void withToolAppendsAfterThePresetTools() {
+    var first = binding("First");
+    var second = binding("Second");
+    var opts =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withTools(List.of(first))
+            .withTool(second)
+            .build();
+    assertEquals(List.of(first, second), opts.tools());
+  }
+
+  @Test
+  void withToolsReplacesEveryToolAddedBefore() {
+    var kept = binding("Kept");
+    var opts =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withTool(binding("Dropped"))
+            .withTools(List.of(kept))
+            .build();
+    assertEquals(List.of(kept), opts.tools());
+  }
+
+  @Test
+  void withToolRejectsNull() {
+    var ex =
+        assertThrows(NullPointerException.class, () -> SessionOptions.newBuilder().withTool(null));
+    assertEquals("tool must not be null", ex.getMessage());
+  }
+
+  @Test
+  void withToolsRejectsAListContainingNull() {
+    var list = new ArrayList<ToolBinding>();
+    list.add(null);
+    assertThrows(NullPointerException.class, () -> SessionOptions.newBuilder().withTools(list));
+  }
+
+  @Test
+  void theOptionsCopyTheirTools() {
+    var tools = new ArrayList<>(List.of(binding("A")));
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).withTools(tools).build();
+    tools.add(binding("B"));
+    assertEquals(List.of("A"), opts.tools().stream().map(ToolBinding::name).toList());
+  }
+
+  private static ToolBinding binding(String name) {
+    return ToolBinding.newBuilder(
+            Tool.newBuilder()
+                .withName(name)
+                .withDescription("test tool")
+                .withExecutor((args, ctx) -> ToolResult.success("ok"))
+                .build())
+        .withCategory(ToolCategory.READ)
+        .build();
   }
 
   // ── toBuilder round-trip ──────────────────────────────────────────────────
@@ -906,6 +982,9 @@ final class SessionOptionsTest {
             .withModel(stubModel())
             .withSessionId("orig")
             .withMaxQueuedUserMessages(2)
+            .withTool(binding("Tool"))
+            .withExecutionProvider(new RecordingProvider(new ArrayList<>()))
+            .withAskUserQuestion()
             .build();
     var copy = original.toBuilder().build();
     assertEquals(original, copy);

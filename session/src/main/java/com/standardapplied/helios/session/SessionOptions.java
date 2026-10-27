@@ -12,12 +12,11 @@ import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
-import com.standardapplied.helios.session.execution.NoopExecutionProvider;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.tools.ToolRegistry;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.ArrayList;
@@ -41,8 +40,10 @@ import java.util.Optional;
  *     the loop consumes them; a send beyond it throws {@link SteeringQueueFullException}; positive,
  *     defaults to 256
  * @param clock time source supplying event timestamps and elapsed; non-null
- * @param tools the tool registry the loop advertises to the model and dispatches against; non-null,
- *     defaults to {@link ToolRegistry#empty()}
+ * @param tools the tools the loop advertises to the model and dispatches against, before the
+ *     built-in tools the options switch on (the memory tools, {@code Execute}, {@code
+ *     AskUserQuestion}); copied, non-null with no null element, defaults to none. Two tools with
+ *     one name, a built-in included, fail {@link AgentSession#create}
  * @param hooks the hooks fired at lifecycle phases (pre/post-model-turn, pre/post-tool-use,
  *     pre-stop, on-user-message, on-stream-event); non-null, defaults to {@link List#of()}
  * @param permission the permission policy; an internal {@code DefaultPermissionEvaluator}
@@ -50,17 +51,18 @@ import java.util.Optional;
  *     call that runs, asking the user through {@link AgentSession#answer} when the policy asks.
  *     Non-null, defaults to {@link Permission#empty} in {@link PermissionMode#DEFAULT}, which asks
  *     before every write, execution and network call
- * @param memoryBackend optional persistent memory backend; when present, the session auto-registers
- *     the {@code MemoryRead} tool so the model can view {@code /memories/...} files
+ * @param memoryBackend optional persistent memory backend; when present, the session registers
+ *     {@code MemoryRead} and {@code MemoryWrite} over it
  * @param costCalculator per-model {@code Usage → CostEstimate} lookup. Each completed model turn's
  *     usage flows through this calculator; the result accumulates on the session and gates {@link
  *     SessionLimits#maxBudgetMicroUsd()}. Defaults to {@link CostCalculator#ZERO} — cost tracking
  *     is opt-in
- * @param executionProvider routes {@code Execute} tool dispatches to an isolation boundary
- *     (subprocess, JShell sandbox, Incus instance, …). Defaults to {@link
- *     NoopExecutionProvider#INSTANCE} which refuses every runtime — wire {@code
- *     LocalProcessExecutionProvider.defaultPosix()} (or your own implementation) when the session
- *     legitimately needs to run code. Non-null
+ * @param executionProvider optional provider that runs {@code Execute} scripts behind an isolation
+ *     boundary (subprocess, JShell sandbox, Incus instance, …); when present, the session registers
+ *     {@code Execute} over it and runs its {@code onSessionStart} and {@code onSessionEnd} with the
+ *     session. Absent by default: no {@code Execute} tool and no start or end step
+ * @param askUserQuestion whether the session registers the {@code AskUserQuestion} tool; {@code
+ *     false} by default. Permission approvals ask the user either way
  * @param outputSchema optional schema constraining the model's text output. When present, the
  *     schema rides every model turn via the provider's native structured-output channel — Gemini
  *     {@code response_format.schema}, OpenAI {@code text.format=json_schema}, Anthropic {@code
@@ -94,12 +96,13 @@ public record SessionOptions(
     SessionLimits limits,
     int maxQueuedUserMessages,
     InstantSource clock,
-    ToolRegistry tools,
+    List<ToolBinding> tools,
     List<Hook> hooks,
     Permission permission,
     Optional<MemoryBackend> memoryBackend,
     CostCalculator costCalculator,
-    ExecutionProvider executionProvider,
+    Optional<ExecutionProvider> executionProvider,
+    boolean askUserQuestion,
     Optional<OutputSchema<?>> outputSchema,
     Optional<String> systemPrompt,
     TokenCounter tokenCounter,
@@ -109,7 +112,8 @@ public record SessionOptions(
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if any argument is null
+   * @throws NullPointerException if any argument is null or {@code tools} or {@code hooks} holds a
+   *     null element
    * @throws IllegalArgumentException if {@code sessionId} is blank or {@code maxQueuedUserMessages}
    *     is not positive
    */
@@ -122,7 +126,7 @@ public record SessionOptions(
     Objects.requireNonNull(limits, "limits must not be null");
     requirePositiveQueue(maxQueuedUserMessages);
     Objects.requireNonNull(clock, "clock must not be null");
-    Objects.requireNonNull(tools, "tools must not be null");
+    tools = List.copyOf(Objects.requireNonNull(tools, "tools must not be null"));
     Objects.requireNonNull(hooks, "hooks must not be null");
     hooks = List.copyOf(hooks);
     Objects.requireNonNull(permission, "permission must not be null");
@@ -160,7 +164,12 @@ public record SessionOptions(
    * @return a builder seeded with this record's values
    */
   public Builder toBuilder() {
-    return new Builder()
+    var builder = new Builder();
+    executionProvider.ifPresent(builder::withExecutionProvider);
+    if (askUserQuestion) {
+      builder.withAskUserQuestion();
+    }
+    return builder
         .withModel(model)
         .withSessionId(sessionId)
         .withLimits(limits)
@@ -171,7 +180,6 @@ public record SessionOptions(
         .withPermission(permission)
         .withMemoryBackend(memoryBackend.orElse(null))
         .withCostCalculator(costCalculator)
-        .withExecutionProvider(executionProvider)
         .withOutputSchema(outputSchema.orElse(null))
         .withSystemPrompt(systemPrompt.orElse(null))
         .withTokenCounter(tokenCounter)
@@ -191,12 +199,13 @@ public record SessionOptions(
     private SessionLimits limits = SessionLimits.defaults();
     private int maxQueuedUserMessages = 256;
     private InstantSource clock = Clock.systemUTC();
-    private ToolRegistry tools = ToolRegistry.empty();
+    private final ArrayList<ToolBinding> tools = new ArrayList<>();
     private final ArrayList<Hook> hooks = new ArrayList<>();
     private Permission permission = Permission.empty(PermissionMode.DEFAULT);
     private MemoryBackend memoryBackend;
     private CostCalculator costCalculator = CostCalculator.ZERO;
-    private ExecutionProvider executionProvider = NoopExecutionProvider.INSTANCE;
+    private ExecutionProvider executionProvider;
+    private boolean askUserQuestion;
     private OutputSchema<?> outputSchema;
     private String systemPrompt;
     private TokenCounter tokenCounter = TokenCounter.charBased();
@@ -273,15 +282,30 @@ public record SessionOptions(
     }
 
     /**
-     * Set the tool registry the loop advertises to the model and dispatches against. Defaults to an
-     * empty registry, which leaves the session text-only.
+     * Set the full tool list. Replaces any previously-added tools. Defaults to none, which leaves
+     * the session with only the built-in tools its options switch on.
      *
-     * @param tools non-null registry
+     * @param tools non-null list of bindings
      * @return this builder
-     * @throws NullPointerException if {@code tools} is null
+     * @throws NullPointerException if {@code tools} is null or contains null elements
      */
-    public Builder withTools(ToolRegistry tools) {
-      this.tools = Objects.requireNonNull(tools, "tools must not be null");
+    public Builder withTools(List<ToolBinding> tools) {
+      var copy = List.copyOf(Objects.requireNonNull(tools, "tools must not be null"));
+      this.tools.clear();
+      this.tools.addAll(copy);
+      return this;
+    }
+
+    /**
+     * Append a single tool. A preset's tools stay; two tools with one name, a built-in included,
+     * fail {@link AgentSession#create}.
+     *
+     * @param tool non-null binding
+     * @return this builder
+     * @throws NullPointerException if {@code tool} is null
+     */
+    public Builder withTool(ToolBinding tool) {
+      tools.add(Objects.requireNonNull(tool, "tool must not be null"));
       return this;
     }
 
@@ -333,7 +357,8 @@ public record SessionOptions(
 
     /**
      * Set (or clear) the memory backend. Pass {@code null} to clear. When non-null, the session
-     * auto-registers a {@code MemoryRead} tool wired to this backend.
+     * registers {@code MemoryRead} and {@code MemoryWrite} over this backend; for read-only memory,
+     * deny {@code MemoryWrite} with a permission rule.
      *
      * @param memoryBackend nullable backend
      * @return this builder
@@ -360,11 +385,11 @@ public record SessionOptions(
     }
 
     /**
-     * Set the execution provider — the surface the {@code Execute} tool dispatches through.
-     * Defaults to {@link NoopExecutionProvider#INSTANCE}, which refuses every runtime so a session
-     * that forgot to wire execution cannot silently shell out. Pass {@code
-     * LocalProcessExecutionProvider.defaultPosix()} (or your own implementation) to enable code
-     * execution.
+     * Set the execution provider, such as {@code LocalProcessExecutionProvider.defaultPosix()}. The
+     * session registers {@code Execute} over it and runs its {@code onSessionStart} and {@code
+     * onSessionEnd} with the session; registering {@code ExecuteTool.binding} by hand as well fails
+     * {@link AgentSession#create} with a duplicate tool name. Unset by default: the session has no
+     * {@code Execute} tool.
      *
      * @param executionProvider non-null provider
      * @return this builder
@@ -373,6 +398,18 @@ public record SessionOptions(
     public Builder withExecutionProvider(ExecutionProvider executionProvider) {
       this.executionProvider =
           Objects.requireNonNull(executionProvider, "executionProvider must not be null");
+      return this;
+    }
+
+    /**
+     * Register the {@code AskUserQuestion} tool, through which the model asks the user a structured
+     * question and waits for {@link AgentSession#answer}. Off by default: a chat agent asks by
+     * ending its turn with text. Permission approvals ask the user with or without it.
+     *
+     * @return this builder
+     */
+    public Builder withAskUserQuestion() {
+      this.askUserQuestion = true;
       return this;
     }
 
@@ -489,7 +526,8 @@ public record SessionOptions(
           permission,
           Optional.ofNullable(memoryBackend),
           costCalculator,
-          executionProvider,
+          Optional.ofNullable(executionProvider),
+          askUserQuestion,
           Optional.ofNullable(outputSchema),
           Optional.ofNullable(systemPrompt),
           tokenCounter,

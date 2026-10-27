@@ -4,6 +4,7 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Role;
@@ -11,10 +12,10 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
@@ -105,12 +106,37 @@ class DefaultCompactionSessionTest {
     assertEquals(List.of(), events.eventsOf(QueryEvent.ContextEdited.class));
   }
 
+  @Test
+  void aCustomCompactorReceivesTheSessionsIdAndCurrentTurnIndex() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withTextTurn("done")
+            .build();
+    var contexts = new CopyOnWriteArrayList<HookContext>();
+    ContextCompactor observing =
+        (history, context) -> {
+          contexts.add(context);
+          return CompactionResult.noOp(history);
+        };
+
+    runToSuccess(
+        compactingAfterTheFirstToolResult(model)
+            .withSessionId("compacting")
+            .withContextCompactor(observing));
+
+    assertEquals(
+        List.of("compacting:1", "compacting:2", "compacting:2"),
+        contexts.stream().map(c -> c.sessionId() + ":" + c.turnIndex()).toList());
+    assertSame(model, contexts.getFirst().model());
+  }
+
   /** A session whose history crosses the compaction watermark once it holds a tool result. */
   private static SessionOptions.Builder compactingAfterTheFirstToolResult(ScriptedModel model) {
     return SessionOptions.newBuilder()
         .withModel(model)
         .withSystemPrompt("sys")
-        .withTools(new ToolRegistry(List.of(echo())))
+        .withTools(List.of(echo()))
         .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100L).build())
         .withTokenCounter(
             messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L);

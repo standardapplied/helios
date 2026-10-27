@@ -18,7 +18,6 @@ import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.test.SampleDocuments;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -71,7 +70,7 @@ abstract class ReadToolMultimodalContract {
         var session =
             AgentSession.create(
                 SessionPresets.readOnly(model, workspace)
-                    .withTools(new ToolRegistry(List.of(read)))
+                    .withTools(List.of(read))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));

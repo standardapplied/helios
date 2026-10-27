@@ -29,7 +29,6 @@ import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
@@ -266,7 +265,7 @@ class SessionRunCharacterizationTest {
                   .withSessionId("characterization")
                   .withClock(clock)
                   .withLimits(limits().build())
-                  .withTools(new ToolRegistry(List.of(echo())))
+                  .withTools(List.of(echo()))
                   .withOutputSchema(OutputSchema.of(Answer.class))
                   .withTokenCounter(counter)
                   .withContextCompactor(compactor)

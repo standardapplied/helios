@@ -16,11 +16,11 @@ import java.util.logging.Logger;
  * deadline, {@link SessionLimits#stopGrace()} from the teardown's start: the session is cancelled
  * ({@link com.standardapplied.helios.session.loop.SessionEnding#cancel}), which cancels and
  * interrupts every tool call still running, and the token's callbacks and the calls are waited for
- * until the deadline; the execution provider's {@code onSessionEnd} runs on a thread of its own and
- * is waited for until the same deadline; the event streams are ended, never waited for, since
- * readers drain them on their own threads. Every step runs, but one after a step that used the
- * deadline up is not waited for. A tool call or {@code onSessionEnd} still running at the deadline
- * is logged as such, never taken for ended.
+ * until the deadline; the execution provider's {@code onSessionEnd}, if the session has a provider,
+ * runs on a thread of its own and is waited for until the same deadline; the event streams are
+ * ended, never waited for, since readers drain them on their own threads. Every step runs, but one
+ * after a step that used the deadline up is not waited for. A tool call or {@code onSessionEnd}
+ * still running at the deadline is logged as such, never taken for ended.
  *
  * <p>An {@link Error} {@code onSessionEnd} throws, or carries as the cause of a joined future's
  * exception, is recorded by the session's {@link
@@ -35,7 +35,7 @@ final class SessionTeardown {
 
   private final SessionState state;
   private final SessionContext sessionContext;
-  private final ExecutionProvider executionProvider;
+  private final Optional<ExecutionProvider> executionProvider;
   private final SessionEventPublisher events;
   private final Duration grace;
   private volatile Exception sessionEndFailure;
@@ -43,7 +43,7 @@ final class SessionTeardown {
   SessionTeardown(
       SessionState state,
       SessionContext sessionContext,
-      ExecutionProvider executionProvider,
+      Optional<ExecutionProvider> executionProvider,
       SessionEventPublisher events,
       Duration grace) {
     this.state = state;
@@ -105,31 +105,35 @@ final class SessionTeardown {
                   + state.sessionId()
                   + " ended; its effects may land after the result settled");
     }
+    executionProvider.ifPresent(provider -> endProvider(provider, deadlineNanos));
+    events.close();
+  }
+
+  private void endProvider(ExecutionProvider provider, long deadlineNanos) {
     var sessionEnd =
         BoundedTask.start(
             "helios-teardown-onSessionEnd-" + state.sessionId(),
-            this::onSessionEnd,
-            state.ending());
+            () -> onSessionEnd(provider),
+            state.ending()::failWith);
     if (!sessionEnd.settlesBy(deadlineNanos)) {
       LOGGER.warning(
           () ->
               "onSessionEnd of "
-                  + executionProvider.getClass().getSimpleName()
+                  + provider.getClass().getSimpleName()
                   + " did not return within "
                   + grace
                   + "; the session's provider resources are not known to be released, session "
                   + state.sessionId());
     }
-    events.close();
   }
 
   /**
    * Call {@code onSessionEnd}, logging and keeping an exception the session's ending does not
    * record; an {@link Error} is the {@link BoundedTask}'s to record.
    */
-  private Void onSessionEnd() {
+  private Void onSessionEnd(ExecutionProvider provider) {
     try {
-      executionProvider.onSessionEnd(sessionContext);
+      provider.onSessionEnd(sessionContext);
     } catch (Exception e) {
       if (!state.ending().failWith(e)) {
         LOGGER.log(

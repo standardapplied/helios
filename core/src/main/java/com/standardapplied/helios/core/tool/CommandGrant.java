@@ -64,7 +64,6 @@ import java.util.function.Function;
  * <pre>{@code
  * import com.standardapplied.helios.session.tools.ToolBinding;
  * import com.standardapplied.helios.session.tools.ToolCategory;
- * import com.standardapplied.helios.session.tools.ToolRegistry;
  *
  * var registry = new SecretRegistry();
  * var gh = CommandGrant.builder("gh")
@@ -80,8 +79,7 @@ import java.util.function.Function;
  * var options = SessionOptions.newBuilder()
  *     .withModel(model)
  *     .withSecretRegistry(registry)
- *     .withTools(new ToolRegistry(List.of(
- *         ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())))
+ *     .withTool(ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())
  *     .build();
  * }</pre>
  */

@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.session.hooks;
+package com.standardapplied.helios.session.loop;
 
 import static com.standardapplied.helios.session.test.HookInputs.named;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +19,17 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
+import com.standardapplied.helios.session.hooks.OnUserMessageHook;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
+import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -151,31 +162,26 @@ final class HookRegistryTest {
   }
 
   @Test
-  void emptyFactoryProducesEmptyRegistry() {
-    var registry = HookRegistry.empty();
-    assertEquals(0, registry.countOf(PreToolUseHook.class));
-    assertEquals(0, registry.countOf(OnStreamEventHook.class));
-  }
-
-  @Test
-  void countOfPartitionsByPhase() {
-    PreToolUseHook a = (call, ctx) -> HookOutcome.cont();
-    PreToolUseHook b = (call, ctx) -> HookOutcome.cont();
-    PostToolUseHook c = (call, result, ctx) -> HookOutcome.cont();
+  void eachHookFiresOnlyInItsOwnPhaseInPriorityOrder() {
+    var fired = new ArrayList<String>();
+    PreToolUseHook a = (call, ctx) -> record(fired, "a", HookOutcome.cont());
+    PreToolUseHook b = (call, ctx) -> record(fired, "b", HookOutcome.cont());
+    PostToolUseHook c = (call, result, ctx) -> record(fired, "c", HookOutcome.cont());
     var registry = registry(List.of(a, b, c));
-    assertEquals(2, registry.countOf(PreToolUseHook.class));
-    assertEquals(1, registry.countOf(PostToolUseHook.class));
-    assertEquals(0, registry.countOf(PreModelTurnHook.class));
-    assertEquals(0, registry.countOf(PostModelTurnHook.class));
-    assertEquals(0, registry.countOf(PreStopHook.class));
-    assertEquals(0, registry.countOf(OnUserMessageHook.class));
-    assertEquals(0, registry.countOf(OnStreamEventHook.class));
+
+    registry.firePreToolUse(CALL, ctx());
+    assertEquals(List.of("a", "b"), fired);
+    registry.firePostToolUse(CALL, OK, ctx());
+    assertEquals(List.of("a", "b", "c"), fired);
+    var resp = Response.newBuilder().withContent("x").withFinishReason(FinishReason.STOP).build();
+    registry.firePreStop(resp, ctx());
+    registry.firePreModelTurn(List.of(Message.user("hi")), ctx());
+    assertEquals(List.of("a", "b", "c"), fired);
   }
 
-  @Test
-  void countOfUnknownPhaseReturnsZero() {
-    var registry = HookRegistry.empty();
-    assertEquals(0, registry.countOf(Hook.class));
+  private static <O extends HookOutcome> O record(List<String> fired, String name, O outcome) {
+    fired.add(name);
+    return outcome;
   }
 
   // ── empty registry returns Continue for every phase ──────────────────────

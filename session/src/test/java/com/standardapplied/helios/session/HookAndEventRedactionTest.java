@@ -15,11 +15,11 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.loop.AgentLoop;
+import com.standardapplied.helios.session.loop.HookRegistry;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
@@ -27,7 +27,6 @@ import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -297,8 +296,7 @@ final class HookAndEventRedactionTest {
         SessionOptions.newBuilder()
             .withSecretRegistry(secrets)
             .withTools(
-                new ToolRegistry(
-                    List.of(ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build())));
+                List.of(ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build()));
     var call = new ToolCall("c1", "Register", Map.of(keyEndingIn("12345678"), 1));
 
     var run = WriteToolSessions.run(options, call);

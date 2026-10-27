@@ -15,15 +15,14 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.loop.HookRegistry;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
@@ -64,12 +63,11 @@ final class ToolAuthorizationSessionTest {
     var options =
         SessionOptions.newBuilder()
             .withTools(
-                new ToolRegistry(
-                    List.of(
-                        sessions.writeTool(
-                            args -> {
-                              throw new IllegalStateException("no path");
-                            }))))
+                List.of(
+                    sessions.writeTool(
+                        args -> {
+                          throw new IllegalStateException("no path");
+                        })))
             .withPermission(Permission.empty(PermissionMode.LOCKED_DOWN));
 
     var run = run(options, write("/tmp/a"));
@@ -120,7 +118,7 @@ final class ToolAuthorizationSessionTest {
             : new ToolPermissionKey("Write", SECRET);
     var options =
         SessionOptions.newBuilder()
-            .withTools(new ToolRegistry(List.of(sessions.writeTool(args -> key))))
+            .withTools(List.of(sessions.writeTool(args -> key)))
             .withPermission(Permission.empty(PermissionMode.DEFAULT))
             .withSecretRegistry(secrets);
 
@@ -158,12 +156,11 @@ final class ToolAuthorizationSessionTest {
     var options =
         SessionOptions.newBuilder()
             .withTools(
-                new ToolRegistry(
-                    List.of(
-                        sessions.writeTool(
-                            args -> {
-                              throw new IllegalStateException(message);
-                            }))))
+                List.of(
+                    sessions.writeTool(
+                        args -> {
+                          throw new IllegalStateException(message);
+                        })))
             .withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withSecretRegistry(secrets);
     return run(options, write("/tmp/a"));

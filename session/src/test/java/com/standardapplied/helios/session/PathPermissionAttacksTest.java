@@ -29,7 +29,6 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -253,7 +252,7 @@ final class PathPermissionAttacksTest {
   void aReadRuleThatOnlyWithholdsFromGrepIsCheckedAgainstGrepsSpace() {
     var options =
         SessionOptions.newBuilder()
-            .withTools(new ToolRegistry(List.of(GrepTool.binding(sessions.workspace))))
+            .withTools(List.of(GrepTool.binding(sessions.workspace)))
             .withPermission(
                 policy(
                     PermissionMode.DEFAULT,
@@ -334,7 +333,7 @@ final class PathPermissionAttacksTest {
             rule(PermissionEffect.DENY, MemoryReadTool.NAME, "/memories/locked/*"));
     var options =
         SessionOptions.newBuilder()
-            .withTools(new ToolRegistry(List.of()))
+            .withTools(List.of())
             .withMemoryBackend(listing(List.of("/memories/notes.md", listed)))
             .withPermission(permission);
 
@@ -350,7 +349,7 @@ final class PathPermissionAttacksTest {
         policy(PermissionMode.DEFAULT, rule(PermissionEffect.DENY, MemoryReadTool.NAME, "**/x.md"));
     var options =
         SessionOptions.newBuilder()
-            .withTools(new ToolRegistry(List.of()))
+            .withTools(List.of())
             .withMemoryBackend(listing(List.of("/memories/notes.md", listed)))
             .withPermission(permission);
 

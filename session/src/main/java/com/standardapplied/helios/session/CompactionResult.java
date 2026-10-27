@@ -12,7 +12,7 @@ import java.util.Objects;
 
 /**
  * Result of one {@link ContextCompactor#compact(List,
- * com.standardapplied.helios.session.loop.SessionState)} call.
+ * com.standardapplied.helios.session.hooks.HookContext)} call.
  *
  * <p>Carries the new history, the usage consumed by the compaction step itself, and the identifier
  * of the model the compactor invoked to spend that usage. Compactors that make a model call (e.g.

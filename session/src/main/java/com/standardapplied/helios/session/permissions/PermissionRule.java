@@ -16,13 +16,12 @@ import java.util.Optional;
  *
  * <p>A path tool's canonical args are its canonical path: {@code .} or {@code ./a/b} in a workspace
  * (an absolute real path for a trusted workspace's target outside its root), {@code /memories/} or
- * {@code /memories/a/b} in memory. Glob syntax, as {@link RuleMatcher} reads it: a trailing {@code
- * /**} matches the path before it and everything below it; {@code /**}{@code /} and a leading
- * {@code **}{@code /} match zero or more whole segments; any other {@code **} matches any
- * characters; {@code *} matches within a segment and {@code ?} one character of it; every other
- * character, brackets included, is literal. A glob for a registered path tool that no canonical
- * path can match, such as {@code secrets/**} or {@code ./docs/}, fails the session's creation. An
- * absent {@code argPattern} means "any args."
+ * {@code /memories/a/b} in memory. Glob syntax: a trailing {@code /**} matches the path before it
+ * and everything below it; {@code /**}{@code /} and a leading {@code **}{@code /} match zero or
+ * more whole segments; any other {@code **} matches any characters; {@code *} matches within a
+ * segment and {@code ?} one character of it; every other character, brackets included, is literal.
+ * A glob for a registered path tool that no canonical path can match, such as {@code secrets/**} or
+ * {@code ./docs/}, fails the session's creation. An absent {@code argPattern} means "any args."
  *
  * @param toolName the tool's stable name; non-blank
  * @param argPattern optional glob over the tool's canonical args; non-null Optional

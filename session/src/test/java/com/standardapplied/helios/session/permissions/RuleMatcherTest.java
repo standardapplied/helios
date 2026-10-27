@@ -6,7 +6,6 @@ package com.standardapplied.helios.session.permissions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
@@ -17,47 +16,33 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 final class RuleMatcherTest {
 
-  private final RuleMatcher matcher = new RuleMatcher();
-
   // ── matches() basics ─────────────────────────────────────────────────────
 
   @Test
   void differentToolNameDoesNotMatch() {
     var rule = PermissionRule.any("Read");
     var key = ToolPermissionKey.of("Write");
-    assertFalse(matcher.matches(key, rule));
+    assertFalse(RuleMatcher.matches(key, rule));
   }
 
   @Test
   void sameToolNameWithAbsentPatternMatches() {
     var rule = PermissionRule.any("Read");
     var key = new ToolPermissionKey("Read", "/anything");
-    assertTrue(matcher.matches(key, rule));
+    assertTrue(RuleMatcher.matches(key, rule));
   }
 
   @Test
   void emptyCanonicalArgsMatchAnyArgsRule() {
     var rule = PermissionRule.any("Execute");
     var key = new ToolPermissionKey("Execute", "");
-    assertTrue(matcher.matches(key, rule));
-  }
-
-  @Test
-  void matchesRejectsNullKey() {
-    var rule = PermissionRule.any("Read");
-    assertThrows(NullPointerException.class, () -> matcher.matches(null, rule));
-  }
-
-  @Test
-  void matchesRejectsNullRule() {
-    var key = ToolPermissionKey.of("Read");
-    assertThrows(NullPointerException.class, () -> matcher.matches(key, null));
+    assertTrue(RuleMatcher.matches(key, rule));
   }
 
   // ── the glob dialect over canonical paths ────────────────────────────────
 
   private boolean globMatches(String glob, String canonical) {
-    return matcher.matches(
+    return RuleMatcher.matches(
         new ToolPermissionKey("Read", canonical), PermissionRule.of("Read", glob));
   }
 
@@ -154,14 +139,14 @@ final class RuleMatcherTest {
     var first = PermissionRule.of("Read", "./**");
     var second = PermissionRule.any("Read");
     var key = new ToolPermissionKey("Read", "./src/a.txt");
-    var match = matcher.firstMatch(key, List.of(first, second));
+    var match = RuleMatcher.firstMatch(key, List.of(first, second));
     assertEquals(first, match.orElseThrow());
   }
 
   @Test
   void firstMatchReturnsEmptyForNoMatch() {
     var rules = List.of(PermissionRule.any("Read"));
-    assertTrue(matcher.firstMatch(ToolPermissionKey.of("Write"), rules).isEmpty());
+    assertTrue(RuleMatcher.firstMatch(ToolPermissionKey.of("Write"), rules).isEmpty());
   }
 
   @Test
@@ -169,18 +154,8 @@ final class RuleMatcherTest {
     var skip = PermissionRule.of("Read", "/private/**");
     var hit = PermissionRule.of("Read", "/workspace/**");
     var match =
-        matcher.firstMatch(new ToolPermissionKey("Read", "/workspace/foo.txt"), List.of(skip, hit));
+        RuleMatcher.firstMatch(
+            new ToolPermissionKey("Read", "/workspace/foo.txt"), List.of(skip, hit));
     assertEquals(hit, match.orElseThrow());
-  }
-
-  @Test
-  void firstMatchRejectsNullKey() {
-    assertThrows(NullPointerException.class, () -> matcher.firstMatch(null, List.of()));
-  }
-
-  @Test
-  void firstMatchRejectsNullRules() {
-    assertThrows(
-        NullPointerException.class, () -> matcher.firstMatch(ToolPermissionKey.of("Read"), null));
   }
 }

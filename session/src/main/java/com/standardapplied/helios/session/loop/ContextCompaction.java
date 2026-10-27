@@ -160,7 +160,7 @@ final class ContextCompaction {
     var historyBefore = state.history().snapshot();
     CompactionResult result;
     try {
-      result = contextCompactor.compact(historyBefore, state);
+      result = contextCompactor.compact(historyBefore, collaborators.hookContext(state));
     } catch (RuntimeException e) {
       if (!state.ending().failWith(e)) {
         LOGGER.log(

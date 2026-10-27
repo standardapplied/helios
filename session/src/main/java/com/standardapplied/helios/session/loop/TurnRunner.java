@@ -57,32 +57,14 @@ public final class TurnRunner {
   private final ToolRound toolRound;
   private final UsageAccounting accounting;
 
-  /**
-   * Build a turn runner.
-   *
-   * @param collaborators the collaborators shared with the {@link AgentLoop}; non-null
-   * @param model the model providing {@link Model#chatStream(List, List)}; non-null
-   * @param costCalculator converts per-turn {@link Usage} into a {@link
-   *     com.standardapplied.helios.core.common.CostEstimate}; non-null. Use {@link
-   *     CostCalculator#ZERO} to disable cost tracking
-   * @param outputSchema the schema the model's text output must conform to, or {@code null} when
-   *     the session has no structured-output constraint. When non-null, the loop dispatches {@link
-   *     Model#chatStream(List, List, OutputSchema)} on every turn so the schema rides the
-   *     provider's native channel (Gemini {@code response_format.schema}, OpenAI {@code
-   *     text.format=json_schema}, Anthropic {@code system_instruction} text). The schema is dormant
-   *     on tool-calling turns (tool arguments validate against the tool's own schema) and activates
-   *     on text-output turns. When {@code null}, the loop dispatches {@link Model#chatStream(List,
-   *     List)} and the model is free to produce arbitrary text
-   * @throws NullPointerException if any non-{@code outputSchema} argument is null
-   */
+  /** {@code outputSchema} is null for a session without a structured-output constraint. */
   public TurnRunner(
       LoopCollaborators collaborators,
       Model model,
       CostCalculator costCalculator,
       OutputSchema<?> outputSchema) {
-    this.collaborators = Objects.requireNonNull(collaborators, "collaborators must not be null");
-    this.model = Objects.requireNonNull(model, "model must not be null");
-    Objects.requireNonNull(costCalculator, "costCalculator must not be null");
+    this.collaborators = collaborators;
+    this.model = model;
     this.emitter = collaborators.emitter();
     var effects = new HookEffects(emitter, collaborators.steeringQueue());
     this.turnHooks = new TurnHooks(collaborators, emitter, effects);

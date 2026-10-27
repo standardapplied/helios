@@ -26,9 +26,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.hooks.HookRegistry;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -77,31 +75,6 @@ final class AgentLoopTest {
   }
 
   // ── construction ──────────────────────────────────────────────────────────
-
-  @Test
-  void constructorRejectsNullDependencies() {
-    var queue = new SteeringQueue(8);
-    var collaborators = fixture.collaborators(hooks, dispatch, queue);
-    var runner = fixture.runner(collaborators, fixedModel("x", FinishReason.STOP, Usage.of(1, 1)));
-    var classifier = new StopClassifier(new SecretRegistry());
-    var counter = TokenCounter.charBased();
-    var compactor = ContextCompactor.disabled();
-    assertThrows(
-        NullPointerException.class,
-        () -> new AgentLoop(null, runner, classifier, counter, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () -> new AgentLoop(collaborators, null, classifier, counter, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () -> new AgentLoop(collaborators, runner, null, counter, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () -> new AgentLoop(collaborators, runner, classifier, null, compactor));
-    assertThrows(
-        NullPointerException.class,
-        () -> new AgentLoop(collaborators, runner, classifier, counter, null));
-  }
 
   @Test
   void runRejectsNullState() {

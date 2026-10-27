@@ -38,7 +38,7 @@ final class BoundedTaskTest {
 
   @Test
   void aTasksValueSettlesItsOutcome() {
-    var task = BoundedTask.start("helios-test-value", () -> "done", state.ending());
+    var task = BoundedTask.start("helios-test-value", () -> "done", state.ending()::failWith);
 
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertEquals("done", task.outcome().resultNow());
@@ -54,7 +54,7 @@ final class BoundedTaskTest {
             () -> {
               throw thrown;
             },
-            state.ending());
+            state.ending()::failWith);
 
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertSame(thrown, task.outcome().exceptionNow());
@@ -70,7 +70,7 @@ final class BoundedTaskTest {
             () -> {
               throw thrown;
             },
-            state.ending());
+            state.ending()::failWith);
 
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertTrue(task.outcome().isCancelled());
@@ -85,7 +85,7 @@ final class BoundedTaskTest {
             () -> {
               throw error;
             },
-            state.ending());
+            state.ending()::failWith);
 
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertSame(error, task.outcome().exceptionNow());
@@ -101,7 +101,7 @@ final class BoundedTaskTest {
             () -> {
               throw new ExecutionException(error);
             },
-            state.ending());
+            state.ending()::failWith);
 
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertSame(error, state.ending().seal().orElseThrow());
@@ -142,7 +142,7 @@ final class BoundedTaskTest {
               }
               return null;
             },
-            state.ending());
+            state.ending()::failWith);
     Await.latch("the task to start", started);
 
     task.interrupt();
@@ -166,7 +166,7 @@ final class BoundedTaskTest {
               release.await();
               throw new AssertionError("host failure");
             },
-            state.ending());
+            state.ending()::failWith);
     var cancelledAtSettlement =
         task.outcome().handle((value, thrown) -> state.cancellation().isCancelled());
 
@@ -182,6 +182,6 @@ final class BoundedTaskTest {
           release.await();
           return "released";
         },
-        state.ending());
+        state.ending()::failWith);
   }
 }

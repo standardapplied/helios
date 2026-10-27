@@ -19,17 +19,13 @@ import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
-import com.standardapplied.helios.session.permissions.ApprovalRequest;
-import com.standardapplied.helios.session.permissions.DefaultPermissionEvaluator;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
-import com.standardapplied.helios.session.permissions.ToolApprover;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -86,13 +82,14 @@ final class ToolAuthorizationTest {
 
   private Function<ToolBinding.CanonicalCall, PermissionDecision> asking(
       Permission permission, ToolApprover approver) {
-    return DefaultPermissionEvaluator.newBuilder(permission, writeTool())
-            .withApprover(
-                request -> {
-                  requests.add(request);
-                  return approver.approve(request);
-                })
-            .build()
+    return new DefaultPermissionEvaluator(
+            permission,
+            writeTool(),
+            request -> {
+              requests.add(request);
+              return approver.approve(request);
+            },
+            new SecretRegistry())
         ::authorize;
   }
 
@@ -130,18 +127,6 @@ final class ToolAuthorizationTest {
     assertEquals(
         new ToolOutcome.Rejected("Permission", "unresolved"),
         outcomeOf(call -> PermissionDecision.ask("unresolved")));
-    assertEquals(List.of(), executed);
-  }
-
-  @Test
-  void anAskWithNoApproverRefusesTheCall() {
-    var evaluator =
-        DefaultPermissionEvaluator.newBuilder(Permission.empty(PermissionMode.DEFAULT), writeTool())
-            .build();
-    assertEquals(
-        new ToolOutcome.Rejected(
-            "Permission", "no approver for default-ask on WRITE (Write(/tmp/a))"),
-        outcomeOf(evaluator::authorize));
     assertEquals(List.of(), executed);
   }
 
@@ -199,15 +184,14 @@ final class ToolAuthorizationTest {
     loop.run(
         model,
         tools,
-        DefaultPermissionEvaluator.newBuilder(
-                    new Permission(PermissionMode.DEFAULT, List.of(), List.of(askDocs), List.of()),
-                    tools)
-                .withApprover(
-                    request -> {
-                      requests.add(request);
-                      return PermissionDecision.allow("reviewed");
-                    })
-                .build()
+        new DefaultPermissionEvaluator(
+                new Permission(PermissionMode.DEFAULT, List.of(), List.of(askDocs), List.of()),
+                tools,
+                request -> {
+                  requests.add(request);
+                  return PermissionDecision.allow("reviewed");
+                },
+                new SecretRegistry())
             ::authorize,
         UserMessage.text("write"));
 
@@ -319,7 +303,11 @@ final class ToolAuthorizationTest {
             canonical -> {
               throw new AssertionError("authorization must not run");
             },
-            key -> Optional.of(PermissionDecision.deny("denied by the test")),
+            new Permission(
+                PermissionMode.DEFAULT,
+                List.of(),
+                List.of(),
+                List.of(PermissionRule.any("Missing"))),
             new SecretRegistry(),
             call);
 

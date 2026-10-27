@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -21,6 +22,8 @@ import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.loop.SessionHookContext;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -30,6 +33,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -68,6 +72,15 @@ final class SummarizingCompactorTest {
 
   private static SessionState freshState() {
     return new SessionState("sess-1", new CancellationToken(), Clock.systemUTC());
+  }
+
+  /** The context the session hands its compactor at {@code state}'s current turn. */
+  private static SessionHookContext contextOf(SessionState state) {
+    return SessionHookContext.of(state, summaryModel("unused"));
+  }
+
+  private static SessionHookContext freshContext() {
+    return contextOf(freshState());
   }
 
   private static List<Message> followedBy(Message... messages) {
@@ -118,7 +131,7 @@ final class SummarizingCompactorTest {
   @Test
   void compactRejectsNullHistory() {
     var compactor = SummarizingCompactor.newBuilder(summaryModel("x")).build();
-    assertThrows(NullPointerException.class, () -> compactor.compact(null, freshState()));
+    assertThrows(NullPointerException.class, () -> compactor.compact(null, freshContext()));
   }
 
   @Test
@@ -132,7 +145,7 @@ final class SummarizingCompactorTest {
     var summarizer = summaryModel("the gist");
     var history = followedBy(Message.user("next"));
 
-    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshState());
+    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshContext());
 
     assertEquals(
         List.of(
@@ -154,7 +167,7 @@ final class SummarizingCompactorTest {
     var out =
         SummarizingCompactor.newBuilder(summaryModel("the gist"))
             .build()
-            .compact(CONVERSATION, freshState());
+            .compact(CONVERSATION, freshContext());
 
     assertEquals(
         List.of(
@@ -174,7 +187,7 @@ final class SummarizingCompactorTest {
     var out =
         SummarizingCompactor.newBuilder(summaryModel("the gist"))
             .build()
-            .compact(history, freshState());
+            .compact(history, freshContext());
 
     assertEquals(
         List.of(
@@ -194,7 +207,7 @@ final class SummarizingCompactorTest {
                     new ToolCall("t1", "echo", Map.of()), new ToolCall("t2", "echo", Map.of()))),
             Message.tool("t1", "echo", "r1"));
 
-    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshState());
+    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshContext());
 
     assertSame(history, out.history());
     assertEquals(List.of(), summarizer.calls());
@@ -213,7 +226,7 @@ final class SummarizingCompactorTest {
     var out =
         SummarizingCompactor.newBuilder(summaryModel("the gist"))
             .build()
-            .compact(history, freshState());
+            .compact(history, freshContext());
 
     assertEquals(
         List.of(Message.user(SummarizingCompactor.SUMMARY_PREFIX + "the gist")), out.history());
@@ -226,9 +239,9 @@ final class SummarizingCompactorTest {
     var oneMessage = List.of(Message.system("sys"), Message.assistant("a"), Message.user("b"));
     var compactor = SummarizingCompactor.newBuilder(summarizer).build();
 
-    assertSame(onlyPending, compactor.compact(onlyPending, freshState()).history());
-    assertSame(oneMessage, compactor.compact(oneMessage, freshState()).history());
-    assertSame(List.<Message>of(), compactor.compact(List.of(), freshState()).history());
+    assertSame(onlyPending, compactor.compact(onlyPending, freshContext()).history());
+    assertSame(oneMessage, compactor.compact(oneMessage, freshContext()).history());
+    assertSame(List.<Message>of(), compactor.compact(List.of(), freshContext()).history());
     assertEquals(List.of(), summarizer.calls());
   }
 
@@ -239,7 +252,7 @@ final class SummarizingCompactorTest {
 
     SummarizingCompactor.newBuilder(summarizer)
         .build()
-        .compact(List.of(Message.user("go"), bare), freshState());
+        .compact(List.of(Message.user("go"), bare), freshContext());
 
     assertEquals("[user] go\n[assistant] \n", onlyCall(summarizer).getLast().content());
   }
@@ -250,7 +263,7 @@ final class SummarizingCompactorTest {
     var compactor =
         SummarizingCompactor.newBuilder(summarizer).withSummaryPrompt("strict prompt").build();
 
-    compactor.compact(CONVERSATION, freshState());
+    compactor.compact(CONVERSATION, freshContext());
 
     assertEquals(Message.system("strict prompt"), onlyCall(summarizer).getFirst());
   }
@@ -264,7 +277,7 @@ final class SummarizingCompactorTest {
             .build();
 
     var out =
-        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshState());
+        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshContext());
 
     assertEquals(Usage.of(150, 25), out.usage());
     assertEquals("summary", out.modelId());
@@ -276,7 +289,7 @@ final class SummarizingCompactorTest {
         modelAnswering(() -> Response.newBuilder().withContent("gist").withUsage(null).build());
 
     var out =
-        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshState());
+        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshContext());
 
     assertEquals(Usage.of(0, 0), out.usage());
   }
@@ -289,7 +302,7 @@ final class SummarizingCompactorTest {
               throw new RuntimeException("boom");
             });
 
-    var out = compactor.compact(CONVERSATION, freshState());
+    var out = compactor.compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
@@ -300,7 +313,7 @@ final class SummarizingCompactorTest {
     var out =
         SummarizingCompactor.newBuilder(summaryModel(" "))
             .build()
-            .compact(CONVERSATION, freshState());
+            .compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
@@ -312,7 +325,7 @@ final class SummarizingCompactorTest {
         SummarizingCompactor.newBuilder(modelAnswering(() -> Response.newBuilder().build()))
             .build();
 
-    assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+    assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshContext()).history());
   }
 
   @Test
@@ -322,7 +335,7 @@ final class SummarizingCompactorTest {
     var compactor =
         SummarizingCompactor.newBuilder(slow).withSummaryTimeout(SHORT_SUMMARY_TIMEOUT).build();
 
-    var out = compactor.compact(CONVERSATION, freshState());
+    var out = compactor.compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
@@ -338,7 +351,7 @@ final class SummarizingCompactorTest {
         CompletableFuture.supplyAsync(
             () -> {
               Thread.currentThread().interrupt();
-              var out = compactor.compact(CONVERSATION, freshState());
+              var out = compactor.compact(CONVERSATION, freshContext());
               return out.history() == CONVERSATION && Thread.currentThread().isInterrupted();
             },
             Thread.ofVirtual()::start);
@@ -357,7 +370,7 @@ final class SummarizingCompactorTest {
             });
 
     var thrown =
-        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, freshState()));
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, freshContext()));
 
     assertSame(sentinel, thrown);
   }
@@ -368,7 +381,8 @@ final class SummarizingCompactorTest {
     var compactor = compactorSummarizingWith(() -> CompletableFuture.failedFuture(sentinel).join());
     var state = freshState();
 
-    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, state));
+    var thrown =
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
 
     assertSame(sentinel, thrown);
     assertSame(sentinel, state.ending().seal().orElseThrow());
@@ -385,7 +399,7 @@ final class SummarizingCompactorTest {
     var logged = new ArrayList<LogRecord>();
 
     try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
-      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshContext()).history());
     }
 
     var thrown = logged.getFirst().getThrown();
@@ -399,7 +413,7 @@ final class SummarizingCompactorTest {
         SummarizingCompactor.newBuilder(summaryModel("the gist"))
             .withSummaryTimeout(Duration.ofSeconds(Long.MAX_VALUE))
             .build()
-            .compact(CONVERSATION, freshState());
+            .compact(CONVERSATION, freshContext());
 
     assertEquals(
         List.of(
@@ -413,7 +427,7 @@ final class SummarizingCompactorTest {
 
     var compacted =
         CompletableFuture.supplyAsync(
-            () -> compactor.compact(CONVERSATION, freshState()), Thread.ofVirtual()::start);
+            () -> compactor.compact(CONVERSATION, freshContext()), Thread.ofVirtual()::start);
 
     assertSame(CONVERSATION, Await.value("the compaction", compacted).history());
   }
@@ -425,7 +439,8 @@ final class SummarizingCompactorTest {
     var state = freshState();
 
     var out =
-        timingOut(failingOnRelease(() -> fail(sentinel), calling)).compact(CONVERSATION, state);
+        timingOut(failingOnRelease(() -> fail(sentinel), calling))
+            .compact(CONVERSATION, contextOf(state));
     released.countDown();
     Await.termination("the summary call to throw", Await.value("the summary call", calling));
 
@@ -441,7 +456,7 @@ final class SummarizingCompactorTest {
     var state = freshState();
 
     timingOut(failingOnRelease(() -> CompletableFuture.failedFuture(sentinel).join(), calling))
-        .compact(CONVERSATION, state);
+        .compact(CONVERSATION, contextOf(state));
     released.countDown();
     Await.termination("the summary call to throw", Await.value("the summary call", calling));
 
@@ -449,9 +464,29 @@ final class SummarizingCompactorTest {
   }
 
   @Test
+  void anErrorTheSummarizerThrowsUnderAnotherContextIsOnlyRethrown() {
+    var sentinel = new AssertionError("host failure");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw sentinel;
+            });
+    var state = freshState();
+    var context =
+        new DefaultHookContext(
+            state.sessionId(), state.currentTurnIndex(), state.cancellation(), summaryModel("x"));
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
+
+    assertSame(sentinel, thrown);
+    assertFalse(state.cancellation().isCancelled());
+    assertEquals(Optional.empty(), state.ending().seal());
+  }
+
+  @Test
   void disabledCompactorReturnsHistoryUnchanged() {
     var disabled = ContextCompactor.disabled();
-    var out = disabled.compact(CONVERSATION, freshState());
+    var out = disabled.compact(CONVERSATION, freshContext());
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
   }
@@ -459,7 +494,7 @@ final class SummarizingCompactorTest {
   @Test
   void disabledCompactorRejectsANullHistory() {
     var disabled = ContextCompactor.disabled();
-    assertThrows(NullPointerException.class, () -> disabled.compact(null, freshState()));
+    assertThrows(NullPointerException.class, () -> disabled.compact(null, freshContext()));
   }
 
   @Test
@@ -496,7 +531,7 @@ final class SummarizingCompactorTest {
     var logged = new ArrayList<LogRecord>();
 
     try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
-      timingOut(blockingUntilInterrupted(interrupted)).compact(CONVERSATION, freshState());
+      timingOut(blockingUntilInterrupted(interrupted)).compact(CONVERSATION, freshContext());
     }
 
     Await.latch("the timed-out summary call to be interrupted", interrupted);
@@ -515,7 +550,7 @@ final class SummarizingCompactorTest {
 
     try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
       Thread.currentThread().interrupt();
-      compactor.compact(CONVERSATION, freshState());
+      compactor.compact(CONVERSATION, freshContext());
       assertTrue(Thread.interrupted(), "the compaction keeps the interrupt");
     }
 
@@ -534,7 +569,7 @@ final class SummarizingCompactorTest {
     var logged = new ArrayList<LogRecord>();
 
     try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
-      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshContext()).history());
     }
 
     assertSame(thrown, logged.getFirst().getThrown());

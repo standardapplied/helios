@@ -16,9 +16,9 @@
  * configured workspace.
  *
  * <p>{@link com.standardapplied.helios.session.memory.MemoryReadTool} and {@link
- * com.standardapplied.helios.session.memory.MemoryWriteTool} are the model-facing tools. {@code
- * MemoryRead} is auto-registered by {@code AgentSessionImpl} whenever a backend is wired (so the
- * model can always inspect what's there); {@code MemoryWrite} is opt-in — the workspace preset
- * registers it explicitly, the read-only preset does not.
+ * com.standardapplied.helios.session.memory.MemoryWriteTool} are the model-facing tools. A session
+ * with a memory backend ({@code SessionOptions.Builder.withMemoryBackend}) registers both; for
+ * read-only memory, deny {@code MemoryWrite} with a permission rule. The workspace preset sets a
+ * backend, the read-only preset does not.
  */
 package com.standardapplied.helios.session.memory;

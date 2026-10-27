@@ -14,10 +14,11 @@
  * core.agent.Agent} surface has been removed.
  *
  * <p>The public surface in {@code com.standardapplied.helios.session} carries the value types
- * ({@code UserMessage}, {@code SerializedError}), the concurrency primitives, the sealed
- * event/result hierarchies, the session API, hooks, file tools, execution providers, memory, audit,
- * and the preset surface. Subsystem-specific packages (e.g. {@code
- * com.standardapplied.helios.session.loop}) are exported as their first types land.
+ * ({@code UserMessage}, {@code SerializedError}), the sealed event/result hierarchies, the session
+ * API and the preset surface; the other exported packages hold what a user configures: hooks, file
+ * tools, execution providers, memory, permissions and tool bindings. The agent loop, with the
+ * permission evaluator, the approval prompt and the hook registry, lives in {@code
+ * com.standardapplied.helios.session.loop}, which is not exported.
  */
 module com.standardapplied.helios.session {
   requires com.standardapplied.helios.core;
@@ -29,7 +30,6 @@ module com.standardapplied.helios.session {
   exports com.standardapplied.helios.session.execution;
   exports com.standardapplied.helios.session.files;
   exports com.standardapplied.helios.session.hooks;
-  exports com.standardapplied.helios.session.loop;
   exports com.standardapplied.helios.session.memory;
   exports com.standardapplied.helios.session.permissions;
   exports com.standardapplied.helios.session.tools;

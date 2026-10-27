@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package com.standardapplied.helios.session.permissions;
+package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.session.ask.QuestionGateway;
+import com.standardapplied.helios.session.permissions.PermissionDecision;
 import java.util.Objects;
 
 /**

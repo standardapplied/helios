@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.http.HeaderNames;
 import io.helidon.webserver.http.ServerRequest;
@@ -293,9 +292,7 @@ final class AgentHttpServiceAuthorizationTest {
     return SessionOptions.newBuilder()
         .withModel(model)
         .withSessionId(Optional.ofNullable(hijackedId.get()).orElse(request.sessionId()))
-        .withTools(
-            new ToolRegistry(
-                List.of(ToolBinding.newBuilder(probe).withCategory(ToolCategory.READ).build())))
+        .withTools(List.of(ToolBinding.newBuilder(probe).withCategory(ToolCategory.READ).build()))
         .build();
   }
 

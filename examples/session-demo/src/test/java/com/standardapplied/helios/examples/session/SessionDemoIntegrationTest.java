@@ -31,7 +31,6 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -170,7 +169,7 @@ final class SessionDemoIntegrationTest {
                 SessionOptions.newBuilder()
                     .withModel(forced)
                     .withPermission(permission)
-                    .withTools(new ToolRegistry(List.of(MemoryWriteTool.binding(memoryBackend))))
+                    .withTools(List.of(MemoryWriteTool.binding(memoryBackend)))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
                     .build())) {
       events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
