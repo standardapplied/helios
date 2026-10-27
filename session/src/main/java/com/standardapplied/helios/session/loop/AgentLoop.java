@@ -144,18 +144,19 @@ public final class AgentLoop {
         ended = iterate(state, limits, boundary);
       }
       terminal = ended.orElseThrow();
+    } catch (SessionStoreException e) {
+      boundary.end(false);
+      terminal = StoredHistory.refusal(state, e, collaborators.secrets().redactor());
+      state.setFinalTerminal(terminal);
     } catch (Exception e) {
       state.ending().failWith(e);
-      var redactor = collaborators.secrets().redactor();
       terminal =
           decided(
               state,
               limits,
               boundary,
-              e instanceof SessionStoreException refused
-                  ? StoredHistory.refusal(state, refused, redactor)
-                  : StopClassifier.errorDuringExecution(
-                      state, SerializedError.of(e).redactedBy(redactor)));
+              StopClassifier.errorDuringExecution(
+                  state, SerializedError.of(e).redactedBy(collaborators.secrets().redactor())));
     }
     return end(state, limits, terminal);
   }
@@ -181,10 +182,10 @@ public final class AgentLoop {
     state.beginTurn();
     compaction.check(state, limits);
     var outcome = turnRunner.runTurn(state, limits);
-    storedHistory.write(state, collaborators.clock().instant());
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
+    storedHistory.write(state, collaborators.clock().instant());
     compaction.check(state, limits);
     return classify(state, limits, boundary, outcome);
   }

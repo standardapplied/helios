@@ -62,22 +62,20 @@ final class SessionFile {
 
   /**
    * Append {@code batch} as one line, if the file's last sequence number is {@code
-   * expectedLastSeq}, and force it to the device. The last sequence number is {@code known}'s while
-   * the file has its size, and is otherwise read from the file, truncating a last line a write did
-   * not finish.
+   * expectedLastSeq}, and force it to the device. The last sequence number is read from the file,
+   * truncating a last line a write did not finish.
    *
-   * @return what the file holds after the append
    * @throws SessionConflictException if the file's last sequence number is not {@code
    *     expectedLastSeq}; nothing is written
    * @throws SessionStoreException if the file cannot be read or written
    */
-  Tail append(String sessionId, long expectedLastSeq, List<SessionEntry> batch, Tail known) {
+  void append(String sessionId, long expectedLastSeq, List<SessionEntry> batch) {
     var line =
         (SessionEntryJson.write(new SessionEntryJson.Batch(expectedLastSeq + 1, batch)) + "\n")
             .getBytes(UTF_8);
     try (var channel = FileChannel.open(path, APPEND, attributes);
         var _ = channel.lock()) {
-      var lastSeq = lastSeq(channel, known);
+      var lastSeq = lastSeq(channel);
       if (lastSeq != expectedLastSeq) {
         throw new SessionConflictException(sessionId, expectedLastSeq, lastSeq);
       }
@@ -87,19 +85,14 @@ final class SessionFile {
         channel.write(bytes, end + bytes.position());
       }
       channel.force(false);
-      return new Tail(end + line.length, lastSeq + batch.size());
     } catch (IOException e) {
       throw new SessionStoreException("cannot append to session file " + path, e);
     }
   }
 
-  private long lastSeq(FileChannel channel, Tail known) throws IOException {
-    var size = channel.size();
-    if (known != null && known.size() == size) {
-      return known.lastSeq();
-    }
+  private long lastSeq(FileChannel channel) throws IOException {
     var log = Log.parse(path, contents(channel));
-    if (log.end() < size) {
+    if (log.end() < channel.size()) {
       channel.truncate(log.end());
     }
     return log.lastSeq();
@@ -108,9 +101,6 @@ final class SessionFile {
   private static byte[] contents(FileChannel channel) throws IOException {
     return Channels.newInputStream(channel.position(0)).readAllBytes();
   }
-
-  /** What a file held after a read or write: its size and last sequence number. */
-  record Tail(long size, long lastSeq) {}
 
   /**
    * A file's complete lines: their entries, the last sequence number, and the offset after the last

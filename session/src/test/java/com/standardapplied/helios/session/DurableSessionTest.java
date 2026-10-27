@@ -18,6 +18,7 @@ import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.store.InMemorySessionStore;
+import com.standardapplied.helios.session.store.SessionConflictException;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.store.SessionStoreException;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
 import org.junit.jupiter.api.Test;
 
@@ -252,9 +254,8 @@ final class DurableSessionTest {
   }
 
   @Test
-  void aWriteRefusedAtTheRunsEndReplacesTheRunsTerminal() {
-    var store =
-        new RecordingStore(index -> index == 1 ? new SessionStoreException("full", null) : null);
+  void aWriteRefusedAtTheRunsEndReplacesTheRunsTerminalAndStoresNoHalfRound() {
+    var store = new RecordingStore(index -> new SessionStoreException("full", null));
     var model = ScriptedModel.newBuilder().withToolCallsTurn(ECHO, ECHO_TWO).build();
     PreToolUseHook stopping = (call, ctx) -> HookOutcome.stop("halted");
 
@@ -265,7 +266,17 @@ final class DurableSessionTest {
 
       assertEquals(List.of("SessionStoreFailed", "full"), List.of(error.kind(), error.message()));
     }
-    assertEquals(List.of(2), store.batches.stream().map(List::size).toList());
+    assertEquals(new StoredSession(SID, 0, List.of()), store.load(SID));
+  }
+
+  @Test
+  void aConflictIsTheTerminalEvenWhenAnInterruptArrivesWhileItIsRefused() {
+    assertRefusalOutranksAnInterrupt(new SessionConflictException(SID, 0, 1), "SessionConflict");
+  }
+
+  @Test
+  void aStoreFailureIsTheTerminalEvenWhenAnInterruptArrivesWhileItIsRefused() {
+    assertRefusalOutranksAnInterrupt(new SessionStoreException("full", null), "SessionStoreFailed");
   }
 
   @Test
@@ -288,6 +299,24 @@ final class DurableSessionTest {
   }
 
   // ── 6. open round ────────────────────────────────────────────────────────
+
+  @Test
+  void aStoppedToolRoundIsWrittenWithItsNotRunResultsAsOneBatch() {
+    var store = new RecordingStore();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(ECHO, ECHO_TWO).build();
+    PreToolUseHook stopping = (call, ctx) -> HookOutcome.stop("halted");
+
+    try (var session =
+        AgentSession.open(
+            options(model, store).withTools(List.of(echo())).withHook(stopping).build())) {
+      Await.value("run", session.send("go"));
+    }
+
+    assertEquals(1, store.batches.size());
+    assertEquals(
+        List.of(notRun(ECHO), notRun(ECHO_TWO)), messages(store.batches.getFirst()).subList(2, 4));
+    assertEquals(4, store.batches.getFirst().size());
+  }
 
   @Test
   void aReopenedSessionHoldsTheNotRunResultsOfTheRoundItsLastRunLeftOpen() {
@@ -349,6 +378,26 @@ final class DurableSessionTest {
   }
 
   // ── fixtures ─────────────────────────────────────────────────────────────
+
+  /** A store that interrupts the run, then refuses its write with {@code refusal}. */
+  private static void assertRefusalOutranksAnInterrupt(SessionStoreException refusal, String kind) {
+    var session = new AtomicReference<AgentSession>();
+    var store =
+        new RecordingStore(
+            index -> {
+              session.get().interrupt();
+              return refusal;
+            });
+    var model = ScriptedModel.newBuilder().withTextTurn("reply").build();
+
+    try (var opened = AgentSession.open(options(model, store).build())) {
+      session.set(opened);
+      var error = errorOf(Await.value("run", opened.send("go")));
+
+      assertEquals(List.of(kind, refusal.getMessage()), List.of(error.kind(), error.message()));
+      assertThrows(IllegalStateException.class, () -> opened.send("again"));
+    }
+  }
 
   private static SessionOptions.Builder options(ScriptedModel model, SessionStore store) {
     return SessionOptions.newBuilder().withModel(model).withSessionId(SID).withStore(store);
