@@ -236,6 +236,7 @@ final class SessionRuns implements RunBoundary {
     } else {
       run.result().complete(terminal);
     }
+    run.settled().complete(null);
     if (error.isPresent()) {
       throw error.get();
     }

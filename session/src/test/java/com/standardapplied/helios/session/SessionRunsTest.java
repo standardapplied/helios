@@ -7,6 +7,7 @@ import static com.standardapplied.helios.session.EndingSessions.SHORT_GRACE;
 import static com.standardapplied.helios.session.EndingSessions.binding;
 import static com.standardapplied.helios.session.EndingSessions.stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -616,6 +617,42 @@ final class SessionRunsTest {
     }
   }
 
+  @Test
+  void anInterruptWhileTheRunWaitsToDecideItsEndEndsTheRunCancelled() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").build();
+    var runThread = new AtomicReference<Thread>();
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    PreStopHook waiting =
+        (response, ctx) -> {
+          entered.countDown();
+          Uninterruptible.await(release);
+          return HookOutcome.cont();
+        };
+    OnStreamEventHook recording =
+        (event, ctx) -> {
+          if (event instanceof QueryEvent.RunStarted) {
+            runThread.set(Thread.currentThread());
+          }
+        };
+
+    try (var session =
+        AgentSession.open(options(model).withHook(waiting).withHook(recording).build())) {
+      var run = session.send("go");
+      Await.latch("the pre-stop hook to run", entered);
+      synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
+        release.countDown();
+        Await.until(
+            "the run's thread to wait to decide its end",
+            () -> isBlockedIn(runThread.get(), "end"));
+        session.interrupt();
+      }
+
+      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the run", run));
+      assertEquals("interrupted", cancelled.reason());
+    }
+  }
+
   // ── 7. close ─────────────────────────────────────────────────────────────
 
   @Test
@@ -639,6 +676,42 @@ final class SessionRunsTest {
     var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
     assertEquals("session is closed", refused.getMessage());
     events.awaitDone();
+  }
+
+  @Test
+  void aCallbackOfTheRunsFutureThatWaitsForTheCloseNeitherRunsOnItNorHoldsItPastItsGrace() {
+    var entered = new CountDownLatch(1);
+    var closeReturned = new CountDownLatch(1);
+    var callbackThreads = new CopyOnWriteArrayList<Thread>();
+    var model =
+        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+    var session =
+        AgentSession.open(
+            options(model)
+                .withLimits(SessionLimits.newBuilder().withStopGrace(SHORT_GRACE).build())
+                .build());
+    var run = session.send("go");
+    Await.latch("the model stream to be read", entered);
+    for (var i = 0; i < 2; i++) {
+      run.whenComplete(
+          (result, failure) -> {
+            callbackThreads.add(Thread.currentThread());
+            Uninterruptible.await(closeReturned);
+          });
+    }
+
+    var closing =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  session.close();
+                  closeReturned.countDown();
+                });
+
+    Await.latch("close to return", closeReturned);
+    assertTrue(run.isDone(), "the run ended before close returned");
+    Await.until("both callbacks to run", () -> callbackThreads.size() == 2);
+    assertFalse(callbackThreads.contains(closing), "a callback ran on the closing thread");
   }
 
   @Test
@@ -1075,6 +1148,15 @@ final class SessionRunsTest {
   private static OnUserMessageHook blocking() {
     return (message, ctx) ->
         message.text().equals("blocked") ? HookOutcome.block("not allowed") : HookOutcome.cont();
+  }
+
+  private static boolean isBlockedIn(Thread thread, String method) {
+    return thread.getState() == Thread.State.BLOCKED
+        && Stream.of(thread.getStackTrace())
+            .anyMatch(
+                frame ->
+                    frame.getClassName().equals(SessionRuns.class.getName())
+                        && frame.getMethodName().equals(method));
   }
 
   private static Message notRun(ToolCall call) {
