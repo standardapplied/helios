@@ -135,6 +135,16 @@ class ResponseTest {
   }
 
   @Test
+  void usageReportsTokensWhenAnyBillableCountIsPositive() {
+    assertFalse(Response.Usage.of(0, 0).reportsTokens());
+    assertFalse(new Response.Usage(0, 0, 0, 0, 7).reportsTokens());
+    assertTrue(Response.Usage.of(1, 0).reportsTokens());
+    assertTrue(Response.Usage.of(0, 1).reportsTokens());
+    assertTrue(Response.Usage.of(0, 0, 1, 0).reportsTokens());
+    assertTrue(Response.Usage.of(0, 0, 0, 1).reportsTokens());
+  }
+
+  @Test
   void usageOfWithCacheTokensRejectsOverflow() {
     // input + output + cacheCreation + cacheRead would exceed Integer.MAX_VALUE.
     var huge = Integer.MAX_VALUE - 10;

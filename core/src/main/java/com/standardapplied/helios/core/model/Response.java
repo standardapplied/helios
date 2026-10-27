@@ -148,6 +148,20 @@ public record Response<T>(
     }
 
     /**
+     * Whether any of the four billable token counts is positive. {@code totalTokens} is not
+     * consulted: a provider total covering token classes the four counts don't model has no rate to
+     * price it against.
+     *
+     * @return {@code true} if input, output, cache-creation or cache-read tokens are positive
+     */
+    public boolean reportsTokens() {
+      return inputTokens > 0
+          || outputTokens > 0
+          || cacheCreationInputTokens > 0
+          || cacheReadInputTokens > 0;
+    }
+
+    /**
      * Build a {@link Usage} including prompt-cache token counts.
      *
      * @param input uncached prompt tokens

@@ -29,6 +29,8 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Every turn's usage reaches the session's totals before a hook or a terminal decision reads them:
@@ -45,7 +47,7 @@ class TurnUsageAccountingTest {
       CostCalculator.staticTable(
           Map.of(
               MAIN, new Pricing(1_000_000L, 2_000_000L),
-              SUMMARIZER, new Pricing(0L, 0L, 0L, 500_000L)));
+              SUMMARIZER, new Pricing(0L, 0L, 1_000_000L, 500_000L)));
 
   @Test
   void aPreToolUseStopCarriesTheTurnThatCalledTheTool() {
@@ -94,8 +96,11 @@ class TurnUsageAccountingTest {
     assertEquals(new CostEstimate(150L), success.cost());
   }
 
-  @Test
-  void aCompactionReportingOnlyCacheReadsIsAccountedAtTheCompactorsRate() {
+  @ParameterizedTest
+  @CsvSource({"0, 900, 450", "900, 0, 900"})
+  void aCompactionReportingOnlyCacheTokensIsAccountedAtTheCompactorsRate(
+      int cacheWrites, int cacheReads, long expectedCost) {
+    var usage = Usage.of(0, 0, cacheWrites, cacheReads);
     var model =
         ScriptedModel.newBuilder()
             .withId(MAIN)
@@ -104,8 +109,7 @@ class TurnUsageAccountingTest {
             .build();
     ContextCompactor cacheOnly =
         (history, state) ->
-            new CompactionResult(
-                List.of(Message.user("the gist")), Usage.of(0, 0, 0, 900), SUMMARIZER);
+            new CompactionResult(List.of(Message.user("the gist")), usage, SUMMARIZER);
 
     var success =
         runToSuccess(
@@ -118,8 +122,8 @@ class TurnUsageAccountingTest {
                     messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L)
                 .withContextCompactor(cacheOnly));
 
-    assertEquals(Usage.of(0, 0, 0, 900), success.usage());
-    assertEquals(new CostEstimate(450L), success.cost());
+    assertEquals(usage, success.usage());
+    assertEquals(new CostEstimate(expectedCost), success.cost());
   }
 
   /** A session whose one model turn reports 100 input and 20 output tokens and calls a tool. */
