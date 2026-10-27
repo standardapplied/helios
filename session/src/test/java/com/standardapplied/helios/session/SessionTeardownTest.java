@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -171,6 +172,38 @@ final class SessionTeardownTest {
     releasing.countDown();
     assertInstanceOf(
         CancellationException.class, Await.failure("the cancelled dispatch", dispatching));
+  }
+
+  @Test
+  void aPassedDeadlineIsNotExtendedByTheGrace() {
+    context.cancellation().onCancel(() -> Uninterruptible.await(releasing));
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    provider.end = () -> Uninterruptible.await(releasing);
+    var teardown = newTeardown(provider, NOT_REACHED);
+    var ending =
+        new FutureTask<Void>(
+            () -> {
+              teardown.end(tools(), Await.passedDeadline());
+              return null;
+            });
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      Thread.ofVirtual().start(ending);
+      Await.value("the teardown to end by the passed deadline", ending);
+    }
+  }
+
+  @Test
+  void theEventStreamsEndOnlyOnceOnSessionEndReturned() {
+    var openAtSessionEnd = new CompletableFuture<Integer>();
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    provider.end = () -> openAtSessionEnd.complete(events.openStreams());
+    events.open();
+
+    newTeardown(provider, NOT_REACHED).end(tools());
+
+    assertEquals(1, Await.value("onSessionEnd to run", openAtSessionEnd));
+    assertEquals(0, events.openStreams());
   }
 
   private ToolDispatch toolsWith(CountDownLatch started) {
