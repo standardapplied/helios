@@ -103,8 +103,9 @@ final class SessionLifecycle {
   /**
    * Close the session: no run starts from now on, the session is cancelled, which cancels the run
    * in progress with the reason {@code "session closed"} before this returns, and that run's thread
-   * tears the session down and then settles the run's future; the close waits for that thread to
-   * end, so none of the future's callbacks runs on the closing thread. Without a run in progress
+   * tears the session down and then settles the run's future, and that of a next run the close
+   * keeps from starting; the close waits for those threads to end, so both futures are settled when
+   * it returns and none of their callbacks runs on the closing thread. Without a run in progress
    * the caller tears the session down. The run's end and the teardown share one deadline, {@code
    * stopGrace} from now; a step after one that used it up still runs but is not waited for. Called
    * on a thread the run in progress started, it returns once the session is cancelled. Never

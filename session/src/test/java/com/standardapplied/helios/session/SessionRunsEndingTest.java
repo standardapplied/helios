@@ -64,6 +64,42 @@ final class SessionRunsEndingTest {
   }
 
   @Test
+  void aCloseReturnsOnlyOnceTheNextRunItKeptFromStartingIsSettled() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build());
+    var first = session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+    var runThread = new AtomicReference<Thread>();
+    first.whenComplete((result, failure) -> runThread.set(Thread.currentThread()));
+    var settling = new CountDownLatch(1);
+    var settled = new CountDownLatch(1);
+    next.whenComplete(
+        (result, failure) -> {
+          settling.countDown();
+          Await.latch("the test to let the settling end", settled);
+        });
+
+    var closing = Thread.ofVirtual().start(session::close);
+    Await.until(
+        "the close to wait for the run", () -> closing.getState() == Thread.State.TIMED_WAITING);
+    release.countDown();
+    Await.latch("the next run's future to be settled", settling);
+    Await.until("run 1's thread to settle its future", () -> runThread.get() != null);
+    Await.termination("run 1's thread", runThread.get());
+    Await.until(
+        "the close to wait or return",
+        () -> closing.getState() == Thread.State.TIMED_WAITING || !closing.isAlive());
+
+    assertTrue(closing.isAlive());
+    settled.countDown();
+    Await.termination("the close", closing);
+    assertTrue(next.isCancelled());
+  }
+
+  @Test
   void aCallbackOfANextRunTheCloseCancelsDoesNotHoldUpTheTeardown() {
     var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
