@@ -146,14 +146,14 @@ final class SessionRuns implements RunBoundary {
 
   /**
    * Start no run from now on: the future of a next run waiting for the run in progress to end is
-   * cancelled on a thread of its own, so none of its callbacks holds up the close, and observed
-   * cancelled by {@code deadlineNanos}. Called on a thread this session's runs started while a run
-   * is in progress, the run's own thread tears the session down once the run ended; otherwise the
-   * caller does.
+   * cancelled on a thread of its own and not waited for, since a thread waiting on a future may run
+   * its callbacks, so none of them holds up the close. Called on a thread this session's runs
+   * started while a run is in progress, the run's own thread tears the session down once the run
+   * ended; otherwise the caller does.
    *
    * @return the run in progress, if any
    */
-  Optional<Run> close(long deadlineNanos) {
+  Optional<Run> close() {
     CompletableFuture<ResultMessage> prevented;
     Optional<Run> running;
     synchronized (lock) {
@@ -167,7 +167,6 @@ final class SessionRuns implements RunBoundary {
       Thread.ofVirtual()
           .name("helios-cancel-next-run-" + session.sessionId())
           .start(() -> prevented.cancel(false));
-      BoundedTask.settlesBy(prevented, deadlineNanos);
     }
     return running;
   }
@@ -220,6 +219,7 @@ final class SessionRuns implements RunBoundary {
     run.unlink();
     var left = leave();
     var error = left.error();
+    run.left().complete(error);
     if (left.tearDown()) {
       teardown.accept(error);
     }

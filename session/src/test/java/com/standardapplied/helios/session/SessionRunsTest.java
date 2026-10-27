@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -366,7 +367,7 @@ final class SessionRunsTest {
     Await.termination("the close", closing);
 
     assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
-    assertTrue(next.isCancelled(), "the next run never started");
+    assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
     assertEquals(1, model.calls().size());
   }
 
@@ -396,7 +397,7 @@ final class SessionRunsTest {
     release.countDown();
     Await.termination("the close", closing);
 
-    assertTrue(next.isCancelled(), "the next run never started");
+    assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
     assertEquals(1, provider.ends.get());
     Await.latch("the callback to read the stream to its end", read);
   }

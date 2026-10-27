@@ -8,7 +8,6 @@ import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -103,16 +102,17 @@ final class SessionLifecycle {
 
   /**
    * Close the session: no run starts from now on, the session is cancelled, which cancels the run
-   * in progress with the reason {@code "session closed"}, and the session is torn down once that
-   * run ended. The run's end and the teardown share one deadline, {@code stopGrace} from now; a
-   * step after one that used it up still runs but is not waited for. Called on a thread the
-   * session's runs started, it returns once the session is cancelled, and the run's own thread
-   * finishes the teardown. Never throws.
+   * in progress with the reason {@code "session closed"} before this returns, and the session is
+   * torn down once that run's thread left it; the run's future is then awaited, after the teardown,
+   * so none of its callbacks that waits for the teardown holds up the close. The run's end and the
+   * teardown share one deadline, {@code stopGrace} from now; a step after one that used it up still
+   * runs but is not waited for. Called on a thread the session's runs started, it returns once the
+   * session is cancelled, and the run's own thread finishes the teardown. Never throws.
    */
   void close() {
     var deadline = BoundedTask.deadlineAfter(limits.stopGrace());
     closeDeadline = deadline;
-    var run = runs.close(deadline);
+    var run = runs.close();
     session.ending().cancel("session closed");
     run.ifPresent(Run::followSession);
     Optional<Error> carried = Optional.empty();
@@ -120,14 +120,13 @@ final class SessionLifecycle {
       if (runs.isWorkerThread()) {
         return;
       }
-      var result = run.get().result();
-      if (BoundedTask.settlesBy(result, deadline)
-          && result.state() == Future.State.FAILED
-          && result.exceptionNow() instanceof Error error) {
-        carried = Optional.of(error);
+      var left = run.get().left();
+      if (BoundedTask.settlesBy(left, deadline)) {
+        carried = left.resultNow();
       }
     }
     tearDown(deadline, carried);
+    run.ifPresent(ended -> BoundedTask.settlesBy(ended.result(), deadline));
   }
 
   /** Expire the run in progress as its wall clock does, for tests. */
