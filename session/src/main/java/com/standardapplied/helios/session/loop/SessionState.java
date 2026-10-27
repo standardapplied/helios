@@ -19,11 +19,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * Mutable state of one run of a session, owned by the agent loop.
  *
  * <p>Carries the run's id, its turn index, its start on the wall clock, its cancellation token and
- * its first-wins terminal {@link ResultMessage}, and is composed of the run's {@link SessionTotals}
- * and the session's {@link ConversationHistory} and {@link SessionEnding}, which every run of the
- * session shares. Threaded through every loop collaborator (the loop itself, the turn runner, the
- * stop classifier, the hook runner). {@link #SessionState(SessionState, CancellationToken)} builds
- * the state of the session's next run.
+ * its terminal {@link ResultMessage}, first-wins until the loop records the final one, and is
+ * composed of the run's {@link SessionTotals} and the session's {@link ConversationHistory} and
+ * {@link SessionEnding}, which every run of the session shares. Threaded through every loop
+ * collaborator (the loop itself, the turn runner, the stop classifier, the hook runner). {@link
+ * #SessionState(SessionState, CancellationToken)} builds the state of the session's next run.
  *
  * <h2>Thread-safety</h2>
  *
@@ -209,6 +209,17 @@ public final class SessionState {
   public boolean setTerminal(ResultMessage result) {
     Objects.requireNonNull(result, "result must not be null");
     return terminal.compareAndSet(Optional.empty(), Optional.of(result));
+  }
+
+  /**
+   * Record the run's final terminal, replacing any a hook's {@code Stop} recorded before the loop
+   * decided the run's end.
+   *
+   * @param result the run's final terminal; non-null
+   * @throws NullPointerException if {@code result} is null
+   */
+  void setFinalTerminal(ResultMessage result) {
+    terminal.set(Optional.of(Objects.requireNonNull(result, "result must not be null")));
   }
 
   /**

@@ -84,6 +84,20 @@ public final class StopClassifier {
     Objects.requireNonNull(state, "state must not be null");
     Objects.requireNonNull(limits, "limits must not be null");
     Objects.requireNonNull(outcome, "outcome must not be null");
+    return imposed(state, limits)
+        .or(() -> byFinishReason(state, outcome, hasPendingMessages))
+        .or(() -> turnCeiling(state, limits));
+  }
+
+  /**
+   * The terminal a limit or the run's cancellation imposes whatever the turn did: the first three
+   * steps of {@link #classify}, non-empty whenever the run's token is cancelled.
+   *
+   * @param state the run's state; non-null
+   * @param limits the session limits in force; non-null
+   * @return the wall-clock, budget or cancellation terminal, or empty when none applies
+   */
+  Optional<ResultMessage> imposed(SessionState state, SessionLimits limits) {
     if (state.totals().elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
@@ -116,8 +130,7 @@ public final class StopClassifier {
               state.totals().cost(),
               state.totals().elapsed()));
     }
-
-    return byFinishReason(state, outcome, hasPendingMessages).or(() -> turnCeiling(state, limits));
+    return Optional.empty();
   }
 
   /**
