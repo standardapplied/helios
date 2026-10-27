@@ -32,8 +32,9 @@ import java.util.Objects;
  * @param usage tokens consumed by the compaction step itself; non-null. {@link Usage#of(int, int)
  *     Usage.of(0, 0)} for compactors that don't invoke a model
  * @param modelId identifier of the model the compactor spent {@code usage} on; non-null. Must be
- *     non-blank when {@code usage} carries any tokens (input or output) — otherwise the loop has no
- *     correct rate to price the spend against. Pure-trim / no-op results use the empty string
+ *     non-blank when {@code usage} {@linkplain Usage#reportsTokens() reports tokens} — otherwise
+ *     the loop has no correct rate to price the spend against. Pure-trim / no-op results use the
+ *     empty string
  */
 public record CompactionResult(List<Message> history, Usage usage, String modelId) {
 
@@ -54,12 +55,9 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
     Objects.requireNonNull(history, "history must not be null");
     Objects.requireNonNull(usage, "usage must not be null");
     Objects.requireNonNull(modelId, "modelId must not be null");
-    if ((usage.inputTokens() > 0 || usage.outputTokens() > 0) && Strings.isBlank(modelId)) {
+    if (usage.reportsTokens() && Strings.isBlank(modelId)) {
       throw new IllegalArgumentException(
-          "modelId must be non-blank when usage reports any tokens; got input="
-              + usage.inputTokens()
-              + " output="
-              + usage.outputTokens());
+          "modelId must be non-blank when usage reports any tokens; got " + usage);
     }
   }
 
