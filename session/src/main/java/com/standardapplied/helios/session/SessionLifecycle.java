@@ -102,13 +102,12 @@ final class SessionLifecycle {
 
   /**
    * Close the session: no run starts from now on, the session is cancelled, which cancels the run
-   * in progress with the reason {@code "session closed"} before this returns, and the session is
-   * torn down once that run's thread left it; the run's thread settling its future is then awaited,
-   * after the teardown, so none of that future's callbacks that waits for the teardown holds up the
-   * close, and none runs on the closing thread. The run's end and the teardown share one deadline,
-   * {@code stopGrace} from now; a step after one that used it up still runs but is not waited for.
-   * Called on a thread the session's runs started, it returns once the session is cancelled, and
-   * the run's own thread finishes the teardown. Never throws.
+   * in progress with the reason {@code "session closed"} before this returns, and that run's thread
+   * tears the session down and then settles the run's future; the close waits for that thread to
+   * end, so none of the future's callbacks runs on the closing thread. Without a run in progress
+   * the caller tears the session down. The run's end and the teardown share one deadline, {@code
+   * stopGrace} from now; a step after one that used it up still runs but is not waited for. Called
+   * on a thread the session's runs started, it returns once the session is cancelled. Never throws.
    */
   void close() {
     var deadline = BoundedTask.deadlineAfter(limits.stopGrace());
@@ -116,18 +115,11 @@ final class SessionLifecycle {
     var run = runs.close();
     session.ending().cancel("session closed");
     run.ifPresent(Run::followSession);
-    Optional<Error> carried = Optional.empty();
-    if (run.isPresent()) {
-      if (runs.isWorkerThread()) {
-        return;
-      }
-      var left = run.get().left();
-      if (BoundedTask.settlesBy(left, deadline)) {
-        carried = left.resultNow();
-      }
+    if (run.isPresent() && Run.isThreadOf(session)) {
+      return;
     }
-    tearDown(deadline, carried);
-    run.ifPresent(ended -> BoundedTask.settlesBy(ended.settled(), deadline));
+    run.ifPresent(running -> running.awaitEnd(deadline));
+    tearDown(deadline, Optional.empty());
   }
 
   /** Expire the run in progress as its wall clock does, for tests. */
