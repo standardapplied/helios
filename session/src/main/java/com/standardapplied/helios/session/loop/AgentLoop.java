@@ -178,8 +178,7 @@ public final class AgentLoop {
   /**
    * The classifier's and the pre-stop hooks' verdict on a turn, decided through {@code boundary}: a
    * {@code Success} that holds only while no message is queued gives way to a message sent
-   * meanwhile, and the turn is classified again as one with a message queued. A cancellation that
-   * arrived while the hooks ran, or before the boundary decided the end, overrides their verdict.
+   * meanwhile, and the turn is classified again as one with a message queued.
    */
   private Optional<ResultMessage> classify(
       SessionState state, SessionLimits limits, RunBoundary boundary, TurnOutcome outcome) {
@@ -188,10 +187,10 @@ public final class AgentLoop {
     if (verdict.isEmpty()) {
       return Optional.empty();
     }
-    var hookVerdict = preStop.resolve(state, verdict.get(), outcome);
     var resolved =
-        unlessCancelled(
-            state, limits, hookVerdict.or(() -> classifier.classify(state, limits, outcome, true)));
+        preStop
+            .resolve(state, verdict.get(), outcome)
+            .or(() -> classifier.classify(state, limits, outcome, true));
     if (resolved.isEmpty()) {
       return Optional.empty();
     }
@@ -208,15 +207,6 @@ public final class AgentLoop {
   }
 
   /**
-   * {@code verdict}, or the terminal a limit or the cancellation imposes once the run was
-   * cancelled.
-   */
-  private Optional<ResultMessage> unlessCancelled(
-      SessionState state, SessionLimits limits, Optional<ResultMessage> verdict) {
-    return state.cancellation().isCancelled() ? classifier.imposed(state, limits) : verdict;
-  }
-
-  /**
    * Decide through {@code boundary} that the run ends with {@code result}, a non-natural stop: a
    * hook's {@code Stop}, a limit, a run with no user message or a failure.
    */
@@ -228,10 +218,13 @@ public final class AgentLoop {
 
   /**
    * Record the run's final terminal: {@code result}, unless a cancellation that arrived before the
-   * boundary decided the end imposes its own.
+   * boundary decided the end, while a hook or the turn ran, imposes its own.
    */
   private ResultMessage finished(SessionState state, SessionLimits limits, ResultMessage result) {
-    var terminal = unlessCancelled(state, limits, Optional.of(result)).orElseThrow();
+    var terminal =
+        state.cancellation().isCancelled()
+            ? classifier.imposed(state, limits).orElseThrow()
+            : result;
     state.setFinalTerminal(terminal);
     return terminal;
   }
