@@ -107,7 +107,8 @@ final class SessionLifecycle {
    * end, so none of the future's callbacks runs on the closing thread. Without a run in progress
    * the caller tears the session down. The run's end and the teardown share one deadline, {@code
    * stopGrace} from now; a step after one that used it up still runs but is not waited for. Called
-   * on a thread the session's runs started, it returns once the session is cancelled. Never throws.
+   * on a thread the run in progress started, it returns once the session is cancelled. Never
+   * throws.
    */
   void close() {
     var deadline = BoundedTask.deadlineAfter(limits.stopGrace());
@@ -115,7 +116,7 @@ final class SessionLifecycle {
     var run = runs.close();
     session.ending().cancel("session closed");
     run.ifPresent(Run::followSession);
-    if (run.isPresent() && Run.isThreadOf(session)) {
+    if (run.isPresent() && run.get().isThreadOfThisRun()) {
       return;
     }
     run.ifPresent(running -> running.awaitEnd(deadline));

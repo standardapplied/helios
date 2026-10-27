@@ -99,10 +99,12 @@ final class Run {
         .orElseThrow(() -> new IllegalStateException("no run started this thread"));
   }
 
-  /** Whether a run of {@code session}'s session started the calling thread, directly or not. */
-  static boolean isThreadOf(SessionState session) {
-    var bound = CURRENT.get();
-    return bound != null && bound.ending() == session.ending();
+  /**
+   * Whether this run started the calling thread, directly or not. A thread an earlier run started,
+   * such as a pooled thread a tool's work created, is not this run's.
+   */
+  boolean isThreadOfThisRun() {
+    return CURRENT.get() == state;
   }
 
   /**

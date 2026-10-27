@@ -18,7 +18,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -89,6 +92,59 @@ final class SessionCloseTest {
     assertEquals(Thread.State.TIMED_WAITING, closing.getState(), "close returned before settling");
     release.countDown();
     Await.termination("the close", closing);
+  }
+
+  @Test
+  void aCloseFromAPooledThreadAnEarlierRunCreatedWaitsForTheTeardown() {
+    var pool = Executors.newSingleThreadExecutor();
+    var blocked = new CountDownLatch(1);
+    var tool =
+        binding(
+            "work",
+            (args, ctx) -> {
+              try {
+                if (args.get("step").equals("warm")) {
+                  pool.submit(() -> {}).get();
+                } else {
+                  blocked.countDown();
+                  new CountDownLatch(1).await();
+                }
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              } catch (ExecutionException e) {
+                throw new IllegalStateException(e);
+              }
+              return ToolResult.success("done");
+            });
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "work", Map.of("step", "warm")))
+            .withTextTurn("one")
+            .withToolCallsTurn(new ToolCall("c2", "work", Map.of("step", "block")))
+            .withTextTurn("two")
+            .build();
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var session =
+        AgentSession.open(
+            options(model)
+                .withTools(List.of(tool))
+                .withExecutionProvider(provider)
+                .withLimits(slowGrace())
+                .build());
+    Await.value("run 1", session.send("warm the pool"));
+    var run = session.send("block");
+    Await.latch("run 2's tool", blocked);
+
+    var endsOnReturn =
+        pool.submit(
+            () -> {
+              session.close();
+              return provider.ends.get();
+            });
+
+    assertEquals(1, Await.value("the close on the pooled thread", endsOnReturn));
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("run 2", run));
+    pool.shutdown();
   }
 
   private static SessionOptions.Builder options(ScriptedModel model) {
