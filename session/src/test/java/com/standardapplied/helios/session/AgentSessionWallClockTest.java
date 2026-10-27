@@ -7,19 +7,28 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.testing.ScriptedModel;
+import com.sun.management.HotSpotDiagnosticMXBean;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Regression coverage for the "session hangs past {@code maxWallClock}" bug surfaced in a client
@@ -39,6 +48,7 @@ final class AgentSessionWallClockTest {
 
   private static final String SESSION_ID = "sess-hang-wallclock";
   private static final String EXPIRED = "maxWallClock exceeded after 500ms";
+  private static final String WALL_CLOCK_THREAD = "\"helios-wall-clock-" + SESSION_ID + "\"";
 
   private final CountDownLatch entered = new CountDownLatch(1);
   private final CountDownLatch closed = new CountDownLatch(1);
@@ -83,14 +93,42 @@ final class AgentSessionWallClockTest {
   }
 
   @Test
-  void aRunningSessionHoldsNoDeadlinePlatformThread() {
+  void aRunningSessionHoldsNoPlatformThreadAndItsWallClockIsAVirtualOne(@TempDir Path dumps) {
     try (var session = AgentSession.create(options())) {
       session.send(UserMessage.text("hi"));
       Await.latch("the stream to be read", entered);
 
       var names = Thread.getAllStackTraces().keySet().stream().map(Thread::getName).toList();
 
-      assertFalse(names.contains("helios-deadline-" + SESSION_ID), names::toString);
+      assertFalse(names.stream().anyMatch(name -> name.contains(SESSION_ID)), names::toString);
+      assertTrue(threadDump(dumps).contains(WALL_CLOCK_THREAD), "the wall clock runs");
+    }
+  }
+
+  @Test
+  void aSessionThatEndsBeforeItsDeadlineLeavesNoWallClockThreadBehind(@TempDir Path dumps) {
+    var options =
+        options().toBuilder()
+            .withModel(ScriptedModel.newBuilder().withTextTurn("done").build())
+            .withLimits(SessionLimits.defaults())
+            .build();
+    try (var session = AgentSession.create(options)) {
+      session.send(UserMessage.text("hi"));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+    }
+
+    Await.until("the wall clock to end", () -> !threadDump(dumps).contains(WALL_CLOCK_THREAD));
+  }
+
+  /** Every live thread, virtual ones included, as the JVM's JSON thread dump lists them. */
+  private static String threadDump(Path dumps) {
+    var dump = dumps.resolve(UUID.randomUUID() + ".json");
+    try {
+      ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
+          .dumpThreads(dump.toString(), HotSpotDiagnosticMXBean.ThreadDumpFormat.JSON);
+      return Files.readString(dump);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
   }
 
