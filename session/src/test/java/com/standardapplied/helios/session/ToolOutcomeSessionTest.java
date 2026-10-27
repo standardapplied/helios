@@ -138,10 +138,10 @@ final class ToolOutcomeSessionTest {
             .withModel(model)
             .build();
 
-    try (var session = AgentSession.create(options)) {
-      session.send(UserMessage.text("go"));
+    try (var session = AgentSession.open(options)) {
+      var future = session.send(UserMessage.text("go"));
 
-      assertSame(sentinel, Await.failure("the session to fail", session.result()));
+      assertSame(sentinel, Await.failure("the session to fail", future));
     }
     assertEquals(1, model.calls().size());
     assertEquals(0, laterCalls.get());
@@ -284,16 +284,15 @@ final class ToolOutcomeSessionTest {
             .withTextTurn("done")
             .build();
     var events = new EventCollector();
-    try (var session = AgentSession.create(options.withModel(model).build())) {
+    try (var session = AgentSession.open(options.withModel(model).build())) {
       events.read(session.events());
-      session.send(UserMessage.text("go"));
+      var future = session.send(UserMessage.text("go"));
       Await.latch("the first call to start", entered);
 
       session.close();
 
-      assertInstanceOf(
-          ResultMessage.Cancelled.class, Await.value("the session to end", session.result()));
-      events.awaitDone();
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the session to end", future));
+      events.awaitRunEnded();
     }
     assertEquals(
         List.of(

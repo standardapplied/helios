@@ -40,12 +40,12 @@ Helios is used in production but has documented limitations that you should unde
 ### What's hardened
 
 - **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. Every HTTP route authenticates the request through the configured `Authenticator` and acts only on the caller's own sessions; an unauthenticated server (`withoutAuthentication()`) is accepted only on a loopback bind.
-- **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable`. An `Error` (OOM, StackOverflow, LinkageError, an `AssertionError`) caught on any thread the session runs work on (the loop, the model stream, a tool, a hook, a cancellation callback, the execution provider's start and end) is never retried or turned into a tool result or terminal: it ends the session, no further model or tool call is made, and `result()` completes exceptionally with the first such `Error`, as the same instance (later ones suppressed on it; one arriving after the result settled is logged at `SEVERE`). The loop's virtual thread then ends by throwing it to its uncaught-exception handler. That ends the thread, not the JVM; what an `Error` means for the process is the host's decision. A failure inside the sandbox child process stays contained and comes back as tool output. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
+- **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable`. An `Error` (OOM, StackOverflow, LinkageError, an `AssertionError`) caught on any thread the session runs work on (the loop, the model stream, a tool, a hook, a cancellation callback, the execution provider's start and end) is never retried or turned into a tool result or terminal: it ends the session, no further model or tool call is made, and the run's future completes exceptionally with the first such `Error`, as the same instance, and the session closes (later ones suppressed on it; one no run carries is logged at `SEVERE`). The run's virtual thread then ends by throwing it to its uncaught-exception handler. That ends the thread, not the JVM; what an `Error` means for the process is the host's decision. A failure inside the sandbox child process stays contained and comes back as tool output. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. A snippet that outlives its timeout is stopped through `jshell.stop()`, repeated until it and every thread it started have ended; one still running after `JvmSandboxConfig.stopGrace` (5 s by default) cannot be reached inside the JVM, so the sandbox answers the execute and halts with exit code 3.
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **One secret registry per session, applied where tool output enters it.** `SessionOptions.withSecretRegistry(registry)` gives the session its `SecretRegistry`. The session redacts every tool result's text once, before its `ToolResult` event, a `PostToolUse` hook or the history sees it, and the messages of every error it reports. Output cut at a size cap first loses any trailing start of a registered secret. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials. See [Secret redaction](#secret-redaction-secretregistry--redactor) for the promise and what it does not cover.
-- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `LoopEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
+- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
 - **Test coverage.** JaCoCo gates at 95% instruction / 90% branch on `helios-core`, `helios-session`, `helios-runtime`. Tests across the project: ~3,200 unit tests. Provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) are gated by environment variables for live-API integration tests; CI runs unit tests without those keys.
 
 ### Known limitations
@@ -238,12 +238,12 @@ not use.
 
 ### 2) Streamable session
 
-`AgentSession` is a long-lived object that runs an agent loop on a virtual thread. `send` messages, read `events()` with for-each, `interrupt` mid-turn, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, mid-run user steering, permission gates, observability.
+`AgentSession` is a conversation that runs many times. Each `send` steers the run in progress or starts the next one and returns that run's result future; read `events()` with for-each, `interrupt()` the current run, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, follow-up questions, mid-run user steering, permission gates, observability.
 
 <!-- snippet: QuickStarts#workspaceSession -->
 ```java
 try (var session =
-    AgentSession.create(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
+    AgentSession.open(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
   var terminal =
       session.runBlocking(UserMessage.text("Summarise the public API of the session module."));
   System.out.println(((ResultMessage.Success) terminal).result());
@@ -282,15 +282,25 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 
 ## Sessions (`helios-session`)
 
-`AgentSession.create(SessionOptions)` returns a session that drives an agent loop on a virtual thread the first time you `send`. Key surfaces:
+A *session* is a conversation; a *run* is one execution, from the message that starts it to its terminal `ResultMessage`; a *turn* is one model call and its tool round. `AgentSession.open(SessionOptions)` opens a session with no run. Key surfaces:
 
-- `send(UserMessage)` — queue a message (steering queue, drained per-iteration).
-- `events()` — a new `EventStream` per call, an `Iterable<QueryEvent>` that is also `AutoCloseable`, read once with for-each (text, thinking, citations, tool use and results, hooks, context warning/edited, questions, retries, turn and loop ends, errors).
-- `result()` — `CompletableFuture<ResultMessage>` for blocking await.
-- `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — synchronous convenience for one-shot use.
-- `interrupt(reason)` — queue a synthetic mid-run user message.
-- `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open.
-- `close()` — `AutoCloseable`; cancels the loop and never throws, whatever a cancellation callback does. A started session's loop runs the teardown and `close()` returns at once; for a session whose loop never started, `close()` runs the teardown on the caller's thread, so it can block for up to `SessionLimits.stopGrace` (5 s). Every end of a session runs one teardown, bounded by one `stopGrace` deadline, before the result settles: cancel the session's token (its callbacks on a thread of their own) and wait for live tool calls and `onSessionEnd` until that deadline; then end the event streams without waiting for their readers. A step after one that used the deadline up still runs but is not waited for. A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
+- `send(UserMessage)` — steer the run in progress, or start the next run when none is in progress; returns that run's `CompletableFuture<ResultMessage>`. A session runs again after any ending (success, a limit, a cancel, an error) until it is closed, and every run sees the whole conversation.
+- `events()` — a new `EventStream` per call, an `Iterable<QueryEvent>` that is also `AutoCloseable`, read once with for-each, across every run until the session closes (`RunStarted` and `RunEnded` bracket each run; every event names its `runId`).
+- `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — `send(msg).join()`, and its typed variant.
+- `interrupt()` — cancel the run in progress (`Cancelled`, reason `"interrupted"`); the session stays open.
+- `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open. A run's end cancels its unanswered questions.
+- `close()` — `AutoCloseable`; never throws. It cancels the run in progress (`"session closed"`), waits for it, then tears the session down: `onSessionEnd` for a session with an execution provider, then the event streams, without waiting for their readers. The run's end and the teardown share one deadline, `SessionLimits.stopGrace` (5 s) from the start of `close()`; a step after one that used it up still runs but is not waited for. A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
+
+<!-- snippet: QuickStarts#chat -->
+```java
+try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
+  var answer = session.send("Which classes form the session's public API?").join();
+  var followUp = session.send("Which of them does a chat application need?").join();
+  System.out.println(answer + "\n" + followUp);
+}
+```
+
+`maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run. A run that ends with tool calls unanswered (a hook's `Stop`, an interrupt, an error) answers each with a "not run" tool message, so the next run's history is one a provider accepts. An execution provider that refuses at `open` makes it throw `SessionUnavailableException`.
 
 `SessionPresets` ships three curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
@@ -298,7 +308,7 @@ An id starting `perm-` asks to approve a tool call; one starting `q-` is the mod
 - `readOnly(model, root)` — `Read` / `Glob` / `Grep` / `LS` rooted at the workspace, gated by `Permission.planMode()`.
 - `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
 
-Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), and `withAskUserQuestion()` adds `AskUserQuestion`. Two tools with one name fail `AgentSession.create`.
+Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), and `withAskUserQuestion()` adds `AskUserQuestion`. Two tools with one name fail `AgentSession.open`.
 
 Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
 
@@ -324,7 +334,7 @@ The loop terminates when the model's `FinishReason` indicates the session is don
 
 ### Event delivery semantics
 
-`AgentSession.events()` opens a new `EventStream` per call, attached before it returns, with its own 256-event buffer. The loop offers each event to every open stream on its own thread and never waits for a reader on a routine event (text, tool use, hook fired): a stream whose buffer is full misses it at once. Control events (`LoopEnded`, `QuestionAsked`, `Error`) wait up to 30 s for room in each full stream, then are dropped there. A reader that pauses indefinitely sees a gap in its stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control). A dropped terminal stays readable through `result()`, a dropped question through `pendingQuestions()`. A stream ends when its reader closes it, when the session ended and the reader has read every buffered event, or when the reading thread is interrupted. One opened after the session ended holds its `LoopEnded` once, then ends. Every event is in each stream's buffer, or missed by it, before `result()` completes, but the session does not wait for readers. A reader that must have handled `LoopEnded` before `result()` returns synchronises with its own reading thread.
+`AgentSession.events()` opens a new `EventStream` per call, attached before it returns, with its own 256-event buffer. The loop offers each event to every open stream on its own thread and never waits for a reader on a routine event (text, tool use, hook fired): a stream whose buffer is full misses it at once. Control events (`RunEnded`, `QuestionAsked`, `Error`) wait up to 30 s for room in each full stream, then are dropped there. A reader that pauses indefinitely sees a gap in its stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control). A dropped terminal stays readable through the future `send` returned, a dropped question through `pendingQuestions()`. A stream spans every run of the session; it ends when its reader closes it, when the session closed and the reader has read every buffered event, or when the reading thread is interrupted. One opened after the session closed ends at once; nothing is replayed. Every event of a run is in each stream's buffer, or missed by it, before the run's future completes, but the session does not wait for readers. A reader that must have handled `RunEnded` before the future returns synchronises with its own reading thread.
 
 ### Context compaction
 
@@ -359,7 +369,7 @@ var options = SessionPresets.workspace(model, repo).withContextCompactor(archivi
 ```java
 try (var model = new AnthropicProvider().create(modelId, config)) {
   for (var request : requests) {
-    try (var session = AgentSession.create(SessionPresets.workspace(model, repo).build())) {
+    try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
       session.runBlocking(UserMessage.text(request));
     }
   }
@@ -502,7 +512,7 @@ var result = ft.execute(() -> model.chat(messages, List.of()));   // checked exc
 
 ## Observability
 
-The session's `events()` stream is the primary observability surface. Read an `EventStream` on a thread of your own (or register an `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `LoopEnded`, etc.).
+The session's `events()` stream is the primary observability surface. Read an `EventStream` on a thread of your own (or register an `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `RunStarted`, `RunEnded`, etc.).
 
 ```java
 try (var events = session.events()) {
@@ -510,7 +520,7 @@ try (var events = session.events()) {
     switch (ev) {
       case QueryEvent.ToolUse t -> log.info("tool: {} args={}", t.call().name(), t.call().arguments());
       case QueryEvent.ContextWarning w -> metrics.recordContextFill(w.usagePct());
-      case QueryEvent.LoopEnded e -> auditSink.flush(e.result());
+      case QueryEvent.RunEnded e -> auditSink.flush(e.result());
       default -> { /* skip */ }
     }
   }
@@ -543,7 +553,7 @@ var quote = new HostFunction(
 
 try (var executionProvider = JShellExecutionProvider.create(
          ReplConfig.newBuilder().withHostFunction(quote).build());
-     var session = AgentSession.create(
+     var session = AgentSession.open(
          SessionOptions.newBuilder()
              .withModel(model)
              .withExecutionProvider(executionProvider)
@@ -641,7 +651,7 @@ var options = SessionOptions.newBuilder()
     .build();
 ```
 
-**The promise: no registered value reaches the model, and none appears in anything the session emits.** Each session has one registry, set with `SessionOptions.withSecretRegistry` (default: a new empty registry, which redacts nothing; sessions built from the same options share it). The session redacts each tool result's text once, right after the tool returns, before its `QueryEvent.ToolResult` (in-process subscribers, `OnStreamEvent` hooks, the runtime's SSE stream), `PostToolUse` hooks and the conversation history see it. That covers every tool — built-in, custom, `MemoryRead`, `CommandGrant`, `Execute` — successes and failures, the results the loop substitutes (blocked, skipped, timed out, threw, not found, dispatch failed), and the text a `PostToolUse` `MutateResult` supplies. `QueryEvent.ToolResult.redactions()` reports how many occurrences of each secret that pass replaced. The messages of every error the session reports — `TurnRetried`, error terminals, `ErrorProviderUnavailable`'s reason and cause — are redacted the same way. Each redaction takes a fresh snapshot of the registry, so a secret registered mid-session (a tool can reach the registry through `ToolContext.sessionContext().secrets()`) is honoured from the next result on. Where a tool cuts its output at a size cap (`CommandGrant`, `LocalProcessExecutionProvider`, `Read`'s per-line cap), the cut first drops any trailing start of a registered secret, so half a secret never survives the cap. The arguments that `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carry are redacted the same way, in keys and string values, while the tool, its `PreToolUse` and `PostToolUse` hooks and the history see them as written; a `ToolBlocked` reason is redacted too, and a hook's or tool's failure the session logs attaches a redacted copy of the exception.
+**The promise: no registered value reaches the model, and none appears in anything the session emits.** Each session has one registry, set with `SessionOptions.withSecretRegistry` (default: a new empty registry, which redacts nothing; sessions built from the same options share it). The session redacts each tool result's text once, right after the tool returns, before its `QueryEvent.ToolResult` (in-process subscribers, `OnStreamEvent` hooks, the runtime's SSE stream), `PostToolUse` hooks and the conversation history see it. That covers every tool — built-in, custom, `MemoryRead`, `CommandGrant`, `Execute` — successes and failures, the results the loop substitutes (blocked, skipped, timed out, threw, not found, dispatch failed), and the text a `PostToolUse` `MutateResult` supplies. `QueryEvent.ToolResult.redactions()` reports how many occurrences of each secret that pass replaced. The messages of every error the session reports — `TurnRetried`, error terminals, a `SessionUnavailableException`'s reason — are redacted the same way. Each redaction takes a fresh snapshot of the registry, so a secret registered mid-session (a tool can reach the registry through `ToolContext.sessionContext().secrets()`) is honoured from the next result on. Where a tool cuts its output at a size cap (`CommandGrant`, `LocalProcessExecutionProvider`, `Read`'s per-line cap), the cut first drops any trailing start of a registered secret, so half a secret never survives the cap. The arguments that `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carry are redacted the same way, in keys and string values, while the tool, its `PreToolUse` and `PostToolUse` hooks and the history see them as written; a `ToolBlocked` reason is redacted too, and a hook's or tool's failure the session logs attaches a redacted copy of the exception.
 
 Not covered:
 

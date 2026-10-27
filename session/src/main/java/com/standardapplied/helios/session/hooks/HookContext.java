@@ -8,9 +8,9 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 
 /**
- * Per-invocation context passed to every {@link Hook} call. Carries the session-wide handles a hook
- * may need to make a decision — session id, current turn index, cancellation token, and the model
- * itself (for hooks that want to call out for judgment).
+ * Per-invocation context passed to every {@link Hook} call. Carries the handles a hook may need to
+ * make a decision — session id, run id, the run's current turn index, the run's cancellation token,
+ * and the model itself (for hooks that want to call out for judgment).
  *
  * <h2>Thread-safety</h2>
  *
@@ -26,16 +26,23 @@ public interface HookContext {
   String sessionId();
 
   /**
-   * The agent-loop turn index at the moment the hook is firing. For pre-turn hooks this is the
-   * index of the turn that is about to start; for post-turn hooks it is the index of the turn that
-   * just ended.
+   * The run of the session that produced this hook invocation.
+   *
+   * @return non-blank run id
+   */
+  String runId();
+
+  /**
+   * The run's turn index at the moment the hook is firing. For pre-turn hooks this is the index of
+   * the turn that is about to start; for post-turn hooks it is the index of the turn that just
+   * ended.
    *
    * @return non-negative turn index
    */
   long turnIndex();
 
   /**
-   * The session's cancellation token. Hooks performing long-running work — e.g. a devil's-advocate
+   * The run's cancellation token. Hooks performing long-running work — e.g. a devil's-advocate
    * model call — should poll this at safe points.
    *
    * @return non-null token

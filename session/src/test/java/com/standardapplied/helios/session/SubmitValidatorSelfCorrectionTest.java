@@ -41,7 +41,7 @@ class SubmitValidatorSelfCorrectionTest {
   private static final String PEOPLE = "{\"kind\":\"people\",\"body\":\"b\"}";
 
   private static AgentSession session(ScriptedModel model, OutputSchema<?> schema, int maxTurns) {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder()
             .withModel(model)
             .withSessionId("sess-submit-validator")

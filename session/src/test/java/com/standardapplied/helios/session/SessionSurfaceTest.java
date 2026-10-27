@@ -105,7 +105,7 @@ final class SessionSurfaceTest {
   void twoToolsWithOneNameFailTheSessionsCreation() {
     var options = minimal(answering()).withTool(tool("X")).withTool(tool("X")).build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("duplicate tool name in registry: X", thrown.getMessage());
   }
@@ -115,7 +115,7 @@ final class SessionSurfaceTest {
     var options =
         SessionPresets.workspace(answering(), root).withTool(tool(MemoryWriteTool.NAME)).build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("duplicate tool name in registry: MemoryWrite", thrown.getMessage());
   }
@@ -175,7 +175,7 @@ final class SessionSurfaceTest {
             .withTool(ExecuteTool.binding(provider))
             .build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("duplicate tool name in registry: Execute", thrown.getMessage());
     assertEquals(0, provider.starts.get());
@@ -185,7 +185,7 @@ final class SessionSurfaceTest {
   void aHandExecuteBindingWithoutAProviderFailsTheSessionsCreationBeforeItStarts() {
     var options = minimal(answering()).withTool(ExecuteTool.binding(provider)).build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals(
         "Execute requires withExecutionProvider(provider); remove the hand Execute binding",
@@ -244,7 +244,7 @@ final class SessionSurfaceTest {
     var options =
         minimal(answering()).withAskUserQuestion().withTool(tool(AskUserQuestionTool.NAME)).build();
 
-    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.create(options));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> AgentSession.open(options));
 
     assertEquals("duplicate tool name in registry: AskUserQuestion", thrown.getMessage());
   }
@@ -332,12 +332,12 @@ final class SessionSurfaceTest {
       OfferingModel model,
       SessionOptions.Builder options,
       Function<AgentSession, Consumer<QueryEvent>> reactions) {
-    try (var session = AgentSession.create(options.withModel(model).build())) {
+    try (var session = AgentSession.open(options.withModel(model).build())) {
       var events = new EventCollector(reactions.apply(session));
       events.read(session.events());
-      session.send(UserMessage.text("go"));
-      var terminal = Await.value("the session to end", session.result());
-      events.awaitDone();
+      var future = session.send(UserMessage.text("go"));
+      var terminal = Await.value("the session to end", future);
+      events.awaitRunEnded();
       return new Run(events, terminal);
     }
   }

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.helidon.webserver.WebServer;
 import io.helidon.webserver.http.HttpRouting;
@@ -123,23 +124,24 @@ final class AgentHttpServiceOnAnyServerTest {
     session
         .streams
         .getFirst()
-        .push(new QueryEvent.AssistantText(sessionId, 0L, Instant.EPOCH, "hello"));
+        .push(new QueryEvent.AssistantText(sessionId, "run-1", 0L, Instant.EPOCH, "hello"));
     assertEquals(
         List.of(
             "event:AssistantText",
             "data:{\"sessionId\":\""
                 + sessionId
-                + "\",\"turnIndex\":0,\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}",
+                + "\",\"runId\":\"run-1\",\"turnIndex\":0,\"timestamp\":\"1970-01-01T00:00:00Z\",\"text\":\"hello\"}",
             ""),
         lines(events, 3));
 
+    registry.lookup(sessionId, ALICE).orElseThrow().send(UserMessage.text("go"));
     session.terminate();
     var result = send("GET", "/sessions/" + sessionId + "/result?timeout=0", "alice");
     assertJson(
         200,
-        "{\"type\":\"Success\",\"result\":{\"sessionId\":\""
+        "{\"type\":\"Success\",\"runId\":\"run-1\",\"result\":{\"sessionId\":\""
             + sessionId
-            + "\",\"result\":\"ok\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,"
+            + "\",\"runId\":\"run-1\",\"result\":\"ok\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,"
             + "\"cacheCreationInputTokens\":0,\"cacheReadInputTokens\":0,\"totalTokens\":0},"
             + "\"cost\":{\"microUsd\":0},\"duration\":\"PT0S\",\"citations\":[]}}",
         result);

@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,7 +63,7 @@ class SessionRunCharacterizationTest {
     var run = new Run();
 
     try (var session = run.start()) {
-      var terminal = Await.value("the scripted run's terminal", session.result());
+      var terminal = Await.value("the scripted run's terminal", run.result);
       var events = run.awaitEvents();
       run.assertEveryCallCarriedTheSchema();
 
@@ -97,7 +98,7 @@ class SessionRunCharacterizationTest {
         };
 
     try (var session = run.start()) {
-      var terminal = Await.value("the wall-clock terminal", session.result());
+      var terminal = Await.value("the wall-clock terminal", run.result);
 
       assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, terminal);
       run.assertEveryCallCarriedTheSchema();
@@ -117,7 +118,7 @@ class SessionRunCharacterizationTest {
     var session = run.start();
     Await.latch("the stalled schema turn", stalled);
     session.close();
-    var terminal = Await.value("the cancelled terminal", session.result());
+    var terminal = Await.value("the cancelled terminal", run.result);
 
     var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, terminal);
     assertEquals("session closed", cancelled.reason());
@@ -134,7 +135,7 @@ class SessionRunCharacterizationTest {
         };
 
     try (var session = run.start()) {
-      var failure = Await.failure("the escaped error", session.result());
+      var failure = Await.failure("the escaped error", run.result);
 
       assertInstanceOf(AssertionError.class, failure);
       assertEquals("hook bug", failure.getMessage());
@@ -145,11 +146,13 @@ class SessionRunCharacterizationTest {
 
   private static void assertShutDown(AgentSession session) {
     var impl = (AgentSessionImpl) session;
+    session.close();
     assertEquals(0, impl.lifecycle.events().openStreams(), "event streams ended");
   }
 
   private static final List<String> EXPECTED_EVENTS =
       List.of(
+          "RunStarted turn=0 run",
           "UserMessageReceived turn=0 start files=1",
           "HookFired turn=1 SessionRunCharacterizationTest$Run PreModelTurnHook Inject",
           "TurnEnded turn=1 TOOL_CALLS",
@@ -176,7 +179,7 @@ class SessionRunCharacterizationTest {
           "UserMessageReceived turn=4 pre-stop inject files=0",
           "AssistantText turn=5 {\"answer\":\"final\"}",
           "TurnEnded turn=5 STOP",
-          "LoopEnded turn=5 Success");
+          "RunEnded turn=5 Success");
 
   private static final List<String> EXPECTED_FINAL_MODEL_INPUT =
       List.of(
@@ -191,6 +194,7 @@ class SessionRunCharacterizationTest {
   private static final class Run {
 
     final AtomicReference<Instant> now = new AtomicReference<>(START);
+    CompletableFuture<ResultMessage> result;
     final List<CloseableIterator<ModelChunk>> replies =
         new ArrayList<>(
             List.of(
@@ -259,7 +263,7 @@ class SessionRunCharacterizationTest {
       replies.forEach(script::withStreamTurn);
       model = script.build();
       var session =
-          AgentSession.create(
+          AgentSession.open(
               SessionOptions.newBuilder()
                   .withModel(model)
                   .withSessionId("characterization")
@@ -278,16 +282,17 @@ class SessionRunCharacterizationTest {
                   .withHook(preStop)
                   .build());
       events.read(session.events());
-      session.send(
-          UserMessage.newBuilder()
-              .withText("start")
-              .withAttachment(new byte[] {1, 2, 3}, "image/png")
-              .build());
+      result =
+          session.send(
+              UserMessage.newBuilder()
+                  .withText("start")
+                  .withAttachment(new byte[] {1, 2, 3}, "image/png")
+                  .build());
       return session;
     }
 
     List<QueryEvent> awaitEvents() {
-      events.awaitDone();
+      events.awaitRunEnded();
       return events.events();
     }
 
@@ -358,7 +363,8 @@ class SessionRunCharacterizationTest {
           case QueryEvent.ContextWarning e -> String.valueOf(e.usagePct());
           case QueryEvent.ContextEdited e ->
               "removed=" + e.removedBlocks() + " " + e.tokensBefore() + "->" + e.tokensAfter();
-          case QueryEvent.LoopEnded e -> e.result().getClass().getSimpleName();
+          case QueryEvent.RunStarted e -> e.runId().startsWith("run-") ? "run" : e.runId();
+          case QueryEvent.RunEnded e -> e.result().getClass().getSimpleName();
           default -> "";
         };
     return event.getClass().getSimpleName() + " turn=" + event.turnIndex() + " " + detail;

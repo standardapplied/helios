@@ -89,7 +89,7 @@ final class ProgressNotesSessionTest {
                         .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS))
                         .build());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withTools(List.of(searchProfiles()))
@@ -97,7 +97,7 @@ final class ProgressNotesSessionTest {
       events.read(session.events());
 
       var terminal = session.runBlocking(UserMessage.text("Who should I meet?"));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertInstanceOf(ResultMessage.Success.class, terminal);
       var notes = events.eventsOf(QueryEvent.AssistantThinking.class);

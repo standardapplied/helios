@@ -14,12 +14,7 @@ import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.loop.AgentLoop;
-import com.standardapplied.helios.session.loop.HookRegistry;
-import com.standardapplied.helios.session.loop.LoopCollaborators;
 import com.standardapplied.helios.session.loop.SessionState;
-import com.standardapplied.helios.session.loop.StopClassifier;
-import com.standardapplied.helios.session.loop.ToolDispatch;
-import com.standardapplied.helios.session.loop.TurnRunner;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -28,70 +23,68 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Concrete {@link AgentSession} implementation.
  *
- * <p>One instance per session. Builds the loop substrate ({@link SessionState}, {@link
- * SteeringQueue}, {@link HookRegistry}, {@link ToolDispatch}, {@link LoopCollaborators}, {@link
- * TurnRunner}, {@link StopClassifier}, {@link AgentLoop}) in the constructor, the loop through
- * {@link SessionWiring}, and notifies the execution provider last; its {@link SessionLifecycle}
- * defers starting the agent-loop virtual thread until the first {@link #send(UserMessage)} or
- * {@link #interrupt(String)} call so streams opened between construction and first send observe
- * every event. Open {@code AskUserQuestion} questions are its {@link PendingQuestions}.
+ * <p>One instance per session. Builds the session's own {@link SessionState} (its history, its
+ * token and its ending), the {@link SteeringQueue} and the {@link SessionLifecycle} in the
+ * constructor, the loop through {@link SessionWiring}, and notifies the execution provider last.
+ * The lifecycle's {@link SessionRuns} run one run at a time, each on a virtual thread of its own
+ * with a {@link SessionState} of its own sharing the session's history. Open questions are its
+ * {@link PendingQuestions}, each of which belongs to the run that asked it.
  *
  * <h2>Event delivery</h2>
  *
  * Events flow through the session's {@link SessionEventPublisher}: live fan-out into each reader's
- * bounded {@link EventStream}, and replay of the terminal {@link QueryEvent.LoopEnded} to a stream
- * opened after the session ended.
+ * bounded {@link EventStream}, across every run, until the session is closed.
  *
  * <h2>Thread-safety</h2>
  *
  * Thread-safe. Producer threads (HTTP, UI) call {@link #send}/{@link #interrupt}/{@link #close}
- * concurrently; the agent loop runs on a dedicated virtual thread. Atomic flags coordinate
- * lifecycle. The loop is the only writer to {@link SessionState}'s mutable fields aside from {@code
- * close()}'s pre-start terminal write, which is guarded by the same compare-and-set as the loop
- * launch — at most one of the two paths executes.
+ * concurrently; {@code send} and a run's decision to end take one lock in {@link SessionRuns}.
  */
 public final class AgentSessionImpl implements AgentSession {
 
   private final String sessionId;
-  private final SessionState state;
-  private final SteeringQueue steeringQueue;
   private final SessionEventPublisher events;
 
   /** Package-private for tests that assert the runtime's executors shut down. */
   final SessionLifecycle lifecycle;
 
-  private final AgentLoop loop;
-  private final CompletableFuture<ResultMessage> resultFuture = new CompletableFuture<>();
+  private final SessionRuns runs;
   private final AtomicBoolean closed = new AtomicBoolean(false);
-  private final PendingQuestions pendingQuestions;
+
+  /** Package-private for tests that ask a question from a thread that outlived its run. */
+  final PendingQuestions pendingQuestions;
+
   private final RawOutputCapturePolicy rawOutputCapturePolicy;
   private final OutputSchema<?> outputSchema;
 
   /**
-   * Build a session from a composition record.
+   * Open a session from a composition record.
    *
    * @param options the configuration bundle; non-null
    * @throws NullPointerException if {@code options} is null
+   * @throws SessionUnavailableException if the execution provider did not accept the session
    */
-  public AgentSessionImpl(SessionOptions options) {
+  AgentSessionImpl(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
     this.sessionId = options.sessionId();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
     this.outputSchema = options.outputSchema().orElse(null);
     var clock = options.clock();
     var cancellation = new CancellationToken();
-    this.state = new SessionState(sessionId, cancellation, clock);
-    options.systemPrompt().ifPresent(prompt -> this.state.history().append(Message.system(prompt)));
+    var state = new SessionState(sessionId, cancellation, clock);
+    options.systemPrompt().ifPresent(prompt -> state.history().append(Message.system(prompt)));
     var sessionContext =
         new SessionContext(sessionId, cancellation, clock, options.secretRegistry());
-    this.steeringQueue = new SteeringQueue(options.maxQueuedUserMessages());
+    var steeringQueue = new SteeringQueue(options.maxQueuedUserMessages());
     this.lifecycle =
         new SessionLifecycle(
-            state, sessionContext, options.executionProvider(), options.limits(), resultFuture);
+            state, sessionContext, options.executionProvider(), options.limits(), steeringQueue);
     this.events = lifecycle.events();
-    this.pendingQuestions = new PendingQuestions(state, events, clock);
+    this.runs = lifecycle.runs();
+    this.pendingQuestions = new PendingQuestions(Run::stateOfThisThread, events, clock);
+    AgentLoop loop;
     try {
-      this.loop =
+      loop =
           SessionWiring.agentLoop(
               options, sessionContext, pendingQuestions, steeringQueue, events, state.ending());
     } catch (RuntimeException | Error e) {
@@ -102,41 +95,14 @@ public final class AgentSessionImpl implements AgentSession {
   }
 
   @Override
-  public void send(UserMessage message) {
+  public CompletableFuture<ResultMessage> send(UserMessage message) {
     Objects.requireNonNull(message, "message must not be null");
-    if (closed.get()) {
-      throw new IllegalStateException("session is closed");
-    }
-    if (state.isTerminal() || resultFuture.isDone()) {
-      throw new IllegalStateException("session is terminal");
-    }
-    if (!steeringQueue.offer(message)) {
-      throw new SteeringQueueFullException(
-          "steering queue full at capacity " + steeringQueue.capacity());
-    }
-    lifecycle.startIfNeeded();
+    return runs.send(message);
   }
 
   @Override
-  public void interrupt(String reason) {
-    Objects.requireNonNull(reason, "reason must not be null");
-    if (Strings.isBlank(reason)) {
-      throw new IllegalArgumentException("reason must not be blank");
-    }
-    if (closed.get()) {
-      throw new IllegalStateException("session is closed");
-    }
-    if (state.isTerminal() || resultFuture.isDone()) {
-      throw new IllegalStateException("session is terminal");
-    }
-    var synthetic = UserMessage.text("[interrupted by user: " + reason + "]");
-    if (!steeringQueue.offer(synthetic)) {
-      throw new SteeringQueueFullException(
-          "steering queue full at capacity "
-              + steeringQueue.capacity()
-              + " — cannot enqueue interrupt");
-    }
-    lifecycle.startIfNeeded();
+  public void interrupt() {
+    runs.interrupt();
   }
 
   @Override
@@ -155,13 +121,13 @@ public final class AgentSessionImpl implements AgentSession {
     var terminal = runBlocking(message);
     if (!(terminal instanceof ResultMessage.Success success)) {
       throw new IllegalStateException(
-          "session terminated as "
+          "run ended as "
               + terminal.getClass().getSimpleName()
               + "; cannot parse a typed result from a non-Success terminal");
     }
     if (Strings.isBlank(success.result())) {
       throw new IllegalStateException(
-          "session ended with Success but produced no result to parse as "
+          "run ended with Success but produced no result to parse as "
               + schema.type().getSimpleName());
     }
     return StructuredContentParser.parse(
@@ -174,23 +140,18 @@ public final class AgentSessionImpl implements AgentSession {
   }
 
   @Override
-  public CompletableFuture<ResultMessage> result() {
-    return resultFuture;
-  }
-
-  @Override
   public String sessionId() {
     return sessionId;
   }
 
   @Override
   public long currentTurnIndex() {
-    return state.currentTurnIndex();
+    return runs.activeRun().map(run -> run.state().currentTurnIndex()).orElse(0L);
   }
 
   @Override
-  public boolean isStarted() {
-    return lifecycle.isStarted();
+  public boolean isRunning() {
+    return runs.isRunning();
   }
 
   @Override

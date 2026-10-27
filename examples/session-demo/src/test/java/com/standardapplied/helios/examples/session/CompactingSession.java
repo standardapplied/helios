@@ -77,7 +77,7 @@ final class CompactingSession {
                 SessionLimits.newBuilder().withMaxContextTokens(100L).withMaxTurns(2).build())
             .withContextCompactor(recording)
             .build();
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       events.read(session.events());
       var terminal =
@@ -86,7 +86,7 @@ final class CompactingSession {
                   "A member's id is p followed by the sum of the primes below 30. Work out the"
                       + " id, look that member up with get_profile, then tell me in one sentence"
                       + " who they are."));
-      events.awaitDone();
+      events.awaitRunEnded();
       return new Run(terminal, events, Optional.ofNullable(compacted.get()));
     }
   }

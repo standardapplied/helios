@@ -37,8 +37,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Admission in {@link SessionRegistry}: the two caps hold under concurrency, a reservation is given
- * back exactly once on every path, and room is made only from the requester's own terminal
- * sessions.
+ * back exactly once on every path, and room is made only from the requester's own idle sessions.
  */
 final class SessionRegistryAdmissionTest {
 
@@ -159,7 +158,7 @@ final class SessionRegistryAdmissionTest {
   @Test
   void aPrincipalAtItsCapIsRefusedTheSameWhateverOthersHold() {
     var registry = stubs().withMaxSessionsPerPrincipal(1).withMaxSessions(2).build();
-    create(registry, ALICE);
+    startedSession(registry, ALICE);
 
     var alone = assertThrows(SessionCapacityException.class, () -> create(registry, ALICE));
     create(registry, EVE);
@@ -279,8 +278,8 @@ final class SessionRegistryAdmissionTest {
     var younger = create(registry, ALICE);
     younger.terminate();
     var ownOnly = stubs().withMaxSessions(2).build();
-    create(ownOnly, EVE);
-    create(ownOnly, EVE);
+    startedSession(ownOnly, EVE);
+    startedSession(ownOnly, EVE);
 
     var amongOthers = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
     var amongOwn = assertThrows(SessionCapacityException.class, () -> create(ownOnly, EVE));
@@ -349,7 +348,7 @@ final class SessionRegistryAdmissionTest {
     reservation.close();
 
     create(registry, EVE);
-    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
   }
 
   @Test
@@ -422,7 +421,7 @@ final class SessionRegistryAdmissionTest {
     create(registry, EVE);
 
     assertEquals("session id already registered: " + options.sessionId(), ex.getMessage());
-    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
   }
 
   @Test
@@ -434,7 +433,7 @@ final class SessionRegistryAdmissionTest {
     assertFalse(registry.close(session.sessionId(), ALICE));
 
     create(registry, EVE);
-    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
     assertEquals(1, session.closes.get());
   }
 
@@ -453,7 +452,7 @@ final class SessionRegistryAdmissionTest {
     working.terminate();
 
     create(registry, EVE);
-    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
   }
 
   @Test
@@ -461,7 +460,7 @@ final class SessionRegistryAdmissionTest {
     var registry = stubs().withMaxSessions(2).build();
     var options = options();
     var working = (StubSession) registry.create(options, ALICE);
-    working.send(UserMessage.text("go"));
+    registry.lookup(working.sessionId(), ALICE).orElseThrow().send(UserMessage.text("go"));
     registry.close(working.sessionId(), ALICE);
     var successor = (StubSession) registry.create(options, ALICE);
 
@@ -469,11 +468,11 @@ final class SessionRegistryAdmissionTest {
 
     assertSame(successor, registry.find(options.sessionId(), ALICE).orElseThrow());
     create(registry, EVE);
-    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    var refused = assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
     assertEquals("sessions at cap 2", refused.getMessage());
     assertTrue(registry.close(options.sessionId(), ALICE));
     create(registry, EVE);
-    assertThrows(SessionCapacityException.class, () -> create(registry, EVE));
+    assertThrows(SessionCapacityException.class, () -> create(registry, CAROL));
   }
 
   @Test
@@ -494,7 +493,7 @@ final class SessionRegistryAdmissionTest {
           assertThrows(
               SessionCapacityException.class, () -> registry.create(withProvider(provider), ALICE));
       assertEquals("sessions of the principal at cap 1", refused.getMessage());
-      assertFalse(first.result().isDone());
+      assertFalse(closing.isDone());
     } finally {
       provider.release.countDown();
     }
@@ -550,7 +549,7 @@ final class SessionRegistryAdmissionTest {
 
   private StubSession startedSession(SessionRegistry registry, Principal owner) {
     var session = create(registry, owner);
-    session.send(UserMessage.text("go"));
+    registry.lookup(session.sessionId(), owner).orElseThrow().send(UserMessage.text("go"));
     return session;
   }
 

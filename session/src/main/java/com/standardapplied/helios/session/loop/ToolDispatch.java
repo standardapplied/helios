@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.AgentSessionImpl;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
+import java.util.logging.Logger;
 
 /**
  * Synchronous tool dispatch surface. The agent loop calls {@link #dispatch(ToolCall,
@@ -28,9 +30,9 @@ import java.util.function.Predicate;
  * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
  *
- * <p>Each call stays linked to the session's cancellation token until its worker ends, so closing
- * the session cancels and interrupts every call still running, including one already answered as
- * {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(long)} waits for them to end.
+ * <p>Each call stays linked to its run's cancellation token until its worker ends, so ending the
+ * run or closing the session cancels and interrupts every call still running, including one already
+ * answered as {@link ToolOutcome.Unknown}. {@link #awaitLiveCalls(long)} waits for them to end.
  *
  * <h2>Thread-safety</h2>
  *
@@ -38,6 +40,8 @@ import java.util.function.Predicate;
  * thread, since the set of live calls is concurrent.
  */
 public final class ToolDispatch {
+
+  private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
 
   private final SessionContext sessionContext;
   private final ToolRegistry registry;
@@ -87,6 +91,30 @@ public final class ToolDispatch {
         .toList();
   }
 
+  /**
+   * Wait as {@link #awaitLiveCalls(long)} does and log a {@code WARNING} for each call still
+   * running when the wait ended: never taken for ended, its effects may land later.
+   *
+   * @param deadlineNanos when to stop waiting
+   * @param grace how long the wait was given, for the log
+   * @param ended what ended, for the log, such as {@code "session <id>"}
+   */
+  public void endLiveCalls(long deadlineNanos, Duration grace, String ended) {
+    for (var call : awaitLiveCalls(deadlineNanos)) {
+      LOGGER.warning(
+          () ->
+              "tool '"
+                  + call.name()
+                  + "' (call "
+                  + call.id()
+                  + ") still runs "
+                  + grace
+                  + " after "
+                  + ended
+                  + " ended; its effects may land after the result settled");
+    }
+  }
+
   /** Settle every live call's answer as its deadline does, for tests that fire deadlines. */
   void expireLiveCalls() {
     liveCalls.forEach(DispatchedCall::expire);
@@ -116,7 +144,7 @@ public final class ToolDispatch {
    * interrupt. A tool's {@link Error} is rethrown as itself.
    *
    * @param call the call; non-null
-   * @param cancellation the session's cancellation token; non-null
+   * @param cancellation the run's cancellation token; non-null
    * @param timeout per-call budget, from now; non-null, positive
    * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
    * @param withheld true for the canonical key of an entry the call must not return, handed to the

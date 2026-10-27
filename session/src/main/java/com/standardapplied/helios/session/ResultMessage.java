@@ -14,16 +14,16 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Terminal result of an agent session.
+ * Terminal result of one run of an agent session.
  *
- * <p>Sealed: every termination path produces exactly one of the eight subtypes below. Callers
- * branch on the subtype via {@code switch} pattern matching; they never parse assistant text to
- * discover whether the session succeeded.
+ * <p>Sealed: every way a run ends produces exactly one of the eight subtypes below. Callers branch
+ * on the subtype via {@code switch} pattern matching; they never parse assistant text to discover
+ * whether the run succeeded.
  *
- * <p>Every subtype carries the same four common fields ({@code sessionId}, {@code usage}, {@code
- * cost}, {@code duration}) plus subtype-specific detail. Common-field validation lives in {@link
- * #validateCommon(String, Usage, CostEstimate, Duration)} so the eight record bodies stay tight and
- * the validation contract is testable in one place.
+ * <p>Every subtype carries the same five common fields ({@code sessionId}, {@code runId}, {@code
+ * usage}, {@code cost}, {@code duration}) plus subtype-specific detail. Common-field validation
+ * lives in {@link #validateCommon(String, String, Usage, CostEstimate, Duration)} so the eight
+ * record bodies stay tight and the validation contract is testable in one place.
  */
 public sealed interface ResultMessage
     permits ResultMessage.Success,
@@ -32,7 +32,6 @@ public sealed interface ResultMessage
         ResultMessage.ErrorMaxWallClock,
         ResultMessage.ErrorDuringExecution,
         ResultMessage.ErrorTransientStream,
-        ResultMessage.ErrorProviderUnavailable,
         ResultMessage.Refusal,
         ResultMessage.Cancelled {
 
@@ -44,28 +43,35 @@ public sealed interface ResultMessage
   String sessionId();
 
   /**
-   * Token usage accumulated across every model call in the session.
+   * The identifier of the run this result ends.
+   *
+   * @return non-blank run id
+   */
+  String runId();
+
+  /**
+   * Token usage accumulated across every model call in the run.
    *
    * @return non-null usage
    */
   Usage usage();
 
   /**
-   * Estimated dollar cost accumulated across the session.
+   * Estimated dollar cost accumulated across the run.
    *
    * @return non-null cost estimate
    */
   CostEstimate cost();
 
   /**
-   * Wall-clock duration of the session, from creation to terminal state.
+   * Wall-clock duration of the run, from its start to its terminal state.
    *
    * @return non-null, non-negative duration
    */
   Duration duration();
 
   /**
-   * Grounding citations accumulated across the session (e.g. Google Search / web grounding),
+   * Grounding citations accumulated across the run (e.g. Google Search / web grounding),
    * deduplicated and in document order. Carried only by {@link Success} — the provenance of a
    * delivered answer; every other terminal returns an empty list. Mirrors the per-turn {@link
    * QueryEvent.AssistantCitations} events on the streaming surface.
@@ -92,16 +98,22 @@ public sealed interface ResultMessage
   }
 
   /**
-   * Validate the four fields every subtype shares. Each record's canonical constructor calls this
+   * Validate the five fields every subtype shares. Each record's canonical constructor calls this
    * before applying its own field-specific checks.
    *
    * @throws NullPointerException if any argument is null
-   * @throws IllegalArgumentException if {@code sessionId} is blank or {@code duration} is negative
+   * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+   *     duration} is negative
    */
-  static void validateCommon(String sessionId, Usage usage, CostEstimate cost, Duration duration) {
+  static void validateCommon(
+      String sessionId, String runId, Usage usage, CostEstimate cost, Duration duration) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {
       throw new IllegalArgumentException("sessionId must not be blank");
+    }
+    Objects.requireNonNull(runId, "runId must not be null");
+    if (Strings.isBlank(runId)) {
+      throw new IllegalArgumentException("runId must not be blank");
     }
     Objects.requireNonNull(usage, "usage must not be null");
     Objects.requireNonNull(cost, "cost must not be null");
@@ -112,9 +124,10 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated naturally with a final assistant answer.
+   * The run ended naturally with a final assistant answer.
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param result the final answer text
    * @param usage accumulated token usage
    * @param cost accumulated cost
@@ -124,6 +137,7 @@ public sealed interface ResultMessage
    */
   record Success(
       String sessionId,
+      String runId,
       String result,
       Usage usage,
       CostEstimate cost,
@@ -132,7 +146,7 @@ public sealed interface ResultMessage
       implements ResultMessage {
 
     public Success {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(result, "result must not be null");
       Objects.requireNonNull(citations, "citations must not be null");
       citations = List.copyOf(citations);
@@ -140,21 +154,27 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated because it needed a turn past the {@code maxTurns} ceiling: its last
-   * allowed turn would have continued the loop (tool calls, or a message queued for another turn).
+   * The run ended because it needed a turn past the {@code maxTurns} ceiling: its last allowed turn
+   * would have continued the loop (tool calls, or a message queued for another turn).
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param turnsUsed turns consumed before termination
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock
    */
   record ErrorMaxTurns(
-      String sessionId, int turnsUsed, Usage usage, CostEstimate cost, Duration duration)
+      String sessionId,
+      String runId,
+      int turnsUsed,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration)
       implements ResultMessage {
 
     public ErrorMaxTurns {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       if (turnsUsed < 0) {
         throw new IllegalArgumentException("turnsUsed must be non-negative, got " + turnsUsed);
       }
@@ -162,20 +182,26 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated because the configured USD budget was exhausted.
+   * The run ended because the configured USD budget was exhausted.
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param microUsdSpent the amount spent before termination, in micro-USD
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock
    */
   record ErrorMaxBudgetUsd(
-      String sessionId, long microUsdSpent, Usage usage, CostEstimate cost, Duration duration)
+      String sessionId,
+      String runId,
+      long microUsdSpent,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration)
       implements ResultMessage {
 
     public ErrorMaxBudgetUsd {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       if (microUsdSpent < 0L) {
         throw new IllegalArgumentException(
             "microUsdSpent must be non-negative, got " + microUsdSpent);
@@ -184,39 +210,46 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session terminated because the configured wall-clock ceiling was exceeded. The {@code
-   * duration} field carries the elapsed wall clock (which is &ge; the configured ceiling);
-   * consumers read the configured ceiling from their session settings if needed.
+   * The run ended because the configured wall-clock ceiling was exceeded. The {@code duration}
+   * field carries the elapsed wall clock (which is &ge; the configured ceiling); consumers read the
+   * configured ceiling from their session settings if needed.
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock at termination
    */
-  record ErrorMaxWallClock(String sessionId, Usage usage, CostEstimate cost, Duration duration)
+  record ErrorMaxWallClock(
+      String sessionId, String runId, Usage usage, CostEstimate cost, Duration duration)
       implements ResultMessage {
 
     public ErrorMaxWallClock {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
     }
   }
 
   /**
-   * The session terminated because of an unrecoverable error (provider error, hook abort, tool
-   * crash, etc).
+   * The run ended because of an unrecoverable error (provider error, hook abort, tool crash, etc).
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param error the serialized error captured at termination
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock
    */
   record ErrorDuringExecution(
-      String sessionId, SerializedError error, Usage usage, CostEstimate cost, Duration duration)
+      String sessionId,
+      String runId,
+      SerializedError error,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration)
       implements ResultMessage {
 
     public ErrorDuringExecution {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(error, "error must not be null");
     }
 
@@ -225,12 +258,12 @@ public sealed interface ResultMessage
       var redacted = error.withoutStackTrace();
       return redacted == error
           ? this
-          : new ErrorDuringExecution(sessionId, redacted, usage, cost, duration);
+          : new ErrorDuringExecution(sessionId, runId, redacted, usage, cost, duration);
     }
   }
 
   /**
-   * The session terminated because a model stream failed with a {@link
+   * The run ended because a model stream failed with a {@link
    * com.standardapplied.helios.core.model.TransientStreamException} (a transport failure such as a
    * socket reset or a half-closed connection, a 408, 429 or 5xx answer to the stream request, or an
    * error event the provider marks retryable mid-stream) and the configured {@link
@@ -247,6 +280,7 @@ public sealed interface ResultMessage
    * provider's exception, whose message starts {@code API error (status <n>)}.
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param providerName the provider's short identifier carried from {@link
    *     com.standardapplied.helios.core.model.TransientStreamException#providerName()}; non-blank
    * @param attemptsMade total number of stream attempts the loop made — always {@code >= 1}; equals
@@ -259,6 +293,7 @@ public sealed interface ResultMessage
    */
   record ErrorTransientStream(
       String sessionId,
+      String runId,
       String providerName,
       int attemptsMade,
       SerializedError error,
@@ -268,7 +303,7 @@ public sealed interface ResultMessage
       implements ResultMessage {
 
     public ErrorTransientStream {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(providerName, "providerName must not be null");
       if (Strings.isBlank(providerName)) {
         throw new IllegalArgumentException("providerName must not be blank");
@@ -285,59 +320,7 @@ public sealed interface ResultMessage
       return redacted == error
           ? this
           : new ErrorTransientStream(
-              sessionId, providerName, attemptsMade, redacted, usage, cost, duration);
-    }
-  }
-
-  /**
-   * The session terminated before the agent loop began because an {@link
-   * com.standardapplied.helios.session.execution.ExecutionProvider}'s {@code onSessionStart}
-   * returned a {@link com.standardapplied.helios.session.execution.SessionStartOutcome.Refuse
-   * Refuse} — typically pool saturation, per-session auth failure, in-flight provider shutdown, or
-   * a caught exception during sandbox spawn.
-   *
-   * @param sessionId the session's id
-   * @param providerName a short, stable name identifying which provider refused (e.g. the provider
-   *     class's simple name); non-blank
-   * @param reason the human-readable refusal reason carried from {@code
-   *     SessionStartOutcome.Refuse}; non-blank
-   * @param cause the underlying error serialised from {@code SessionStartOutcome.Refuse#cause()},
-   *     or {@code null} when the refusal is a policy decision (saturation, auth) rather than a
-   *     caught exception. Deployers inspecting failures programmatically read the typed kind /
-   *     message / stack trace and walk the cause chain via {@link SerializedError#cause()}
-   * @param usage accumulated token usage (always zero at this point)
-   * @param cost accumulated cost (always zero at this point)
-   * @param duration elapsed wall clock (typically tiny)
-   */
-  record ErrorProviderUnavailable(
-      String sessionId,
-      String providerName,
-      String reason,
-      SerializedError cause,
-      Usage usage,
-      CostEstimate cost,
-      Duration duration)
-      implements ResultMessage {
-
-    public ErrorProviderUnavailable {
-      validateCommon(sessionId, usage, cost, duration);
-      Objects.requireNonNull(providerName, "providerName must not be null");
-      if (Strings.isBlank(providerName)) {
-        throw new IllegalArgumentException("providerName must not be blank");
-      }
-      Objects.requireNonNull(reason, "reason must not be null");
-      if (Strings.isBlank(reason)) {
-        throw new IllegalArgumentException("reason must not be blank");
-      }
-    }
-
-    /**
-     * The underlying serialised error, if any.
-     *
-     * @return an optional view of {@link #cause()}; empty for policy-driven refusals
-     */
-    public Optional<SerializedError> causeOpt() {
-      return Optional.ofNullable(cause);
+              sessionId, runId, providerName, attemptsMade, redacted, usage, cost, duration);
     }
   }
 
@@ -345,6 +328,7 @@ public sealed interface ResultMessage
    * The model refused to answer (safety filter or model-side policy).
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param refusalText the provider's explanation of the refusal when it gave one, otherwise the
    *     text the model returned
    * @param usage accumulated token usage
@@ -357,6 +341,7 @@ public sealed interface ResultMessage
    */
   record Refusal(
       String sessionId,
+      String runId,
       String refusalText,
       Usage usage,
       CostEstimate cost,
@@ -365,7 +350,7 @@ public sealed interface ResultMessage
       implements ResultMessage {
 
     public Refusal {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(refusalText, "refusalText must not be null");
       if (Strings.isBlank(refusalText)) {
         throw new IllegalArgumentException("refusalText must not be blank");
@@ -383,20 +368,27 @@ public sealed interface ResultMessage
   }
 
   /**
-   * The session was cancelled via {@code AgentSession.interrupt(...)} or wall-clock cancellation.
+   * The run was cancelled: by {@code AgentSession.interrupt()}, the session's close or a host
+   * failure.
    *
    * @param sessionId the session's id
+   * @param runId the run's id
    * @param reason the reason recorded on the cancellation token
    * @param usage accumulated token usage
    * @param cost accumulated cost
    * @param duration elapsed wall clock at cancellation
    */
   record Cancelled(
-      String sessionId, String reason, Usage usage, CostEstimate cost, Duration duration)
+      String sessionId,
+      String runId,
+      String reason,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration)
       implements ResultMessage {
 
     public Cancelled {
-      validateCommon(sessionId, usage, cost, duration);
+      validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(reason, "reason must not be null");
       if (Strings.isBlank(reason)) {
         throw new IllegalArgumentException("reason must not be blank");

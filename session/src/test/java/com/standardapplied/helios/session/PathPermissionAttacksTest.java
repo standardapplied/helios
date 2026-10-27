@@ -244,7 +244,7 @@ final class PathPermissionAttacksTest {
   // ── rules that could never match ─────────────────────────────────────────
 
   private static AgentSession create(SessionOptions.Builder options) {
-    return AgentSession.create(
+    return AgentSession.open(
         options.withModel(ScriptedModel.newBuilder().withTextTurn("done").build()).build());
   }
 

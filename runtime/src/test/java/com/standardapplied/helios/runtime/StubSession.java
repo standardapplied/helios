@@ -20,26 +20,29 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * An {@link AgentSession} with no agent loop: messages go into a real {@link SteeringQueue} that
- * nothing drains, event streams are fed by hand and end at {@link #completeEvents()}, and the
- * result completes through {@link #terminate()}, standing for the end of the loop. Like a real
- * session, closing it before the first message completes the result at once, while a started one
- * keeps running until terminated. It counts its closes and runs {@link #onClose} on each, and
- * counts the event streams its readers closed.
+ * An {@link AgentSession} with no agent loop and one run: messages go into a real {@link
+ * SteeringQueue} that nothing drains and each {@code send} returns that run's {@link #result},
+ * event streams are fed by hand and end at {@link #completeEvents()}, and the run completes through
+ * {@link #terminate()}, standing for the end of the loop. A closed session refuses a message, as a
+ * real one does, while a run already in progress keeps running until terminated. It counts its
+ * closes and interrupts, runs {@link #onSend} on each accepted message and {@link #onClose} on each
+ * close, and counts the event streams its readers closed.
  */
 final class StubSession implements AgentSession {
 
-  final CompletableFuture<ResultMessage> result = new CompletableFuture<>();
+  /** The future of the run in progress; a test replaces it to start another run. */
+  volatile CompletableFuture<ResultMessage> result = new CompletableFuture<>();
+
   final SteeringQueue queue;
   final List<FedEventStream> streams = new CopyOnWriteArrayList<>();
   final AtomicInteger closes = new AtomicInteger();
+  final AtomicInteger interrupts = new AtomicInteger();
+  volatile Runnable onSend = () -> {};
   volatile Runnable onClose = () -> {};
-
-  /** Thrown by {@link #result()} once set, standing for a session that fails to answer. */
-  volatile RuntimeException resultFailure;
 
   private final String sessionId;
   private volatile boolean started;
+  private volatile boolean closed;
 
   StubSession(String sessionId) {
     this(sessionId, 256);
@@ -52,14 +55,19 @@ final class StubSession implements AgentSession {
 
   /** Complete the result with a {@link ResultMessage.Success}. */
   void terminate() {
-    result.complete(
-        new ResultMessage.Success(
-            sessionId,
-            "ok",
-            Response.Usage.of(0, 0),
-            CostEstimate.zero(),
-            Duration.ZERO,
-            List.of()));
+    result.complete(success());
+  }
+
+  /** The {@link ResultMessage.Success} a run of this session ends with. */
+  ResultMessage success() {
+    return new ResultMessage.Success(
+        sessionId,
+        "run-1",
+        "ok",
+        Response.Usage.of(0, 0),
+        CostEstimate.zero(),
+        Duration.ZERO,
+        List.of());
   }
 
   /** End every event stream opened so far. */
@@ -73,16 +81,22 @@ final class StubSession implements AgentSession {
   }
 
   @Override
-  public void send(UserMessage message) {
+  public CompletableFuture<ResultMessage> send(UserMessage message) {
+    if (closed) {
+      throw new IllegalStateException("session is closed");
+    }
     if (!queue.offer(message)) {
       throw new SteeringQueueFullException("steering queue full");
     }
     started = true;
+    var run = result;
+    onSend.run();
+    return run;
   }
 
   @Override
-  public void interrupt(String reason) {
-    send(UserMessage.text(reason));
+  public void interrupt() {
+    interrupts.incrementAndGet();
   }
 
   @Override
@@ -90,14 +104,6 @@ final class StubSession implements AgentSession {
     var stream = new FedEventStream();
     streams.add(stream);
     return stream;
-  }
-
-  @Override
-  public CompletableFuture<ResultMessage> result() {
-    if (resultFailure != null) {
-      throw resultFailure;
-    }
-    return result;
   }
 
   @Override
@@ -111,23 +117,14 @@ final class StubSession implements AgentSession {
   }
 
   @Override
-  public boolean isStarted() {
-    return started;
+  public boolean isRunning() {
+    return started && !result.isDone();
   }
 
   @Override
   public void close() {
     closes.incrementAndGet();
-    if (!started) {
-      started = true;
-      result.complete(
-          new ResultMessage.Cancelled(
-              sessionId,
-              "session closed",
-              Response.Usage.of(0, 0),
-              CostEstimate.zero(),
-              Duration.ZERO));
-    }
+    closed = true;
     onClose.run();
   }
 

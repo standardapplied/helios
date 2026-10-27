@@ -33,7 +33,7 @@ final class QueryEventToolAndHookTest {
 
   @Test
   void toolUseAccessorsExposeFields() {
-    var e = new QueryEvent.ToolUse(SID, TURN, TS, CALL);
+    var e = new QueryEvent.ToolUse(SID, "run-1", TURN, TS, CALL);
     assertEquals(SID, e.sessionId());
     assertEquals(TURN, e.turnIndex());
     assertEquals(TS, e.timestamp());
@@ -43,7 +43,8 @@ final class QueryEventToolAndHookTest {
   @Test
   void toolUseRejectsNullCall() {
     var ex =
-        assertThrows(NullPointerException.class, () -> new QueryEvent.ToolUse(SID, TURN, TS, null));
+        assertThrows(
+            NullPointerException.class, () -> new QueryEvent.ToolUse(SID, "run-1", TURN, TS, null));
     assertEquals("call must not be null", ex.getMessage());
   }
 
@@ -52,7 +53,7 @@ final class QueryEventToolAndHookTest {
   @Test
   void toolResultAccessorsExposeFields() {
     var r = ToolResult.success("done");
-    var e = new QueryEvent.ToolResult(SID, TURN, TS, CALL, r, Map.of());
+    var e = new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, r, Map.of());
     assertSame(CALL, e.call());
     assertSame(r, e.result());
   }
@@ -63,7 +64,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.ToolResult(SID, TURN, TS, null, r, Map.of()));
+            () -> new QueryEvent.ToolResult(SID, "run-1", TURN, TS, null, r, Map.of()));
     assertEquals("call must not be null", ex.getMessage());
   }
 
@@ -72,7 +73,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, null, Map.of()));
+            () -> new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, null, Map.of()));
     assertEquals("result must not be null", ex.getMessage());
   }
 
@@ -81,7 +82,8 @@ final class QueryEventToolAndHookTest {
     var counts = new LinkedHashMap<String, Integer>();
     counts.put("B_KEY", 2);
     counts.put("A_KEY", 1);
-    var e = new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), counts);
+    var e =
+        new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, ToolResult.success("x"), counts);
     counts.put("C_KEY", 3);
 
     assertEquals(List.of("B_KEY", "A_KEY"), List.copyOf(e.redactions().keySet()));
@@ -94,7 +96,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, r, null));
+            () -> new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, r, null));
     assertEquals("redactions must not be null", ex.getMessage());
   }
 
@@ -104,14 +106,18 @@ final class QueryEventToolAndHookTest {
     counts.put("A_KEY", null);
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), counts));
+        () ->
+            new QueryEvent.ToolResult(
+                SID, "run-1", TURN, TS, CALL, ToolResult.success("x"), counts));
   }
 
   // ── ToolBlocked ──────────────────────────────────────────────────────────
 
   @Test
   void toolBlockedAccessorsExposeFields() {
-    var e = new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "PermissionHook", "denied by policy");
+    var e =
+        new QueryEvent.ToolBlocked(
+            SID, "run-1", TURN, TS, CALL, "PermissionHook", "denied by policy");
     assertEquals("PermissionHook", e.hookName());
     assertEquals("denied by policy", e.reason());
     assertSame(CALL, e.call());
@@ -121,7 +127,7 @@ final class QueryEventToolAndHookTest {
   void toolBlockedRejectsNullCall() {
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolBlocked(SID, TURN, TS, null, "h", "r"));
+        () -> new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, null, "h", "r"));
   }
 
   @Test
@@ -129,7 +135,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, null, "r"));
+            () -> new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, null, "r"));
     assertEquals("hookName must not be null", ex.getMessage());
   }
 
@@ -138,7 +144,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "  ", "r"));
+            () -> new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, "  ", "r"));
     assertEquals("hookName must not be blank", ex.getMessage());
   }
 
@@ -147,7 +153,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "h", null));
+            () -> new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, "h", null));
     assertEquals("reason must not be null", ex.getMessage());
   }
 
@@ -156,7 +162,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "h", ""));
+            () -> new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, "h", ""));
     assertEquals("reason must not be blank", ex.getMessage());
   }
 
@@ -166,7 +172,7 @@ final class QueryEventToolAndHookTest {
   void toolMutatedAccessorsExposeFields() {
     Map<String, Object> before = Map.of("path", "/before");
     Map<String, Object> after = Map.of("path", "/after");
-    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "Sanitizer", before, after);
+    var e = new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "Sanitizer", before, after);
     assertEquals("Sanitizer", e.hookName());
     assertEquals("/before", e.inputBefore().get("path"));
     assertEquals("/after", e.inputAfter().get("path"));
@@ -178,7 +184,7 @@ final class QueryEventToolAndHookTest {
     var daysAfter = new ArrayList<Object>(List.of(2));
     var before = new HashMap<String, Object>(Map.of("k", "v", "days", daysBefore));
     var after = new HashMap<String, Object>(Map.of("k", "v2", "days", daysAfter));
-    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, after);
+    var e = new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", before, after);
     before.put("k", "tampered");
     after.put("k", "tampered");
     daysBefore.add(3);
@@ -196,7 +202,7 @@ final class QueryEventToolAndHookTest {
       after.put(name, name.length());
     }
 
-    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, after);
+    var e = new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", before, after);
 
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputBefore()));
     assertEquals(DeclarationOrderFixture.ARGUMENTS, DeclarationOrderFixture.keys(e.inputAfter()));
@@ -207,7 +213,8 @@ final class QueryEventToolAndHookTest {
     var before = new LinkedHashMap<String, Object>();
     before.put("unit", null);
 
-    var e = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", before, Map.of("unit", "C"));
+    var e =
+        new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", before, Map.of("unit", "C"));
 
     assertTrue(e.inputBefore().containsKey("unit"));
     assertNull(e.inputBefore().get("unit"));
@@ -217,14 +224,14 @@ final class QueryEventToolAndHookTest {
   void toolMutatedRejectsNullCall() {
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolMutated(SID, TURN, TS, null, "h", Map.of(), Map.of()));
+        () -> new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, null, "h", Map.of(), Map.of()));
   }
 
   @Test
   void toolMutatedRejectsNullHookName() {
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolMutated(SID, TURN, TS, CALL, null, Map.of(), Map.of()));
+        () -> new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, null, Map.of(), Map.of()));
   }
 
   @Test
@@ -232,7 +239,8 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "  ", Map.of(), Map.of()));
+            () ->
+                new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "  ", Map.of(), Map.of()));
     assertEquals("hookName must not be blank", ex.getMessage());
   }
 
@@ -240,21 +248,21 @@ final class QueryEventToolAndHookTest {
   void toolMutatedRejectsNullInputBefore() {
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", null, Map.of()));
+        () -> new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", null, Map.of()));
   }
 
   @Test
   void toolMutatedRejectsNullInputAfter() {
     assertThrows(
         NullPointerException.class,
-        () -> new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", Map.of(), null));
+        () -> new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", Map.of(), null));
   }
 
   // ── HookFired ───────────────────────────────────────────────────────────
 
   @Test
   void hookFiredAccessorsExposeFields() {
-    var e = new QueryEvent.HookFired(SID, TURN, TS, "MyHook", "PreToolUseHook", "Block");
+    var e = new QueryEvent.HookFired(SID, "run-1", TURN, TS, "MyHook", "PreToolUseHook", "Block");
     assertEquals("MyHook", e.hookName());
     assertEquals("PreToolUseHook", e.phase());
     assertEquals("Block", e.outcomeKind());
@@ -265,7 +273,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, null, "p", "Block"));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, null, "p", "Block"));
     assertEquals("hookName must not be null", ex.getMessage());
   }
 
@@ -274,7 +282,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, "  ", "p", "Block"));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, "  ", "p", "Block"));
     assertEquals("hookName must not be blank", ex.getMessage());
   }
 
@@ -283,7 +291,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, "h", null, "Block"));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, "h", null, "Block"));
     assertEquals("phase must not be null", ex.getMessage());
   }
 
@@ -292,7 +300,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, "h", "", "Block"));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, "h", "", "Block"));
     assertEquals("phase must not be blank", ex.getMessage());
   }
 
@@ -301,7 +309,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, "h", "p", null));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, "h", "p", null));
     assertEquals("outcomeKind must not be null", ex.getMessage());
   }
 
@@ -310,7 +318,7 @@ final class QueryEventToolAndHookTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.HookFired(SID, TURN, TS, "h", "p", "  "));
+            () -> new QueryEvent.HookFired(SID, "run-1", TURN, TS, "h", "p", "  "));
     assertEquals("outcomeKind must not be blank", ex.getMessage());
   }
 
@@ -318,11 +326,12 @@ final class QueryEventToolAndHookTest {
 
   @Test
   void allFiveNewSubtypesAreQueryEvents() {
-    var u = new QueryEvent.ToolUse(SID, TURN, TS, CALL);
-    var r = new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of());
-    var b = new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "h", "r");
-    var m = new QueryEvent.ToolMutated(SID, TURN, TS, CALL, "h", Map.of(), Map.of());
-    var f = new QueryEvent.HookFired(SID, TURN, TS, "h", "p", "Block");
+    var u = new QueryEvent.ToolUse(SID, "run-1", TURN, TS, CALL);
+    var r =
+        new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, ToolResult.success("x"), Map.of());
+    var b = new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, "h", "r");
+    var m = new QueryEvent.ToolMutated(SID, "run-1", TURN, TS, CALL, "h", Map.of(), Map.of());
+    var f = new QueryEvent.HookFired(SID, "run-1", TURN, TS, "h", "p", "Block");
     assertTrue(u instanceof QueryEvent);
     assertTrue(r instanceof QueryEvent);
     assertTrue(b instanceof QueryEvent);

@@ -88,20 +88,26 @@ final class LoopStagesTest {
 
   private static HookContext context(SessionState s) {
     return new DefaultHookContext(
-        s.sessionId(), s.currentTurnIndex(), s.cancellation(), new MockModel("unused"));
+        s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), new MockModel("unused"));
   }
 
   @Test
   void aSessionAlreadyTerminalEndsWithItsTerminal() {
     var cancelled =
         new ResultMessage.Cancelled(
-            "sess-loop", "closed early", Usage.of(0, 0), CostEstimate.zero(), state.elapsed());
+            "sess-loop",
+            "run-1",
+            "closed early",
+            Usage.of(0, 0),
+            CostEstimate.zero(),
+            state.totals().elapsed());
     state.setTerminal(cancelled);
 
-    var result = loop(new MockModel("unused")).run(state, SessionLimits.defaults());
+    var result =
+        loop(new MockModel("unused")).run(state, SessionLimits.defaults(), natural -> true);
 
     assertSame(cancelled, result);
-    var ended = assertInstanceOf(QueryEvent.LoopEnded.class, events.getLast());
+    var ended = assertInstanceOf(QueryEvent.RunEnded.class, events.getLast());
     assertSame(cancelled, ended.result());
   }
 
@@ -117,7 +123,7 @@ final class LoopStagesTest {
                 : CompactionResult.noOp(history);
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(2, 3)).build();
 
-    loop(model, OVER_THE_WATERMARK, summarise).run(state, SMALL_WINDOW);
+    loop(model, OVER_THE_WATERMARK, summarise).run(state, SMALL_WINDOW, natural -> true);
 
     assertEquals(Usage.of(2, 8), state.totals().usage());
     assertEquals(CostEstimate.ofMicroUsd(8), state.totals().cost());
@@ -136,7 +142,7 @@ final class LoopStagesTest {
 
     ResultMessage result;
     try (var ignored = LogCapture.of(AgentLoop.class, records)) {
-      result = loop(model, OVER_THE_WATERMARK, throwing).run(state, SMALL_WINDOW);
+      result = loop(model, OVER_THE_WATERMARK, throwing).run(state, SMALL_WINDOW, natural -> true);
     }
 
     assertEquals("done", assertInstanceOf(ResultMessage.Success.class, result).result());
@@ -173,7 +179,7 @@ final class LoopStagesTest {
 
     ResultMessage result;
     try (var ignored = LogCapture.of(TurnRunner.class, records)) {
-      result = loop(model, filler).run(state, SessionLimits.defaults());
+      result = loop(model, filler).run(state, SessionLimits.defaults(), natural -> true);
     }
 
     assertEquals("second", assertInstanceOf(ResultMessage.Success.class, result).result());

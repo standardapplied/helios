@@ -377,7 +377,7 @@ final class CanonicalPermissionPathsTest {
   }
 
   private static AgentSession create(SessionOptions.Builder options) {
-    return AgentSession.create(
+    return AgentSession.open(
         options.withModel(ScriptedModel.newBuilder().withTextTurn("done").build()).build());
   }
 
@@ -403,7 +403,7 @@ final class CanonicalPermissionPathsTest {
         SessionOptions.newBuilder().withTools(sessions.tools(trusted)).withPermission(permission);
 
     try (var session = create(options)) {
-      assertFalse(session.isStarted());
+      assertFalse(session.isRunning());
     }
   }
 

@@ -11,7 +11,12 @@ import java.util.Objects;
 import java.util.OptionalLong;
 
 /**
- * Per-session ceilings the agent loop enforces.
+ * The ceilings the agent loop enforces.
+ *
+ * <p>{@code maxTurns}, {@code maxBudgetMicroUsd} and {@code maxWallClock} apply to each run of the
+ * session: every run starts at turn 1, with no spend and a fresh wall clock. Every other limit
+ * applies per call, per turn or per session, and {@code stopGrace} bounds both a run's end and the
+ * session's close.
  *
  * <p>Eight orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
  * tokens, stream-retry policy, start timeout — each mapping to a distinct termination path,
@@ -35,12 +40,14 @@ import java.util.OptionalLong;
  *             {@link com.standardapplied.helios.core.tool.ToolOutcome.TimedOut}, one that does not
  *             {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, and until it ends
  *             every later tool call of the session is rejected;
- *         <li>the whole of the session's teardown, whose waits share one deadline: for the tool
- *             calls still running, cancelled first, to end; for the execution provider's {@code
- *             onSessionEnd} to return. A tool call or {@code onSessionEnd} still running at the
- *             deadline is logged as such and the teardown moves on, so the result settles; such a
- *             tool's effects may land after it has, and a step after one that used the deadline up
- *             is not waited for;
+ *         <li>a run's end: its tool calls still running, cancelled first, are waited for this long,
+ *             then logged as such, and the run's result settles; such a tool's effects may land
+ *             after it has;
+ *         <li>the whole of the session's close, whose waits share one deadline: for the run in
+ *             progress to end; for the tool calls still running to end; for the execution
+ *             provider's {@code onSessionEnd} to return. A tool call or {@code onSessionEnd} still
+ *             running at the deadline is logged as such and the close moves on, and a step after
+ *             one that used the deadline up is not waited for;
  *         <li>a model stream's reader, once the stream is closed: one still reading then is logged
  *             as such and the turn ends without it.
  *       </ul>
@@ -57,26 +64,25 @@ import java.util.OptionalLong;
  *       failure, a 408, 429 or 5xx answer to the stream request, or an error event the provider
  *       marks retryable mid-stream. It waits the answer's {@code Retry-After} capped by the
  *       back-off's maximum delay when the answer carried one, the back-off's delay otherwise. On
- *       exhaustion the session terminates as {@link ResultMessage.ErrorTransientStream}. Use {@link
+ *       exhaustion the run ends as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
- *   <li>{@code startTimeout}: 60 seconds — how long {@link AgentSession#create} waits for the
+ *   <li>{@code startTimeout}: 60 seconds — how long {@link AgentSession#open} waits for the
  *       execution provider's {@code onSessionStart}, which may fork a sandbox. A start that has not
- *       returned by then, like one the provider refuses, ends the session with {@link
- *       ResultMessage.ErrorProviderUnavailable}; an acceptance that comes later is ended with
- *       {@code onSessionEnd}.
+ *       returned by then, like one the provider refuses, makes {@code open} throw {@link
+ *       SessionUnavailableException}; an acceptance that comes later is ended with {@code
+ *       onSessionEnd}.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the
  * rationale. Use {@link CostEstimate#MICRO_USD_PER_USD} to convert between full dollars and
  * micro-USD when wiring a budget.
  *
- * @param maxTurns hard ceiling on agent-loop iterations: the session runs at most this many turns,
- *     and ends in {@link ResultMessage.ErrorMaxTurns} when the last of them would continue; must be
- *     positive
+ * @param maxTurns hard ceiling on a run's turns: each run runs at most this many turns, and ends in
+ *     {@link ResultMessage.ErrorMaxTurns} when the last of them would continue; must be positive
  * @param maxBudgetMicroUsd optional spend ceiling in micro-USD; if present, must be strictly
  *     positive
- * @param maxWallClock wall-clock ceiling from session start to terminal state; must be non-null and
- *     strictly positive
+ * @param maxWallClock wall-clock ceiling from a run's start to its terminal state; must be non-null
+ *     and strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
  *     positive
  * @param stopGrace how long anything the session cancels is given to stop; must be non-null and
@@ -292,9 +298,8 @@ public record SessionLimits(
     }
 
     /**
-     * Set how long {@link AgentSession#create} waits for the execution provider's {@code
-     * onSessionStart} before it ends the session with {@link
-     * ResultMessage.ErrorProviderUnavailable}.
+     * Set how long {@link AgentSession#open} waits for the execution provider's {@code
+     * onSessionStart} before it throws {@link SessionUnavailableException}.
      *
      * @param startTimeout strictly positive
      * @return this builder

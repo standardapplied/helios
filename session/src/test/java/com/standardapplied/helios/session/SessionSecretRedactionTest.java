@@ -4,6 +4,7 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -16,7 +17,6 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.runtime.SessionContext;
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.CommandGrant;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
@@ -106,10 +106,10 @@ final class SessionSecretRedactionTest {
   private static Run run(SessionOptions.Builder options, ScriptedModel model) {
     var built = options.withModel(model).build();
     var events = new EventCollector();
-    try (var session = AgentSession.create(built)) {
+    try (var session = AgentSession.open(built)) {
       events.read(session.events());
       var result = session.runBlocking(UserMessage.text("go"));
-      events.awaitDone();
+      events.awaitRunEnded();
       return new Run(result, events, model, built.secretRegistry());
     }
   }
@@ -393,14 +393,11 @@ final class SessionSecretRedactionTest {
             .withExecutionProvider(provider)
             .build();
 
-    ResultMessage terminal;
-    try (var session = AgentSession.create(options)) {
-      terminal = Await.value("the refused session's terminal", session.result());
-    }
+    var refusal = assertThrows(SessionUnavailableException.class, () -> AgentSession.open(options));
 
-    var refusal = assertInstanceOf(ResultMessage.ErrorProviderUnavailable.class, terminal);
-    assertEquals("startup printed " + MARKER, refusal.reason());
-    assertEquals(List.of("cause " + MARKER), messages(refusal.cause()));
+    assertEquals(
+        "RefusingProvider refused session " + options.sessionId() + ": startup printed " + MARKER,
+        refusal.getMessage());
   }
 
   private static List<String> messages(SerializedError error) {

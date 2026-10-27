@@ -5,6 +5,7 @@ package com.standardapplied.helios.runtime;
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.runtime.AuthenticationGate.Caller;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.SessionUnavailableException;
 import io.helidon.http.Status;
 import io.helidon.webserver.http.ServerResponse;
 import java.util.LinkedHashMap;
@@ -19,8 +20,10 @@ import java.util.logging.Logger;
  * SessionRegistry} before anything else, asks the options factory for the options of a freshly
  * generated session id owned by the caller ({@link SessionRequest}), and registers the session. A
  * refused reservation is answered {@code 429} or {@code 503} before the factory runs; a factory
- * that fails, or returns options for another id, is answered {@code 500}; an identity that ended
- * meanwhile, {@code 401}. On every answer but {@code 201} the reservation is given back.
+ * that fails, or returns options for another id, is answered {@code 500}; an execution provider
+ * that does not accept the session ({@link SessionUnavailableException}), {@code 503} with a fixed
+ * body, its redacted reason logged; an identity that ended meanwhile, {@code 401}. On every answer
+ * but {@code 201} the reservation is given back.
  */
 final class SessionCreation {
 
@@ -29,6 +32,8 @@ final class SessionCreation {
 
   private static final Map<String, String> FACTORY_FAILED =
       Map.of("error", "session options factory failed");
+
+  private static final Map<String, String> UNAVAILABLE = Map.of("error", "session unavailable");
 
   private final SessionRegistry registry;
   private final Function<SessionRequest, SessionOptions> optionsFactory;
@@ -69,7 +74,13 @@ final class SessionCreation {
     if (caller.answeredAsEnded(resp)) {
       return;
     }
-    reservation.register(options.get());
+    try {
+      reservation.register(options.get());
+    } catch (SessionUnavailableException e) {
+      LOGGER.log(Level.WARNING, "session " + sessionId + " unavailable: " + e.getMessage());
+      JsonBody.send(resp, Status.SERVICE_UNAVAILABLE_503, UNAVAILABLE);
+      return;
+    }
     var created = new LinkedHashMap<String, String>();
     created.put("sessionId", sessionId);
     created.put("eventsUrl", eventsPathPrefix + "/sessions/" + sessionId + "/events");

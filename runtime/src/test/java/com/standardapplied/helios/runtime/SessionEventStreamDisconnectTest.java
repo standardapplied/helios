@@ -70,7 +70,8 @@ final class SessionEventStreamDisconnectTest {
 
     List<LogRecord> logged;
     try (var log = LogCapture.of(AgentHttpService.class)) {
-      var event = new QueryEvent.AssistantText(session.sessionId(), 0L, Instant.EPOCH, "after");
+      var event =
+          new QueryEvent.AssistantText(session.sessionId(), "run-1", 0L, Instant.EPOCH, "after");
       Await.until(
           "the stream to be closed",
           () -> {

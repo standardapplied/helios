@@ -31,7 +31,7 @@ final class HookSubtypesTest {
 
   private static HookContext ctx() {
     return new DefaultHookContext(
-        "sess-1", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
+        "sess-1", "run-1", 0, new CancellationToken(), ScriptedModel.newBuilder().build());
   }
 
   // ── direct invocation smoke ───────────────────────────────────────────────
@@ -87,7 +87,7 @@ final class HookSubtypesTest {
   void onStreamEventInvokes() {
     var calls = new java.util.concurrent.atomic.AtomicInteger();
     OnStreamEventHook hook = (event, ctx) -> calls.incrementAndGet();
-    hook.onEvent(new QueryEvent.AssistantText("sess", 1, Instant.now(), "x"), CTX);
+    hook.onEvent(new QueryEvent.AssistantText("sess", "run-1", 1, Instant.now(), "x"), CTX);
     assertEquals(1, calls.get());
   }
 
@@ -141,6 +141,11 @@ final class HookSubtypesTest {
           }
 
           @Override
+          public String runId() {
+            return "run-2";
+          }
+
+          @Override
           public long turnIndex() {
             return 7;
           }
@@ -156,6 +161,7 @@ final class HookSubtypesTest {
           }
         };
     assertEquals("sess-2", ctx.sessionId());
+    assertEquals("run-2", ctx.runId());
     assertEquals(7, ctx.turnIndex());
     assertEquals(t, ctx.cancellation());
     assertEquals(m, ctx.model());

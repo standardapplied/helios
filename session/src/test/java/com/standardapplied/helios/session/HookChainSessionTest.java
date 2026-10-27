@@ -45,9 +45,9 @@ final class HookChainSessionTest {
 
   private static ResultMessage run(ScriptedModel model, PreModelTurnHook... hooks) {
     var options = SessionOptions.newBuilder().withModel(model).withHooks(List.of(hooks)).build();
-    try (var session = AgentSession.create(options)) {
-      session.send(UserMessage.text("go"));
-      return Await.value("the session's result", session.result());
+    try (var session = AgentSession.open(options)) {
+      var future = session.send(UserMessage.text("go"));
+      return Await.value("the session's result", future);
     }
   }
 

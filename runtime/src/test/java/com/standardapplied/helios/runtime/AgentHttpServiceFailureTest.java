@@ -68,7 +68,7 @@ final class AgentHttpServiceFailureTest {
 
   @Test
   void aFailureRaisedByHelidonKeepsItsStatus() throws Exception {
-    try (var server = server(AgentSession::create)) {
+    try (var server = server(AgentSession::open)) {
       var sessionId = create(server);
 
       var resp =
@@ -83,7 +83,7 @@ final class AgentHttpServiceFailureTest {
   @Test
   void aStreamThatFailsAfterItOpenedIsLeftToHelidonWithItsOwnFailure() throws Exception {
     try (var helidonErrors = LogCapture.of(ErrorHandlers.class);
-        var server = server(options -> withBrokenEvents(AgentSession.create(options)))) {
+        var server = server(options -> withBrokenEvents(AgentSession.open(options)))) {
       var sessionId = create(server);
       var stream =
           CompletableFuture.runAsync(

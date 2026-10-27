@@ -50,23 +50,34 @@ final class ConsoleEventPrinterTest {
     print(
         new QueryEvent.AssistantCitations(
             SID,
+            "run-1",
             TURN,
             TS,
             List.of(
                 Citation.newBuilder().withSourceId("s1").withTitle("Docs").build(),
                 Citation.of("s2", "body"))));
-    print(new QueryEvent.ToolUse(SID, TURN, TS, CALL));
-    print(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.success("x"), Map.of()));
-    print(new QueryEvent.ToolResult(SID, TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
-    print(new QueryEvent.ToolBlocked(SID, TURN, TS, CALL, "perm", "denied"));
-    print(new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP));
+    print(new QueryEvent.ToolUse(SID, "run-1", TURN, TS, CALL));
     print(
-        new QueryEvent.LoopEnded(
+        new QueryEvent.ToolResult(SID, "run-1", TURN, TS, CALL, ToolResult.success("x"), Map.of()));
+    print(
+        new QueryEvent.ToolResult(
+            SID, "run-1", TURN, TS, CALL, ToolResult.failure("nope"), Map.of()));
+    print(new QueryEvent.ToolBlocked(SID, "run-1", TURN, TS, CALL, "perm", "denied"));
+    print(new QueryEvent.TurnEnded(SID, "run-1", TURN, TS, FinishReason.STOP));
+    print(
+        new QueryEvent.RunEnded(
             SID,
+            "run-1",
             TURN,
             TS,
             new ResultMessage.Success(
-                SID, "done", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO, List.of())));
+                SID,
+                "run-1",
+                "done",
+                Usage.of(1, 1),
+                CostEstimate.zero(),
+                Duration.ZERO,
+                List.of())));
 
     var nl = System.lineSeparator();
     assertEquals(
@@ -82,7 +93,7 @@ final class ConsoleEventPrinterTest {
             + nl
             + "\n[turn-ended] STOP"
             + nl
-            + "[loop-ended] Success"
+            + "[run-ended] Success"
             + nl,
         printed());
   }
@@ -108,8 +119,8 @@ final class ConsoleEventPrinterTest {
 
     streaming.print(
         List.of(
-            new QueryEvent.AssistantText(SID, TURN, TS, "Hel"),
-            new QueryEvent.AssistantText(SID, TURN, TS, "lo")));
+            new QueryEvent.AssistantText(SID, "run-1", TURN, TS, "Hel"),
+            new QueryEvent.AssistantText(SID, "run-1", TURN, TS, "lo")));
 
     assertEquals(
         List.of("Hel", "Hello", "Hello"), flushed, "each delta, then the end of the stream");
@@ -119,7 +130,8 @@ final class ConsoleEventPrinterTest {
   void longToolArgumentsAreCutWithTheirLengthNoted() {
     var arguments = "x".repeat(241);
     print(
-        new QueryEvent.ToolUse(SID, TURN, TS, new ToolCall("c2", "Grep", Map.of("p", arguments))));
+        new QueryEvent.ToolUse(
+            SID, "run-1", TURN, TS, new ToolCall("c2", "Grep", Map.of("p", arguments))));
 
     var rendered = Map.of("p", arguments).toString();
     assertEquals(
@@ -134,8 +146,8 @@ final class ConsoleEventPrinterTest {
 
   @Test
   void eventsWithoutALineAreSkipped() {
-    print(new QueryEvent.AssistantThinking(SID, TURN, TS, "hmm"));
-    print(new QueryEvent.ContextWarning(SID, TURN, TS, 0.9));
+    print(new QueryEvent.AssistantThinking(SID, "run-1", TURN, TS, "hmm"));
+    print(new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, 0.9));
 
     assertEquals("", printed());
   }

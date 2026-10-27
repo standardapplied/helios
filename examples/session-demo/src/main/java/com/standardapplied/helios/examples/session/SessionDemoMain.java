@@ -74,7 +74,7 @@ public final class SessionDemoMain {
 
     var options = exploreAndRememberOptions(model, workspace).build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var prompt =
           "You're looking at a tiny sample repo. Use the file tools to see what's in it (LS, Glob,"
               + " Grep, Read are available). Then write a one-line summary to"
@@ -137,7 +137,7 @@ public final class SessionDemoMain {
     var options =
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att").build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var msg =
           UserMessage.newBuilder()
               .withText(

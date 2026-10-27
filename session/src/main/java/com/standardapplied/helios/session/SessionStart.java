@@ -13,14 +13,15 @@ import java.util.logging.Logger;
 
 /**
  * The execution provider's {@code onSessionStart}, run on a thread of its own and waited for within
- * a bound. A provider that refuses, returns {@code null}, throws, or has not returned when the
- * bound passes or the waiting thread is interrupted, refuses the session; an {@link Error} it
- * throws, or carries as the cause of a joined future's exception, is also recorded by the session's
- * {@link com.standardapplied.helios.session.loop.SessionEnding#failWith}. A start that settles
- * after the session stopped waiting is logged as a {@code WARNING}, and a late acceptance is then
- * ended by the session's bounded teardown, so the provider is never left holding a session nobody
- * ends. That teardown runs on a thread of its own, which the interrupt that gave up on {@code
- * onSessionStart} never reaches, so it waits until its own {@code stopGrace} deadline.
+ * a bound. A provider that refuses, returns {@code null}, throws an {@link Exception}, or has not
+ * returned when the bound passes or the waiting thread is interrupted, refuses the session with a
+ * {@link SessionUnavailableException}; an {@link Error} it throws, or carries as the cause of a
+ * joined future's exception, is recorded by the session's {@link
+ * com.standardapplied.helios.session.loop.SessionEnding#failWith} and thrown as itself. A start
+ * that settles after the session stopped waiting is logged as a {@code WARNING}, and a late
+ * acceptance is then ended by the session's bounded teardown, so the provider is never left holding
+ * a session nobody ends. That teardown runs on a thread of its own, which the interrupt that gave
+ * up on {@code onSessionStart} never reaches, so it waits until its own {@code stopGrace} deadline.
  */
 final class SessionStart {
 
@@ -49,16 +50,24 @@ final class SessionStart {
   /**
    * Run {@code onSessionStart} and wait up to {@code bound} for it.
    *
-   * @return the refusal the session ends with, its reason and cause redacted against the session's
-   *     secret registry, or empty if the provider accepted
+   * @return the refusal to throw, its reason redacted against the session's secret registry, or
+   *     empty if the provider accepted
+   * @throws Error the {@link Error} {@code onSessionStart} threw, as itself
    */
-  Optional<ResultMessage.ErrorProviderUnavailable> await(Duration bound) {
+  Optional<SessionUnavailableException> await(Duration bound) {
     var task =
         BoundedTask.start(
             "helios-session-start-" + state.sessionId(),
             () -> executionProvider.onSessionStart(sessionContext),
             state.ending()::failWith);
     if (task.settlesBy(BoundedTask.deadlineAfter(bound))) {
+      state
+          .ending()
+          .first()
+          .ifPresent(
+              error -> {
+                throw error;
+              });
       return judged(task.outcome().handle(SessionStart::settled).join());
     }
     var reason =
@@ -105,7 +114,7 @@ final class SessionStart {
         + executionProvider.getClass().getSimpleName();
   }
 
-  private Optional<ResultMessage.ErrorProviderUnavailable> judged(SessionStartOutcome outcome) {
+  private Optional<SessionUnavailableException> judged(SessionStartOutcome outcome) {
     return switch (outcome) {
       case null -> Optional.of(refusal("onSessionStart returned null", null));
       case SessionStartOutcome.Refuse refuse ->
@@ -114,16 +123,13 @@ final class SessionStart {
     };
   }
 
-  private ResultMessage.ErrorProviderUnavailable refusal(String reason, Throwable cause) {
-    var redactor = sessionContext.secrets().redactor();
-    var serialised = cause == null ? null : SerializedError.of(cause).redactedBy(redactor);
-    return new ResultMessage.ErrorProviderUnavailable(
-        state.sessionId(),
-        executionProvider.getClass().getSimpleName(),
-        redactor.redact(reason).text(),
-        serialised,
-        state.totals().usage(),
-        state.totals().cost(),
-        state.elapsed());
+  private SessionUnavailableException refusal(String reason, Throwable cause) {
+    return new SessionUnavailableException(
+        executionProvider.getClass().getSimpleName()
+            + " refused session "
+            + state.sessionId()
+            + ": "
+            + sessionContext.secrets().redactor().redact(reason).text(),
+        cause);
   }
 }

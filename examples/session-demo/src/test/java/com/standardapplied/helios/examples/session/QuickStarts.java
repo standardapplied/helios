@@ -44,17 +44,25 @@ final class QuickStarts {
 
   static void workspaceSession(Model model) {
     try (var session =
-        AgentSession.create(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
+        AgentSession.open(SessionPresets.workspace(model, Path.of("/path/to/repo")).build())) {
       var terminal =
           session.runBlocking(UserMessage.text("Summarise the public API of the session module."));
       System.out.println(((ResultMessage.Success) terminal).result());
     }
   }
 
+  static void chat(Model model, Path repo) {
+    try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
+      var answer = session.send("Which classes form the session's public API?").join();
+      var followUp = session.send("Which of them does a chat application need?").join();
+      System.out.println(answer + "\n" + followUp);
+    }
+  }
+
   static void sharedModel(String modelId, ModelConfig config, List<String> requests, Path repo) {
     try (var model = new AnthropicProvider().create(modelId, config)) {
       for (var request : requests) {
-        try (var session = AgentSession.create(SessionPresets.workspace(model, repo).build())) {
+        try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
           session.runBlocking(UserMessage.text(request));
         }
       }
@@ -68,7 +76,7 @@ final class QuickStarts {
                 AnthropicModelId.CLAUDE_SONNET_4_6.id(),
                 ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
 
-    try (var session = AgentSession.create(SessionPresets.minimal(model).build())) {
+    try (var session = AgentSession.open(SessionPresets.minimal(model).build())) {
       var terminal = session.runBlocking(UserMessage.text("What is the capital of France?"));
       switch (terminal) {
         case ResultMessage.Success s -> System.out.println(s.result());
@@ -85,7 +93,7 @@ final class QuickStarts {
             .build();
 
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             SessionPresets.workspace(model, root)
                 .withCostCalculator(CostCalculator.staticTable(pricing))
                 .withLimits(limits)
@@ -106,7 +114,7 @@ final class QuickStarts {
             List.of(PermissionRule.of("Read", "**/secrets.*")));
 
     try (var session =
-        AgentSession.create(SessionPresets.workspace(model, root).withPermission(policy).build())) {
+        AgentSession.open(SessionPresets.workspace(model, root).withPermission(policy).build())) {
       session.runBlocking(UserMessage.text("Summarise the public API under src."));
     }
   }
@@ -121,7 +129,7 @@ final class QuickStarts {
         };
 
     var session =
-        AgentSession.create(SessionPresets.workspace(model, root).withHook(denyShell).build());
+        AgentSession.open(SessionPresets.workspace(model, root).withHook(denyShell).build());
   }
 
   static void archivingCompaction(
@@ -138,7 +146,7 @@ final class QuickStarts {
 
   static void compaction(Model model, Path repo, Model cheapHaikuModel) {
     // 1) Default — SummarizingCompactor bound to the session's model
-    var session = AgentSession.create(SessionPresets.workspace(model, repo).build());
+    var session = AgentSession.open(SessionPresets.workspace(model, repo).build());
 
     // 2) BYO compactor — a cheaper summary model or prompt, or any ContextCompactor of your own
     var custom =
@@ -147,12 +155,12 @@ final class QuickStarts {
             .withSummaryTimeout(Duration.ofSeconds(30)) // bound the summary call
             .build();
     var session2 =
-        AgentSession.create(
+        AgentSession.open(
             SessionPresets.workspace(model, repo).withContextCompactor(custom).build());
 
     // 3) Opt out wholesale — long sessions overflow naturally with an ErrorDuringExecution
     var session3 =
-        AgentSession.create(
+        AgentSession.open(
             SessionPresets.workspace(model, repo)
                 .withContextCompactor(ContextCompactor.disabled())
                 .build());

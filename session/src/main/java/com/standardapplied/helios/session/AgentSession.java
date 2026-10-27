@@ -12,83 +12,110 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * A live, streamable, steerable agent session.
+ * A conversation with an agent that runs many times.
  *
- * <p>The session loop runs on a virtual thread that begins on the first {@link #send(UserMessage)}
- * call. Open {@link #events()} BEFORE the first {@code send} so the initial chunks reach the
- * reader: a stream opened while the session runs receives the events emitted from then on, and no
- * earlier event is replayed. One opened after the session emitted its terminal {@link
- * QueryEvent.LoopEnded} holds that same event once, then ends; if the session ended without a
- * {@code LoopEnded} (closed before it started, or the loop escaped with an {@code Error}) it ends
- * at once. No stream sees {@code LoopEnded} twice.
+ * <h2>Vocabulary</h2>
+ *
+ * A <em>session</em> is the conversation: {@link #open} opens it, its id is the conversation's id,
+ * and it holds the history, the hooks, the permission policy and its approvals, the secret
+ * registry, the execution provider and the memory backend until it is closed. A <em>run</em> is one
+ * execution: the user message that starts it, then every turn until a terminal {@link
+ * ResultMessage}. A <em>turn</em> is one model call and its tool round. Every run sees the whole
+ * conversation; {@code maxTurns}, {@code maxBudgetMicroUsd} and {@code maxWallClock} count per run.
  *
  * <h2>Lifecycle</h2>
  *
- * <ol>
- *   <li>{@code AgentSession session = ... ;} construct via implementation factory.
- *   <li>{@code try (var events = session.events()) { ... }} open a reader, read on its own thread.
- *   <li>{@code session.send(...);} steer the session — first call starts the loop.
- *   <li>{@code session.interrupt(...);} optional mid-run steering.
- *   <li>{@code ResultMessage r = session.result().get();} await terminal.
- *   <li>{@code session.close();} release resources (idempotent; safe after natural termination).
- * </ol>
+ * <pre>{@code
+ * try (var session = AgentSession.open(options)) {
+ *   var first = session.send("What changed in the build?").join();
+ *   var second = session.send("Summarise that for the changelog.").join();
+ * }
+ * }</pre>
+ *
+ * <p>{@link #send} steers the run in progress, or starts the next run when none is in progress, and
+ * returns that run's result future. A session runs again after any ending (success, a limit, a
+ * cancel, an error), any number of times, until it is closed. {@link #interrupt()} cancels the run
+ * in progress and keeps the session. {@link #events()} is one stream per reader across every run:
+ * {@link QueryEvent.RunStarted} and {@link QueryEvent.RunEnded} bracket each run and every event
+ * names its run. {@link #close()} ends the run in progress and releases the session.
  *
  * <h2>Thread-safety</h2>
  *
  * Implementations must be safe for the standard "many producers, one loop" pattern: HTTP/UI threads
- * call {@code send} / {@code interrupt} / {@code close} concurrently; the agent loop thread reads
+ * call {@code send} / {@code interrupt} / {@code close} concurrently; each run's loop thread reads
  * the queue and offers each event to every open {@link EventStream}; readers drain them on their
  * own threads.
  */
 public interface AgentSession extends AutoCloseable {
 
   /**
-   * Build a new session from the given options.
+   * Open a session from the given options. For a session with an execution provider ({@code
+   * SessionOptions.Builder#withExecutionProvider}), its {@code onSessionStart} runs before this
+   * returns, within {@link SessionLimits#startTimeout()}. The session has no run until the first
+   * {@link #send}.
    *
    * @param options the composition record; non-null
-   * @return a fresh, unstarted session
+   * @return an open session with no run
    * @throws NullPointerException if {@code options} is null
+   * @throws SessionUnavailableException if the execution provider refused, returned {@code null},
+   *     threw an {@link Exception} or did not return in time; nothing stays acquired
+   * @throws Error an {@link Error} {@code onSessionStart} threw, as itself
    */
-  static AgentSession create(SessionOptions options) {
+  static AgentSession open(SessionOptions options) {
     Objects.requireNonNull(options, "options must not be null");
     return new AgentSessionImpl(options);
   }
 
   /**
-   * Queue a user message for the agent loop to consume at the next iteration boundary. The first
-   * call also starts the loop on a virtual thread.
+   * Send a user message. While a run is in progress and has not decided to end, the message is
+   * queued for it and joins it at its next iteration boundary; otherwise the message starts the
+   * next run, at once when no run is in progress, or as soon as the run that decided to end has
+   * ended. A message queued for a run that then ends before draining it (a limit, a hook {@code
+   * Stop}, an error, an interrupt) is discarded with that run. A message is part of a run's input
+   * once its {@link QueryEvent.UserMessageReceived} was emitted.
+   *
+   * <p>The future completes, after the run's {@link QueryEvent.RunEnded}, normally with the run's
+   * terminal value. It completes exceptionally only with an {@link Error}, as itself: the first
+   * caught on a thread the session runs work on (the loop, the model stream, a tool, a hook, a
+   * cancellation callback, the execution provider's end). That is a host failure, not a terminal:
+   * it ends the session as {@link #close()} does, every later {@code Error}, and an exception of
+   * {@code onSessionEnd}, rides along as {@linkplain Throwable#getSuppressed() suppressed}, and the
+   * run's thread ends by throwing it to its uncaught-exception handler; nothing stops the JVM. The
+   * future of a next run the session's close prevents from starting is cancelled. Every message of
+   * one run returns the same future, so completing or cancelling it settles it for every caller but
+   * does not stop the run; {@link #interrupt()} does.
    *
    * @param message the message; non-null
+   * @return the future of the run the message is part of
    * @throws NullPointerException if {@code message} is null
-   * @throws IllegalStateException if the session is closed or terminal
+   * @throws IllegalStateException if the session is closed, or a host {@link Error} failed it
    * @throws SteeringQueueFullException if the steering queue is full; the message is not queued
    */
-  void send(UserMessage message);
+  CompletableFuture<ResultMessage> send(UserMessage message);
 
   /**
    * Convenience for {@code send(UserMessage.text(text))}.
    *
    * @param text non-null, non-blank text
+   * @return the future of the run the message is part of
    */
-  default void send(String text) {
-    send(UserMessage.text(text));
+  default CompletableFuture<ResultMessage> send(String text) {
+    return send(UserMessage.text(text));
   }
 
   /**
-   * Steer the session mid-run by queueing a synthetic user message. The session continues; this is
-   * not a session-ending action.
-   *
-   * @param reason a human-readable description; non-null, non-blank
-   * @throws NullPointerException if {@code reason} is null
-   * @throws IllegalArgumentException if {@code reason} is blank
-   * @throws IllegalStateException if the session is closed or terminal
-   * @throws SteeringQueueFullException if the steering queue is full; the interrupt is not queued
+   * Cancel the run in progress: it ends in {@link ResultMessage.Cancelled} with the reason {@code
+   * "interrupted"}, its model stream closed and its tool calls cancelled, and messages still queued
+   * for it are discarded. The session stays open, and the next {@link #send} starts a new run. With
+   * no run in progress, or on a closed session, it does nothing. Never blocks, never throws.
    */
-  void interrupt(String reason);
+  void interrupt();
 
   /**
-   * Open a new stream of session events, attached before this returns. Open it BEFORE the first
-   * {@link #send(UserMessage)} to observe every chunk, and read it on a thread of its own:
+   * Open a new stream of session events, attached before this returns, that spans every run of the
+   * session from now on and ends once the session is closed and its buffered events are read. Open
+   * it before a {@link #send(UserMessage)} to observe every event of that run, and read it on a
+   * thread of its own:
    *
    * <pre>{@code
    * try (var events = session.events()) {
@@ -107,22 +134,6 @@ public interface AgentSession extends AutoCloseable {
   EventStream events();
 
   /**
-   * Future that completes when the session reaches a terminal {@link ResultMessage} and its runtime
-   * has been torn down. Completes normally with the terminal value. It completes exceptionally only
-   * with an {@link Error}, as itself: the first caught on a thread the session runs work on (the
-   * loop, the model stream, a tool, a hook, a cancellation callback, the execution provider's start
-   * or end). That is a host failure, not an agent-loop terminal: it ends the session, no further
-   * model or tool call is made, and every later {@code Error}, and an exception of {@code
-   * onSessionEnd}, rides along as {@linkplain Throwable#getSuppressed() suppressed}; one caught
-   * after the future completed is logged. Nothing stops the JVM: the loop's virtual thread ends by
-   * throwing the error to its uncaught-exception handler, and the host decides what an {@code
-   * Error} means for the process.
-   *
-   * @return the terminal-result future
-   */
-  CompletableFuture<ResultMessage> result();
-
-  /**
    * The stable session identifier.
    *
    * @return non-blank id
@@ -130,55 +141,42 @@ public interface AgentSession extends AutoCloseable {
   String sessionId();
 
   /**
-   * The agent loop's current turn index. Reads the live state; subject to change between calls.
+   * The turn index of the run in progress. Reads the live state; subject to change between calls.
    *
-   * @return the turn index (0-based; 0 if the loop has not yet started)
+   * @return the run's turn index (its first turn is 1), {@code 0} when no run is in progress
    */
   long currentTurnIndex();
 
   /**
-   * Whether the agent loop has started: {@code true} from the first accepted {@link
-   * #send(UserMessage)} or {@link #interrupt(String)} on, and once the session is closed or its
-   * execution provider did not accept it, since such a session can never start. A host uses it to
-   * tell a session nobody ever used from one at work.
+   * Whether a run is in progress: from the {@link #send(UserMessage)} that started it until its
+   * future has completed and the session has left it.
    *
-   * @return {@code true} once the loop started, the session closed or it ended at start-up
+   * @return {@code true} while a run is in progress
    */
-  boolean isStarted();
+  boolean isRunning();
 
   /**
-   * Close the session. Idempotent — safe to call multiple times, and after the session ended; it
-   * never throws. It cancels the session's token, whose callbacks run on a thread of their own, so
-   * a callback that throws never reaches the caller.
-   *
-   * <p>Once the loop started, that is all this call does, and it returns at once: the loop stops
-   * cooperatively and runs the teardown below on its own thread, and {@link #result()} completes
-   * after that, which may be after this returns. For a session whose loop never started, this call
-   * runs the teardown itself, on the caller's thread, and returns once {@link #result()} completed,
-   * with {@link ResultMessage.Cancelled} unless a host {@link Error} failed it: the teardown below
-   * can hold the caller up to {@link SessionLimits#stopGrace()}, and an interrupt of the caller
-   * ends its waits early, its interrupt status kept. A session whose provider did not accept it at
-   * start completed its result then, and this call only cancels its token.
-   *
-   * <p>The teardown runs on every end, a natural one included, and all its waits share one
-   * deadline, {@link SessionLimits#stopGrace()} from its start: it cancels the session's token,
-   * which cancels and interrupts every tool call still running, and waits until the deadline for
-   * the token's callbacks and the tool calls to end; then it calls {@link
-   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd} on a thread of its
-   * own and waits until the same deadline for it to return; then it ends the event streams, without
-   * waiting for their readers, and the result completes. A step after one that used the deadline up
-   * still runs but is not waited for. A callback, tool call or {@code onSessionEnd} still running
-   * at the deadline is logged and left running: a tool that ignores both its token and interruption
-   * may still run, and its effects land, after the result settles. An {@link Error} such a tool
-   * throws then is logged; the result does not change.
+   * Close the session. Idempotent — safe to call multiple times; it never throws. No run starts
+   * from now on: the run in progress is cancelled with the reason {@code "session closed"} and
+   * waited for, then the session is torn down: {@link
+   * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd}, for a session
+   * with an execution provider, runs on a thread of its own and is waited for, and the event
+   * streams end, without waiting for their readers. The future of the run in progress, and that of
+   * a next run the close keeps from starting, are settled when it returns. The run's end and the
+   * teardown share one deadline, {@link SessionLimits#stopGrace()} from the start of this call: a
+   * step after one that used it up still runs but is not waited for, and a tool call or {@code
+   * onSessionEnd} still running then is logged and left running. An interrupt of the caller ends
+   * the waits early, its interrupt status kept. Called on a thread the session runs work on (a
+   * tool, a hook), it cancels and returns at once, and the run's own thread finishes the teardown.
    */
   @Override
   void close();
 
   /**
-   * Answer a pending {@code AskUserQuestion}. The agent loop is blocked on a future keyed by {@code
+   * Answer a pending {@code AskUserQuestion}. The run is blocked on a future keyed by {@code
    * questionId}; this call completes that future, the {@code AskUserQuestion} tool's executor wakes
-   * up, and the session continues.
+   * up, and the run continues. A question belongs to the run that asked it: the run's end cancels
+   * its unanswered questions, which then are unknown ids.
    *
    * @param questionId the {@code questionId} from the originating {@link QueryEvent.QuestionAsked
    *     QuestionAsked} event; non-blank
@@ -203,22 +201,21 @@ public interface AgentSession extends AutoCloseable {
   List<AskUserQuestionRequest> pendingQuestions();
 
   /**
-   * Blocking convenience: send the message, then await the terminal {@link ResultMessage}. Open
-   * event streams, if any, receive its events as usual.
+   * Blocking convenience: {@code send(message).join()}. Open event streams, if any, receive the
+   * run's events as usual.
    *
    * @param message the message; non-null
-   * @return the terminal result
+   * @return the terminal result of the run the message is part of
    * @throws NullPointerException if {@code message} is null
    */
   default ResultMessage runBlocking(UserMessage message) {
-    send(message);
-    return result().join();
+    return send(message).join();
   }
 
   /**
-   * Typed blocking convenience: send the message, await termination, parse the final assistant text
-   * as JSON against {@code schema}, return the typed result. Markdown fences and prose prefixes
-   * around the JSON are tolerated.
+   * Typed blocking convenience: send the message, await the run's end, parse its final assistant
+   * text as JSON against {@code schema}, return the typed result. Markdown fences and prose
+   * prefixes around the JSON are tolerated.
    *
    * <ul>
    *   <li>A session built with an output schema (see {@code
@@ -240,10 +237,10 @@ public interface AgentSession extends AutoCloseable {
    * @throws NullPointerException if {@code message} or {@code schema} is null
    * @throws IllegalArgumentException if the session has an output schema and {@code schema} differs
    *     from it; nothing is sent
-   * @throws IllegalStateException if the session terminated without a {@link ResultMessage.Success}
-   *     — the caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
-   *     ResultMessage.ErrorDuringExecution} / etc., or terminated as a {@link
-   *     ResultMessage.Success} whose result is blank, leaving nothing to parse
+   * @throws IllegalStateException if the run ended without a {@link ResultMessage.Success} — the
+   *     caller cannot recover a typed value from {@link ResultMessage.Cancelled} / {@link
+   *     ResultMessage.ErrorDuringExecution} / etc., or ended as a {@link ResultMessage.Success}
+   *     whose result is blank, leaving nothing to parse
    * @throws com.standardapplied.helios.core.schema.StructuredOutputParseException if the final
    *     assistant text does not parse against the schema (carries a per-field diff) or, as {@link
    *     com.standardapplied.helios.core.schema.SubmitValidationException}, fails the schema's

@@ -176,11 +176,11 @@ final class CompactionIntegrationTest {
             .withLimits(limits)
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       events.read(session.events());
       var result = session.runBlocking(UserMessage.text(NOTES_TASK));
-      events.awaitDone();
+      events.awaitRunEnded();
       return new Run(result, events);
     }
   }

@@ -137,6 +137,7 @@ final class ToolRound {
         state,
         new QueryEvent.ToolResult(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             RedactedArguments.of(call, collaborators.secrets()),
@@ -161,6 +162,7 @@ final class ToolRound {
           state,
           new QueryEvent.ToolMutated(
               state.sessionId(),
+              state.runId(),
               state.currentTurnIndex(),
               collaborators.clock().instant(),
               shownBefore,
@@ -192,6 +194,7 @@ final class ToolRound {
             state,
             new QueryEvent.ToolUse(
                 state.sessionId(),
+                state.runId(),
                 state.currentTurnIndex(),
                 collaborators.clock().instant(),
                 RedactedArguments.of(admitted.call(), collaborators.secrets())));
@@ -207,6 +210,7 @@ final class ToolRound {
         state,
         new QueryEvent.ToolBlocked(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             RedactedArguments.of(call, collaborators.secrets()),

@@ -28,7 +28,7 @@ final class QueryEventTest {
 
   @Test
   void assistantTextConstructsAndExposesFields() {
-    var e = new QueryEvent.AssistantText(SID, TURN, TS, "hello");
+    var e = new QueryEvent.AssistantText(SID, "run-1", TURN, TS, "hello");
     assertEquals(SID, e.sessionId());
     assertEquals(TURN, e.turnIndex());
     assertEquals(TS, e.timestamp());
@@ -37,7 +37,7 @@ final class QueryEventTest {
 
   @Test
   void assistantTextAllowsEmptyText() {
-    var e = new QueryEvent.AssistantText(SID, TURN, TS, "");
+    var e = new QueryEvent.AssistantText(SID, "run-1", TURN, TS, "");
     assertEquals("", e.text());
   }
 
@@ -45,7 +45,8 @@ final class QueryEventTest {
   void assistantTextRejectsNullText() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.AssistantText(SID, TURN, TS, null));
+            NullPointerException.class,
+            () -> new QueryEvent.AssistantText(SID, "run-1", TURN, TS, null));
     assertEquals("text must not be null", ex.getMessage());
   }
 
@@ -55,7 +56,8 @@ final class QueryEventTest {
   void nullSessionIdRejected() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.AssistantText(null, TURN, TS, "x"));
+            NullPointerException.class,
+            () -> new QueryEvent.AssistantText(null, "run-1", TURN, TS, "x"));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
@@ -64,21 +66,55 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.AssistantText("   ", TURN, TS, "x"));
+            () -> new QueryEvent.AssistantText("   ", "run-1", TURN, TS, "x"));
     assertEquals("sessionId must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void nullRunIdRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new QueryEvent.AssistantText(SID, null, TURN, TS, "x"));
+    assertEquals("runId must not be null", ex.getMessage());
+  }
+
+  @Test
+  void blankRunIdRejected() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.AssistantText(SID, " ", TURN, TS, "x"));
+    assertEquals("runId must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void runStartedIsAtTurnZeroAndNamesItsRun() {
+    var e = new QueryEvent.RunStarted(SID, "run-7", TS);
+    assertEquals(
+        List.of(SID, "run-7", 0L, TS),
+        List.of(e.sessionId(), e.runId(), e.turnIndex(), e.timestamp()));
+  }
+
+  @Test
+  void runStartedRejectsABlankRunId() {
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> new QueryEvent.RunStarted(SID, "", TS));
+    assertEquals("runId must not be blank", ex.getMessage());
   }
 
   @Test
   void negativeTurnIndexRejected() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> new QueryEvent.AssistantText(SID, -1, TS, "x"));
+            IllegalArgumentException.class,
+            () -> new QueryEvent.AssistantText(SID, "run-1", -1, TS, "x"));
     assertEquals("turnIndex must be non-negative, got -1", ex.getMessage());
   }
 
   @Test
   void zeroTurnIndexAllowed() {
-    var e = new QueryEvent.AssistantText(SID, 0, TS, "x");
+    var e = new QueryEvent.AssistantText(SID, "run-1", 0, TS, "x");
     assertEquals(0, e.turnIndex());
   }
 
@@ -86,7 +122,8 @@ final class QueryEventTest {
   void nullTimestampRejected() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.AssistantText(SID, TURN, null, "x"));
+            NullPointerException.class,
+            () -> new QueryEvent.AssistantText(SID, "run-1", TURN, null, "x"));
     assertEquals("timestamp must not be null", ex.getMessage());
   }
 
@@ -94,7 +131,7 @@ final class QueryEventTest {
 
   @Test
   void assistantThinkingConstructsAndExposesFields() {
-    var e = new QueryEvent.AssistantThinking(SID, TURN, TS, "ponder");
+    var e = new QueryEvent.AssistantThinking(SID, "run-1", TURN, TS, "ponder");
     assertEquals("ponder", e.text());
   }
 
@@ -103,7 +140,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.AssistantThinking(SID, TURN, TS, null));
+            () -> new QueryEvent.AssistantThinking(SID, "run-1", TURN, TS, null));
     assertEquals("text must not be null", ex.getMessage());
   }
 
@@ -112,7 +149,7 @@ final class QueryEventTest {
   @Test
   void userMessageReceivedConstructsAndExposesFields() {
     var msg = UserMessage.text("hi");
-    var e = new QueryEvent.UserMessageReceived(SID, TURN, TS, msg);
+    var e = new QueryEvent.UserMessageReceived(SID, "run-1", TURN, TS, msg);
     assertSame(msg, e.message());
   }
 
@@ -121,7 +158,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.UserMessageReceived(SID, TURN, TS, null));
+            () -> new QueryEvent.UserMessageReceived(SID, "run-1", TURN, TS, null));
     assertEquals("message must not be null", ex.getMessage());
   }
 
@@ -130,7 +167,8 @@ final class QueryEventTest {
   @Test
   void messageBlockedConstructsAndExposesFields() {
     var msg = UserMessage.text("dropped");
-    var e = new QueryEvent.MessageBlocked(SID, TURN, TS, msg, "MyHook", "policy violation");
+    var e =
+        new QueryEvent.MessageBlocked(SID, "run-1", TURN, TS, msg, "MyHook", "policy violation");
     assertSame(msg, e.message());
     assertEquals("MyHook", e.hookName());
     assertEquals("policy violation", e.reason());
@@ -141,7 +179,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.MessageBlocked(SID, TURN, TS, null, "MyHook", "r"));
+            () -> new QueryEvent.MessageBlocked(SID, "run-1", TURN, TS, null, "MyHook", "r"));
     assertEquals("message must not be null", ex.getMessage());
   }
 
@@ -150,7 +188,9 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.MessageBlocked(SID, TURN, TS, UserMessage.text("x"), null, "r"));
+            () ->
+                new QueryEvent.MessageBlocked(
+                    SID, "run-1", TURN, TS, UserMessage.text("x"), null, "r"));
     assertEquals("hookName must not be null", ex.getMessage());
   }
 
@@ -159,7 +199,9 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.MessageBlocked(SID, TURN, TS, UserMessage.text("x"), "  ", "r"));
+            () ->
+                new QueryEvent.MessageBlocked(
+                    SID, "run-1", TURN, TS, UserMessage.text("x"), "  ", "r"));
     assertEquals("hookName must not be blank", ex.getMessage());
   }
 
@@ -170,7 +212,7 @@ final class QueryEventTest {
             NullPointerException.class,
             () ->
                 new QueryEvent.MessageBlocked(
-                    SID, TURN, TS, UserMessage.text("x"), "MyHook", null));
+                    SID, "run-1", TURN, TS, UserMessage.text("x"), "MyHook", null));
     assertEquals("reason must not be null", ex.getMessage());
   }
 
@@ -181,7 +223,7 @@ final class QueryEventTest {
             IllegalArgumentException.class,
             () ->
                 new QueryEvent.MessageBlocked(
-                    SID, TURN, TS, UserMessage.text("x"), "MyHook", "  "));
+                    SID, "run-1", TURN, TS, UserMessage.text("x"), "MyHook", "  "));
     assertEquals("reason must not be blank", ex.getMessage());
   }
 
@@ -189,13 +231,13 @@ final class QueryEventTest {
 
   @Test
   void contextWarningConstructsAndExposesFields() {
-    var e = new QueryEvent.ContextWarning(SID, TURN, TS, 0.85);
+    var e = new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, 0.85);
     assertEquals(0.85, e.usagePct());
   }
 
   @Test
   void contextWarningAllowsZeroPct() {
-    var e = new QueryEvent.ContextWarning(SID, TURN, TS, 0.0);
+    var e = new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, 0.0);
     assertEquals(0.0, e.usagePct());
   }
 
@@ -204,7 +246,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ContextWarning(SID, TURN, TS, -0.01));
+            () -> new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, -0.01));
     assertTrue(ex.getMessage().startsWith("usagePct must be non-negative and finite"));
   }
 
@@ -212,14 +254,14 @@ final class QueryEventTest {
   void contextWarningRejectsNanPct() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new QueryEvent.ContextWarning(SID, TURN, TS, Double.NaN));
+        () -> new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, Double.NaN));
   }
 
   // ── ContextEdited ─────────────────────────────────────────────────────────
 
   @Test
   void contextEditedConstructsAndExposesFields() {
-    var e = new QueryEvent.ContextEdited(SID, TURN, TS, 4, 18_000L, 12_000L);
+    var e = new QueryEvent.ContextEdited(SID, "run-1", TURN, TS, 4, 18_000L, 12_000L);
     assertEquals(4, e.removedBlocks());
     assertEquals(18_000L, e.tokensBefore());
     assertEquals(12_000L, e.tokensAfter());
@@ -230,7 +272,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ContextEdited(SID, TURN, TS, -1, 0L, 0L));
+            () -> new QueryEvent.ContextEdited(SID, "run-1", TURN, TS, -1, 0L, 0L));
     assertEquals("removedBlocks must be non-negative, got -1", ex.getMessage());
   }
 
@@ -239,7 +281,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ContextEdited(SID, TURN, TS, 0, -1L, 0L));
+            () -> new QueryEvent.ContextEdited(SID, "run-1", TURN, TS, 0, -1L, 0L));
     assertEquals("tokensBefore must be non-negative, got -1", ex.getMessage());
   }
 
@@ -248,7 +290,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.ContextEdited(SID, TURN, TS, 0, 0L, -1L));
+            () -> new QueryEvent.ContextEdited(SID, "run-1", TURN, TS, 0, 0L, -1L));
     assertEquals("tokensAfter must be non-negative, got -1", ex.getMessage());
   }
 
@@ -256,7 +298,7 @@ final class QueryEventTest {
 
   @Test
   void turnEndedConstructsAndExposesFields() {
-    var e = new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP);
+    var e = new QueryEvent.TurnEnded(SID, "run-1", TURN, TS, FinishReason.STOP);
     assertSame(FinishReason.STOP, e.reason());
   }
 
@@ -264,7 +306,8 @@ final class QueryEventTest {
   void turnEndedRejectsNullReason() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.TurnEnded(SID, TURN, TS, null));
+            NullPointerException.class,
+            () -> new QueryEvent.TurnEnded(SID, "run-1", TURN, TS, null));
     assertEquals("reason must not be null", ex.getMessage());
   }
 
@@ -273,7 +316,9 @@ final class QueryEventTest {
   @Test
   void turnRetriedConstructsAndExposesFields() {
     var err = SerializedError.of("kind", "msg");
-    var e = new QueryEvent.TurnRetried(SID, TURN, TS, 2, Duration.ofMillis(750), "anthropic", err);
+    var e =
+        new QueryEvent.TurnRetried(
+            SID, "run-1", TURN, TS, 2, Duration.ofMillis(750), "anthropic", err);
     assertEquals(2, e.attemptNumber());
     assertEquals(Duration.ofMillis(750), e.backoff());
     assertEquals("anthropic", e.providerName());
@@ -286,7 +331,9 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 0, Duration.ofMillis(1), "p", err));
+            () ->
+                new QueryEvent.TurnRetried(
+                    SID, "run-1", TURN, TS, 0, Duration.ofMillis(1), "p", err));
     assertEquals("attemptNumber must be >= 1, got 0", ex.getMessage());
   }
 
@@ -296,7 +343,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, null, "p", err));
+            () -> new QueryEvent.TurnRetried(SID, "run-1", TURN, TS, 1, null, "p", err));
     assertEquals("backoff must not be null", ex.getMessage());
   }
 
@@ -306,14 +353,16 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ofMillis(-1), "p", err));
+            () ->
+                new QueryEvent.TurnRetried(
+                    SID, "run-1", TURN, TS, 1, Duration.ofMillis(-1), "p", err));
     assertTrue(ex.getMessage().startsWith("backoff must not be negative"));
   }
 
   @Test
   void turnRetriedAcceptsZeroBackoff() {
     var err = SerializedError.of("kind", "msg");
-    var e = new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "p", err);
+    var e = new QueryEvent.TurnRetried(SID, "run-1", TURN, TS, 1, Duration.ZERO, "p", err);
     assertEquals(Duration.ZERO, e.backoff());
   }
 
@@ -323,7 +372,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, null, err));
+            () -> new QueryEvent.TurnRetried(SID, "run-1", TURN, TS, 1, Duration.ZERO, null, err));
     assertEquals("providerName must not be null", ex.getMessage());
   }
 
@@ -333,7 +382,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "  ", err));
+            () -> new QueryEvent.TurnRetried(SID, "run-1", TURN, TS, 1, Duration.ZERO, "  ", err));
     assertEquals("providerName must not be blank", ex.getMessage());
   }
 
@@ -342,26 +391,33 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.TurnRetried(SID, TURN, TS, 1, Duration.ZERO, "p", null));
+            () -> new QueryEvent.TurnRetried(SID, "run-1", TURN, TS, 1, Duration.ZERO, "p", null));
     assertEquals("error must not be null", ex.getMessage());
   }
 
-  // ── LoopEnded ─────────────────────────────────────────────────────────────
+  // ── RunEnded ──────────────────────────────────────────────────────────────
 
   @Test
-  void loopEndedConstructsAndExposesFields() {
+  void runEndedConstructsAndExposesFields() {
     var result =
         new ResultMessage.Success(
-            SID, "done", Usage.of(10, 5), CostEstimate.zero(), Duration.ofSeconds(1), List.of());
-    var e = new QueryEvent.LoopEnded(SID, TURN, TS, result);
+            SID,
+            "run-1",
+            "done",
+            Usage.of(10, 5),
+            CostEstimate.zero(),
+            Duration.ofSeconds(1),
+            List.of());
+    var e = new QueryEvent.RunEnded(SID, "run-1", TURN, TS, result);
     assertSame(result, e.result());
   }
 
   @Test
-  void loopEndedRejectsNullResult() {
+  void runEndedRejectsNullResult() {
     var ex =
         assertThrows(
-            NullPointerException.class, () -> new QueryEvent.LoopEnded(SID, TURN, TS, null));
+            NullPointerException.class,
+            () -> new QueryEvent.RunEnded(SID, "run-1", TURN, TS, null));
     assertEquals("result must not be null", ex.getMessage());
   }
 
@@ -370,23 +426,24 @@ final class QueryEventTest {
   @Test
   void errorConstructsAndExposesFields() {
     var err = SerializedError.of("kind", "msg");
-    var e = new QueryEvent.Error(SID, TURN, TS, err);
+    var e = new QueryEvent.Error(SID, "run-1", TURN, TS, err);
     assertSame(err, e.error());
   }
 
   @Test
   void errorRejectsNullSerializedError() {
     var ex =
-        assertThrows(NullPointerException.class, () -> new QueryEvent.Error(SID, TURN, TS, null));
+        assertThrows(
+            NullPointerException.class, () -> new QueryEvent.Error(SID, "run-1", TURN, TS, null));
     assertEquals("error must not be null", ex.getMessage());
   }
 
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasSeventeenPermittedSubclasses() {
+  void sealedInterfaceHasEighteenPermittedSubclasses() {
     var permits = QueryEvent.class.getPermittedSubclasses();
-    assertEquals(17, permits.length);
+    assertEquals(18, permits.length);
   }
 
   @Test
@@ -394,7 +451,7 @@ final class QueryEventTest {
     var cite = Citation.of("https://src", "snippet");
     var mutable = new java.util.ArrayList<Citation>();
     mutable.add(cite);
-    var ev = new QueryEvent.AssistantCitations(SID, TURN, TS, mutable);
+    var ev = new QueryEvent.AssistantCitations(SID, "run-1", TURN, TS, mutable);
     mutable.add(Citation.of("https://b", "y"));
     assertEquals(List.of(cite), ev.citations());
     assertThrows(UnsupportedOperationException.class, () -> ev.citations().add(cite));
@@ -405,7 +462,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             NullPointerException.class,
-            () -> new QueryEvent.AssistantCitations(SID, TURN, TS, null));
+            () -> new QueryEvent.AssistantCitations(SID, "run-1", TURN, TS, null));
     assertEquals("citations must not be null", ex.getMessage());
   }
 
@@ -414,7 +471,7 @@ final class QueryEventTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new QueryEvent.AssistantCitations(SID, TURN, TS, List.of()));
+            () -> new QueryEvent.AssistantCitations(SID, "run-1", TURN, TS, List.of()));
     assertEquals("citations must not be empty", ex.getMessage());
   }
 
@@ -422,29 +479,31 @@ final class QueryEventTest {
   void switchPatternHandlesEverySubtype() {
     var result =
         new ResultMessage.Success(
-            SID, "ok", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO, List.of());
+            SID, "run-1", "ok", Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO, List.of());
     List<QueryEvent> all =
         List.of(
-            new QueryEvent.AssistantText(SID, TURN, TS, "t"),
-            new QueryEvent.AssistantThinking(SID, TURN, TS, "th"),
+            new QueryEvent.AssistantText(SID, "run-1", TURN, TS, "t"),
+            new QueryEvent.AssistantThinking(SID, "run-1", TURN, TS, "th"),
             new QueryEvent.AssistantCitations(
-                SID, TURN, TS, List.of(Citation.of("https://src", "snippet"))),
-            new QueryEvent.UserMessageReceived(SID, TURN, TS, UserMessage.text("hi")),
+                SID, "run-1", TURN, TS, List.of(Citation.of("https://src", "snippet"))),
+            new QueryEvent.UserMessageReceived(SID, "run-1", TURN, TS, UserMessage.text("hi")),
             new QueryEvent.MessageBlocked(
-                SID, TURN, TS, UserMessage.text("nope"), "MyHook", "policy violation"),
-            new QueryEvent.ContextWarning(SID, TURN, TS, 0.5),
-            new QueryEvent.ContextEdited(SID, TURN, TS, 1, 100L, 50L),
-            new QueryEvent.TurnEnded(SID, TURN, TS, FinishReason.STOP),
+                SID, "run-1", TURN, TS, UserMessage.text("nope"), "MyHook", "policy violation"),
+            new QueryEvent.ContextWarning(SID, "run-1", TURN, TS, 0.5),
+            new QueryEvent.ContextEdited(SID, "run-1", TURN, TS, 1, 100L, 50L),
+            new QueryEvent.TurnEnded(SID, "run-1", TURN, TS, FinishReason.STOP),
             new QueryEvent.TurnRetried(
                 SID,
+                "run-1",
                 TURN,
                 TS,
                 1,
                 Duration.ofMillis(100),
                 "anthropic",
                 SerializedError.of("k", "m")),
-            new QueryEvent.LoopEnded(SID, TURN, TS, result),
-            new QueryEvent.Error(SID, TURN, TS, SerializedError.of("k", "m")));
+            new QueryEvent.RunStarted(SID, "run-1", TS),
+            new QueryEvent.RunEnded(SID, "run-1", TURN, TS, result),
+            new QueryEvent.Error(SID, "run-1", TURN, TS, SerializedError.of("k", "m")));
     for (var e : all) {
       var tag =
           switch (e) {
@@ -463,7 +522,8 @@ final class QueryEventTest {
             case QueryEvent.QuestionAsked q -> "question-asked";
             case QueryEvent.TurnEnded te -> "turn-end";
             case QueryEvent.TurnRetried tr -> "turn-retried";
-            case QueryEvent.LoopEnded le -> "loop-end";
+            case QueryEvent.RunStarted rs -> "run-start";
+            case QueryEvent.RunEnded re -> "run-end";
             case QueryEvent.Error err -> "error";
           };
       assertTrue(tag != null && !tag.isEmpty());

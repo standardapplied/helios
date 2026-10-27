@@ -46,7 +46,7 @@ final class AgentSessionImplTest {
   }
 
   private static AgentSession buildSession(Model model, int maxQueuedUserMessages) {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder()
             .withModel(model)
             .withSessionId(SID)
@@ -72,8 +72,8 @@ final class AgentSessionImplTest {
     return sub.events().stream().<Class<?>>map(QueryEvent::getClass).toList();
   }
 
-  private static ResultMessage terminalOf(AgentSession session) {
-    return Await.value("the session to reach its terminal", session.result());
+  private static ResultMessage terminalOf(CompletableFuture<ResultMessage> run) {
+    return Await.value("the run to reach its terminal", run);
   }
 
   // ── construction validation ───────────────────────────────────────────────
@@ -86,14 +86,14 @@ final class AgentSessionImplTest {
 
   @Test
   void createFactoryRejectsNullOptions() {
-    var ex = assertThrows(NullPointerException.class, () -> AgentSession.create(null));
+    var ex = assertThrows(NullPointerException.class, () -> AgentSession.open(null));
     assertEquals("options must not be null", ex.getMessage());
   }
 
   @Test
   void createFactoryReturnsAgentSession() {
     try (var s =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(textOnceModel("x", FinishReason.STOP))
                 .withSessionId(SID)
@@ -120,31 +120,36 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void aSessionIsNotStartedUntilItsFirstMessage() throws Exception {
-    var s = buildSession(textOnceModel("done", FinishReason.STOP));
-    try {
-      assertFalse(s.isStarted());
-      s.send(UserMessage.text("hi"));
-      assertTrue(s.isStarted());
-      terminalOf(s);
-    } finally {
-      s.close();
+  void aSessionRunsOnlyWhileARunIsInProgress() {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (var s = buildSession(latchedModel(entered, release, "done"))) {
+      assertFalse(s.isRunning());
+      var run = s.send(UserMessage.text("hi"));
+      Await.latch("the run to reach the model", entered);
+      assertTrue(s.isRunning());
+      assertEquals(1, s.currentTurnIndex());
+      release.countDown();
+      terminalOf(run);
+      Await.until("the session to leave the run", () -> !s.isRunning());
+      assertEquals(0, s.currentTurnIndex());
     }
   }
 
   @Test
-  void anInterruptStartsTheSession() {
+  void anInterruptWithNoRunDoesNothing() {
     try (var s = buildSession(textOnceModel("done", FinishReason.STOP))) {
-      s.interrupt("now");
-      assertTrue(s.isStarted());
+      s.interrupt();
+      assertFalse(s.isRunning());
+      assertInstanceOf(ResultMessage.Success.class, terminalOf(s.send("hi")));
     }
   }
 
   @Test
-  void aSessionClosedBeforeItsFirstMessageCountsAsStarted() {
+  void aSessionClosedBeforeItsFirstMessageNeverRuns() {
     var s = buildSession(textOnceModel("x", FinishReason.STOP));
     s.close();
-    assertTrue(s.isStarted());
+    assertFalse(s.isRunning());
   }
 
   @Test
@@ -173,16 +178,6 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void sendOnTerminalSessionThrows() throws Exception {
-    var s = buildSession(textOnceModel("done", FinishReason.STOP));
-    s.send(UserMessage.text("hi"));
-    terminalOf(s);
-    var ex = assertThrows(IllegalStateException.class, () -> s.send(UserMessage.text("again")));
-    assertEquals("session is terminal", ex.getMessage());
-    s.close();
-  }
-
-  @Test
   void sendFullQueueThrows() throws Exception {
     var release = new CountDownLatch(1);
     var entered = new CountDownLatch(1);
@@ -202,56 +197,14 @@ final class AgentSessionImplTest {
     }
   }
 
-  @Test
-  void interruptOnFullQueueThrows() throws Exception {
-    var release = new CountDownLatch(1);
-    var entered = new CountDownLatch(1);
-    Model latched = latchedModel(entered, release, "ok");
-    var s = buildSession(latched, 1);
-    try {
-      s.send(UserMessage.text("first"));
-      Await.latch("the loop to reach chat()", entered);
-      s.send(UserMessage.text("second"));
-      var ex = assertThrows(SteeringQueueFullException.class, () -> s.interrupt("nope"));
-      assertEquals("steering queue full at capacity 1 — cannot enqueue interrupt", ex.getMessage());
-    } finally {
-      release.countDown();
-      s.close();
-    }
-  }
-
-  // ── interrupt validation ─────────────────────────────────────────────────
+  // ── interrupt ─────────────────────────────────────────────────────────────
 
   @Test
-  void interruptRejectsNullReason() {
-    try (var s = buildSession(textOnceModel("x", FinishReason.STOP))) {
-      var ex = assertThrows(NullPointerException.class, () -> s.interrupt(null));
-      assertEquals("reason must not be null", ex.getMessage());
-    }
-  }
-
-  @Test
-  void interruptRejectsBlankReason() {
-    try (var s = buildSession(textOnceModel("x", FinishReason.STOP))) {
-      var ex = assertThrows(IllegalArgumentException.class, () -> s.interrupt("  "));
-      assertEquals("reason must not be blank", ex.getMessage());
-    }
-  }
-
-  @Test
-  void interruptOnClosedSessionThrows() {
+  void interruptOnClosedSessionDoesNothing() {
     var s = buildSession(textOnceModel("x", FinishReason.STOP));
     s.close();
-    assertThrows(IllegalStateException.class, () -> s.interrupt("nope"));
-  }
-
-  @Test
-  void interruptOnTerminalSessionThrows() throws Exception {
-    var s = buildSession(textOnceModel("done", FinishReason.STOP));
-    s.send(UserMessage.text("hi"));
-    terminalOf(s);
-    assertThrows(IllegalStateException.class, () -> s.interrupt("late"));
-    s.close();
+    s.interrupt();
+    assertFalse(s.isRunning());
   }
 
   // ── happy path ────────────────────────────────────────────────────────────
@@ -261,16 +214,16 @@ final class AgentSessionImplTest {
     try (var s = buildSession(textOnceModel("hello back", FinishReason.STOP))) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("hi"));
+      var run = s.send(UserMessage.text("hi"));
 
-      var result = terminalOf(s);
-      sub.awaitDone();
+      var result = terminalOf(run);
+      sub.awaitRunEnded();
 
       var success = assertInstanceOf(ResultMessage.Success.class, result);
       assertEquals("hello back", success.result());
       assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.UserMessageReceived));
       assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.AssistantText));
-      assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.LoopEnded));
+      assertTrue(sub.events().stream().anyMatch(e -> e instanceof QueryEvent.RunEnded));
     }
   }
 
@@ -283,94 +236,24 @@ final class AgentSessionImplTest {
     }
   }
 
-  // ── interrupt steering ────────────────────────────────────────────────────
-
-  @Test
-  void interruptQueuesSyntheticMessageAndContinues() throws Exception {
-    var calls = new java.util.concurrent.atomic.AtomicInteger();
-    var firstTurnEntered = new CountDownLatch(1);
-    var firstTurnRelease = new CountDownLatch(1);
-    Model alternating =
-        new BlockingModel() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var call = calls.incrementAndGet();
-            if (call == 1) {
-              // Hold the first turn until interrupt() is queued: a first turn that completes
-              // with an empty queue sends the session terminal, and interrupt() then throws.
-              firstTurnEntered.countDown();
-              try {
-                firstTurnRelease.await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-            }
-            return Response.newBuilder()
-                .withContent("turn-" + call)
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(1, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-    try (var s = buildSession(alternating)) {
-      var sub = new EventCollector();
-      sub.read(s.events());
-      s.send(UserMessage.text("first"));
-      Await.latch("the first turn to reach chat()", firstTurnEntered);
-      s.interrupt("rethink");
-      firstTurnRelease.countDown();
-      var result = terminalOf(s);
-      sub.awaitDone();
-
-      var success = assertInstanceOf(ResultMessage.Success.class, result);
-      var interruptedReceived =
-          sub.events().stream()
-              .filter(e -> e instanceof QueryEvent.UserMessageReceived)
-              .map(e -> (QueryEvent.UserMessageReceived) e)
-              .anyMatch(u -> u.message().text().contains("[interrupted by user: rethink]"));
-      assertTrue(interruptedReceived, "interrupt synthetic message must be received");
-      assertEquals("turn-2", success.result());
-      assertEquals(2, calls.get());
-    }
-  }
-
   // ── close lifecycle ───────────────────────────────────────────────────────
 
   @Test
-  void closeBeforeAnySendProducesCancelledTerminal() throws Exception {
-    var s = buildSession(textOnceModel("never", FinishReason.STOP));
-    s.close();
-    var result = terminalOf(s);
-    var c = assertInstanceOf(ResultMessage.Cancelled.class, result);
-    assertEquals("session closed", c.reason());
-  }
-
-  @Test
-  void closeIsIdempotent() throws Exception {
+  void closeIsIdempotent() {
     var s = buildSession(textOnceModel("x", FinishReason.STOP));
     s.close();
     s.close();
-    s.close();
-    assertInstanceOf(ResultMessage.Cancelled.class, terminalOf(s));
+    var ex = assertThrows(IllegalStateException.class, () -> s.send("hi"));
+    assertEquals("session is closed", ex.getMessage());
   }
 
   @Test
   void closeAfterTerminalDoesNotBreak() throws Exception {
     var s = buildSession(textOnceModel("done", FinishReason.STOP));
-    s.send(UserMessage.text("hi"));
-    var first = terminalOf(s);
+    var run = s.send(UserMessage.text("hi"));
+    var first = terminalOf(run);
     s.close();
-    assertEquals(first, terminalOf(s));
+    assertEquals(first, terminalOf(run));
   }
 
   @Test
@@ -378,11 +261,11 @@ final class AgentSessionImplTest {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     try (var s = buildSession(latchedModel(entered, release, "too late"))) {
-      s.send(UserMessage.text("hi"));
+      var run = s.send(UserMessage.text("hi"));
       Await.latch("the loop to reach chat()", entered);
       s.close();
       release.countDown();
-      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, terminalOf(s));
+      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, terminalOf(run));
       assertEquals("session closed", cancelled.reason());
     }
   }
@@ -397,20 +280,13 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void naturalLoopTerminationEndsEveryOpenStreamBeforeTheResultSettles() {
+  void theEndOfARunKeepsEveryStreamOpenUntilTheSessionCloses() {
     var s = (AgentSessionImpl) buildSession(textOnceModel("done", FinishReason.STOP));
     s.events();
-    s.send(UserMessage.text("hi"));
-    terminalOf(s);
-    assertEquals(0, s.lifecycle.events().openStreams(), "the teardown ended every stream");
-  }
-
-  @Test
-  void resultFutureExposedAsCompletableFuture() {
-    try (var s = buildSession(textOnceModel("x", FinishReason.STOP))) {
-      var f = s.result();
-      assertInstanceOf(CompletableFuture.class, f);
-    }
+    terminalOf(s.send(UserMessage.text("hi")));
+    assertEquals(1, s.lifecycle.events().openStreams(), "a run's end leaves the stream open");
+    s.close();
+    assertEquals(0, s.lifecycle.events().openStreams(), "the close ended every stream");
   }
 
   @Test
@@ -435,8 +311,8 @@ final class AgentSessionImplTest {
     try (var s = buildSession(throwing)) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("hi"));
-      var result = terminalOf(s);
+      var run = s.send(UserMessage.text("hi"));
+      var result = terminalOf(run);
       assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     }
   }
@@ -450,16 +326,16 @@ final class AgentSessionImplTest {
         };
     var model = ScriptedModel.newBuilder().withTextTurn("done").withTextTurn("never").build();
     try (var s =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId(SID)
                 .withClock(CLOCK)
                 .withHook(erroring)
                 .build())) {
-      s.send(UserMessage.text("hi"));
+      var future = s.send(UserMessage.text("hi"));
 
-      assertSame(sentinel, Await.failure("the result future to fail", s.result()));
+      assertSame(sentinel, Await.failure("the result future to fail", future));
     }
     assertEquals(1, model.calls().size());
   }
@@ -468,7 +344,7 @@ final class AgentSessionImplTest {
   void systemPromptLeadsTheHistoryTheModelSees() {
     var model = ScriptedModel.newBuilder().withTextTurn("ok").build();
     try (var s =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(model)
                 .withSessionId(SID)
@@ -489,16 +365,17 @@ final class AgentSessionImplTest {
       var sub2 = new EventCollector();
       sub1.read(s.events());
       sub2.read(s.events());
-      s.send(UserMessage.text("hi"));
-      terminalOf(s);
-      sub1.awaitDone();
-      sub2.awaitDone();
+      var run = s.send(UserMessage.text("hi"));
+      terminalOf(run);
+      sub1.awaitRunEnded();
+      sub2.awaitRunEnded();
       assertEquals(
           List.of(
+              QueryEvent.RunStarted.class,
               QueryEvent.UserMessageReceived.class,
               QueryEvent.AssistantText.class,
               QueryEvent.TurnEnded.class,
-              QueryEvent.LoopEnded.class),
+              QueryEvent.RunEnded.class),
           eventTypes(sub1));
       assertEquals(sub1.events(), sub2.events(), "both subscribers see the same stream");
     }
@@ -509,11 +386,11 @@ final class AgentSessionImplTest {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     try (var s = buildSession(latchedModel(entered, release, "late"))) {
-      s.send(UserMessage.text("hi"));
+      var future = s.send(UserMessage.text("hi"));
       Await.latch("the loop to reach chat()", entered);
-      assertFalse(s.result().isDone(), "the result cannot settle while the model call is open");
+      assertFalse(future.isDone(), "the result cannot settle while the model call is open");
       release.countDown();
-      var success = assertInstanceOf(ResultMessage.Success.class, terminalOf(s));
+      var success = assertInstanceOf(ResultMessage.Success.class, terminalOf(future));
       assertEquals("late", success.result());
     }
   }
@@ -523,9 +400,9 @@ final class AgentSessionImplTest {
     try (var s = buildSession(textOnceModel("hi", FinishReason.STOP))) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("hi"));
-      terminalOf(s);
-      sub.awaitDone();
+      var run = s.send(UserMessage.text("hi"));
+      terminalOf(run);
+      sub.awaitRunEnded();
       for (var e : sub.events()) {
         assertEquals(FIXED, e.timestamp());
       }
@@ -573,9 +450,9 @@ final class AgentSessionImplTest {
     try (var s = buildSession(respondingWith(thoughtful))) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("match me"));
-      terminalOf(s);
-      sub.awaitDone();
+      var run = s.send(UserMessage.text("match me"));
+      terminalOf(run);
+      sub.awaitRunEnded();
 
       var kinds =
           sub.events().stream()
@@ -613,7 +490,7 @@ final class AgentSessionImplTest {
                     .build())
             .build();
     try (var s =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(billy)
                 .withSessionId(SID)
@@ -634,7 +511,7 @@ final class AgentSessionImplTest {
     // completes normally — this is the opt-in contract.
     var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(10_000L).build();
     try (var s =
-        AgentSession.create(
+        AgentSession.open(
             SessionOptions.newBuilder()
                 .withModel(textOnceModel("hello", FinishReason.STOP))
                 .withSessionId(SID)
