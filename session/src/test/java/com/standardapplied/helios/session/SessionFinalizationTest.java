@@ -35,7 +35,6 @@ import com.standardapplied.helios.session.loop.TurnRunner;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
@@ -282,7 +281,9 @@ final class SessionFinalizationTest {
             .withStopGrace(SHORT_GRACE)
             .withToolTimeoutDefault(NOT_REACHED)
             .build();
-    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
+    var session =
+        AgentSession.create(
+            withProvider(provider, model).withLimits(limits).withAskUserQuestion().build());
     provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
     var asked = opensOn(session, QueryEvent.QuestionAsked.class);
     session.send("go");
@@ -450,8 +451,7 @@ final class SessionFinalizationTest {
             return HookOutcome.cont();
           };
       var events = new EventCollector(event -> threads.add(Thread.currentThread()));
-      var options =
-          options(model).withTools(new ToolRegistry(List.of(tool))).withHook(recordingLoop).build();
+      var options = options(model).withTools(List.of(tool)).withHook(recordingLoop).build();
 
       try (var session = (AgentSessionImpl) AgentSession.create(options)) {
         events.read(session.events());

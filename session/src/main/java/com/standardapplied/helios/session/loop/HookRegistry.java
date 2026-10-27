@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.session.hooks;
+package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
@@ -13,12 +13,20 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.Hook;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
+import com.standardapplied.helios.session.hooks.OnUserMessageHook;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
+import com.standardapplied.helios.session.hooks.PostToolUseHook;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -66,7 +74,6 @@ public final class HookRegistry {
   private final List<Registered<PreStopHook>> preStop;
   private final List<Registered<OnUserMessageHook>> onUserMessage;
   private final List<Registered<OnStreamEventHook>> onStreamEvent;
-  private final Map<Class<? extends Hook>, List<?>> hooksByPhase;
   private final SecretRegistry secrets;
 
   /** A hook with the name the registry read from it when it was built. */
@@ -95,15 +102,6 @@ public final class HookRegistry {
     this.preStop = sortByPriority(registered, PreStopHook.class);
     this.onUserMessage = sortByPriority(registered, OnUserMessageHook.class);
     this.onStreamEvent = sortByPriority(registered, OnStreamEventHook.class);
-    var byPhase = new HashMap<Class<? extends Hook>, List<?>>();
-    byPhase.put(PreToolUseHook.class, preToolUse);
-    byPhase.put(PostToolUseHook.class, postToolUse);
-    byPhase.put(PreModelTurnHook.class, preModelTurn);
-    byPhase.put(PostModelTurnHook.class, postModelTurn);
-    byPhase.put(PreStopHook.class, preStop);
-    byPhase.put(OnUserMessageHook.class, onUserMessage);
-    byPhase.put(OnStreamEventHook.class, onStreamEvent);
-    this.hooksByPhase = Map.copyOf(byPhase);
   }
 
   /**
@@ -135,17 +133,6 @@ public final class HookRegistry {
         .map(registered -> new Registered<>(phase.cast(registered.hook()), registered.name()))
         .sorted(Comparator.comparingInt(registered -> registered.hook().priority()))
         .toList();
-  }
-
-  /**
-   * Number of registered hooks of the given phase. Useful for tests and observability.
-   *
-   * @param phase the phase class
-   * @return non-negative count
-   */
-  public int countOf(Class<? extends Hook> phase) {
-    var phaseHooks = hooksByPhase.get(phase);
-    return phaseHooks == null ? 0 : phaseHooks.size();
   }
 
   /**

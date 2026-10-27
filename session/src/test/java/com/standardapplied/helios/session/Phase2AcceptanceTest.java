@@ -24,7 +24,6 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -67,15 +66,14 @@ final class Phase2AcceptanceTest {
     var workspace = WorkspaceRoot.of(tmp);
     var memoryBackend = FileSystemMemoryBackend.of(workspace);
 
-    // User tools: Read, LS, Glob, Grep. MemoryRead + AskUserQuestion are auto-registered by the
-    // session.
+    // User tools: Read, LS, Glob, Grep. The memory tools come with the backend, AskUserQuestion
+    // with the opt-in.
     var tools =
-        new ToolRegistry(
-            List.of(
-                ReadTool.binding(workspace),
-                LsTool.binding(workspace),
-                GlobTool.binding(workspace),
-                GrepTool.binding(workspace)));
+        List.of(
+            ReadTool.binding(workspace),
+            LsTool.binding(workspace),
+            GlobTool.binding(workspace),
+            GrepTool.binding(workspace));
 
     // Permission policy: deny Read on the sensitive file, allow everything else by default.
     var permission =
@@ -117,6 +115,7 @@ final class Phase2AcceptanceTest {
             .withTools(tools)
             .withPermission(permission)
             .withMemoryBackend(memoryBackend)
+            .withAskUserQuestion()
             .build();
 
     try (var session = AgentSession.create(options)) {
@@ -173,9 +172,7 @@ final class Phase2AcceptanceTest {
       assertTrue(askResult.result().output().contains("- Yes"));
 
       // Verify memory listing works via the auto-registered MemoryRead tool.
-      var memBinding = options.tools(); // user-supplied registry, no MemoryRead in here
-      // Sanity: MemoryRead is NOT in the user registry, only in the combined session registry.
-      assertTrue(memBinding.get(MemoryReadTool.NAME).isEmpty());
+      assertTrue(options.tools().stream().noneMatch(b -> b.name().equals(MemoryReadTool.NAME)));
     }
   }
 

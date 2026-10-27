@@ -6,9 +6,7 @@ package com.standardapplied.helios.session.permissions;
 
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -37,28 +35,14 @@ import java.util.regex.Pattern;
  * strings, not on the filesystem, so a glob names real paths: one written through a symlink, such
  * as {@code ./link/**}, never matches, since a canonical path never goes through one.
  *
- * <h2>Thread-safety</h2>
- *
- * Thread-safe: its only state is a concurrent cache of compiled globs. Safe to share.
+ * <p>A glob is compiled only for a rule naming the key's tool. Stateless.
  */
-public final class RuleMatcher {
+final class RuleMatcher {
 
-  private final ConcurrentHashMap<String, Pattern> patterns = new ConcurrentHashMap<>();
+  private RuleMatcher() {}
 
-  /** Default constructor. */
-  public RuleMatcher() {}
-
-  /**
-   * Find the first rule in {@code rules} that matches {@code key}.
-   *
-   * @param key the tool permission key; non-null
-   * @param rules the rules to scan, in declaration order; non-null
-   * @return the first matching rule, or empty
-   * @throws NullPointerException if either argument is null
-   */
-  public Optional<PermissionRule> firstMatch(ToolPermissionKey key, List<PermissionRule> rules) {
-    Objects.requireNonNull(key, "key must not be null");
-    Objects.requireNonNull(rules, "rules must not be null");
+  /** The first rule in {@code rules}, in declaration order, that matches {@code key}. */
+  static Optional<PermissionRule> firstMatch(ToolPermissionKey key, List<PermissionRule> rules) {
     for (var rule : rules) {
       if (matches(key, rule)) {
         return Optional.of(rule);
@@ -67,32 +51,14 @@ public final class RuleMatcher {
     return Optional.empty();
   }
 
-  /**
-   * Test whether {@code rule} matches {@code key}.
-   *
-   * @param key the tool permission key; non-null
-   * @param rule the rule; non-null
-   * @return {@code true} if the rule matches
-   * @throws NullPointerException if either argument is null
-   */
-  public boolean matches(ToolPermissionKey key, PermissionRule rule) {
-    Objects.requireNonNull(key, "key must not be null");
-    Objects.requireNonNull(rule, "rule must not be null");
-    if (!key.toolName().equals(rule.toolName())) {
-      return false;
-    }
-    if (rule.argPattern().isEmpty()) {
-      return true;
-    }
-    return globMatches(rule.argPattern().orElseThrow(), key.canonicalArgs());
+  /** Whether {@code rule} matches {@code key}. */
+  static boolean matches(ToolPermissionKey key, PermissionRule rule) {
+    return key.toolName().equals(rule.toolName())
+        && rule.argPattern().map(glob -> globMatches(glob, key.canonicalArgs())).orElse(true);
   }
 
-  /** Whether {@code glob} matches {@code input}, compiling each glob once per matcher. */
-  private boolean globMatches(String glob, String input) {
-    return patterns
-        .computeIfAbsent(glob, g -> Pattern.compile(globToRegex(g), Pattern.DOTALL))
-        .matcher(input)
-        .matches();
+  private static boolean globMatches(String glob, String input) {
+    return Pattern.compile(globToRegex(glob), Pattern.DOTALL).matcher(input).matches();
   }
 
   /**

@@ -14,8 +14,6 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
-import com.standardapplied.helios.session.hooks.HookRegistry;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.time.InstantSource;

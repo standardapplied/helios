@@ -14,7 +14,6 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +41,6 @@ final class ExecutePermissionSessionTest {
 
   private SessionOptions.Builder options(Permission permission) {
     return SessionOptions.newBuilder()
-        .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
         .withExecutionProvider(provider)
         .withSecretRegistry(secrets)
         .withPermission(permission);

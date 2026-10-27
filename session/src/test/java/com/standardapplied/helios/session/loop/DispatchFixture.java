@@ -17,7 +17,6 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;

@@ -7,7 +7,6 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
-import com.standardapplied.helios.session.hooks.HookDecision;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.permissions.Permission;
 import java.util.LinkedHashMap;
@@ -182,7 +181,7 @@ final class ToolRound {
         ToolAuthorization.admit(
             collaborators.toolDispatch().registry(),
             collaborators.authorization(),
-            collaborators.ruleDecision(),
+            collaborators.permission(),
             collaborators.secrets(),
             call);
     return switch (verdict) {

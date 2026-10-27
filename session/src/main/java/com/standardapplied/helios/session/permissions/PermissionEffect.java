@@ -10,7 +10,8 @@ package com.standardapplied.helios.session.permissions;
  *
  * <ul>
  *   <li>{@link #ALLOW} — proceed with the call.
- *   <li>{@link #ASK} — refer the call to the session's {@link ToolApprover}; with none, refuse it.
+ *   <li>{@link #ASK} — ask the user through the session's {@code QuestionAsked} event, and run the
+ *       call only if they allow it.
  *   <li>{@link #DENY} — refuse the call with the rule's reason.
  * </ul>
  */

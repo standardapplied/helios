@@ -2,10 +2,10 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
+import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.util.Optional;
 import java.util.function.Function;
 
 /** Permission stages for loop tests. */
@@ -16,8 +16,7 @@ final class Authorizations {
       canonical -> PermissionDecision.allow("admitted by the test");
 
   /** A policy no rule of which decides any key. */
-  static final Function<ToolPermissionKey, Optional<PermissionDecision>> NO_RULE =
-      key -> Optional.empty();
+  static final Permission NO_RULE = Permission.empty(PermissionMode.DEFAULT);
 
   private Authorizations() {}
 }

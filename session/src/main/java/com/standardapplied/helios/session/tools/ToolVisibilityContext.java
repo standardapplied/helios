@@ -15,6 +15,9 @@ import java.util.Objects;
  * in turn N+1 (e.g. a {@code Submit} tool that vanishes after submission, or a destination-specific
  * {@code Send} tool that only appears once the model has chosen a recipient).
  *
+ * <p>Visibility decides what a turn advertises, not what may run: a hidden tool the model names
+ * still runs. To refuse a call, use a deny rule or a {@code PreToolUse} hook's {@code Block}.
+ *
  * <p>It carries the session id and the current turn index.
  *
  * <h2>Thread-safety</h2>

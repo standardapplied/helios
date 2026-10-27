@@ -43,7 +43,6 @@ import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
@@ -200,7 +199,7 @@ final class StreamingSessionTest {
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withModel(model)
-                    .withTools(new ToolRegistry(List.of(weather())))
+                    .withTools(List.of(weather()))
                     .withOutputSchema(OutputSchema.of(Forecast.class))
                     .build())) {
       events.read(session.events());
@@ -438,6 +437,6 @@ final class StreamingSessionTest {
                     .build())
             .withExecutor((arguments, context) -> ToolResult.success("sunny"))
             .build();
-    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.SEARCH).build();
+    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();
   }
 }

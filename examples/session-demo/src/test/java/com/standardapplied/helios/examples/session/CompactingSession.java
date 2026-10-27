@@ -21,7 +21,6 @@ import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -71,7 +70,7 @@ final class CompactingSession {
         SessionOptions.newBuilder()
             .withModel(model)
             .withSystemPrompt("Answer questions about members by looking them up with get_profile.")
-            .withTools(new ToolRegistry(List.of(getProfile())))
+            .withTools(List.of(getProfile()))
             .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
             .withTokenCounter(CompactingSession::tokens)
             .withLimits(
@@ -123,6 +122,6 @@ final class CompactingSession {
                         "Operator turned angel investor, hardware supply chain background, based"
                             + " in Texas."))
             .build();
-    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.SEARCH).build();
+    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();
   }
 }

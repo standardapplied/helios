@@ -30,7 +30,6 @@ import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -120,7 +119,7 @@ final class Claude55AgentSessionIntegrationTest {
             AgentSession.create(
                 SessionOptions.newBuilder()
                     .withModel(model)
-                    .withTools(new ToolRegistry(List.of(searchProfiles(), getProfile())))
+                    .withTools(List.of(searchProfiles(), getProfile()))
                     .withSystemPrompt(SYSTEM_PROMPT)
                     .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(12).build())
@@ -181,6 +180,6 @@ final class Claude55AgentSessionIntegrationTest {
             .withIdempotent(true)
             .withExecutor((args, ctx) -> ToolResult.success(output))
             .build();
-    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.SEARCH).build();
+    return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();
   }
 }

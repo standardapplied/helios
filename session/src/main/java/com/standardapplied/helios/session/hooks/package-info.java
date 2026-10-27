@@ -22,13 +22,11 @@
  * HookOutcome.PreToolUse}), which admits exactly the outcomes that phase honours, so an outcome the
  * phase would ignore does not compile; the phase Javadoc documents what each one does.
  *
- * <p>{@link com.standardapplied.helios.session.hooks.HookRegistry} is the priority-sorted,
- * type-fanned dispatcher the loop calls. {@link
- * com.standardapplied.helios.session.hooks.HookDecision} pairs the firing hook's name (for
- * observability — surfaced on {@code QueryEvent.HookFired}) with the outcome. {@link
- * com.standardapplied.helios.session.hooks.HookContext} (and {@link
- * com.standardapplied.helios.session.hooks.DefaultHookContext}) carries the per-fire session id /
- * turn / model handle / cancellation token so hooks can take their own actions (e.g. call the model
- * again).
+ * <p>Hooks are added with {@code SessionOptions.Builder.withHook}; the session runs each phase's
+ * hooks by priority, and the first non-{@code Continue} outcome wins, attributed to its hook's name
+ * on {@code QueryEvent.HookFired}. {@link com.standardapplied.helios.session.hooks.HookContext}
+ * (and {@link com.standardapplied.helios.session.hooks.DefaultHookContext}) carries the per-fire
+ * session id / turn / model handle / cancellation token so hooks can take their own actions (e.g.
+ * call the model again).
  */
 package com.standardapplied.helios.session.hooks;

@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -44,10 +43,8 @@ final class DefaultPermissionSessionTest {
   private SessionOptions.Builder withoutAPolicy() {
     return SessionOptions.newBuilder()
         .withTools(
-            new ToolRegistry(
-                List.of(
-                    recording("Run", ToolCategory.EXECUTION),
-                    recording("Look", ToolCategory.READ))));
+            List.of(
+                recording("Run", ToolCategory.EXECUTION), recording("Look", ToolCategory.READ)));
   }
 
   private static ToolCall call(String name) {

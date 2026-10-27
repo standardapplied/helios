@@ -65,7 +65,9 @@ public final class ExecuteTool {
   private ExecuteTool() {}
 
   /**
-   * Build a binding bound to the given provider.
+   * Build a binding bound to the given provider. A session built with {@code
+   * SessionOptions.Builder.withExecutionProvider(provider)} registers this binding itself; add it
+   * by hand only to a session without one, whose provider's start and end then never run.
    *
    * @param provider the execution provider; non-null
    * @return a fresh binding

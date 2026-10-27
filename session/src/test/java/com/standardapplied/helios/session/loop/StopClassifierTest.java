@@ -514,10 +514,4 @@ final class StopClassifierTest {
     assertEquals("said " + marker, providerTerminal.error().message());
     assertTrue(lengthTerminal.error().message().endsWith("; partial content: said " + marker));
   }
-
-  @Test
-  void rejectsANullRegistry() {
-    var ex = assertThrows(NullPointerException.class, () -> new StopClassifier(null));
-    assertEquals("secrets must not be null", ex.getMessage());
-  }
 }

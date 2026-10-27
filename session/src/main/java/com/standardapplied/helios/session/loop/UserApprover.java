@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 
-package com.standardapplied.helios.session.permissions;
+package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.JsonSnapshot;
@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.QuestionGateway;
+import com.standardapplied.helios.session.permissions.PermissionDecision;
 import java.util.List;
 
 /**
@@ -25,7 +26,7 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
 
   @Override
   public PermissionDecision approve(ApprovalRequest request) throws InterruptedException {
-    var action = DefaultPermissionEvaluator.describe(request.key());
+    var action = request.key().describe();
     var question =
         new AskUserQuestionRequest(
             "perm-" + Ids.newId(),

@@ -11,12 +11,13 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 
 /**
- * Dispatch surface the {@code Execute} tool calls into to actually run a request. Implementations
- * range from "refuses everything" ({@link NoopExecutionProvider}) through "host-process subprocess
- * with a {@code CommandGrant} per runtime" ({@link LocalProcessExecutionProvider}) to "spawn an
- * Incus instance, run the script, dispose the instance" ({@code IncusExecutionProvider}, ships
- * separately) and "wrap a persistent JShell REPL" ({@code JShellExecutionProvider} in {@code
- * helios-repl}).
+ * Dispatch surface the {@code Execute} tool calls into to actually run a request. A session built
+ * with {@code SessionOptions.Builder.withExecutionProvider(provider)} registers {@code Execute}
+ * over it; a session without one has no {@code Execute} tool. Implementations range from
+ * "host-process subprocess with a {@code CommandGrant} per runtime" ({@link
+ * LocalProcessExecutionProvider}) to "spawn an Incus instance, run the script, dispose the
+ * instance" ({@code IncusExecutionProvider}, ships separately) and "wrap a persistent JShell REPL"
+ * ({@code JShellExecutionProvider} in {@code helios-repl}).
  *
  * <p>One {@code Execute} tool dispatches every runtime — providers route by {@link
  * ExecutionRequest#runtime()}. A provider declares its runtimes through {@link
@@ -72,8 +73,8 @@ public interface ExecutionProvider {
    * per-session resources (a JShell REPL, an Incus instance, a connection), keyed by {@link
    * SessionContext#sessionId()}.
    *
-   * <p>Defaults to {@link SessionStartOutcome#accept()} — stateless providers (Noop, local
-   * subprocess fork) need no per-session bookkeeping.
+   * <p>Defaults to {@link SessionStartOutcome#accept()} — stateless providers (a local subprocess
+   * fork) need no per-session bookkeeping.
    *
    * <p>If the returned outcome is a {@link SessionStartOutcome.Refuse}, the agent loop never
    * starts; the session terminates immediately with {@link

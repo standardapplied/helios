@@ -92,7 +92,9 @@ public record ToolBinding(
   }
 
   /**
-   * Decide whether the tool is visible to the model for the given turn.
+   * Decide whether the tool is advertised to the model for the given turn. Visibility decides what
+   * a turn advertises, not what may run: a hidden tool the model names still runs. To refuse a
+   * call, use a deny rule or a {@code PreToolUse} hook's {@code Block}.
    *
    * @param ctx the visibility context; non-null
    * @return {@code true} if the tool should appear in the model's tool list
@@ -251,7 +253,10 @@ public record ToolBinding(
     }
 
     /**
-     * Set the visibility predicate. Defaults to always-visible.
+     * Set the predicate deciding on which turns the tool is advertised to the model. Defaults to
+     * every turn. It decides what a turn advertises, not what may run: a hidden tool the model
+     * names still runs; refuse a call with a deny rule or a {@code PreToolUse} hook's {@code
+     * Block}.
      *
      * @param visibility non-null predicate
      * @return this builder

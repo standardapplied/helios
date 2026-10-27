@@ -10,7 +10,8 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
-import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.loop.SessionHookContext;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -20,6 +21,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -42,10 +44,11 @@ import java.util.logging.Logger;
  * <p>The summary call runs on a virtual thread under a timeout (default {@value
  * #DEFAULT_SUMMARY_TIMEOUT_SECONDS}s). A call that throws, times out or returns a blank summary is
  * logged as a WARNING and leaves the history unchanged; the watermark fires again on the next
- * check. An {@link Error} is recorded by the session's {@link SessionState#ending() ending} and
- * rethrown as itself. A successful call reports its usage and the summary model's id on the {@link
- * CompactionResult}, so the loop prices it and gates it through {@code
- * SessionLimits.maxBudgetMicroUsd}.
+ * check. An {@link Error} is rethrown as itself; called by the session, the compactor first records
+ * it in the session's {@code Error} sink, so one thrown after the timeout still ends the session.
+ * Called directly with any other {@link HookContext}, it only rethrows. A successful call reports
+ * its usage and the summary model's id on the {@link CompactionResult}, so the loop prices it and
+ * gates it through {@code SessionLimits.maxBudgetMicroUsd}.
  */
 public final class SummarizingCompactor implements ContextCompactor {
 
@@ -89,15 +92,15 @@ public final class SummarizingCompactor implements ContextCompactor {
   }
 
   @Override
-  public CompactionResult compact(List<Message> history, SessionState state) {
+  public CompactionResult compact(List<Message> history, HookContext context) {
     Objects.requireNonNull(history, "history must not be null");
-    Objects.requireNonNull(state, "state must not be null");
+    Objects.requireNonNull(context, "context must not be null");
     var summarisedFrom = leadingSystemMessages(history);
     var summarisedTo = pendingUserTurnStart(history);
     if (summarisedTo - summarisedFrom < MIN_SUMMARISED_MESSAGES || inToolRound(history)) {
       return CompactionResult.noOp(history);
     }
-    return summarise(history.subList(summarisedFrom, summarisedTo), state)
+    return summarise(history.subList(summarisedFrom, summarisedTo), context)
         .map(
             response -> {
               var compacted = new ArrayList<>(history.subList(0, summarisedFrom));
@@ -110,18 +113,18 @@ public final class SummarizingCompactor implements ContextCompactor {
   }
 
   /** The summary response for {@code summarised}, or empty when the call failed or was blank. */
-  private Optional<Response<Void>> summarise(List<Message> summarised, SessionState state) {
+  private Optional<Response<Void>> summarise(List<Message> summarised, HookContext context) {
     Optional<Response<Void>> response;
     try {
       response =
           invokeSummary(
-              state, List.of(Message.system(summaryPrompt), Message.user(render(summarised))));
+              context, List.of(Message.system(summaryPrompt), Message.user(render(summarised))));
     } catch (RuntimeException e) {
-      LOG.log(Level.WARNING, e, () -> unchanged("summary call failed", state));
+      LOG.log(Level.WARNING, e, () -> unchanged("summary call failed", context));
       return Optional.empty();
     }
     if (response.isPresent() && Strings.isBlank(response.get().content())) {
-      LOG.warning(() -> unchanged("summary returned blank", state));
+      LOG.warning(() -> unchanged("summary returned blank", context));
       return Optional.empty();
     }
     return response;
@@ -132,15 +135,15 @@ public final class SummarizingCompactor implements ContextCompactor {
    * thread is interrupted (best effort) and this returns empty. What the call throws is rethrown as
    * itself, an {@link Error} included, and a checked exception it throws undeclared wrapped in a
    * {@link RuntimeException}; an {@code Error}, or one it carries as a joined future's cause, is
-   * first recorded by the session's {@link SessionState#ending() ending}, so one thrown after the
-   * timeout still ends the session.
+   * first recorded by the session's ending when {@code context} is the session's, so one thrown
+   * after the timeout still ends the session.
    */
-  private Optional<Response<Void>> invokeSummary(SessionState state, List<Message> request) {
+  private Optional<Response<Void>> invokeSummary(HookContext context, List<Message> request) {
+    Consumer<Throwable> failures =
+        context instanceof SessionHookContext session ? session.ending()::failWith : thrown -> {};
     var summary =
         BoundedTask.start(
-            "helios-compaction-summary",
-            () -> summaryModel.chat(request, List.of()),
-            state.ending());
+            "helios-compaction-summary", () -> summaryModel.chat(request, List.of()), failures);
     if (summary.settlesBy(BoundedTask.deadlineAfter(summaryTimeout))) {
       return Optional.of(valueOf(summary.outcome()));
     }
@@ -149,7 +152,7 @@ public final class SummarizingCompactor implements ContextCompactor {
       throw new RuntimeException(
           new InterruptedException("interrupted while waiting for the summary call"));
     }
-    LOG.warning(() -> unchanged("summary timed out after " + summaryTimeout, state));
+    LOG.warning(() -> unchanged("summary timed out after " + summaryTimeout, context));
     return Optional.empty();
   }
 
@@ -164,13 +167,13 @@ public final class SummarizingCompactor implements ContextCompactor {
     }
   }
 
-  private static String unchanged(String reason, SessionState state) {
+  private static String unchanged(String reason, HookContext context) {
     return "Context compaction "
         + reason
         + "; leaving history unchanged. Session "
-        + state.sessionId()
+        + context.sessionId()
         + " turn "
-        + state.currentTurnIndex();
+        + context.turnIndex();
   }
 
   private static int leadingSystemMessages(List<Message> history) {

@@ -36,7 +36,6 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
@@ -116,9 +115,7 @@ final class SessionSecretRedactionTest {
   }
 
   private static SessionOptions.Builder withTools(SecretRegistry secrets, ToolBinding... tools) {
-    return SessionOptions.newBuilder()
-        .withSecretRegistry(secrets)
-        .withTools(new ToolRegistry(List.of(tools)));
+    return SessionOptions.newBuilder().withSecretRegistry(secrets).withTools(List.of(tools));
   }
 
   @Test
@@ -275,8 +272,7 @@ final class SessionSecretRedactionTest {
     var options =
         SessionOptions.newBuilder()
             .withTools(
-                new ToolRegistry(
-                    List.of(tool("reveal", (args, ctx) -> ToolResult.success("token=" + SECRET)))));
+                List.of(tool("reveal", (args, ctx) -> ToolResult.success("token=" + SECRET))));
 
     var run = run(options, calling(List.of(List.of(call("c1", "reveal")))));
 
@@ -312,11 +308,10 @@ final class SessionSecretRedactionTest {
             .withSecretRegistry(secrets)
             .withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))
             .withTools(
-                new ToolRegistry(
-                    List.of(
-                        ToolBinding.newBuilder(grant.toTool())
-                            .withCategory(ToolCategory.EXECUTION)
-                            .build())));
+                List.of(
+                    ToolBinding.newBuilder(grant.toTool())
+                        .withCategory(ToolCategory.EXECUTION)
+                        .build()));
     var model =
         calling(
             List.of(

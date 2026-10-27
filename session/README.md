@@ -87,8 +87,10 @@ The `workspace` preset wires:
 - `Permission.defaultInWorkspace()` — reads + memory allowed, writes / edit / execute asked.
 
 `SessionPresets.readOnly(model, root)` is the same shape without memory, gated by
-`Permission.planMode()` for purely read-only inspection. `SessionPresets.openEnded(model, root,
-provider)` adds `Execute` through the given `ExecutionProvider`, asked before each run.
+`Permission.planMode()` for purely read-only inspection. Tools append with `withTool(binding)`;
+`SessionPresets.workspace(model, root).withExecutionProvider(provider)` adds `Execute` through the
+given `ExecutionProvider`, asked before each run, and starts and ends the provider with the
+session; `withAskUserQuestion()` adds the model's `AskUserQuestion` tool.
 
 ## Streaming events
 
@@ -169,8 +171,10 @@ try (var session =
 
 Rule order, in every mode: **deny > ask > allow > the mode's default for the tool's category**.
 A rule has no effect of its own; the list it sits in is its effect. ASK decisions route through
-the session's `QuestionGateway` and surface as an `AskUserQuestion` prompt the host answers via
-`session.answer(questionId, response)`. A session built without `withPermission` gets
+the session's `QuestionGateway` and surface as a `QuestionAsked` event the host answers via
+`session.answer(questionId, response)`, whether or not the session registers `AskUserQuestion`.
+To test a policy without a session, `policy.evaluate(key, category)` returns the decision the
+session would act on, naming the deciding rule. A session built without `withPermission` gets
 `Permission.empty(PermissionMode.DEFAULT)`: reads run, writes, execution and network ask. A
 headless host sets `Permission.empty(PermissionMode.BYPASS_PERMISSIONS)`, or allow rules for the
 tools its runs need. `SessionPresets.workspace(...)` ships `Permission.defaultInWorkspace()`;
@@ -300,7 +304,7 @@ as the [root README](../README.md#context-compaction) shows.
 tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.
 
 The compaction step's `Usage` (input/output tokens consumed by the summary call) flows through
-`SessionState.usage()` and the session's `CostCalculator` so `SessionLimits.maxBudgetMicroUsd`
+the session's usage totals and its `CostCalculator` so `SessionLimits.maxBudgetMicroUsd`
 gates compaction spend along with normal turn spend. Custom compactors report this via
 `CompactionResult.usage()`; pure-trim compactors return `CompactionResult.noOp(history)`.
 

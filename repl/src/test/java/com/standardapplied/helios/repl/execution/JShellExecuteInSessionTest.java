@@ -26,7 +26,6 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.test.EventCollector;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.util.HashMap;
@@ -167,7 +166,6 @@ class JShellExecuteInSessionTest {
       var options =
           SessionOptions.newBuilder()
               .withModel(model)
-              .withTools(new ToolRegistry(List.of(ExecuteTool.binding(provider))))
               .withExecutionProvider(provider)
               .withPermission(Permission.lockedDown())
               .withSecretRegistry(secrets)

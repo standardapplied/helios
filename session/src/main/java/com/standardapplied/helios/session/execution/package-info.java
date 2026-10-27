@@ -12,9 +12,10 @@
  * com.standardapplied.helios.session.execution.ExecutionResult} with stdout, stderr, exit code, and
  * a {@code timedOut} flag.
  *
- * <p>Two built-in providers ship with Helios: {@link
- * com.standardapplied.helios.session.execution.NoopExecutionProvider} (the safe default — refuses
- * every runtime so a misconfigured session cannot silently shell out) and {@code
+ * <p>A session runs code only when built with {@code
+ * SessionOptions.Builder.withExecutionProvider(provider)}: it then registers the {@code Execute}
+ * tool over that provider and runs the provider's {@code onSessionStart} and {@code onSessionEnd}
+ * with the session; without one it has no {@code Execute} tool. The built-in provider is {@code
  * LocalProcessExecutionProvider} (each runtime run through {@link
  * com.standardapplied.helios.core.process.BoundedProcess} with argv-only invocation, a cleared
  * environment, capped output and descendant kill on timeout; the session redacts its output).
@@ -22,7 +23,7 @@
  * execution must happen inside a sandbox rather than the host process.
  *
  * <p>The {@code Execute} tool itself is a single tool that dispatches every runtime through the
- * configured provider, classified under {@link
+ * session's provider, classified under {@link
  * com.standardapplied.helios.session.tools.ToolCategory#EXECUTION} so permission rules and audit
  * attribution treat it uniformly. {@code Runtime.JSHELL} is served by {@code helios-repl}'s {@code
  * JShellExecutionProvider}.

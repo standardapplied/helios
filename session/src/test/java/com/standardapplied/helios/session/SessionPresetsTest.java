@@ -18,7 +18,6 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import com.standardapplied.helios.session.test.QuestionAnswers;
-import com.standardapplied.helios.session.tools.ToolRegistry;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -65,10 +64,10 @@ final class SessionPresetsTest {
     return Stream.of(
         preset("workspace", SessionPresets::workspace),
         preset(
-            "openEnded",
+            "workspace with an execution provider",
             (model, root) ->
-                SessionPresets.openEnded(
-                    model, root, new RecordingProvider(new CopyOnWriteArrayList<>()))));
+                SessionPresets.workspace(model, root)
+                    .withExecutionProvider(new RecordingProvider(new CopyOnWriteArrayList<>()))));
   }
 
   static Stream<Arguments> rootedPresets() {
@@ -116,8 +115,7 @@ final class SessionPresetsTest {
     var run =
         run(
             model,
-            SessionPresets.readOnly(model, root)
-                .withTools(new ToolRegistry(List.of(sessions.writeTool()))),
+            SessionPresets.readOnly(model, root).withTool(sessions.writeTool()),
             session -> QuestionAnswers.selecting(session, "Allow"));
 
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
@@ -148,7 +146,7 @@ final class SessionPresetsTest {
   }
 
   @Test
-  void openEndedExecutesThroughTheProviderOnceAllowed() {
+  void aWorkspaceWithAProviderExecutesThroughItOnceAllowed() {
     var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var model =
         answering(
@@ -157,7 +155,7 @@ final class SessionPresetsTest {
     var run =
         run(
             model,
-            SessionPresets.openEnded(model, root, provider),
+            SessionPresets.workspace(model, root).withExecutionProvider(provider),
             session -> QuestionAnswers.selecting(session, "Allow"));
 
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
@@ -168,17 +166,13 @@ final class SessionPresetsTest {
 
   static Stream<Arguments> nullArguments() {
     var model = ScriptedModel.newBuilder().withTextTurn("unused").build();
-    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var root = Path.of(".");
     return Stream.of(
         nullArgument("minimal", "model", () -> SessionPresets.minimal(null)),
         nullArgument("readOnly", "model", () -> SessionPresets.readOnly(null, root)),
         nullArgument("readOnly", "root", () -> SessionPresets.readOnly(model, null)),
         nullArgument("workspace", "model", () -> SessionPresets.workspace(null, root)),
-        nullArgument("workspace", "root", () -> SessionPresets.workspace(model, null)),
-        nullArgument("openEnded", "model", () -> SessionPresets.openEnded(null, root, provider)),
-        nullArgument("openEnded", "root", () -> SessionPresets.openEnded(model, null, provider)),
-        nullArgument("openEnded", "provider", () -> SessionPresets.openEnded(model, root, null)));
+        nullArgument("workspace", "root", () -> SessionPresets.workspace(model, null)));
   }
 
   private static Arguments nullArgument(String preset, String argument, Executable call) {
