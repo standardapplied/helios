@@ -170,7 +170,6 @@ final class SessionRuns implements RunBoundary {
    * escapes anyway fails the run as itself, so its future never stays pending.
    */
   private void execute(Run run) {
-    run.begin();
     ResultMessage terminal = null;
     RuntimeException crash = null;
     try {
