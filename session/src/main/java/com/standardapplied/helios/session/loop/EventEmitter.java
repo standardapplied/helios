@@ -62,6 +62,7 @@ final class EventEmitter {
         state,
         new QueryEvent.HookFired(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             clock.instant(),
             hookName,

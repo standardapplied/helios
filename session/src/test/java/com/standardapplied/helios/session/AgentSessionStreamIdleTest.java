@@ -30,9 +30,9 @@ final class AgentSessionStreamIdleTest {
             .build();
 
     ResultMessage terminal;
-    try (var session = AgentSession.create(options)) {
-      session.send(UserMessage.text("hi"));
-      terminal = Await.value("the terminal", session.result());
+    try (var session = AgentSession.open(options)) {
+      var future = session.send(UserMessage.text("hi"));
+      terminal = Await.value("the terminal", future);
     }
 
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, terminal);

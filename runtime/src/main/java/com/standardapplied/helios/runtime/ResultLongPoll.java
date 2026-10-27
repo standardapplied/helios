@@ -24,12 +24,13 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * The long-poll behind {@code GET /sessions/{sessionId}/result?timeout=<seconds>}: waits up to the
- * clamped timeout for the session's terminal {@link ResultMessage} and answers {@code 200} with
- * {@code {type, result}}, {@code 204} when the wait ends first, {@code 401} when the caller's
- * identity expires or is revoked first, or an error status when the wait is interrupted or the
- * session failed. Once the identity has ended the result is never disclosed, even if it is ready:
- * the body is serialized before the response is committed and the identity is checked again
- * immediately before it is sent.
+ * clamped timeout for the terminal {@link ResultMessage} of the session's latest run (the run in
+ * progress; else the last run, at once; else, for a session that never ran, its first run) and
+ * answers {@code 200} with {@code {type, runId, result}}, {@code 204} when the wait ends first,
+ * {@code 401} when the caller's identity expires or is revoked first, or an error status when the
+ * wait is interrupted or the session failed. Once the identity has ended the result is never
+ * disclosed, even if it is ready: the body is serialized before the response is committed and the
+ * identity is checked again immediately before it is sent.
  */
 final class ResultLongPoll {
 
@@ -51,12 +52,13 @@ final class ResultLongPoll {
   private ResultLongPoll() {}
 
   /**
-   * Answer the long-poll for {@code session}'s terminal result. The wait also watches a future of
-   * its own, {@code answered}, completed once the wait is over: completing it unhooks the {@code
-   * anyOf} relay from the session's and the identity's futures, so a timed-out poll leaves nothing
-   * watching either.
+   * Answer the long-poll for the terminal result of {@code run}, the latest run of {@code session}.
+   * The wait also watches a future of its own, {@code answered}, completed once the wait is over:
+   * completing it unhooks the {@code anyOf} relay from the session's and the identity's futures, so
+   * a timed-out poll leaves nothing watching either.
    *
    * @param session the session whose result is awaited; non-null
+   * @param run the future of its latest run; non-null
    * @param req the request carrying the optional {@code timeout} query parameter; non-null
    * @param resp the response the outcome is sent on; non-null
    * @param mapper serializes the result's body; non-null
@@ -64,18 +66,17 @@ final class ResultLongPoll {
    */
   static void respond(
       AgentSession session,
+      CompletableFuture<ResultMessage> run,
       ServerRequest req,
       ServerResponse resp,
       ObjectMapper mapper,
       Caller caller) {
     var timeoutSeconds = parseResultTimeoutSeconds(req.query().first("timeout").orElse(null));
-    var result = session.result();
     var answered = new CompletableFuture<Void>();
     var timedOut = false;
     var interrupted = false;
     try {
-      CompletableFuture.anyOf(result, caller.ended(), answered)
-          .get(timeoutSeconds, TimeUnit.SECONDS);
+      CompletableFuture.anyOf(run, caller.ended(), answered).get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException e) {
       timedOut = true;
     } catch (InterruptedException e) {
@@ -98,7 +99,7 @@ final class ResultLongPoll {
     }
     ResultMessage terminal;
     try {
-      terminal = result.join();
+      terminal = run.join();
     } catch (CompletionException | CancellationException e) {
       LOGGER.log(
           Level.WARNING,
@@ -109,6 +110,7 @@ final class ResultLongPoll {
     }
     var body = new LinkedHashMap<String, Object>();
     body.put("type", terminal.getClass().getSimpleName());
+    body.put("runId", terminal.runId());
     body.put("result", terminal);
     var json = mapper.writeValueAsBytes(body);
     if (caller.answeredAsEnded(resp)) {

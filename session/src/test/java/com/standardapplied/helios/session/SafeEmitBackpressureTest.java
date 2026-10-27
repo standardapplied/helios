@@ -63,11 +63,11 @@ final class SafeEmitBackpressureTest {
 
     try (var session = session("sess-backpressure-slow", model)) {
       reader.read(session.events());
-      session.send(UserMessage.text("go"));
+      var future = session.send(UserMessage.text("go"));
 
       Await.latch("the turn to emit past the stalled reader's full buffer", overflowEmitted);
       release.countDown();
-      var terminal = Await.value("the session to finish", session.result());
+      var terminal = Await.value("the session to finish", future);
       awaitCompletion(reader);
 
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
@@ -79,7 +79,7 @@ final class SafeEmitBackpressureTest {
           chunks(CAPACITY),
           texts(reader),
           "exactly the one event offered to the full buffer is missed");
-      var last = assertInstanceOf(QueryEvent.LoopEnded.class, reader.events().getLast());
+      var last = assertInstanceOf(QueryEvent.RunEnded.class, reader.events().getLast());
       assertEquals(terminal, last.result());
     }
   }
@@ -91,10 +91,9 @@ final class SafeEmitBackpressureTest {
 
     try (var session = session("sess-backpressure-fast", burstModel(burst, () -> {}, () -> {}))) {
       reader.read(session.events());
-      session.send(UserMessage.text("go"));
+      var future = session.send(UserMessage.text("go"));
 
-      assertInstanceOf(
-          ResultMessage.Success.class, Await.value("the session to finish", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the session to finish", future));
       awaitCompletion(reader);
 
       assertEquals(chunks(burst), texts(reader), "a reader that keeps up misses nothing");
@@ -102,7 +101,7 @@ final class SafeEmitBackpressureTest {
   }
 
   private static AgentSession session(String sessionId, Model model) {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder().withModel(model).withSessionId(sessionId).build());
   }
 
@@ -154,7 +153,7 @@ final class SafeEmitBackpressureTest {
   }
 
   private static void awaitCompletion(EventCollector reader) {
-    reader.awaitDone();
+    reader.awaitRunEnded();
     assertNull(reader.error().orElse(null), "the reader must end without an error");
   }
 

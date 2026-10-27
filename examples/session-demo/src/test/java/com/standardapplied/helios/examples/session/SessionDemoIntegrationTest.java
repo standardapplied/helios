@@ -91,7 +91,7 @@ final class SessionDemoIntegrationTest {
     seedFakeRepo(tmp);
     try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionDemoMain.exploreAndRememberOptions(forced, tmp)
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(3).build())
                     .build())) {
@@ -102,7 +102,7 @@ final class SessionDemoIntegrationTest {
               + "1. Call LS on the workspace root to list its contents.\n"
               + "2. Call Read on README.md.";
       var result = session.runBlocking(UserMessage.text(prompt));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertTrue(
           result instanceof ResultMessage.Success || result instanceof ResultMessage.ErrorMaxTurns,
@@ -132,7 +132,7 @@ final class SessionDemoIntegrationTest {
     var options =
         SessionOptions.newBuilder().withModel(model).withSessionId("session-demo-att-test").build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       new EventCollector(QuestionAnswers.selecting(session, "Deny")).read(session.events());
       var msg =
           UserMessage.newBuilder()
@@ -165,7 +165,7 @@ final class SessionDemoIntegrationTest {
     String modelId;
     try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder()
                     .withModel(forced)
                     .withPermission(permission)
@@ -178,7 +178,7 @@ final class SessionDemoIntegrationTest {
           UserMessage.text(
               "Use MemoryWrite with op=create to save a note at /memories/test.md with content"
                   + " 'hello world'."));
-      events.awaitDone();
+      events.awaitRunEnded();
       modelId = forced.id();
     }
 

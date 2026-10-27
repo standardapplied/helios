@@ -40,14 +40,13 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>The model's stream blocks its first read until it is closed — the bare-minimum hang. The only
  * limit short enough to end that wait is the 500 ms {@code maxWallClock}: the terminal is {@link
- * ResultMessage.ErrorMaxWallClock}, and the session closed the stream. The deadline is a virtual
- * thread waiting on the session's token: no platform thread runs it, and nothing a caller does to
- * the result future disarms it.
+ * ResultMessage.ErrorMaxWallClock}, the run closed the stream, and the session stays open. The
+ * deadline is a virtual thread waiting on the run's token: no platform thread runs it, and nothing
+ * a caller does to the run's future disarms it.
  */
 final class AgentSessionWallClockTest {
 
   private static final String SESSION_ID = "sess-hang-wallclock";
-  private static final String EXPIRED = "maxWallClock exceeded after 500ms";
   private static final String WALL_CLOCK_THREAD = "\"helios-wall-clock-" + SESSION_ID + "\"";
 
   private final CountDownLatch entered = new CountDownLatch(1);
@@ -56,9 +55,9 @@ final class AgentSessionWallClockTest {
 
   @Test
   void maxWallClockTerminatesHangingChatStream() {
-    try (var session = AgentSession.create(options())) {
-      session.send(UserMessage.text("hi"));
-      var terminal = Await.value("the wall-clock terminal", session.result());
+    try (var session = AgentSession.open(options())) {
+      var future = session.send(UserMessage.text("hi"));
+      var terminal = Await.value("the wall-clock terminal", future);
       assertInstanceOf(
           ResultMessage.ErrorMaxWallClock.class,
           terminal,
@@ -68,33 +67,31 @@ final class AgentSessionWallClockTest {
                   + terminal.getClass().getSimpleName()
                   + ": "
                   + terminal);
-      assertEquals(Optional.of(EXPIRED), provider.context.cancellation().reason());
+      assertEquals(Optional.empty(), provider.context.cancellation().reason(), "session stays");
     }
     Await.latch("the stream closed", closed);
   }
 
   /**
    * A caller that completes the public result future, as {@code orTimeout} does when it fires,
-   * leaves the deadline armed: the wall clock waits on the session's token, never on that future.
+   * leaves the deadline armed: the wall clock waits on the run's token, never on that future.
    */
   @Test
   void aCallerThatCompletesTheResultFutureDoesNotDisarmTheDeadline() {
-    try (var session = AgentSession.create(options())) {
-      session.send(UserMessage.text("hi"));
+    try (var session = AgentSession.open(options())) {
+      var future = session.send(UserMessage.text("hi"));
       Await.latch("the stream to be read", entered);
 
-      session.result().completeExceptionally(new TimeoutException("the caller's own timeout"));
+      future.completeExceptionally(new TimeoutException("the caller's own timeout"));
 
-      assertInstanceOf(
-          TimeoutException.class, Await.failure("the caller's timeout", session.result()));
+      assertInstanceOf(TimeoutException.class, Await.failure("the caller's timeout", future));
       Await.latch("the deadline to close the stream", closed);
-      assertEquals(Optional.of(EXPIRED), provider.context.cancellation().reason());
     }
   }
 
   @Test
   void aRunningSessionHoldsNoPlatformThreadAndItsWallClockIsAVirtualOne(@TempDir Path dumps) {
-    try (var session = AgentSession.create(options())) {
+    try (var session = AgentSession.open(options())) {
       session.send(UserMessage.text("hi"));
       Await.latch("the stream to be read", entered);
 
@@ -112,9 +109,9 @@ final class AgentSessionWallClockTest {
             .withModel(ScriptedModel.newBuilder().withTextTurn("done").build())
             .withLimits(SessionLimits.defaults())
             .build();
-    try (var session = AgentSession.create(options)) {
-      session.send(UserMessage.text("hi"));
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+    try (var session = AgentSession.open(options)) {
+      var future = session.send(UserMessage.text("hi"));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
 
     Await.until("the wall clock to end", () -> !threadDump(dumps).contains(WALL_CLOCK_THREAD));

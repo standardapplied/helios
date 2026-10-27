@@ -98,10 +98,10 @@ final class Phase5AcceptanceTest {
 
   private static Run run(SessionOptions.Builder options, String prompt) {
     var sub = new EventCollector();
-    try (var session = AgentSession.create(options.build())) {
+    try (var session = AgentSession.open(options.build())) {
       sub.read(session.events());
       var result = session.runBlocking(UserMessage.text(prompt));
-      sub.awaitDone();
+      sub.awaitRunEnded();
       return new Run(result, sub);
     }
   }
@@ -207,10 +207,10 @@ final class Phase5AcceptanceTest {
     var model = executing(Map.of("runtime", "BASH", "script", "true"));
 
     try (var session =
-        AgentSession.create(options("phase5-error-", model, allowingExecute(), provider).build())) {
-      session.send("run it");
+        AgentSession.open(options("phase5-error-", model, allowingExecute(), provider).build())) {
+      var future = session.send("run it");
 
-      assertSame(failure, Await.failure("the result to fail", session.result()));
+      assertSame(failure, Await.failure("the result to fail", future));
     }
   }
 

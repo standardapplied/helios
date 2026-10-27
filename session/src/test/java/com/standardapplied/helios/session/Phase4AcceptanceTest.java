@@ -118,10 +118,10 @@ final class Phase4AcceptanceTest {
             .build();
 
     var sub = new EventCollector();
-    try (var session = AgentSession.create(options("phase4-", model, backend, permission))) {
+    try (var session = AgentSession.open(options("phase4-", model, backend, permission))) {
       sub.read(session.events());
       var result = session.runBlocking(UserMessage.text("update my preferences"));
-      sub.awaitDone();
+      sub.awaitRunEnded();
       assertInstanceOf(ResultMessage.Success.class, result);
     }
 
@@ -152,7 +152,7 @@ final class Phase4AcceptanceTest {
         options("phase4-allow-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
     EventCollector sub;
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       sub = new EventCollector(QuestionAnswers.selecting(session, "Allow"));
       sub.read(session.events());
 
@@ -181,12 +181,12 @@ final class Phase4AcceptanceTest {
         options("phase4-deny-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
     EventCollector sub;
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       sub = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       sub.read(session.events());
 
       session.runBlocking(UserMessage.text("try to write"));
-      sub.awaitDone();
+      sub.awaitRunEnded();
     }
 
     var blocked = sub.eventsOf(QueryEvent.ToolBlocked.class);
@@ -210,7 +210,7 @@ final class Phase4AcceptanceTest {
         options("phase4-cancel-", model, backend, allowing(allowUnderMemories("MemoryRead")));
 
     var questionLatch = new CountDownLatch(1);
-    var session = AgentSession.create(options);
+    var session = AgentSession.open(options);
     new EventCollector(
             event -> {
               if (event instanceof QueryEvent.QuestionAsked) {
@@ -218,10 +218,10 @@ final class Phase4AcceptanceTest {
               }
             })
         .read(session.events());
-    session.send(UserMessage.text("trigger write"));
+    var future = session.send(UserMessage.text("trigger write"));
     Await.latch("the agent to reach the ASK question", questionLatch);
     session.close();
-    var terminal = Await.value("the closed session to settle its result", session.result());
+    var terminal = Await.value("the closed session to settle its result", future);
     assertInstanceOf(ResultMessage.Cancelled.class, terminal);
   }
 }

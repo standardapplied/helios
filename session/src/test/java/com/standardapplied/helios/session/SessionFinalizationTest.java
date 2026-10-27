@@ -48,18 +48,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * How a session ends: the teardown releases what the session acquired in reverse order, the result
- * settles once, after a bounded teardown that accounts for tool work still running, and nothing
- * that hangs, a subscriber included, keeps it from settling. Every fixture that hangs blocks on
- * {@link #released}, opened after each test; the grace under test is {@link
- * EndingSessions#SHORT_GRACE} and every other limit is beyond the hang guard.
+ * How runs and sessions end: a run's result settles once, after its bounded end accounts for the
+ * callbacks and tool work it leaves running; the close's teardown releases what the session
+ * acquired in reverse order; and nothing that hangs, a subscriber included, keeps either from
+ * ending. Every fixture that hangs blocks on {@link #released}, opened after each test; the grace
+ * under test is {@link EndingSessions#SHORT_GRACE} and every other limit is beyond the hang guard.
  */
 final class SessionFinalizationTest {
 
@@ -87,15 +86,15 @@ final class SessionFinalizationTest {
                     },
                     () -> {}));
     var events = new EventCollector();
-    var session = AgentSession.create(options(model).withLimits(grace()).build());
+    var session = AgentSession.open(options(model).withLimits(grace()).build());
     events.read(session.events());
-    session.send("go");
+    var future = session.send("go");
     var reading = Await.value("the stream read", reader);
 
     try (var ignored = LogCapture.of(TurnRunner.class, logged)) {
       session.close();
 
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
     }
     events.awaitDone();
     var emitted = events.events();
@@ -124,10 +123,10 @@ final class SessionFinalizationTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(withProvider(provider).withSecretRegistry(secrets).build())) {
-      session.send("go");
+            AgentSession.open(withProvider(provider).withSecretRegistry(secrets).build())) {
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
     var warning = logged.getFirst();
     assertEquals(
@@ -142,17 +141,15 @@ final class SessionFinalizationTest {
   }
 
   @Test
-  void aSessionClosedBeforeItStartsSettlesItsResultOnlyAfterTheProviderEnded() {
+  void aCloseReturnsOnlyOnceTheProviderEndedAndARunsEndNeverEndsIt() {
     var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).build());
-    var settledDuringEnd = new AtomicBoolean(true);
-    provider.end = () -> settledDuringEnd.set(session.result().isDone());
+    var session = AgentSession.open(withProvider(provider).build());
 
+    assertInstanceOf(ResultMessage.Success.class, Await.value("the run", session.send("go")));
+    assertEquals(0, provider.ends.get());
     session.close();
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     assertEquals(1, provider.ends.get());
-    assertFalse(settledDuringEnd.get(), "the result settled while the provider still held it");
   }
 
   @Test
@@ -161,10 +158,10 @@ final class SessionFinalizationTest {
     provider.end = () -> Uninterruptible.await(released);
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session = AgentSession.create(withProvider(provider).withLimits(grace()).build())) {
-      session.send("go");
+        var session = AgentSession.open(withProvider(provider).withLimits(grace()).build())) {
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
     assertReported(
         logged,
@@ -186,21 +183,25 @@ final class SessionFinalizationTest {
             .withLimits(grace());
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session = AgentSession.create(options.build())) {
-      session.send("go");
+        var session = AgentSession.open(options.build())) {
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      var run = Await.value("the result", future).runId();
+      assertReported(
+          logged,
+          "a callback of the cancellation of run "
+              + run
+              + " of session "
+              + SID
+              + " did not return within PT0.05S");
     }
-    assertReported(
-        logged,
-        "a callback of the cancellation of session " + SID + " did not return within PT0.05S");
   }
 
   @Test
   void anInterruptedCloseStopsWaitingForTheTeardownAndKeepsTheInterrupt() {
     var provider = new RecordingProvider(order);
     provider.end = () -> Uninterruptible.await(released);
-    var session = AgentSession.create(withProvider(provider).withLimits(slowGrace()).build());
+    var session = AgentSession.open(withProvider(provider).withLimits(slowGrace()).build());
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       Thread.currentThread().interrupt();
@@ -208,7 +209,6 @@ final class SessionFinalizationTest {
       assertTrue(Thread.interrupted(), "close keeps the caller's interrupt");
     }
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     assertReported(
         logged,
         "onSessionEnd of RecordingProvider did not return within PT10M; the session's"
@@ -218,25 +218,31 @@ final class SessionFinalizationTest {
 
   @Test
   void aCancellationCallbackThatNeverReturnsCannotKeepAClosedModelStreamOpen() {
-    var session = streamingBehindACallbackThatNeverReturns(new RecordingProvider(order));
+    var streaming = streamingBehindACallbackThatNeverReturns(new RecordingProvider(order));
 
-    session.close();
+    streaming.session().close();
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", streaming.run()));
     Await.latch("the stalled stream closed", streamClosed);
   }
 
   @Test
   void aHostsOwnCancelOfTheSessionsTokenEndsTheModelStreamWhileACallbackNeverReturns() {
     var provider = new RecordingProvider(order);
-    var session = streamingBehindACallbackThatNeverReturns(provider);
+    var streaming = streamingBehindACallbackThatNeverReturns(provider);
 
     Thread.ofVirtual().start(() -> provider.context.cancellation().cancel("host cancelled"));
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    var cancelled =
+        assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", streaming.run()));
+    assertEquals("host cancelled", cancelled.reason());
+    streaming.session().close();
   }
 
-  private AgentSession streamingBehindACallbackThatNeverReturns(RecordingProvider provider) {
+  /** A session whose run streams from a stalled model, and that run's future. */
+  private record Streaming(AgentSession session, CompletableFuture<ResultMessage> run) {}
+
+  private Streaming streamingBehindACallbackThatNeverReturns(RecordingProvider provider) {
     var entered = new CountDownLatch(1);
     var stalled = ModelStreams.stalled(entered::countDown);
     var model =
@@ -249,16 +255,16 @@ final class SessionFinalizationTest {
                       streamClosed.countDown();
                     }))
             .build();
-    var session = AgentSession.create(withProvider(provider, model).withLimits(grace()).build());
+    var session = AgentSession.open(withProvider(provider, model).withLimits(grace()).build());
     var token = provider.context.cancellation();
     token.onCancel(() -> Uninterruptible.await(released));
     var armed = token.activeCallbackCountForTests();
-    session.send("go");
+    var run = session.send("go");
     Await.latch("the model call to start", entered);
     Await.until(
-        "the wall clock and the stream to wait on the session's token",
-        () -> token.activeCallbackCountForTests() == armed + 2);
-    return session;
+        "the run to follow the session's token",
+        () -> token.activeCallbackCountForTests() == armed + 1);
+    return new Streaming(session, run);
   }
 
   @Test
@@ -282,16 +288,16 @@ final class SessionFinalizationTest {
             .withToolTimeoutDefault(NOT_REACHED)
             .build();
     var session =
-        AgentSession.create(
+        AgentSession.open(
             withProvider(provider, model).withLimits(limits).withAskUserQuestion().build());
     provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
     var asked = opensOn(session, QueryEvent.QuestionAsked.class);
-    session.send("go");
+    var future = session.send("go");
     Await.latch("the question to be asked", asked);
 
     session.close();
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
   }
 
   @Test
@@ -309,34 +315,28 @@ final class SessionFinalizationTest {
             .withStreamRetryPolicy(
                 new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
             .build();
-    var session = AgentSession.create(withProvider(provider, model).withLimits(limits).build());
-    var token = provider.context.cancellation();
-    token.onCancel(() -> Uninterruptible.await(released));
-    var armed = token.activeCallbackCountForTests();
+    var session = AgentSession.open(withProvider(provider, model).withLimits(limits).build());
+    provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
     var retried = opensOn(session, QueryEvent.TurnRetried.class);
-    session.send("go");
+    var future = session.send("go");
     Await.latch("the turn to be retried", retried);
-    Await.until(
-        "the wall clock and the back-off to wait on the session's token",
-        () -> token.activeCallbackCountForTests() == armed + 2);
 
     session.close();
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
     assertEquals(1, model.calls().size());
   }
 
   @Test
   void aCancellationCallbackThatNeverReturnsOnCloseIsReportedAndTheResultStillSettles() {
     var provider = new RecordingProvider(order);
-    var session = AgentSession.create(withProvider(provider).withLimits(grace()).build());
+    var session = AgentSession.open(withProvider(provider).withLimits(grace()).build());
     provider.context.cancellation().onCancel(() -> Uninterruptible.await(released));
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
       session.close();
     }
 
-    assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
     assertReported(
         logged,
         "a callback of the cancellation of session " + SID + " did not return within PT0.05S");
@@ -349,63 +349,45 @@ final class SessionFinalizationTest {
         ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
     var provider = new RecordingProvider(order);
 
-    try (var session = AgentSession.create(withProvider(provider, model).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(withProvider(provider, model).build())) {
+      var future = session.send("go");
       Await.latch("the model call to start", entered);
       session.close();
 
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
       session.close();
     }
     assertEquals(1, provider.ends.get());
   }
 
   @Test
-  void closingDuringTheTeardownOfANaturalEndKeepsItsResultAndOneDisposal() {
+  void closingWhileARunEndsKeepsItsResultAndOneDisposal() {
     var provider = new RecordingProvider(order);
-    var inTeardown = new CountDownLatch(1);
+    var ending = new CountDownLatch(1);
     var proceed = new CountDownLatch(1);
-    provider.end =
-        () -> {
-          inTeardown.countDown();
-          Uninterruptible.await(proceed);
-        };
+    var options =
+        withProvider(provider)
+            .withHook(
+                (PreStopHook)
+                    (response, ctx) -> {
+                      ctx.cancellation()
+                          .onCancel(
+                              () -> {
+                                ending.countDown();
+                                Uninterruptible.await(proceed);
+                              });
+                      return HookOutcome.cont();
+                    })
+            .withLimits(slowGrace());
 
-    try (var session =
-        AgentSession.create(withProvider(provider).withLimits(slowGrace()).build())) {
-      session.send("go");
-      Await.latch("the teardown to reach onSessionEnd", inTeardown);
-      session.close();
+    try (var session = AgentSession.open(options.build())) {
+      var future = session.send("go");
+      Await.latch("the run's end to cancel its token", ending);
+      var closing = Thread.ofVirtual().start(session::close);
       proceed.countDown();
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
-    }
-    assertEquals(1, provider.ends.get());
-  }
-
-  @Test
-  void closingDuringTheTeardownOfAWallClockEndKeepsItsResultAndOneDisposal() {
-    var model = ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(() -> {})).build();
-    var provider = new RecordingProvider(order);
-    var inTeardown = new CountDownLatch(1);
-    var proceed = new CountDownLatch(1);
-    provider.end =
-        () -> {
-          inTeardown.countDown();
-          Uninterruptible.await(proceed);
-        };
-    var limits =
-        SessionLimits.newBuilder().withMaxWallClock(SHORT_GRACE).withStopGrace(NOT_REACHED).build();
-
-    try (var session =
-        AgentSession.create(withProvider(provider, model).withLimits(limits).build())) {
-      session.send("go");
-      Await.latch("the teardown to reach onSessionEnd", inTeardown);
-      session.close();
-      proceed.countDown();
-
-      assertInstanceOf(
-          ResultMessage.ErrorMaxWallClock.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
+      Await.termination("the close", closing);
     }
     assertEquals(1, provider.ends.get());
   }
@@ -415,16 +397,16 @@ final class SessionFinalizationTest {
     var entered = new CountDownLatch(1);
     var model = ScriptedModel.newBuilder().withTextTurn("done").build();
 
-    try (var session = AgentSession.create(options(model).withLimits(grace()).build())) {
+    try (var session = AgentSession.open(options(model).withLimits(grace()).build())) {
       new EventCollector(
               event -> {
                 entered.countDown();
                 Uninterruptible.await(released);
               })
           .read(session.events());
-      session.send("go");
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
     Await.latch("the subscriber to have been stuck in an event", entered);
   }
@@ -453,11 +435,13 @@ final class SessionFinalizationTest {
       var events = new EventCollector(event -> threads.add(Thread.currentThread()));
       var options = options(model).withTools(List.of(tool)).withHook(recordingLoop).build();
 
-      try (var session = (AgentSessionImpl) AgentSession.create(options)) {
+      try (var session = (AgentSessionImpl) AgentSession.open(options)) {
         events.read(session.events());
-        session.send("go");
+        var future = session.send("go");
 
-        assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+        assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
+        events.awaitRunEnded();
+        session.close();
         events.awaitDone();
         assertEquals(Optional.empty(), events.error());
         assertEquals(0, session.lifecycle.events().openStreams());
@@ -485,13 +469,13 @@ final class SessionFinalizationTest {
             });
 
     try (var session =
-        AgentSession.create(
+        AgentSession.open(
             callingTool(new RecordingProvider(order), tool).withLimits(slowGrace()).build())) {
-      session.send("go");
+      var future = session.send("go");
       Await.latch("the tool to start", started);
       session.close();
 
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
     }
     assertEquals(List.of("tool ended", "onSessionEnd"), order);
   }
@@ -510,19 +494,22 @@ final class SessionFinalizationTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 callingTool(new RecordingProvider(order), tool).withLimits(grace()).build())) {
-      session.send("go");
+      var future = session.send("go");
       Await.latch("the tool to start", started);
       session.close();
 
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      var run = Await.value("the result", future);
+      assertInstanceOf(ResultMessage.Cancelled.class, run);
+      assertReported(
+          logged,
+          "tool 'stuck' (call c-stuck) still runs PT0.05S after run "
+              + run.runId()
+              + " of session "
+              + SID
+              + " ended; its effects may land after the result settled");
     }
-    assertReported(
-        logged,
-        "tool 'stuck' (call c-stuck) still runs PT0.05S after session "
-            + SID
-            + " ended; its effects may land after the result settled");
   }
 
   @Test
@@ -541,19 +528,20 @@ final class SessionFinalizationTest {
             });
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
-        var session =
-            AgentSession.create(callingTool(provider, tool).withLimits(grace()).build())) {
-      session.send("go");
+        var session = AgentSession.open(callingTool(provider, tool).withLimits(grace()).build())) {
+      var future = session.send("go");
       Await.latch("the tool to start", started);
       session.close();
 
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the result", future));
+      var warning =
+          "tool 'needs-provider' (call c-needs-provider) still runs PT0.05S after session "
+              + SID
+              + " ended; its effects may land after the result settled";
+      Await.until(
+          "the teardown to report the tool",
+          () -> logged.stream().anyMatch(record -> warning.equals(record.getMessage())));
     }
-    assertReported(
-        logged,
-        "tool 'needs-provider' (call c-needs-provider) still runs PT0.05S after session "
-            + SID
-            + " ended; its effects may land after the result settled");
   }
 
   @Test
@@ -578,12 +566,12 @@ final class SessionFinalizationTest {
 
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 callingTool(new RecordingProvider(order), tool).withLimits(limits).build())) {
       events.read(session.events());
-      session.send("go");
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
     var answered = events.eventsOf(QueryEvent.ToolResult.class).getFirst().result();
     assertInstanceOf(ToolOutcome.Unknown.class, answered.outcome());
@@ -599,43 +587,45 @@ final class SessionFinalizationTest {
               throw failure;
             });
 
-    try (var session = AgentSession.create(options(model).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(options(model).build())) {
+      var future = session.send("go");
 
-      assertSame(failure, Await.failure("the result to fail", session.result()));
+      assertSame(failure, Await.failure("the result to fail", future));
     }
   }
 
   @Test
-  void anInterruptAHookLeavesOnTheLoopThreadDoesNotCutTheWaitForOnSessionEndShort() {
-    var provider = new RecordingProvider(order);
+  void anInterruptAHookLeavesOnTheRunThreadDoesNotCutTheRunsWaitForItsCallbacksShort() {
     var ending = new CountDownLatch(1);
-    provider.end =
-        () -> {
-          ending.countDown();
-          Uninterruptible.await(released);
-        };
-    var loopThread = new CompletableFuture<Thread>();
+    var runThread = new CompletableFuture<Thread>();
     var options =
-        withProvider(provider)
+        options(ScriptedModel.newBuilder().withTextTurn("done").build())
             .withHook(
                 (PreStopHook)
                     (response, ctx) -> {
-                      loopThread.complete(Thread.currentThread());
+                      runThread.complete(Thread.currentThread());
+                      ctx.cancellation()
+                          .onCancel(
+                              () -> {
+                                ending.countDown();
+                                Uninterruptible.await(released);
+                              });
                       Thread.currentThread().interrupt();
                       return HookOutcome.cont();
                     })
             .withLimits(slowGrace());
 
-    try (var session = AgentSession.create(options.build())) {
-      session.send("go");
-      Await.latch("onSessionEnd to start", ending);
-      var loop = Await.value("the loop thread", loopThread);
+    try (var session = AgentSession.open(options.build())) {
+      var future = session.send("go");
+      Await.latch("the run's end to cancel its token", ending);
+      var run = Await.value("the run thread", runThread);
       Await.until(
-          "the result to settle or the loop to wait for onSessionEnd",
-          () -> session.result().isDone() || loop.getState() == Thread.State.TIMED_WAITING);
+          "the result to settle or the run to wait for its callbacks",
+          () -> future.isDone() || run.getState() == Thread.State.TIMED_WAITING);
 
-      assertFalse(session.result().isDone(), "the result settled while onSessionEnd runs");
+      assertFalse(future.isDone(), "the result settled while a callback of the run still runs");
+      released.countDown();
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
   }
 
@@ -644,11 +634,10 @@ final class SessionFinalizationTest {
     var provider = new RecordingProvider(order);
     provider.end = () -> throwUndeclared(new IOException("undeclared"));
 
-    try (var session =
-        AgentSession.create(withProvider(provider).withLimits(slowGrace()).build())) {
-      session.send("go");
+    try (var session = AgentSession.open(withProvider(provider).withLimits(slowGrace()).build())) {
+      var future = session.send("go");
 
-      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", session.result()));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the result", future));
     }
   }
 

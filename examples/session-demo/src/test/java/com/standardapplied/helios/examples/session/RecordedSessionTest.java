@@ -223,10 +223,10 @@ final class RecordedSessionTest {
             replies,
             modelAt,
             model -> {
-              try (var session = AgentSession.create(options.apply(model).build())) {
+              try (var session = AgentSession.open(options.apply(model).build())) {
                 events.read(session.events());
                 terminal[0] = session.runBlocking(UserMessage.text("Go."));
-                events.awaitDone();
+                events.awaitRunEnded();
               }
             });
     assertEquals(replies.size(), requests.size());

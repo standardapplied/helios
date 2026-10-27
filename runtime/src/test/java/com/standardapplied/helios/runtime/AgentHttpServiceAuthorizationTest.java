@@ -100,16 +100,16 @@ final class AgentHttpServiceAuthorizationTest {
     var events = openEvents(sessionId, "alice");
 
     assertEquals(202, send("POST", messages(sessionId), "alice").statusCode());
-    var streamed = events.awaitEnd();
     var result = send("GET", "/sessions/" + sessionId + "/result", "alice");
     var interrupt = send("POST", interrupt(sessionId), "alice");
     var delete = send("DELETE", "/sessions/" + sessionId, "alice");
+    var streamed = events.awaitEnd();
 
-    assertTrue(streamed.endsWith("event:LoopEnded"), () -> "streamed: " + streamed);
+    assertTrue(streamed.endsWith("event:RunEnded"), () -> "streamed: " + streamed);
     assertEquals(200, result.statusCode());
     assertEquals(Optional.of("application/json"), result.headers().firstValue("Content-Type"));
     assertTrue(result.body().contains("\"result\":\"done\""), result::body);
-    assertEquals(409, interrupt.statusCode());
+    assertEquals(202, interrupt.statusCode());
     assertEquals(204, delete.statusCode());
     assertEquals(1, toolRuns.get());
     assertEquals(2, model.calls().size());
@@ -173,13 +173,13 @@ final class AgentHttpServiceAuthorizationTest {
 
     assertEquals("", events.awaitEnd());
     var session = registry.find(sessionId, CAROL).orElseThrow();
-    assertFalse(session.result().isDone());
+    assertFalse(session.isRunning());
   }
 
   @Test
   void revokingTheIdentityAnswersAPendingResultLongPollWith401() throws Exception {
     var sessionId = create("carol");
-    var result = registry.find(sessionId, CAROL).orElseThrow().result();
+    var result = registry.lookup(sessionId, CAROL).orElseThrow().latest();
     var watchersBeforePoll = result.getNumberOfDependents();
     var poll =
         CompletableFuture.supplyAsync(
@@ -300,7 +300,7 @@ final class AgentHttpServiceAuthorizationTest {
     var path = "/sessions/" + sessionId;
     return List.of(
         new Route("POST", messages(sessionId), "{\"text\":\"hi\"}"),
-        new Route("POST", interrupt(sessionId), "{\"reason\":\"stop\"}"),
+        new Route("POST", interrupt(sessionId), null),
         new Route("GET", path + "/questions", null),
         new Route("POST", path + "/questions/perm-1", "{\"selectedLabels\":[\"Allow\"]}"),
         new Route("GET", path + "/events", null),
@@ -326,7 +326,6 @@ final class AgentHttpServiceAuthorizationTest {
     var body =
         switch (path.substring(path.lastIndexOf('/') + 1)) {
           case "messages" -> "{\"text\":\"go\"}";
-          case "interrupt" -> "{\"reason\":\"stop\"}";
           case "sessions" -> "{}";
           default -> null;
         };

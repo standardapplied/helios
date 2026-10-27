@@ -96,15 +96,15 @@ final class StreamingSessionTest {
     var reply = held(provider);
     try (var server = HeldSseServer.start(reply);
         var model = modelAt(provider, server.uri());
-        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
+        var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build())) {
       var texts = assistantTexts(session);
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
       var first = Await.next("the first text delta", texts);
       reply.release();
 
       assertEquals("Hello", first.text());
-      var success = assertInstanceOf(ResultMessage.Success.class, result(session));
+      var success = assertInstanceOf(ResultMessage.Success.class, result(run));
       assertEquals("Hello, world.", success.result());
       assertEquals(1, server.requests());
     }
@@ -152,12 +152,12 @@ final class StreamingSessionTest {
                     .withResponseTimeout(Duration.ofMillis(200))
                     .withStreamIdleTimeout(Duration.ofMillis(1)));
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder().withModel(model).withLimits(limits).build())) {
 
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
-      assertInstanceOf(ResultMessage.ErrorTransientStream.class, result(session));
+      assertInstanceOf(ResultMessage.ErrorTransientStream.class, result(run));
     }
   }
 
@@ -172,12 +172,12 @@ final class StreamingSessionTest {
                 provider,
                 server.uri(),
                 ModelConfig.newBuilder().withStreamIdleTimeout(Duration.ofMillis(300)));
-        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
-      session.send(UserMessage.text("Hi"));
+        var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build())) {
+      var run = session.send(UserMessage.text("Hi"));
 
       reply.awaitClientClosed();
 
-      var failed = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result(session));
+      var failed = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result(run));
       assertEquals(PROVIDER_EXCEPTIONS.get(provider).getName(), failed.error().kind());
       assertTrue(
           failed.error().message().contains("Stream idle timeout"), failed.error().message());
@@ -196,7 +196,7 @@ final class StreamingSessionTest {
             StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, SseReplies.inOrder(replies));
         var model = modelAt("anthropic", server.uri());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withTools(List.of(weather()))
@@ -206,7 +206,7 @@ final class StreamingSessionTest {
 
       var forecast =
           session.runBlocking(UserMessage.text("Weather?"), OutputSchema.of(Forecast.class));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertEquals(new Forecast("Paris", "Sunny"), forecast);
       assertEquals(
@@ -233,12 +233,12 @@ final class StreamingSessionTest {
                 0,
                 SseReplies.inOrder(List.of(Golden.read("gemini/sessions/cited.sse"))));
         var model = modelAt("gemini", server.uri());
-        var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
+        var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build())) {
       events.read(session.events());
 
-      session.send(UserMessage.text("Paris?"));
-      var success = assertInstanceOf(ResultMessage.Success.class, result(session));
-      events.awaitDone();
+      var run = session.send(UserMessage.text("Paris?"));
+      var success = assertInstanceOf(ResultMessage.Success.class, result(run));
+      events.awaitRunEnded();
 
       var cited = events.eventsOf(QueryEvent.AssistantCitations.class).getFirst().citations();
       assertEquals(
@@ -259,11 +259,11 @@ final class StreamingSessionTest {
     try (var server = HeldSseServer.start(reply);
         var model = modelAt("anthropic", server.uri());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder().withModel(model).withHook(cancelFirst).build())) {
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
 
-      assertInstanceOf(ResultMessage.Cancelled.class, result(session));
+      assertInstanceOf(ResultMessage.Cancelled.class, result(run));
       assertEquals(0, server.requests());
     }
   }
@@ -274,14 +274,14 @@ final class StreamingSessionTest {
     var reply = HeldSseServer.Reply.holdingHeaders(parts);
     try (var server = HeldSseServer.start(reply);
         var model = modelAt("anthropic", server.uri())) {
-      var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build());
-      session.send(UserMessage.text("Hi"));
+      var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build());
+      var run = session.send(UserMessage.text("Hi"));
       reply.awaitRequest();
 
       session.close();
 
       reply.awaitClientClosed();
-      assertInstanceOf(ResultMessage.Cancelled.class, result(session));
+      assertInstanceOf(ResultMessage.Cancelled.class, result(run));
     }
   }
 
@@ -290,15 +290,15 @@ final class StreamingSessionTest {
     var reply = held("anthropic");
     try (var server = HeldSseServer.start(reply);
         var model = modelAt("anthropic", server.uri())) {
-      var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build());
+      var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build());
       var texts = assistantTexts(session);
-      session.send(UserMessage.text("Hi"));
+      var run = session.send(UserMessage.text("Hi"));
       Await.next("the first text delta", texts);
 
       session.close();
 
       reply.awaitClientClosed();
-      assertInstanceOf(ResultMessage.Cancelled.class, result(session));
+      assertInstanceOf(ResultMessage.Cancelled.class, result(run));
     }
   }
 
@@ -308,15 +308,15 @@ final class StreamingSessionTest {
     reply.release();
     try (var server = HeldSseServer.start(reply);
         var model = modelAt("anthropic", server.uri())) {
-      var session = AgentSession.create(SessionOptions.newBuilder().withModel(model).build());
-      session.send(UserMessage.text("Hi"));
-      var settled = result(session);
+      var session = AgentSession.open(SessionOptions.newBuilder().withModel(model).build());
+      var run = session.send(UserMessage.text("Hi"));
+      var settled = result(run);
       reply.awaitFinished();
 
       session.close();
 
       assertInstanceOf(ResultMessage.Success.class, settled);
-      assertEquals(settled, result(session));
+      assertEquals(settled, result(run));
     }
   }
 
@@ -329,25 +329,26 @@ final class StreamingSessionTest {
     after.release();
     try (var server = HeldSseServer.start(cancelled, other, after);
         var model = modelAt("anthropic", server.uri());
-        var survivor = AgentSession.create(SessionOptions.newBuilder().withModel(model).build());
-        var later = AgentSession.create(SessionOptions.newBuilder().withModel(model).build())) {
-      var victim = AgentSession.create(SessionOptions.newBuilder().withModel(model).build());
+        var survivor = AgentSession.open(SessionOptions.newBuilder().withModel(model).build());
+        var later = AgentSession.open(SessionOptions.newBuilder().withModel(model).build())) {
+      var victim = AgentSession.open(SessionOptions.newBuilder().withModel(model).build());
       var texts = assistantTexts(victim);
-      victim.send(UserMessage.text("Hi"));
+      var victimRun = victim.send(UserMessage.text("Hi"));
       Await.next("the first text delta", texts);
-      survivor.send(UserMessage.text("Hi"));
+      var survivorRun = survivor.send(UserMessage.text("Hi"));
       other.awaitRequest();
 
       victim.close();
       cancelled.awaitClientClosed();
-      later.send(UserMessage.text("Hi"));
+      var laterRun = later.send(UserMessage.text("Hi"));
 
-      assertInstanceOf(ResultMessage.Cancelled.class, result(victim));
+      assertInstanceOf(ResultMessage.Cancelled.class, result(victimRun));
       assertEquals(
           "Hello, world.",
-          assertInstanceOf(ResultMessage.Success.class, result(survivor)).result());
+          assertInstanceOf(ResultMessage.Success.class, result(survivorRun)).result());
       assertEquals(
-          "Hello, world.", assertInstanceOf(ResultMessage.Success.class, result(later)).result());
+          "Hello, world.",
+          assertInstanceOf(ResultMessage.Success.class, result(laterRun)).result());
     }
   }
 
@@ -372,8 +373,8 @@ final class StreamingSessionTest {
     return queue;
   }
 
-  static ResultMessage result(AgentSession session) {
-    return Await.value("the session's result", session.result());
+  static ResultMessage result(CompletableFuture<ResultMessage> run) {
+    return Await.value("the run's result", run);
   }
 
   private static CompletableFuture<Void> readInto(

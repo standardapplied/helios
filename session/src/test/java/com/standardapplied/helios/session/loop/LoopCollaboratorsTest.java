@@ -35,7 +35,11 @@ final class LoopCollaboratorsTest {
   private final Function<SessionState, HookContext> contextFactory =
       s ->
           new DefaultHookContext(
-              s.sessionId(), s.currentTurnIndex(), s.cancellation(), new MockModel("unused"));
+              s.sessionId(),
+              s.runId(),
+              s.currentTurnIndex(),
+              s.cancellation(),
+              new MockModel("unused"));
 
   @Test
   void hookContextAndEmitterUseTheSharedFactoryAndSink() {

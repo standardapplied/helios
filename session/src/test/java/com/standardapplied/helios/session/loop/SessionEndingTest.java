@@ -70,8 +70,7 @@ final class SessionEndingTest {
 
     assertEquals(0, first.getSuppressed().length);
     assertEquals(
-        List.of(
-            Level.SEVERE, "an Error reached session sess-ending after its result settled", late),
+        List.of(Level.SEVERE, "an Error reached session sess-ending after it ended", late),
         List.of(
             logged.getFirst().getLevel(),
             logged.getFirst().getMessage(),

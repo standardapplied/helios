@@ -43,7 +43,7 @@ final class ResultLongPollRevocationTest {
     var resp = new RecordingResponse();
 
     ResultLongPoll.respond(
-        session, ServerStubs.request("timeout=0"), resp.response, mapper, caller);
+        session, session.result, ServerStubs.request("timeout=0"), resp.response, mapper, caller);
 
     assertTrue(revoked.isDone());
     assertEquals(Status.UNAUTHORIZED_401, resp.status());

@@ -47,7 +47,7 @@ import org.junit.jupiter.api.Test;
  * Only a turn that ended in {@code TOOL_CALLS} or {@code STOP} runs the tool calls it emitted; a
  * failed, truncated, cancelled or unterminated turn discards them and ends in its own terminal. A
  * session with {@code maxTurns = N} admits N model turns. Each test runs the loop to its terminal
- * {@link QueryEvent.LoopEnded} before it counts the recording tool's invocations.
+ * {@link QueryEvent.RunEnded} before it counts the recording tool's invocations.
  */
 final class TurnOutcomesTest {
 
@@ -192,8 +192,8 @@ final class TurnOutcomesTest {
 
   private ResultMessage run(Model model, SessionLimits limits, Hook... hooks) {
     queue.offer(UserMessage.text("go"));
-    var terminal = loop(model, hooks).run(state, limits);
-    var ended = (QueryEvent.LoopEnded) fixture.events.getLast();
+    var terminal = loop(model, hooks).run(state, limits, natural -> true);
+    var ended = (QueryEvent.RunEnded) fixture.events.getLast();
     assertSame(terminal, ended.result());
     return terminal;
   }

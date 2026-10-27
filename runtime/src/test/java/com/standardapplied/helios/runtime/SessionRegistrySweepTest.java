@@ -12,14 +12,15 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link SessionRegistry#sweep()} on a hand-advanced clock: it reclaims a session not running once
- * it has not been running for the retention, a terminal session from its end and one never started
- * from its registration, and never a started session that has not ended.
+ * {@link SessionRegistry#sweep()} on a hand-advanced clock: it reclaims an idle session once it has
+ * been idle for the retention, measured from the end of its last run or, if it never ran, from its
+ * registration, and never a session whose run is in progress.
  */
 final class SessionRegistrySweepTest {
 
@@ -61,7 +62,22 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
-  void aTerminalSessionIsRetainedFromItsEndNotItsRegistration() {
+  void aRunThatEndsAfterALaterRunStartedLeavesTheSessionActive() {
+    var session = startedSession();
+    var first = session.result;
+    session.result = new CompletableFuture<>();
+    registry.lookup(session.sessionId(), ALICE).orElseThrow().send(UserMessage.text("next"));
+    first.complete(session.success());
+    advance(RETENTION);
+
+    assertEquals(0, registry.sweep());
+    session.terminate();
+    advance(RETENTION);
+    assertEquals(1, registry.sweep());
+  }
+
+  @Test
+  void anIdleSessionIsRetainedFromItsLastRunsEndNotItsRegistration() {
     var working = startedSession();
     advance(RETENTION);
     working.terminate();
@@ -101,7 +117,7 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
-  void aStartedSessionThatHasNotEndedIsNeverSwept() {
+  void aSessionWhoseRunIsInProgressIsNeverSwept() {
     var working = startedSession();
     advance(Duration.ofDays(365));
 
@@ -121,9 +137,9 @@ final class SessionRegistrySweepTest {
 
     assertEquals(3, registry.sweep());
 
-    create(EVE);
-    create(EVE);
-    create(EVE);
+    startedSession(EVE);
+    startedSession(EVE);
+    startedSession(EVE);
     assertThrows(SessionCapacityException.class, () -> create(EVE));
   }
 
@@ -169,7 +185,7 @@ final class SessionRegistrySweepTest {
   }
 
   @Test
-  void aConfiguredRetentionAppliesToTerminalAndNeverStartedSessionsAlike() {
+  void aConfiguredRetentionAppliesToSessionsThatRanAndNeverRanAlike() {
     var retention = Duration.ofMinutes(1);
     var configured =
         SessionRegistry.newBuilder()
@@ -178,7 +194,7 @@ final class SessionRegistrySweepTest {
             .withRetention(retention)
             .build();
     var terminal = (StubSession) configured.create(options(), ALICE);
-    terminal.send(UserMessage.text("go"));
+    configured.lookup(terminal.sessionId(), ALICE).orElseThrow().send(UserMessage.text("go"));
     terminal.terminate();
     configured.create(options(), ALICE);
     advance(retention.minusMillis(1));
@@ -194,7 +210,7 @@ final class SessionRegistrySweepTest {
 
   private StubSession startedSession(Principal owner) {
     var session = create(owner);
-    session.send(UserMessage.text("go"));
+    registry.lookup(session.sessionId(), owner).orElseThrow().send(UserMessage.text("go"));
     return session;
   }
 

@@ -6,7 +6,6 @@ package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
@@ -17,7 +16,6 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -90,11 +88,9 @@ final class Phase3AcceptanceTest {
             .withAttachment(csvPath)
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var result = session.runBlocking(userMessage);
       assertInstanceOf(ResultMessage.Success.class, result);
-      assertTrue(session.result().isDone());
-      assertSame(result, Await.value("the settled session result", session.result()));
     }
 
     // Find the user message the model saw.
@@ -133,7 +129,7 @@ final class Phase3AcceptanceTest {
             .withSessionId("phase3-plain-" + UUID.randomUUID())
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       session.runBlocking(UserMessage.text("plain text"));
     }
 
@@ -155,7 +151,7 @@ final class Phase3AcceptanceTest {
             .build();
     var reference = FileReference.of("https://example.com/video.mp4", "video/mp4");
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       session.runBlocking(
           UserMessage.newBuilder()
               .withText("Summarize this video")
@@ -181,7 +177,7 @@ final class Phase3AcceptanceTest {
             .withSessionId("phase3-att-only-" + UUID.randomUUID())
             .build();
 
-    try (var session = AgentSession.create(options)) {
+    try (var session = AgentSession.open(options)) {
       var msg = UserMessage.newBuilder().withAttachment(tmp.resolve("p.png")).build();
       session.runBlocking(msg);
     }

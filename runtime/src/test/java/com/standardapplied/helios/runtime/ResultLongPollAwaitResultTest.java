@@ -47,7 +47,7 @@ final class ResultLongPollAwaitResultTest {
     assertEquals(Status.OK_200, resp.status());
     assertEquals("application/json", resp.header("Content-Type"));
     var body = JsonBody.MAPPER.readValue(resp.body(), Map.class);
-    assertEquals(List.of("type", "result"), List.copyOf(body.keySet()));
+    assertEquals(List.of("type", "runId", "result"), List.copyOf(body.keySet()));
     assertEquals("Success", body.get("type"));
     assertEquals("ok", ((Map<?, ?>) body.get("result")).get("result"));
   }
@@ -66,7 +66,12 @@ final class ResultLongPollAwaitResultTest {
     for (var i = 0; i < 1_000; i++) {
       var each = new RecordingResponse();
       ResultLongPoll.respond(
-          session, ServerStubs.request("timeout=0"), each.response, JsonBody.MAPPER, caller());
+          session,
+          session.result,
+          ServerStubs.request("timeout=0"),
+          each.response,
+          JsonBody.MAPPER,
+          caller());
       assertEquals(Status.NO_CONTENT_204, each.status());
     }
 
@@ -149,7 +154,7 @@ final class ResultLongPollAwaitResultTest {
     assertTrue(carrying.stackTrace().size() > 0, "test precondition");
     session.result.complete(
         new ResultMessage.ErrorDuringExecution(
-            "sess-1", carrying, Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO));
+            "sess-1", "run-1", carrying, Usage.of(1, 1), CostEstimate.zero(), Duration.ZERO));
 
     poll("timeout=5");
 
@@ -163,7 +168,12 @@ final class ResultLongPollAwaitResultTest {
 
   private void poll(String query) {
     ResultLongPoll.respond(
-        session, ServerStubs.request(query), resp.response, JsonBody.MAPPER, caller());
+        session,
+        session.result,
+        ServerStubs.request(query),
+        resp.response,
+        JsonBody.MAPPER,
+        caller());
   }
 
   private Caller caller() {

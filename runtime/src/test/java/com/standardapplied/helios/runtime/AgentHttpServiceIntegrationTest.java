@@ -5,6 +5,7 @@
 package com.standardapplied.helios.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
@@ -14,12 +15,21 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.execution.ExecutionProvider;
+import com.standardapplied.helios.session.execution.ExecutionRequest;
+import com.standardapplied.helios.session.execution.ExecutionResult;
+import com.standardapplied.helios.session.execution.Runtime;
+import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.testing.ModelStreams;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -31,9 +41,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -111,7 +123,7 @@ final class AgentHttpServiceIntegrationTest {
       var events = startEventReader(http, base, sessionId);
       sendMessage(http, base, sessionId, "hi");
 
-      var collected = events.awaitTerminal();
+      var collected = events.awaitRunEnded();
       assertTrue(
           collected.stream().anyMatch(e -> e.event.equals("UserMessageReceived")),
           "stream must include UserMessageReceived");
@@ -121,9 +133,10 @@ final class AgentHttpServiceIntegrationTest {
       var turnEnded =
           collected.stream().filter(e -> e.event.equals("TurnEnded")).findFirst().orElseThrow();
       assertTrue(turnEnded.data.contains("\"reason\":\"STOP\""), turnEnded.data);
-      var loopEnded =
-          collected.stream().filter(e -> e.event.equals("LoopEnded")).findFirst().orElseThrow();
-      assertTrue(loopEnded.data.contains("hello back"));
+      var runEnded =
+          collected.stream().filter(e -> e.event.equals("RunEnded")).findFirst().orElseThrow();
+      assertTrue(runEnded.data.contains("hello back"));
+      assertEquals("RunStarted", collected.get(1).event());
     }
   }
 
@@ -159,7 +172,7 @@ final class AgentHttpServiceIntegrationTest {
       sendMessage(http, base, sessionId, "go");
 
       var toolResult =
-          events.awaitTerminal().stream()
+          events.awaitRunEnded().stream()
               .filter(e -> e.event.equals("ToolResult"))
               .findFirst()
               .orElseThrow();
@@ -174,10 +187,9 @@ final class AgentHttpServiceIntegrationTest {
                   .timeout(HTTP_TIMEOUT)
                   .build(),
               BodyHandlers.ofString());
+      assertTrue(result.body().startsWith("{\"type\":\"Success\",\"runId\":\"run-"), result.body());
       assertTrue(
-          result
-              .body()
-              .startsWith("{\"type\":\"Success\",\"result\":{\"sessionId\":\"" + sessionId),
+          result.body().contains("\"result\":{\"sessionId\":\"" + sessionId + "\",\"runId\":"),
           result.body());
       assertTrue(result.body().contains("\"usage\":{\"inputTokens\":"), result.body());
     }
@@ -212,98 +224,100 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   @Test
-  void midRunInterruptIsObservedAsUserMessageReceived() throws Exception {
-    var calls = new AtomicInteger();
-    var firstChatEntered = new CountDownLatch(1);
-    var modelLatch = new CountDownLatch(1);
-    Model adaptive =
-        new BlockingModel() {
-          @Override
-          public Response<Void> chat(List<Message> messages, List<Tool> tools) {
-            var call = calls.incrementAndGet();
-            if (call == 1) {
-              firstChatEntered.countDown();
-              try {
-                modelLatch.await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-              return Response.newBuilder()
-                  .withContent("partial")
-                  .withFinishReason(FinishReason.STOP)
-                  .withUsage(Usage.of(1, 1))
-                  .build();
-            }
-            return Response.newBuilder()
-                .withContent("after-interrupt")
-                .withFinishReason(FinishReason.STOP)
-                .withUsage(Usage.of(2, 1))
-                .build();
-          }
-
-          @Override
-          public String id() {
-            return "test";
-          }
-
-          @Override
-          public String provider() {
-            return "test";
-          }
-        };
-    try (var server =
-        RuntimeServer.builder()
-            .withRegistry(SessionRegistry.inMemory())
-            .withOptionsFactory(
-                request ->
-                    SessionOptions.newBuilder()
-                        .withModel(adaptive)
-                        .withSessionId(request.sessionId())
-                        .build())
-            .withPort(0)
-            .withoutAuthentication()
-            .withHost("127.0.0.1")
-            .build()) {
-      var http = httpClient();
+  void twoMessagesARunApartProduceTwoResultsOnOneEventStream() throws Exception {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    try (var server = startServer(model)) {
       var base = baseUrl(server);
       var sessionId = createSession(http, base);
       var events = startEventReader(http, base, sessionId);
+
       sendMessage(http, base, sessionId, "first");
-      Await.latch("the model's first chat to be entered", firstChatEntered);
-      interruptSession(http, base, sessionId, "rethink");
-      modelLatch.countDown();
-      var collected = events.awaitTerminal();
-      assertTrue(
+      var first = result(base, sessionId);
+      events.awaitRunEnded();
+      sendMessage(http, base, sessionId, "second");
+      var second = result(base, sessionId);
+      var collected = events.awaitRunEnded();
+
+      assertEquals(List.of("Success", "Success"), List.of(first.get("type"), second.get("type")));
+      assertNotEquals(first.get("runId"), second.get("runId"));
+      assertEquals(
+          List.of(first.get("runId"), second.get("runId")),
           collected.stream()
-              .filter(e -> e.event.equals("UserMessageReceived"))
-              .anyMatch(e -> e.data.contains("interrupted by user: rethink")),
-          "stream must include synthetic interrupt UserMessageReceived");
-      var loopEnded =
-          collected.stream().filter(e -> e.event.equals("LoopEnded")).findFirst().orElseThrow();
-      assertTrue(loopEnded.data.contains("after-interrupt"));
+              .filter(e -> e.event().equals("RunEnded"))
+              .map(e -> mapper.readValue(e.data(), Map.class).get("runId"))
+              .toList());
     }
   }
 
   @Test
-  void eventsOfATerminatedSessionAreReadyThenLoopEndedThenACleanEnd() throws Exception {
-    try (var server = startServer(textModel("the answer"))) {
-      var http = httpClient();
+  void anInterruptWithNoBodyCancelsTheStalledRunAndTheSessionRunsAgain() throws Exception {
+    var entered = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(ModelStreams.stalled(entered::countDown))
+            .withTextTurn("again")
+            .build();
+    try (var server = startServer(model)) {
       var base = baseUrl(server);
       var sessionId = createSession(http, base);
       sendMessage(http, base, sessionId, "go");
-      var result =
+      Await.latch("the run to stall in its model stream", entered);
+
+      var interrupt =
           http.send(
-              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/result"))
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/interrupt"))
                   .timeout(HTTP_TIMEOUT)
-                  .GET()
+                  .POST(HttpRequest.BodyPublishers.noBody())
                   .build(),
               BodyHandlers.ofString());
-      assertEquals(200, result.statusCode(), "the session must be terminal before subscribing");
+      var cancelled = result(base, sessionId);
+      sendMessage(http, base, sessionId, "next");
 
-      var collected = startEventReader(http, base, sessionId).awaitTerminal();
+      assertEquals(202, interrupt.statusCode());
+      assertEquals("Cancelled", cancelled.get("type"));
+      assertEquals("interrupted", ((Map<?, ?>) cancelled.get("result")).get("reason"));
+      assertEquals("Success", result(base, sessionId).get("type"));
+    }
+  }
 
-      assertEquals(List.of("Ready", "LoopEnded"), collected.stream().map(SseLog::event).toList());
-      assertTrue(collected.getLast().data().contains("the answer"));
+  @Test
+  void aSessionWhoseExecutionProviderRefusesIsAnswered503() throws Exception {
+    try (var server =
+        serverWithFactory(
+            request ->
+                SessionOptions.newBuilder()
+                    .withModel(textModel("x"))
+                    .withSessionId(request.sessionId())
+                    .withExecutionProvider(new RefusingProvider())
+                    .build())) {
+      var resp =
+          http.send(postJson(baseUrl(server) + "/sessions", Map.of()), BodyHandlers.ofString());
+
+      assertEquals(503, resp.statusCode());
+      assertEquals("{\"error\":\"session unavailable\"}", resp.body());
+      assertEquals(0, registry.size());
+    }
+  }
+
+  @Test
+  void eventsOpenedBetweenRunsAreReadyThenNothingUntilTheSessionIsDeleted() throws Exception {
+    try (var server = startServer(textModel("the answer"))) {
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      sendMessage(http, base, sessionId, "go");
+      assertEquals("Success", result(base, sessionId).get("type"));
+      var events = startEventReader(http, base, sessionId);
+
+      var delete =
+          http.send(
+              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId))
+                  .timeout(HTTP_TIMEOUT)
+                  .DELETE()
+                  .build(),
+              BodyHandlers.ofString());
+
+      assertEquals(204, delete.statusCode());
+      assertEquals(List.of("Ready"), events.awaitTerminal().stream().map(SseLog::event).toList());
     }
   }
 
@@ -364,36 +378,19 @@ final class AgentHttpServiceIntegrationTest {
   }
 
   @Test
-  void sendOnTerminatedSessionReturns409() throws Exception {
+  void anInterruptWithNoRunInProgressIsAccepted() throws Exception {
     try (var server = startServer(textModel("done"))) {
-      var http = httpClient();
       var base = baseUrl(server);
       var sessionId = createSession(http, base);
-      var events = startEventReader(http, base, sessionId);
       sendMessage(http, base, sessionId, "go");
-      events.awaitTerminal();
-      var resp =
-          http.send(
-              postJson(base + "/sessions/" + sessionId + "/messages", Map.of("text", "again")),
-              BodyHandlers.ofString());
-      assertEquals(409, resp.statusCode());
-    }
-  }
+      assertEquals("Success", result(base, sessionId).get("type"));
 
-  @Test
-  void interruptOnTerminatedSessionReturns409() throws Exception {
-    try (var server = startServer(textModel("done"))) {
-      var http = httpClient();
-      var base = baseUrl(server);
-      var sessionId = createSession(http, base);
-      var events = startEventReader(http, base, sessionId);
-      sendMessage(http, base, sessionId, "go");
-      events.awaitTerminal();
       var resp =
           http.send(
               postJson(base + "/sessions/" + sessionId + "/interrupt", Map.of("reason", "late")),
               BodyHandlers.ofString());
-      assertEquals(409, resp.statusCode());
+
+      assertEquals(202, resp.statusCode());
     }
   }
 
@@ -478,52 +475,6 @@ final class AgentHttpServiceIntegrationTest {
               BodyHandlers.ofString());
       assertEquals(400, resp.statusCode());
       assertEquals("{\"error\":\"invalid JSON body\"}", resp.body());
-    }
-  }
-
-  @Test
-  void interruptWithoutReasonReturns400() throws Exception {
-    try (var server = startServer(textModel("x"))) {
-      var http = httpClient();
-      var base = baseUrl(server);
-      var sessionId = createSession(http, base);
-      var resp =
-          http.send(
-              postJson(base + "/sessions/" + sessionId + "/interrupt", Map.of()),
-              BodyHandlers.ofString());
-      assertEquals(400, resp.statusCode());
-    }
-  }
-
-  @Test
-  void interruptWithBlankReasonReturns400() throws Exception {
-    try (var server = startServer(textModel("x"))) {
-      var http = httpClient();
-      var base = baseUrl(server);
-      var sessionId = createSession(http, base);
-      var resp =
-          http.send(
-              postJson(base + "/sessions/" + sessionId + "/interrupt", Map.of("reason", " ")),
-              BodyHandlers.ofString());
-      assertEquals(400, resp.statusCode());
-    }
-  }
-
-  @Test
-  void interruptInvalidJsonReturns400() throws Exception {
-    try (var server = startServer(textModel("x"))) {
-      var http = httpClient();
-      var base = baseUrl(server);
-      var sessionId = createSession(http, base);
-      var resp =
-          http.send(
-              HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/interrupt"))
-                  .timeout(HTTP_TIMEOUT)
-                  .header("Content-Type", "application/json")
-                  .POST(HttpRequest.BodyPublishers.ofString("{broken"))
-                  .build(),
-              BodyHandlers.ofString());
-      assertEquals(400, resp.statusCode());
     }
   }
 
@@ -742,13 +693,42 @@ final class AgentHttpServiceIntegrationTest {
     assertEquals(202, resp.statusCode(), "send should 202; body=" + resp.body());
   }
 
-  private void interruptSession(HttpClient http, String base, String sessionId, String reason)
-      throws Exception {
+  /** The body of the result long poll of {@code sessionId}, which answers {@code 200}. */
+  private Map<?, ?> result(String base, String sessionId) throws Exception {
     var resp =
         http.send(
-            postJson(base + "/sessions/" + sessionId + "/interrupt", Map.of("reason", reason)),
+            HttpRequest.newBuilder(URI.create(base + "/sessions/" + sessionId + "/result"))
+                .timeout(HTTP_TIMEOUT)
+                .GET()
+                .build(),
             BodyHandlers.ofString());
-    assertEquals(202, resp.statusCode(), "interrupt should 202; body=" + resp.body());
+    assertEquals(200, resp.statusCode(), resp::body);
+    return mapper.readValue(resp.body(), Map.class);
+  }
+
+  /** An execution provider that refuses every session. */
+  private static final class RefusingProvider implements ExecutionProvider {
+
+    @Override
+    public Set<Runtime> supportedRuntimes() {
+      return Set.of();
+    }
+
+    @Override
+    public SessionStartOutcome onSessionStart(SessionContext ctx) {
+      return SessionStartOutcome.refuse("pool full");
+    }
+
+    @Override
+    public void onSessionEnd(SessionContext ctx) {
+      throw new AssertionError("a refused session is never ended");
+    }
+
+    @Override
+    public ExecutionResult execute(
+        SessionContext session, ExecutionRequest request, CancellationToken cancellation) {
+      throw new AssertionError("not used");
+    }
   }
 
   /** Captured SSE event {name, data}. */
@@ -756,14 +736,15 @@ final class AgentHttpServiceIntegrationTest {
 
   /**
    * Reads one SSE stream on its own thread and collects every event until the server ends the
-   * stream, which it does once the session's publisher has closed. A failed read fails the test
-   * that waits on the reader.
+   * stream, which it does once the session is closed, handing each {@code RunEnded} to {@link
+   * #awaitRunEnded()}. A failed read fails the test that waits on the reader.
    */
   private static final class SseEventReader {
 
     private final List<SseLog> collected = new CopyOnWriteArrayList<>();
     private final CompletableFuture<Void> ready = new CompletableFuture<>();
     private final CompletableFuture<Void> ended = new CompletableFuture<>();
+    private final LinkedBlockingQueue<SseLog> runsEnded = new LinkedBlockingQueue<>();
 
     SseEventReader(HttpClient http, URI uri) {
       Thread.ofVirtual()
@@ -817,6 +798,9 @@ final class AgentHttpServiceIntegrationTest {
       if ("Ready".equals(log.event())) {
         ready.complete(null);
       }
+      if ("RunEnded".equals(log.event())) {
+        runsEnded.add(log);
+      }
     }
 
     /**
@@ -826,6 +810,12 @@ final class AgentHttpServiceIntegrationTest {
      */
     void awaitReady() {
       Await.value("the SSE Ready event", ready);
+    }
+
+    /** Wait for the next run's {@code RunEnded}, then return every event read so far. */
+    List<SseLog> awaitRunEnded() {
+      Await.next("the next RunEnded", runsEnded);
+      return List.copyOf(collected);
     }
 
     List<SseLog> awaitTerminal() {

@@ -126,7 +126,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
       ToolBinding tool, SecretRegistry secrets, String request, Map<String, ?> arguments) {
     try (var model = createModel(ToolChoice.any());
         var session =
-            AgentSession.create(
+            AgentSession.open(
                 SessionOptions.newBuilder()
                     .withModel(model)
                     .withSecretRegistry(secrets)
@@ -136,7 +136,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
       events.read(session.events());
       var terminal = session.runBlocking(UserMessage.text(request));
-      events.awaitDone();
+      events.awaitRunEnded();
 
       assertTrue(
           terminal instanceof ResultMessage.Success

@@ -75,7 +75,7 @@ final class CitationSurfacingTest {
   }
 
   private static AgentSession session(Model model) {
-    return AgentSession.create(
+    return AgentSession.open(
         SessionOptions.newBuilder().withModel(model).withSessionId(SID).withClock(CLOCK).build());
   }
 
@@ -84,10 +84,10 @@ final class CitationSurfacingTest {
     try (var s = session(groundedModel(List.of(WIKI, BRIT)))) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("What is the capital of Australia?"));
+      var future = s.send(UserMessage.text("What is the capital of Australia?"));
 
-      var result = Await.value("the session result", s.result());
-      sub.awaitDone();
+      var result = Await.value("the session result", future);
+      sub.awaitRunEnded();
 
       // Streaming surface.
       var event =
@@ -107,10 +107,10 @@ final class CitationSurfacingTest {
     try (var s = session(groundedModel(List.of()))) {
       var sub = new EventCollector();
       sub.read(s.events());
-      s.send(UserMessage.text("hi"));
+      var future = s.send(UserMessage.text("hi"));
 
-      var result = Await.value("the session result", s.result());
-      sub.awaitDone();
+      var result = Await.value("the session result", future);
+      sub.awaitRunEnded();
 
       assertTrue(
           sub.eventsOf(QueryEvent.AssistantCitations.class).isEmpty(),

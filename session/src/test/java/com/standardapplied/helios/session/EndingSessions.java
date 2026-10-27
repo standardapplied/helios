@@ -78,9 +78,9 @@ final class EndingSessions {
 
   /** What the result of a session built from {@code options}, sent one message, fails with. */
   static Throwable failureOf(SessionOptions.Builder options) {
-    try (var session = AgentSession.create(options.build())) {
-      session.send("go");
-      return Await.failure("the result to fail", session.result());
+    try (var session = AgentSession.open(options.build())) {
+      var future = session.send("go");
+      return Await.failure("the result to fail", future);
     }
   }
 

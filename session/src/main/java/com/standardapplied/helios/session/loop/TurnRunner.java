@@ -173,6 +173,7 @@ public final class TurnRunner {
         state,
         new QueryEvent.TurnEnded(
             state.sessionId(),
+            state.runId(),
             state.currentTurnIndex(),
             collaborators.clock().instant(),
             outcome.finishReason()));

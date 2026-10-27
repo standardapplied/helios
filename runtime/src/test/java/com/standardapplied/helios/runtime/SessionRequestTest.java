@@ -99,7 +99,7 @@ final class SessionRequestTest {
   private Message firstModelMessage(String sessionId, Principal owner) throws Exception {
     assertEquals(
         202, post("/sessions/" + sessionId + "/messages", owner, "{\"text\":\"go\"}").statusCode());
-    Await.value("the session's result", registry.find(sessionId, owner).orElseThrow().result());
+    Await.value("the session's result", registry.lookup(sessionId, owner).orElseThrow().latest());
     return models.get(sessionId).calls().getFirst().getFirst();
   }
 

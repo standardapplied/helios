@@ -14,15 +14,17 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
 
 /**
  * The session's open {@code AskUserQuestion} questions: the gateway the tool asks through, which
  * emits {@link QueryEvent.QuestionAsked} and blocks on a future keyed by question id, the listing
  * of the questions still open, and the answer and cancellation that complete those futures.
  *
- * <p>Cancellation is wired via {@link CancellationToken#onCancel(Runnable)} — when the session
- * cancels, the registered callback completes the pending future with a {@link
- * CancellationException}, waking {@code future.get()} immediately. No polling.
+ * <p>A question belongs to the run that asks it. Cancellation is wired via {@link
+ * CancellationToken#onCancel(Runnable)} on that run's token — when the run ends or is cancelled,
+ * the registered callback completes the pending future with a {@link CancellationException}, waking
+ * {@code future.get()} immediately, and the question is no longer pending. No polling.
  *
  * <p>{@link CompletableFuture#get()} special-cases {@code CancellationException}-shaped results and
  * re-throws them directly rather than wrapping in {@code ExecutionException}, so the only checked
@@ -33,13 +35,16 @@ import java.util.concurrent.ExecutionException;
  */
 final class PendingQuestions implements QuestionGateway {
 
-  private final SessionState state;
+  private final Supplier<SessionState> runs;
   private final SessionEventPublisher events;
   private final InstantSource clock;
   private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
 
-  PendingQuestions(SessionState state, SessionEventPublisher events, InstantSource clock) {
-    this.state = state;
+  /**
+   * @param runs the state of the run in progress, whose token a question observes
+   */
+  PendingQuestions(Supplier<SessionState> runs, SessionEventPublisher events, InstantSource clock) {
+    this.runs = runs;
     this.events = events;
     this.clock = clock;
   }
@@ -48,13 +53,9 @@ final class PendingQuestions implements QuestionGateway {
   public AskUserQuestionResponse ask(AskUserQuestionRequest request)
       throws InterruptedException, CancellationException {
     Objects.requireNonNull(request, "request must not be null");
+    var state = runs.get();
     var future = new CompletableFuture<AskUserQuestionResponse>();
     pending.put(request.questionId(), new Pending(request, future));
-    // Capture the Registration so we can remove the callback in finally. Without this every
-    // AskUserQuestion call accumulates a permanent closure on the session's long-lived
-    // CancellationToken — a session with N questions over its life leaks N callbacks (each
-    // pinning the completed future via the closure capture). Mirrors the pattern in
-    // LocalProcessExecutionProvider.runProcess.
     var cancelRegistration =
         state
             .cancellation()
@@ -62,11 +63,15 @@ final class PendingQuestions implements QuestionGateway {
                 () ->
                     future.completeExceptionally(
                         new CancellationException(
-                            state.cancellation().reason().orElse("session cancelled"))));
+                            state.cancellation().reason().orElse("run cancelled"))));
     try {
       events.emit(
           new QueryEvent.QuestionAsked(
-              state.sessionId(), state.currentTurnIndex(), clock.instant(), request));
+              state.sessionId(),
+              state.runId(),
+              state.currentTurnIndex(),
+              clock.instant(),
+              request));
       return future.get();
     } catch (ExecutionException e) {
       var cause = e.getCause();

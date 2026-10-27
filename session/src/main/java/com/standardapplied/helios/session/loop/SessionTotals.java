@@ -5,14 +5,17 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.Response.Usage;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * The running totals of one session — usage, cost and grounding citations across every model call —
- * read by anyone and accumulated only by the loop.
+ * The running totals of one run — usage, cost and grounding citations across every model call, and
+ * the time since the run started — read by anyone and accumulated only by the loop.
  *
  * <h2>Thread-safety</h2>
  *
@@ -25,10 +28,25 @@ public final class SessionTotals {
   private final AtomicReference<CostEstimate> cost = new AtomicReference<>(CostEstimate.zero());
   private final AtomicReference<List<Citation>> citations = new AtomicReference<>(List.of());
 
-  SessionTotals() {}
+  private final InstantSource clock;
+  private final Instant startedAt;
+
+  SessionTotals(InstantSource clock) {
+    this.clock = clock;
+    this.startedAt = clock.instant();
+  }
 
   /**
-   * The accumulated usage across every model call in this session.
+   * The wall-clock duration since the run started.
+   *
+   * @return a non-negative duration
+   */
+  public Duration elapsed() {
+    return Duration.between(startedAt, clock.instant());
+  }
+
+  /**
+   * The accumulated usage across every model call in this run.
    *
    * @return the running usage; non-null
    */
@@ -37,7 +55,7 @@ public final class SessionTotals {
   }
 
   /**
-   * The accumulated cost across this session.
+   * The accumulated cost across this run.
    *
    * @return the running cost; non-null
    */
@@ -46,8 +64,8 @@ public final class SessionTotals {
   }
 
   /**
-   * The grounding citations accumulated across every model turn in this session, in document order
-   * with exact duplicates suppressed.
+   * The grounding citations accumulated across every model turn in this run, in document order with
+   * exact duplicates suppressed.
    *
    * @return the running citations; non-null, immutable, may be empty
    */

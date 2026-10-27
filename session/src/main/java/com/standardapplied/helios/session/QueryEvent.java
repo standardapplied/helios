@@ -25,13 +25,16 @@ import java.util.Objects;
  * surface assistant text, tool activity, context-editing decisions, and lifecycle transitions.
  * Subscribers branch on the subtype via {@code switch}; they never parse strings.
  *
- * <p>Every subtype carries the same three common fields ({@code sessionId}, {@code turnIndex},
- * {@code timestamp}) plus subtype-specific detail. Common-field validation lives in {@link
- * #validateCommon(String, long, Instant)} so the record bodies stay tight.
+ * <p>Every subtype carries the same four common fields ({@code sessionId}, {@code runId}, {@code
+ * turnIndex}, {@code timestamp}) plus subtype-specific detail. Common-field validation lives in
+ * {@link #validateCommon(String, String, long, Instant)} so the record bodies stay tight. A session
+ * is one stream of events across its runs: {@link RunStarted} and {@link RunEnded} bracket each
+ * run, and every event names the run it belongs to, so the events of one run are a filter on {@code
+ * runId}.
  *
- * <p>The 17 subtypes cover every observable lifecycle event the agent loop emits — assistant output
- * (text, thinking, grounding citations), user input, context lifecycle, tool dispatch, hook
- * activity, and terminal results.
+ * <p>The 18 subtypes cover every observable lifecycle event the agent loop emits — run boundaries,
+ * assistant output (text, thinking, grounding citations), user input, context lifecycle, tool
+ * dispatch, hook activity, and terminal results.
  *
  * <p>Adding a subtype is a breaking change for {@code switch} consumers that lack a {@code default}
  * branch — by design, so the compiler flags consumers that need updating.
@@ -52,7 +55,8 @@ public sealed interface QueryEvent
         QueryEvent.QuestionAsked,
         QueryEvent.TurnEnded,
         QueryEvent.TurnRetried,
-        QueryEvent.LoopEnded,
+        QueryEvent.RunStarted,
+        QueryEvent.RunEnded,
         QueryEvent.Error {
 
   /**
@@ -63,7 +67,14 @@ public sealed interface QueryEvent
   String sessionId();
 
   /**
-   * The turn index in which this event occurred.
+   * The identifier of the run that produced this event.
+   *
+   * @return non-blank run id
+   */
+  String runId();
+
+  /**
+   * The turn index of the run in which this event occurred; {@code 0} before the run's first turn.
    *
    * @return non-negative turn index
    */
@@ -77,15 +88,20 @@ public sealed interface QueryEvent
   Instant timestamp();
 
   /**
-   * Validate the three fields every subtype shares.
+   * Validate the four fields every subtype shares.
    *
-   * @throws NullPointerException if {@code sessionId} or {@code timestamp} is null
-   * @throws IllegalArgumentException if {@code sessionId} is blank or {@code turnIndex} is negative
+   * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
+   * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+   *     turnIndex} is negative
    */
-  static void validateCommon(String sessionId, long turnIndex, Instant timestamp) {
+  static void validateCommon(String sessionId, String runId, long turnIndex, Instant timestamp) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {
       throw new IllegalArgumentException("sessionId must not be blank");
+    }
+    Objects.requireNonNull(runId, "runId must not be null");
+    if (Strings.isBlank(runId)) {
+      throw new IllegalArgumentException("runId must not be blank");
     }
     if (turnIndex < 0) {
       throw new IllegalArgumentException("turnIndex must be non-negative, got " + turnIndex);
@@ -102,15 +118,17 @@ public sealed interface QueryEvent
    * message again from its start, so a subscriber restarts the turn's text there.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index
    * @param timestamp the event timestamp
    * @param text the text delta; non-null, may be empty
    */
-  record AssistantText(String sessionId, long turnIndex, Instant timestamp, String text)
+  record AssistantText(
+      String sessionId, String runId, long turnIndex, Instant timestamp, String text)
       implements QueryEvent {
 
     public AssistantText {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
     }
   }
@@ -124,15 +142,17 @@ public sealed interface QueryEvent
    * gemini.thoughtSignatures}; OpenAI signs no summary.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index
    * @param timestamp the event timestamp
    * @param text the thinking text delta; non-null, may be empty
    */
-  record AssistantThinking(String sessionId, long turnIndex, Instant timestamp, String text)
+  record AssistantThinking(
+      String sessionId, String runId, long turnIndex, Instant timestamp, String text)
       implements QueryEvent {
 
     public AssistantThinking {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
     }
   }
@@ -145,16 +165,17 @@ public sealed interface QueryEvent
    * ResultMessage.Success#citations()} at termination.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index that produced the citations
    * @param timestamp the event timestamp
    * @param citations the turn's grounding citations; non-null, non-empty, defensively copied
    */
   record AssistantCitations(
-      String sessionId, long turnIndex, Instant timestamp, List<Citation> citations)
+      String sessionId, String runId, long turnIndex, Instant timestamp, List<Citation> citations)
       implements QueryEvent {
 
     public AssistantCitations {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(citations, "citations must not be null");
       if (citations.isEmpty()) {
         throw new IllegalArgumentException("citations must not be empty");
@@ -167,16 +188,17 @@ public sealed interface QueryEvent
    * A user message arrived (via {@code send(...)} or the post-interrupt synthetic message).
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the message will be processed
    * @param timestamp the event timestamp
    * @param message the user's message
    */
   record UserMessageReceived(
-      String sessionId, long turnIndex, Instant timestamp, UserMessage message)
+      String sessionId, String runId, long turnIndex, Instant timestamp, UserMessage message)
       implements QueryEvent {
 
     public UserMessageReceived {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(message, "message must not be null");
     }
   }
@@ -191,6 +213,7 @@ public sealed interface QueryEvent
    * message looks identical to a user who never sent anything.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index the message would have been processed in
    * @param timestamp the event timestamp
    * @param message the dropped message; non-null
@@ -199,6 +222,7 @@ public sealed interface QueryEvent
    */
   record MessageBlocked(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       UserMessage message,
@@ -207,7 +231,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public MessageBlocked {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(message, "message must not be null");
       Objects.requireNonNull(hookName, "hookName must not be null");
       if (Strings.isBlank(hookName)) {
@@ -224,15 +248,17 @@ public sealed interface QueryEvent
    * Context-window usage crossed a watermark; compaction is imminent or recommended.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index
    * @param timestamp the event timestamp
    * @param usagePct fraction of the context window consumed; non-negative
    */
-  record ContextWarning(String sessionId, long turnIndex, Instant timestamp, double usagePct)
+  record ContextWarning(
+      String sessionId, String runId, long turnIndex, Instant timestamp, double usagePct)
       implements QueryEvent {
 
     public ContextWarning {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       if (usagePct < 0.0 || Double.isNaN(usagePct)) {
         throw new IllegalArgumentException(
             "usagePct must be non-negative and finite, got " + usagePct);
@@ -245,6 +271,7 @@ public sealed interface QueryEvent
    * pruned.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index
    * @param timestamp the event timestamp
    * @param removedBlocks count of messages removed or collapsed; non-negative
@@ -253,6 +280,7 @@ public sealed interface QueryEvent
    */
   record ContextEdited(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       int removedBlocks,
@@ -261,7 +289,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public ContextEdited {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       if (removedBlocks < 0) {
         throw new IllegalArgumentException(
             "removedBlocks must be non-negative, got " + removedBlocks);
@@ -278,18 +306,20 @@ public sealed interface QueryEvent
 
   /**
    * A turn ended. The {@code reason} carries why; the loop may continue (tool use) or stop
-   * (end-of-turn followed by a {@code LoopEnded}).
+   * (end-of-turn followed by a {@code RunEnded}).
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index that ended
    * @param timestamp the event timestamp
    * @param reason the turn's finish reason
    */
-  record TurnEnded(String sessionId, long turnIndex, Instant timestamp, FinishReason reason)
+  record TurnEnded(
+      String sessionId, String runId, long turnIndex, Instant timestamp, FinishReason reason)
       implements QueryEvent {
 
     public TurnEnded {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(reason, "reason must not be null");
     }
   }
@@ -308,9 +338,10 @@ public sealed interface QueryEvent
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
-   * LoopEnded} event.
+   * RunEnded} event.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index that is being retried
    * @param timestamp the event timestamp (captured before the back-off sleep begins)
    * @param attemptNumber the 1-based attempt number that just failed; the next attempt is {@code
@@ -324,6 +355,7 @@ public sealed interface QueryEvent
    */
   record TurnRetried(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       int attemptNumber,
@@ -333,7 +365,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public TurnRetried {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       if (attemptNumber < 1) {
         throw new IllegalArgumentException("attemptNumber must be >= 1, got " + attemptNumber);
       }
@@ -350,36 +382,62 @@ public sealed interface QueryEvent
   }
 
   /**
-   * The session terminated. Fired exactly once per session, after all other events.
+   * A run started. The first event of every run, before its first {@link UserMessageReceived} or
+   * {@link MessageBlocked}; its turn index is {@code 0}.
    *
    * @param sessionId the session id
-   * @param turnIndex the final turn index
+   * @param runId the run id
    * @param timestamp the event timestamp
-   * @param result the terminal result message
    */
-  record LoopEnded(String sessionId, long turnIndex, Instant timestamp, ResultMessage result)
+  record RunStarted(String sessionId, String runId, Instant timestamp) implements QueryEvent {
+
+    public RunStarted {
+      validateCommon(sessionId, runId, 0, timestamp);
+    }
+
+    /** A run starts before its first turn. */
+    @Override
+    public long turnIndex() {
+      return 0;
+    }
+  }
+
+  /**
+   * A run ended. The last event of every run, emitted before the future {@code send} returned for
+   * the run completes; a run a host {@link java.lang.Error} ended emits none.
+   *
+   * @param sessionId the session id
+   * @param runId the run id
+   * @param turnIndex the run's final turn index
+   * @param timestamp the event timestamp
+   * @param result the run's terminal result
+   */
+  record RunEnded(
+      String sessionId, String runId, long turnIndex, Instant timestamp, ResultMessage result)
       implements QueryEvent {
 
-    public LoopEnded {
-      validateCommon(sessionId, turnIndex, timestamp);
+    public RunEnded {
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(result, "result must not be null");
     }
   }
 
   /**
    * An error occurred during the session. May or may not be terminal — terminal errors are also
-   * surfaced via a subsequent {@link LoopEnded} with an error-shaped {@link ResultMessage}.
+   * surfaced via a subsequent {@link RunEnded} with an error-shaped {@link ResultMessage}.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the error occurred
    * @param timestamp the event timestamp
    * @param error the serialized error
    */
-  record Error(String sessionId, long turnIndex, Instant timestamp, SerializedError error)
+  record Error(
+      String sessionId, String runId, long turnIndex, Instant timestamp, SerializedError error)
       implements QueryEvent {
 
     public Error {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(error, "error must not be null");
     }
   }
@@ -389,16 +447,17 @@ public sealed interface QueryEvent
    * which tool the model invoked and with which arguments.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the call was dispatched
    * @param timestamp the event timestamp
    * @param call the assembled tool call, its arguments redacted against the session's secret
    *     registry, in keys and in string values; non-null
    */
-  record ToolUse(String sessionId, long turnIndex, Instant timestamp, ToolCall call)
+  record ToolUse(String sessionId, String runId, long turnIndex, Instant timestamp, ToolCall call)
       implements QueryEvent {
 
     public ToolUse {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
     }
   }
@@ -410,6 +469,7 @@ public sealed interface QueryEvent
    * failure), its output already redacted against the session's secret registry.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the call ran
    * @param timestamp the event timestamp
    * @param call the originating call, its arguments redacted against the session's secret registry,
@@ -420,6 +480,7 @@ public sealed interface QueryEvent
    */
   record ToolResult(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       ToolCall call,
@@ -428,7 +489,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public ToolResult {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
       Objects.requireNonNull(result, "result must not be null");
       Objects.requireNonNull(redactions, "redactions must not be null");
@@ -442,6 +503,7 @@ public sealed interface QueryEvent
    * block (so the model sees its action refused with a reason).
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the block fired
    * @param timestamp the event timestamp
    * @param call the call that was blocked, its arguments redacted against the session's secret
@@ -451,6 +513,7 @@ public sealed interface QueryEvent
    */
   record ToolBlocked(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       ToolCall call,
@@ -459,7 +522,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public ToolBlocked {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
       Objects.requireNonNull(hookName, "hookName must not be null");
       if (Strings.isBlank(hookName)) {
@@ -480,6 +543,7 @@ public sealed interface QueryEvent
    * values.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the mutation fired
    * @param timestamp the event timestamp
    * @param call the call as the hook received it, redacted; non-null
@@ -491,6 +555,7 @@ public sealed interface QueryEvent
    */
   record ToolMutated(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       ToolCall call,
@@ -500,7 +565,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public ToolMutated {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
       Objects.requireNonNull(hookName, "hookName must not be null");
       if (Strings.isBlank(hookName)) {
@@ -524,6 +589,7 @@ public sealed interface QueryEvent
    * stream).
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the hook fired
    * @param timestamp the event timestamp
    * @param hookName the hook's name; non-null and non-blank
@@ -535,6 +601,7 @@ public sealed interface QueryEvent
    */
   record HookFired(
       String sessionId,
+      String runId,
       long turnIndex,
       Instant timestamp,
       String hookName,
@@ -543,7 +610,7 @@ public sealed interface QueryEvent
       implements QueryEvent {
 
     public HookFired {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(hookName, "hookName must not be null");
       if (Strings.isBlank(hookName)) {
         throw new IllegalArgumentException("hookName must not be blank");
@@ -568,16 +635,21 @@ public sealed interface QueryEvent
    * cancelled.
    *
    * @param sessionId the session id
+   * @param runId the run id
    * @param turnIndex the turn index in which the question was asked
    * @param timestamp the event timestamp
    * @param request the question payload; non-null
    */
   record QuestionAsked(
-      String sessionId, long turnIndex, Instant timestamp, AskUserQuestionRequest request)
+      String sessionId,
+      String runId,
+      long turnIndex,
+      Instant timestamp,
+      AskUserQuestionRequest request)
       implements QueryEvent {
 
     public QuestionAsked {
-      validateCommon(sessionId, turnIndex, timestamp);
+      validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(request, "request must not be null");
     }
   }

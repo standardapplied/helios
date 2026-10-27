@@ -26,20 +26,17 @@ final class AgentSessionTest {
   private static final class StubSession implements AgentSession {
 
     final List<UserMessage> sent = new ArrayList<>();
-    final List<String> interrupts = new ArrayList<>();
-    int closes = 0;
-    boolean started = false;
     final CompletableFuture<ResultMessage> future = new CompletableFuture<>();
 
     @Override
-    public void send(UserMessage message) {
+    public CompletableFuture<ResultMessage> send(UserMessage message) {
       sent.add(message);
-      started = true;
+      return future;
     }
 
     @Override
-    public void interrupt(String reason) {
-      interrupts.add(reason);
+    public void interrupt() {
+      // not exercised by these interface-level tests
     }
 
     @Override
@@ -56,11 +53,6 @@ final class AgentSessionTest {
     }
 
     @Override
-    public CompletableFuture<ResultMessage> result() {
-      return future;
-    }
-
-    @Override
     public String sessionId() {
       return "stub";
     }
@@ -71,13 +63,13 @@ final class AgentSessionTest {
     }
 
     @Override
-    public boolean isStarted() {
-      return !sent.isEmpty();
+    public boolean isRunning() {
+      return !sent.isEmpty() && !future.isDone();
     }
 
     @Override
     public void close() {
-      closes++;
+      // not exercised by these interface-level tests
     }
 
     @Override
@@ -99,7 +91,7 @@ final class AgentSessionTest {
   @Test
   void sendStringConvertsToUserMessage() {
     var s = new StubSession();
-    s.send("hello world");
+    assertSame(s.future, s.send("hello world"));
     assertEquals(1, s.sent.size());
     assertEquals("hello world", s.sent.get(0).text());
   }
@@ -109,7 +101,7 @@ final class AgentSessionTest {
     var s = new StubSession();
     var expected =
         new ResultMessage.Success(
-            "stub", "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
+            "stub", "run-1", "done", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
     s.future.complete(expected);
     var result = s.runBlocking(UserMessage.text("hi"));
     assertSame(expected, result);
