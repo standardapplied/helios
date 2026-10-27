@@ -27,6 +27,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
@@ -810,19 +811,18 @@ final class SessionRunsTest {
   void anErrorRecordedWhileTheRunsThreadWaitsToLeaveTheRunFailsItAndEndsTheSession() {
     var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var sentinel = new AssertionError("late callback failure");
-    var ending = new CountDownLatch(1);
+    var atRunEnded = new CountDownLatch(1);
+    var hold = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var runThread = new AtomicReference<Thread>();
     var callbackThread = new AtomicReference<Thread>();
     var model = ScriptedModel.newBuilder().withTextTurn("one").build();
     PreStopHook failingLate =
         (response, ctx) -> {
-          runThread.set(Thread.currentThread());
           ctx.cancellation()
               .onCancel(
                   () -> {
                     callbackThread.set(Thread.currentThread());
-                    ending.countDown();
                     Uninterruptible.await(release);
                     throw sentinel;
                   });
@@ -832,19 +832,31 @@ final class SessionRunsTest {
         options(model)
             .withExecutionProvider(provider)
             .withHook(failingLate)
+            .withHook(
+                (OnStreamEventHook)
+                    (event, ctx) -> {
+                      if (event instanceof QueryEvent.RunEnded) {
+                        runThread.set(Thread.currentThread());
+                        atRunEnded.countDown();
+                        Uninterruptible.await(hold);
+                      }
+                    })
             .withLimits(SessionLimits.newBuilder().withStopGrace(SHORT_GRACE).build());
 
     try (var session = AgentSession.open(options.build())) {
       var run = session.send("go");
-      Await.latch("the run to end", ending);
+      Await.latch("the run's thread to emit RunEnded", atRunEnded);
       synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
+        hold.countDown();
         Await.until(
             "the run's thread to wait to leave the run",
             () -> runThread.get().getState() == Thread.State.BLOCKED);
         release.countDown();
         Await.until(
             "the Error to wait to fail the session",
-            () -> callbackThread.get().getState() == Thread.State.BLOCKED);
+            () ->
+                callbackThread.get() != null
+                    && callbackThread.get().getState() == Thread.State.BLOCKED);
       }
 
       assertSame(sentinel, Await.failure("the run", run));
