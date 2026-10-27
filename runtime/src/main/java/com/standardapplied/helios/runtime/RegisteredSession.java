@@ -62,14 +62,18 @@ final class RegisteredSession {
    * Send {@code message} to the session and record the run it is part of, which keeps the session
    * active until it completes; the first run recorded also completes the first-run future. Sending
    * and recording happen under the table's lock, so runs are recorded in the order the session
-   * started them, and no sweep sees a run started but not recorded.
+   * started them, no sweep sees a run started but not recorded, and a session whose charge was
+   * given back, by an eviction a request that looked it up raced, never starts a run.
    *
    * @return the future of the run the message is part of
-   * @throws IllegalStateException if the session is closed or failed
+   * @throws IllegalStateException if the session's charge was given back, or it is closed or failed
    * @throws com.standardapplied.helios.session.SteeringQueueFullException if its queue is full
    */
   CompletableFuture<ResultMessage> send(UserMessage message) {
     synchronized (lock) {
+      if (released) {
+        throw new IllegalStateException("session is closed");
+      }
       var run = session.send(message);
       if (latest != run) {
         if (latest == firstRun) {
