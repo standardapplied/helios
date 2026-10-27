@@ -487,6 +487,56 @@ final class SummarizingCompactorTest {
         ex.getMessage());
   }
 
+  @Test
+  void aSummaryTimeoutIsLoggedAsATimeout() {
+    var interrupted = new CountDownLatch(1);
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      timingOut(blockingUntilInterrupted(interrupted)).compact(CONVERSATION, freshState());
+    }
+
+    Await.latch("the timed-out summary call to be interrupted", interrupted);
+    assertEquals(
+        List.of(
+            "Context compaction summary timed out after PT0.05S; leaving history unchanged."
+                + " Session sess-1 turn 0"),
+        logged.stream().map(LogRecord::getMessage).toList());
+  }
+
+  @Test
+  void anInterruptedCompactionIsLoggedAsAnInterruptNotATimeout() {
+    var interrupted = new CountDownLatch(1);
+    var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      Thread.currentThread().interrupt();
+      compactor.compact(CONVERSATION, freshState());
+      assertTrue(Thread.interrupted(), "the compaction keeps the interrupt");
+    }
+
+    Await.latch("the summary call to be interrupted", interrupted);
+    assertInstanceOf(InterruptedException.class, logged.getFirst().getThrown().getCause());
+  }
+
+  @Test
+  void aRuntimeExceptionTheSummarizerThrewIsLoggedAsItself() {
+    var thrown = new IllegalStateException("summary transport failed");
+    var compactor =
+        compactorSummarizingWith(
+            () -> {
+              throw thrown;
+            });
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, freshState()).history());
+    }
+
+    assertSame(thrown, logged.getFirst().getThrown());
+  }
+
   @SuppressWarnings("unchecked")
   private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
     throw (E) t;
