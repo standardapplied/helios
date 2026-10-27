@@ -112,7 +112,7 @@ final class SessionLifecycle {
   void close() {
     var deadline = BoundedTask.deadlineAfter(limits.stopGrace());
     closeDeadline = deadline;
-    var run = runs.close();
+    var run = runs.close(deadline);
     session.ending().cancel("session closed");
     Optional<Error> carried = Optional.empty();
     if (run.isPresent()) {

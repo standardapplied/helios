@@ -143,12 +143,14 @@ final class SessionRuns implements RunBoundary {
 
   /**
    * Start no run from now on: the future of a next run waiting for the run in progress to end is
-   * cancelled. Called on a thread this session's runs started while a run is in progress, the run's
-   * own thread tears the session down once the run ended; otherwise the caller does.
+   * cancelled on a thread of its own, so none of its callbacks holds up the close, and observed
+   * cancelled by {@code deadlineNanos}. Called on a thread this session's runs started while a run
+   * is in progress, the run's own thread tears the session down once the run ended; otherwise the
+   * caller does.
    *
    * @return the run in progress, if any
    */
-  Optional<Run> close() {
+  Optional<Run> close(long deadlineNanos) {
     CompletableFuture<ResultMessage> prevented;
     Optional<Run> running;
     synchronized (lock) {
@@ -159,7 +161,10 @@ final class SessionRuns implements RunBoundary {
       running = Optional.ofNullable(active);
     }
     if (prevented != null) {
-      prevented.cancel(false);
+      Thread.ofVirtual()
+          .name("helios-cancel-next-run-" + session.sessionId())
+          .start(() -> prevented.cancel(false));
+      BoundedTask.settlesBy(prevented, deadlineNanos);
     }
     return running;
   }
@@ -186,12 +191,13 @@ final class SessionRuns implements RunBoundary {
 
   /**
    * Drive {@code run} to its end, leave it, so a completion callback of its future that sends finds
-   * no run in progress, then settle its future and, once the session closed or failed, tear the
-   * session down. {@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an
-   * {@link Error} escapes it, which goes to the session's ending; the run fails with the {@code
-   * Error} that failed the session, and this thread ends by throwing it to its uncaught-exception
-   * handler once the session is torn down. A {@link RuntimeException} that escapes anyway fails the
-   * run as itself, so its future never stays pending.
+   * no run in progress, tear the session down once it closed or failed, then settle the futures, so
+   * none of their callbacks holds up the teardown. {@link AgentLoop#run} turns every {@link
+   * Exception} into a terminal, so only an {@link Error} escapes it, which goes to the session's
+   * ending; the run fails with the {@code Error} that failed the session, and this thread ends by
+   * throwing it to its uncaught-exception handler once the session is torn down. A {@link
+   * RuntimeException} that escapes anyway fails the run as itself, so its future never stays
+   * pending.
    */
   private void execute(Run run) {
     WORKER.set(this);
@@ -210,15 +216,16 @@ final class SessionRuns implements RunBoundary {
     run.unlink();
     var left = leave();
     var error = left.error();
+    if (left.tearDown()) {
+      teardown.accept(error);
+    }
     if (error.isPresent()) {
       run.result().completeExceptionally(error.get());
+      left.prevented().ifPresent(next -> next.completeExceptionally(error.get()));
     } else if (crash != null) {
       run.result().completeExceptionally(crash);
     } else {
       run.result().complete(terminal);
-    }
-    if (left.tearDown()) {
-      teardown.accept(error);
     }
     if (error.isPresent()) {
       throw error.get();
@@ -228,36 +235,36 @@ final class SessionRuns implements RunBoundary {
   /**
    * Leave the ended run: a run that ended without deciding it, such as one a host {@link Error}
    * ended, decides it now, so no message stays queued for it; then the next run starts if a message
-   * is waiting for one and the session is open, or else that run's future fails with the {@code
-   * Error} that failed the session.
+   * is waiting for one and the session is open, or else that run's future is returned, to fail with
+   * the {@code Error} that failed the session.
    */
   private Left leave() {
-    CompletableFuture<ResultMessage> prevented;
-    Left left;
     synchronized (lock) {
       if (!ending) {
         queue.drain();
       }
       active = null;
       ending = false;
-      prevented = next;
+      var prevented = next;
       next = null;
       if (prevented != null && !closed) {
         start(prevented);
-        return new Left(Optional.empty(), false);
+        return new Left(Optional.empty(), false, Optional.empty());
       }
-      left = new Left(Optional.ofNullable(failure), failure != null || closedByWorker);
+      return new Left(
+          Optional.ofNullable(failure),
+          failure != null || closedByWorker,
+          Optional.ofNullable(prevented));
     }
-    if (prevented != null) {
-      prevented.completeExceptionally(left.error().orElseThrow());
-    }
-    return left;
   }
 
   /**
    * How a run was left: the {@link Error} that failed the session, if any, and whether the run's
    * thread tears the session down, after that {@code Error} or a close from a thread the session's
-   * runs started.
+   * runs started, and the future of the next run that {@code Error} keeps from starting, if any.
    */
-  private record Left(Optional<Error> error, boolean tearDown) {}
+  private record Left(
+      Optional<Error> error,
+      boolean tearDown,
+      Optional<CompletableFuture<ResultMessage>> prevented) {}
 }
