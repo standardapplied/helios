@@ -176,7 +176,8 @@ public final class AgentLoop {
   /**
    * The classifier's and the pre-stop hooks' verdict on a turn, decided through {@code boundary}: a
    * {@code Success} that holds only while no message is queued gives way to a message sent
-   * meanwhile, and the turn is classified again as one with a message queued.
+   * meanwhile, and the turn is classified again as one with a message queued. A cancellation that
+   * arrived while the hooks ran overrides their verdict.
    */
   private Optional<ResultMessage> classify(
       SessionState state, SessionLimits limits, RunBoundary boundary, TurnOutcome outcome) {
@@ -185,10 +186,11 @@ public final class AgentLoop {
     if (verdict.isEmpty()) {
       return Optional.empty();
     }
+    var hookVerdict = preStop.resolve(state, verdict.get(), outcome);
     var resolved =
-        preStop
-            .resolve(state, verdict.get(), outcome)
-            .or(() -> classifier.classify(state, limits, outcome, true));
+        state.cancellation().isCancelled()
+            ? classifier.classify(state, limits, outcome, true)
+            : hookVerdict.or(() -> classifier.classify(state, limits, outcome, true));
     if (resolved.isEmpty()) {
       return Optional.empty();
     }

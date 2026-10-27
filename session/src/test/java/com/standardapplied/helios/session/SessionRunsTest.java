@@ -371,6 +371,37 @@ final class SessionRunsTest {
   }
 
   @Test
+  void aCallbackOfANextRunTheCloseCancelsDoesNotHoldUpTheTeardown() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session =
+        AgentSession.open(
+            holdingItsEnd(model, ending, release).withExecutionProvider(provider).build());
+    var stream = session.events();
+    session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+    var read = new CountDownLatch(1);
+    next.whenComplete(
+        (result, failure) -> {
+          stream.forEach(event -> {});
+          read.countDown();
+        });
+
+    var closing = Thread.ofVirtual().start(session::close);
+    Await.until(
+        "the close to wait for the run", () -> closing.getState() == Thread.State.TIMED_WAITING);
+    release.countDown();
+    Await.termination("the close", closing);
+
+    assertTrue(next.isCancelled(), "the next run never started");
+    assertEquals(1, provider.ends.get());
+    Await.latch("the callback to read the stream to its end", read);
+  }
+
+  @Test
   void aNextRunWaitingForARunAnErrorEndsFailsWithThatError() {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var sentinel = new AssertionError("callback failure");
@@ -541,6 +572,29 @@ final class SessionRunsTest {
     }
   }
 
+  @Test
+  void anInterruptWhileAPreStopHookRunsEndsTheRunCancelled() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").build();
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    PreStopHook waiting =
+        (response, ctx) -> {
+          entered.countDown();
+          Uninterruptible.await(release);
+          return HookOutcome.cont();
+        };
+
+    try (var session = AgentSession.open(options(model).withHook(waiting).build())) {
+      var run = session.send("go");
+      Await.latch("the pre-stop hook to run", entered);
+      session.interrupt();
+      release.countDown();
+
+      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the run", run));
+      assertEquals("interrupted", cancelled.reason());
+    }
+  }
+
   // ── 7. close ─────────────────────────────────────────────────────────────
 
   @Test
@@ -656,6 +710,40 @@ final class SessionRunsTest {
 
       var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
       assertEquals("session failed: java.lang.AssertionError", refused.getMessage());
+    }
+  }
+
+  @Test
+  void aCallbackOfARunAnErrorFailsDoesNotHoldUpTheTeardown() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var sentinel = new AssertionError("tool failure");
+    var release = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder().withToolCallsTurn(new ToolCall("c1", "boom", Map.of())).build();
+    var boom =
+        binding(
+            "boom",
+            (args, ctx) -> {
+              Uninterruptible.await(release);
+              throw sentinel;
+            });
+
+    try (var session =
+        AgentSession.open(
+            options(model).withExecutionProvider(provider).withTools(List.of(boom)).build())) {
+      var stream = session.events();
+      var run = session.send("go");
+      var read = new CountDownLatch(1);
+      run.whenComplete(
+          (result, failure) -> {
+            stream.forEach(event -> {});
+            read.countDown();
+          });
+      release.countDown();
+
+      Await.latch("the callback to read the stream to its end", read);
+      assertSame(sentinel, Await.failure("the run", run));
+      assertEquals(1, provider.ends.get());
     }
   }
 
