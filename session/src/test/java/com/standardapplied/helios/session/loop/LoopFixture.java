@@ -103,7 +103,12 @@ final class LoopFixture {
       TokenCounter counter,
       ContextCompactor compactor) {
     return new AgentLoop(
-        collaborators, runner, new StopClassifier(collaborators.secrets()), counter, compactor);
+        collaborators,
+        runner,
+        new StopClassifier(collaborators.secrets()),
+        counter,
+        compactor,
+        StoredHistory.none());
   }
 
   /** A fresh state of this fixture's session, cancelled through {@code cancellation}. */

@@ -80,7 +80,7 @@ class ArchitectureRulesTest {
   private static final String WORKSPACE_WALK = HELIOS + ".session.files.WorkspaceWalk";
 
   /** The one class in the session module that builds a Jackson mapper. */
-  private static final String SESSION_JSON = HELIOS + ".session.SessionJson";
+  private static final String SESSION_JSON = HELIOS + ".session.loop.SessionJson";
 
   /** The one launcher outside core.process: the REPL sandbox starts its own JVM. */
   private static final String SANDBOX_LAUNCHER = HELIOS + ".repl.sandbox.SandboxLauncher";
@@ -211,7 +211,7 @@ class ArchitectureRulesTest {
                     targetOwner(name(JSON_MAPPER).or(name(OBJECT_MAPPER)))
                         .and(target(name(JavaConstructor.CONSTRUCTOR_NAME)))))
         .because(
-            "the session module builds its one Jackson mapper in session.SessionJson, and every"
+            "the session module builds its one Jackson mapper in session.loop.SessionJson, and every"
                 + " other class reads JSON through the binding it holds")
         .check(LIBRARY);
   }

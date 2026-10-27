@@ -13,6 +13,7 @@ import com.standardapplied.helios.session.loop.LoopCollaborators;
 import com.standardapplied.helios.session.loop.SessionEnding;
 import com.standardapplied.helios.session.loop.SessionHookContext;
 import com.standardapplied.helios.session.loop.StopClassifier;
+import com.standardapplied.helios.session.loop.StoredHistory;
 import com.standardapplied.helios.session.loop.ToolApprover;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.loop.ToolRegistry;
@@ -43,7 +44,8 @@ final class SessionWiring {
       PendingQuestions pendingQuestions,
       SteeringQueue steeringQueue,
       SessionEventPublisher events,
-      SessionEnding ending) {
+      SessionEnding ending,
+      StoredHistory storedHistory) {
     var tools = registry(options, pendingQuestions);
     var model = options.model();
     var evaluator =
@@ -70,7 +72,8 @@ final class SessionWiring {
         turnRunner,
         new StopClassifier(options.secretRegistry()),
         options.tokenCounter(),
-        options.contextCompactor());
+        options.contextCompactor(),
+        storedHistory);
   }
 
   private static ToolRegistry registry(SessionOptions options, QuestionGateway gateway) {
