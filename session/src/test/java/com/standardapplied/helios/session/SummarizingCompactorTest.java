@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -481,6 +482,36 @@ final class SummarizingCompactorTest {
     assertSame(sentinel, thrown);
     assertFalse(state.cancellation().isCancelled());
     assertEquals(Optional.empty(), state.ending().seal());
+  }
+
+  @Test
+  void anErrorAnExecutionExceptionCarriesUnderAnotherContextIsRethrownAsItself() {
+    var sentinel = new AssertionError("host failure");
+    var compactor =
+        compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
+    var state = freshState();
+    var context =
+        new DefaultHookContext(
+            state.sessionId(), state.currentTurnIndex(), state.cancellation(), summaryModel("x"));
+
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
+
+    assertSame(sentinel, thrown);
+    assertEquals(Optional.empty(), state.ending().seal());
+  }
+
+  @Test
+  void anErrorAnExecutionExceptionCarriesUnderTheSessionsContextIsRecordedAndRethrown() {
+    var sentinel = new AssertionError("host failure");
+    var compactor =
+        compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
+    var state = freshState();
+
+    var thrown =
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
+
+    assertSame(sentinel, thrown);
+    assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
   @Test
