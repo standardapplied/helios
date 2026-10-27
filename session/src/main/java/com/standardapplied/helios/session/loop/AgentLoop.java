@@ -141,6 +141,7 @@ public final class AgentLoop {
       terminal =
           decided(
               state,
+              limits,
               boundary,
               StopClassifier.errorDuringExecution(
                   state, SerializedError.of(e).redactedBy(collaborators.secrets().redactor())));
@@ -152,22 +153,23 @@ public final class AgentLoop {
   private Optional<ResultMessage> iterate(
       SessionState state, SessionLimits limits, RunBoundary boundary) {
     if (state.isTerminal()) {
-      return Optional.of(decided(state, boundary, state.terminal().orElseThrow()));
+      return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
     var received = steeringDrain.drainInto(state);
     if (state.isTerminal()) {
-      return Optional.of(decided(state, boundary, state.terminal().orElseThrow()));
+      return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
     if (!received && state.currentTurnIndex() == 0) {
       var noUserMessage = SerializedError.of("NoUserMessage", NO_USER_MESSAGE);
       return Optional.of(
-          decided(state, boundary, StopClassifier.errorDuringExecution(state, noUserMessage)));
+          decided(
+              state, limits, boundary, StopClassifier.errorDuringExecution(state, noUserMessage)));
     }
     state.beginTurn();
     compaction.check(state, limits);
     var outcome = turnRunner.runTurn(state, limits);
     if (state.isTerminal()) {
-      return Optional.of(decided(state, boundary, state.terminal().orElseThrow()));
+      return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
     compaction.check(state, limits);
     return classify(state, limits, boundary, outcome);
@@ -189,10 +191,7 @@ public final class AgentLoop {
     var hookVerdict = preStop.resolve(state, verdict.get(), outcome);
     var resolved =
         unlessCancelled(
-            state,
-            limits,
-            outcome,
-            hookVerdict.or(() -> classifier.classify(state, limits, outcome, true)));
+            state, limits, hookVerdict.or(() -> classifier.classify(state, limits, outcome, true)));
     if (resolved.isEmpty()) {
       return Optional.empty();
     }
@@ -200,36 +199,41 @@ public final class AgentLoop {
     if (natural && !boundary.end(true)) {
       return classifier
           .classify(state, limits, outcome, true)
-          .map(limit -> decided(state, boundary, limit));
-    }
-    if (!natural) {
-      boundary.end(false);
+          .map(limit -> decided(state, limits, boundary, limit));
     }
     return Optional.of(
-        terminal(state, unlessCancelled(state, limits, outcome, resolved).orElseThrow()));
+        natural
+            ? finished(state, limits, resolved.get())
+            : decided(state, limits, boundary, resolved.get()));
   }
 
-  /** {@code verdict}, or the classifier's verdict on the turn once the run was cancelled. */
+  /**
+   * {@code verdict}, or the terminal a limit or the cancellation imposes once the run was
+   * cancelled.
+   */
   private Optional<ResultMessage> unlessCancelled(
-      SessionState state,
-      SessionLimits limits,
-      TurnOutcome outcome,
-      Optional<ResultMessage> verdict) {
-    return state.cancellation().isCancelled()
-        ? classifier.classify(state, limits, outcome, true)
-        : verdict;
+      SessionState state, SessionLimits limits, Optional<ResultMessage> verdict) {
+    return state.cancellation().isCancelled() ? classifier.imposed(state, limits) : verdict;
   }
 
-  /** Decide through {@code boundary} that the run ends with {@code result}, a non-natural stop. */
-  private static ResultMessage decided(
-      SessionState state, RunBoundary boundary, ResultMessage result) {
+  /**
+   * Decide through {@code boundary} that the run ends with {@code result}, a non-natural stop: a
+   * hook's {@code Stop}, a limit, a run with no user message or a failure.
+   */
+  private ResultMessage decided(
+      SessionState state, SessionLimits limits, RunBoundary boundary, ResultMessage result) {
     boundary.end(false);
-    return terminal(state, result);
+    return finished(state, limits, result);
   }
 
-  private static ResultMessage terminal(SessionState state, ResultMessage result) {
-    state.setTerminal(result);
-    return state.terminal().orElseThrow();
+  /**
+   * Record the run's final terminal: {@code result}, unless a cancellation that arrived before the
+   * boundary decided the end imposes its own.
+   */
+  private ResultMessage finished(SessionState state, SessionLimits limits, ResultMessage result) {
+    var terminal = unlessCancelled(state, limits, Optional.of(result)).orElseThrow();
+    state.setFinalTerminal(terminal);
+    return terminal;
   }
 
   /**

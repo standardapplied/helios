@@ -278,6 +278,22 @@ final class SessionStateTest {
   }
 
   @Test
+  void setFinalTerminalReplacesTheTerminalAHookRecorded() {
+    var state = build();
+    var stopped =
+        new ResultMessage.Success(
+            SID, "run-1", "ok", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO, List.of());
+    var cancelled =
+        new ResultMessage.Cancelled(
+            SID, "run-1", "interrupted", Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
+    state.setTerminal(stopped);
+
+    state.setFinalTerminal(cancelled);
+
+    assertEquals(Optional.of(cancelled), state.terminal());
+  }
+
+  @Test
   void setTerminalRejectsNull() {
     var state = build();
     var ex = assertThrows(NullPointerException.class, () -> state.setTerminal(null));
