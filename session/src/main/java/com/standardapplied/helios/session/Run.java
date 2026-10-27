@@ -31,6 +31,7 @@ final class Run {
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
   private final Thread thread;
+  private Thread prevented;
 
   /**
    * The next run of {@code session}, its token cancelled with the session's reason as soon as the
@@ -75,17 +76,29 @@ final class Run {
   }
 
   /**
-   * Wait until the run's thread has ended, by the {@link System#nanoTime()} instant {@code
-   * deadlineNanos}. Its thread settles {@link #result} last, so the future is settled once the
-   * thread ended; a wait on the future itself may run a caller's callback of it on the waiting
+   * Wait until the run's thread has ended, then the thread that settles the future of the next run
+   * its end kept from starting, if any, by the {@link System#nanoTime()} instant {@code
+   * deadlineNanos}. Each thread settles its future last, so both futures are settled once the
+   * threads ended; a wait on a future itself may run a caller's callback of it on the waiting
    * thread. An interrupt ends the wait, its status kept.
    */
   void awaitEnd(long deadlineNanos) {
     try {
-      thread.join(Duration.ofNanos(deadlineNanos - System.nanoTime()));
+      if (thread.join(Duration.ofNanos(deadlineNanos - System.nanoTime())) && prevented != null) {
+        prevented.join(Duration.ofNanos(deadlineNanos - System.nanoTime()));
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * Settle the future of the next run this run's end kept from starting with {@code settle}, on a
+   * virtual thread of its own, so a callback of either future may wait for the other; called on the
+   * run's thread before it ends, so {@link #awaitEnd} waits for it too.
+   */
+  void settlePrevented(Runnable settle) {
+    prevented = Thread.ofVirtual().name("helios-prevented-run-" + state.sessionId()).start(settle);
   }
 
   /**

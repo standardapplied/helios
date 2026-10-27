@@ -81,7 +81,9 @@ public interface AgentSession extends AutoCloseable {
    * it ends the session as {@link #close()} does, every later {@code Error}, and an exception of
    * {@code onSessionEnd}, rides along as {@linkplain Throwable#getSuppressed() suppressed}, and the
    * run's thread ends by throwing it to its uncaught-exception handler; nothing stops the JVM. The
-   * future of a next run the session's close prevents from starting is cancelled.
+   * future of a next run the session's close prevents from starting is cancelled. Every message of
+   * one run returns the same future, so completing or cancelling it settles it for every caller but
+   * does not stop the run; {@link #interrupt()} does.
    *
    * @param message the message; non-null
    * @return the future of the run the message is part of
@@ -159,12 +161,13 @@ public interface AgentSession extends AutoCloseable {
    * waited for, then the session is torn down: {@link
    * com.standardapplied.helios.session.execution.ExecutionProvider#onSessionEnd}, for a session
    * with an execution provider, runs on a thread of its own and is waited for, and the event
-   * streams end, without waiting for their readers. The run's end and the teardown share one
-   * deadline, {@link SessionLimits#stopGrace()} from the start of this call: a step after one that
-   * used it up still runs but is not waited for, and a tool call or {@code onSessionEnd} still
-   * running then is logged and left running. An interrupt of the caller ends the waits early, its
-   * interrupt status kept. Called on a thread the session runs work on (a tool, a hook), it cancels
-   * and returns at once, and the run's own thread finishes the teardown.
+   * streams end, without waiting for their readers. The future of the run in progress, and that of
+   * a next run the close keeps from starting, are settled when it returns. The run's end and the
+   * teardown share one deadline, {@link SessionLimits#stopGrace()} from the start of this call: a
+   * step after one that used it up still runs but is not waited for, and a tool call or {@code
+   * onSessionEnd} still running then is logged and left running. An interrupt of the caller ends
+   * the waits early, its interrupt status kept. Called on a thread the session runs work on (a
+   * tool, a hook), it cancels and returns at once, and the run's own thread finishes the teardown.
    */
   @Override
   void close();

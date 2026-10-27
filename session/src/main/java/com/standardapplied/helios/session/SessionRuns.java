@@ -190,12 +190,10 @@ final class SessionRuns implements RunBoundary {
     left.prevented()
         .ifPresent(
             prevented ->
-                Thread.ofVirtual()
-                    .name("helios-prevented-run-" + session.sessionId())
-                    .start(
-                        () ->
-                            error.ifPresentOrElse(
-                                prevented::completeExceptionally, () -> prevented.cancel(false))));
+                run.settlePrevented(
+                    () ->
+                        error.ifPresentOrElse(
+                            prevented::completeExceptionally, () -> prevented.cancel(false))));
     if (error.isPresent()) {
       run.result().completeExceptionally(error.get());
       throw error.get();
