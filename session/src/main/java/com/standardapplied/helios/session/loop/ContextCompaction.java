@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.context.TokenCounter;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
@@ -174,7 +175,7 @@ final class ContextCompaction {
       return;
     }
     var compactionUsage = result.usage();
-    if (compactionUsage.inputTokens() > 0 || compactionUsage.outputTokens() > 0) {
+    if (reportsTokens(compactionUsage)) {
       turnRunner.accounting().add(state, result.modelId(), compactionUsage);
     }
     var historyAfter = result.history();
@@ -193,5 +194,12 @@ final class ContextCompaction {
             removedBlocks,
             tokensBefore,
             tokensAfter));
+  }
+
+  private static boolean reportsTokens(Usage usage) {
+    return usage.inputTokens() > 0
+        || usage.outputTokens() > 0
+        || usage.cacheCreationInputTokens() > 0
+        || usage.cacheReadInputTokens() > 0;
   }
 }

@@ -112,6 +112,7 @@ public final class TurnRunner {
     }
 
     var streamed = modelCall.stream(state, limits, visibleTools(state));
+    accounting.add(state, streamed.usage());
     if (modelCall.selfCorrectSchema(state, streamed)) {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.totals().usage()));
     }
@@ -128,7 +129,6 @@ public final class TurnRunner {
     if (!toolCalls.isEmpty() && toolRound.run(state, toolCalls, limits)) {
       return turnEnded(state, outcomeAfterTerminate(state));
     }
-    accounting.add(state, streamed.usage());
     state.totals().accumulateCitations(streamed.citations());
 
     var response =

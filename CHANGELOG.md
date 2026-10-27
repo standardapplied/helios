@@ -1040,6 +1040,12 @@ end, but it is not waited for: `onSessionEnd` may then still run when the result
 
 ### Fixed
 
+- **The session's usage, cost and budget missed spend that had already happened.** A
+  `PreToolUseHook` or `PostToolUseHook` `Stop` ended with the totals from before the turn that
+  called the tool, a schema self-correction turn was never counted, and a compaction whose summary
+  call reported only cache reads or writes was dropped. Each turn's usage is now added as soon as
+  its stream ends, before any tool call or terminal decision, and a compactor's usage is added
+  when any of its four token counts is positive.
 - **A rate-limited or overloaded provider ended the session at once.** A 429, 503 or 529 at
   stream open was never retried, and `Retry-After` was ignored. The session now retries it, and
   waits the `Retry-After` seconds the provider sent, capped by the retry policy's maximum delay;
