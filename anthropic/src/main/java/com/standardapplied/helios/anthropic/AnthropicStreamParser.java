@@ -130,12 +130,6 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   private Response.Usage usage() {
-    if (counts.inputTokens() > 0
-        || counts.outputTokens() > 0
-        || counts.cacheCreationInputTokens() > 0
-        || counts.cacheReadInputTokens() > 0) {
-      return counts;
-    }
-    return null;
+    return counts.reportsTokens() ? counts : null;
   }
 }
