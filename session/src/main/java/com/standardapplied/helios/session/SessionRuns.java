@@ -17,7 +17,8 @@ import java.util.function.Consumer;
  * soon as that one has ended. Each {@link Run} runs on a virtual thread of its own. Once the
  * session is closed, or a host {@link Error} failed it, no run starts; the thread of the run that
  * was in progress hands the session to its teardown after a host {@code Error}, or after a close
- * from a thread the session's runs started.
+ * from a thread the session's runs started, and a host {@code Error} that fails an idle session
+ * tears it down on a thread of its own.
  */
 final class SessionRuns implements RunBoundary {
 
@@ -34,7 +35,7 @@ final class SessionRuns implements RunBoundary {
   private boolean ending;
   private boolean closed;
   private boolean closedByWorker;
-  private String failure;
+  private Error failure;
 
   /**
    * @param session the session's own state: its id, history, ending and token
@@ -68,7 +69,7 @@ final class SessionRuns implements RunBoundary {
   CompletableFuture<ResultMessage> send(UserMessage message) {
     synchronized (lock) {
       if (failure != null) {
-        throw new IllegalStateException("session failed: " + failure);
+        throw new IllegalStateException("session failed: " + failure.getClass().getName());
       }
       if (closed) {
         throw new IllegalStateException("session is closed");
@@ -106,6 +107,41 @@ final class SessionRuns implements RunBoundary {
   }
 
   /**
+   * Cancel the run in progress, if any, with the reason {@code "interrupted"}. Its token's
+   * callbacks run on threads that count as this session's, so a callback that closes the session
+   * does not wait for the run it is part of.
+   */
+  void interrupt() {
+    var previous = WORKER.get();
+    WORKER.set(this);
+    try {
+      activeRun().ifPresent(run -> run.state().cancel("interrupted"));
+    } finally {
+      WORKER.set(previous);
+    }
+  }
+
+  /**
+   * Fail the session with the first host {@link Error} recorded: no {@code send} is taken from now
+   * on, and the run in progress fails with {@code error} once it ended, its thread tearing the
+   * session down. An idle session, not already closing, is torn down on a thread of its own, since
+   * the thread that recorded {@code error} may be one the teardown waits for.
+   */
+  void failed(Error error) {
+    boolean idle;
+    synchronized (lock) {
+      idle = active == null && !closed;
+      failure = error;
+      closed = true;
+    }
+    if (idle) {
+      Thread.ofVirtual()
+          .name("helios-failed-session-" + session.sessionId())
+          .start(() -> teardown.accept(Optional.empty()));
+    }
+  }
+
+  /**
    * Start no run from now on: the future of a next run waiting for the run in progress to end is
    * cancelled. Called on a thread this session's runs started while a run is in progress, the run's
    * own thread tears the session down once the run ended; otherwise the caller does.
@@ -117,7 +153,7 @@ final class SessionRuns implements RunBoundary {
     Optional<Run> running;
     synchronized (lock) {
       closed = true;
-      closedByWorker = active != null && onWorkerThread();
+      closedByWorker = active != null && isWorkerThread();
       prevented = next;
       next = null;
       running = Optional.ofNullable(active);
@@ -129,7 +165,7 @@ final class SessionRuns implements RunBoundary {
   }
 
   /** Whether the calling thread is one this session's runs started, directly or not. */
-  boolean onWorkerThread() {
+  boolean isWorkerThread() {
     return WORKER.get() == this;
   }
 
@@ -144,21 +180,22 @@ final class SessionRuns implements RunBoundary {
     var run = new Run(session, result, limits.maxWallClock());
     active = run;
     ending = false;
-    run.startWallClock();
     Thread.ofVirtual().name("helios-agent-run-" + session.sessionId()).start(() -> execute(run));
     return result;
   }
 
   /**
-   * Drive {@code run} to its end and settle its future, then start the next run or, once the
-   * session closed or failed, tear the session down. {@link AgentLoop#run} turns every {@link
-   * Exception} into a terminal, so only an {@link Error} escapes it, which goes to the session's
-   * ending; the run fails with the first {@code Error} recorded, and this thread ends by throwing
-   * it to its uncaught-exception handler once the session is torn down. A {@link RuntimeException}
-   * that escapes anyway fails the run as itself, so its future never stays pending.
+   * Drive {@code run} to its end, leave it, so a completion callback of its future that sends finds
+   * no run in progress, then settle its future and, once the session closed or failed, tear the
+   * session down. {@link AgentLoop#run} turns every {@link Exception} into a terminal, so only an
+   * {@link Error} escapes it, which goes to the session's ending; the run fails with the {@code
+   * Error} that failed the session, and this thread ends by throwing it to its uncaught-exception
+   * handler once the session is torn down. A {@link RuntimeException} that escapes anyway fails the
+   * run as itself, so its future never stays pending.
    */
   private void execute(Run run) {
     WORKER.set(this);
+    run.startWallClock();
     ResultMessage terminal = null;
     RuntimeException crash = null;
     try {
@@ -171,8 +208,8 @@ final class SessionRuns implements RunBoundary {
     // An interrupt host code left on this thread is no request to cut the teardown's waits short.
     Thread.interrupted();
     run.unlink();
-    var error = session.ending().first();
-    settled(error);
+    var left = leave();
+    var error = left.error();
     if (error.isPresent()) {
       run.result().completeExceptionally(error.get());
     } else if (crash != null) {
@@ -180,7 +217,7 @@ final class SessionRuns implements RunBoundary {
     } else {
       run.result().complete(terminal);
     }
-    if (afterRun(error)) {
+    if (left.tearDown()) {
       teardown.accept(error);
     }
     if (error.isPresent()) {
@@ -189,48 +226,38 @@ final class SessionRuns implements RunBoundary {
   }
 
   /**
-   * Before the run's future completes: a run that ended without deciding it, such as one a host
-   * {@link Error} ended, decides it now, so no message stays queued for it, and an {@code Error}
-   * fails the session, so no later {@code send} is taken.
+   * Leave the ended run: a run that ended without deciding it, such as one a host {@link Error}
+   * ended, decides it now, so no message stays queued for it; then the next run starts if a message
+   * is waiting for one and the session is open, or else that run's future fails with the {@code
+   * Error} that failed the session.
    */
-  private void settled(Optional<Error> error) {
+  private Left leave() {
+    CompletableFuture<ResultMessage> prevented;
+    Left left;
     synchronized (lock) {
       if (!ending) {
-        ending = true;
         queue.drain();
       }
-      error.ifPresent(
-          e -> {
-            failure = e.getClass().getName();
-            closed = true;
-          });
-    }
-  }
-
-  /**
-   * Leave the ended run: start the next run if a message is waiting for one, or fail that run's
-   * future with the {@link Error} that failed the session.
-   *
-   * @return whether this thread tears the session down: after a host {@link Error}, or a close from
-   *     a thread the session's runs started
-   */
-  private boolean afterRun(Optional<Error> error) {
-    CompletableFuture<ResultMessage> prevented;
-    boolean ended;
-    synchronized (lock) {
       active = null;
       ending = false;
       prevented = next;
       next = null;
       if (prevented != null && !closed) {
         start(prevented);
-        return false;
+        return new Left(Optional.empty(), false);
       }
-      ended = error.isPresent() || closedByWorker;
+      left = new Left(Optional.ofNullable(failure), failure != null || closedByWorker);
     }
     if (prevented != null) {
-      prevented.completeExceptionally(error.orElseThrow());
+      prevented.completeExceptionally(left.error().orElseThrow());
     }
-    return ended;
+    return left;
   }
+
+  /**
+   * How a run was left: the {@link Error} that failed the session, if any, and whether the run's
+   * thread tears the session down, after that {@code Error} or a close from a thread the session's
+   * runs started.
+   */
+  private record Left(Optional<Error> error, boolean tearDown) {}
 }

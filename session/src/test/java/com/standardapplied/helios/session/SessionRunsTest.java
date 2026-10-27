@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import static com.standardapplied.helios.session.EndingSessions.NOT_REACHED;
+import static com.standardapplied.helios.session.EndingSessions.SHORT_GRACE;
 import static com.standardapplied.helios.session.EndingSessions.binding;
 import static com.standardapplied.helios.session.EndingSessions.stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -315,6 +316,40 @@ final class SessionRunsTest {
   }
 
   @Test
+  void aCompletionCallbackOfARunCanStartAndJoinTheNextRun() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(model, ending, release).build())) {
+      var first = session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var chained = first.thenApply(result -> session.send("next").join());
+      release.countDown();
+
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the next run", chained));
+      assertEquals(2, model.calls().size());
+    }
+  }
+
+  @Test
+  void aCompletionCallbackOfARunCanJoinTheRunQueuedBehindIt() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(model, ending, release).build())) {
+      var first = session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var next = session.send("next");
+      var chained = first.thenApply(result -> next.join());
+      release.countDown();
+
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the next run", chained));
+    }
+  }
+
+  @Test
   void aNextRunTheSessionsCloseKeepsFromStartingIsCancelled() {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var ending = new CountDownLatch(1);
@@ -532,6 +567,43 @@ final class SessionRunsTest {
   }
 
   @Test
+  void aCloseFromACallbackOfAnInterruptReturnsAndTheRunsThreadEndsTheSession() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var session = new AtomicReference<AgentSession>();
+    var entered = new CountDownLatch(1);
+    var closed = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder().withStreamTurn(ModelStreams.stalled(entered::countDown)).build();
+    PreModelTurnHook closingOnCancel =
+        (history, ctx) -> {
+          ctx.cancellation()
+              .onCancel(
+                  () -> {
+                    session.get().close();
+                    closed.countDown();
+                  });
+          return HookOutcome.cont();
+        };
+    var open =
+        AgentSession.open(
+            options(model)
+                .withExecutionProvider(provider)
+                .withHook(closingOnCancel)
+                .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build())
+                .build());
+    session.set(open);
+    var run = open.send("go");
+    Await.latch("the model stream to be read", entered);
+
+    open.interrupt();
+
+    Await.latch("close to return inside the callback", closed);
+    var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the run", run));
+    assertEquals("interrupted", cancelled.reason());
+    Await.until("the run's thread to end the provider", () -> provider.ends.get() == 1);
+  }
+
+  @Test
   void aCloseFromInsideAToolReturnsAndTheRunsThreadEndsTheSession() {
     var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var session = new AtomicReference<AgentSession>();
@@ -584,6 +656,45 @@ final class SessionRunsTest {
 
       var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
       assertEquals("session failed: java.lang.AssertionError", refused.getMessage());
+    }
+  }
+
+  @Test
+  void anErrorThatReachesAnIdleSessionEndsItsProviderAndRefusesLaterMessages() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var sentinel = new AssertionError("late callback failure");
+    var release = new CountDownLatch(1);
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    var model = ScriptedModel.newBuilder().withTextTurn("one").build();
+    PreStopHook failingLate =
+        (response, ctx) -> {
+          ctx.cancellation()
+              .onCancel(
+                  () -> {
+                    Uninterruptible.await(release);
+                    throw sentinel;
+                  });
+          return HookOutcome.cont();
+        };
+    var options =
+        options(model)
+            .withExecutionProvider(provider)
+            .withHook(failingLate)
+            .withLimits(SessionLimits.newBuilder().withStopGrace(SHORT_GRACE).build());
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
+        var session = AgentSession.open(options.build())) {
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the run", session.send("go")));
+      Await.until("the run to be left", () -> !session.isRunning());
+
+      release.countDown();
+
+      Await.until("the session to end its provider", () -> provider.ends.get() == 1);
+      var refused = assertThrows(IllegalStateException.class, () -> session.send("again"));
+      assertEquals("session failed: java.lang.AssertionError", refused.getMessage());
+      Await.until(
+          "the Error no run carries to be logged",
+          () -> logged.stream().anyMatch(record -> record.getThrown() == sentinel));
     }
   }
 

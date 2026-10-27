@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,6 +34,7 @@ public final class SessionEnding {
   private final List<Error> errors = new ArrayList<>();
   private boolean sealed;
   private CompletableFuture<Void> cancelling;
+  private Consumer<Error> onFirstFailure = error -> {};
 
   SessionEnding(String sessionId, CancellationToken token) {
     this.sessionId = sessionId;
@@ -57,8 +59,25 @@ public final class SessionEnding {
   }
 
   /**
+   * Call {@code listener} with the first {@link Error} recorded, on the thread that records it,
+   * before the session is cancelled; at once if one already is.
+   *
+   * @param listener what the session does once an {@code Error} failed it; non-null
+   */
+  public void onFirstFailure(Consumer<Error> listener) {
+    Objects.requireNonNull(listener, "listener must not be null");
+    Optional<Error> recorded;
+    synchronized (this) {
+      onFirstFailure = listener;
+      recorded = first();
+    }
+    recorded.ifPresent(listener);
+  }
+
+  /**
    * Record {@code error}, once by identity, and cancel the session with a reason naming its class;
-   * or, once sealed, log it at {@code SEVERE}.
+   * or, once sealed, log it at {@code SEVERE}. The first {@code Error} recorded first reaches the
+   * {@link #onFirstFailure} listener.
    *
    * @param error the error a thread of the session caught; non-null
    * @throws NullPointerException if {@code error} is null
@@ -66,11 +85,18 @@ public final class SessionEnding {
   public void fail(Error error) {
     Objects.requireNonNull(error, "error must not be null");
     boolean recorded;
+    Consumer<Error> listener = null;
     synchronized (this) {
       recorded = !sealed;
+      if (recorded && errors.isEmpty()) {
+        listener = onFirstFailure;
+      }
       if (recorded && errors.stream().noneMatch(kept -> kept == error)) {
         errors.add(error);
       }
+    }
+    if (listener != null) {
+      listener.accept(error);
     }
     if (recorded) {
       cancel("host error " + error.getClass().getName());

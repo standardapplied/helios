@@ -75,7 +75,8 @@ final class SessionLifecycle {
    * Bind the loop and notify the execution provider, if any, that the session starts, the last step
    * of the session's construction, waiting for it within {@code startTimeout}. A start the provider
    * does not accept ({@link SessionStart}) releases what the lifecycle acquired and throws, and an
-   * {@link Error} that reaches the session after that is logged. {@code onSessionEnd} is called
+   * {@link Error} that reaches the session after that is logged. Once open, the first host {@code
+   * Error} fails the session's runs ({@link SessionRuns#failed}). {@code onSessionEnd} is called
    * only if the provider accepts after the session stopped waiting, by the {@link SessionTeardown}
    * that ends that late acceptance.
    *
@@ -97,6 +98,7 @@ final class SessionLifecycle {
       abandon();
       throw e;
     }
+    session.ending().onFirstFailure(runs::failed);
   }
 
   /**
@@ -114,7 +116,7 @@ final class SessionLifecycle {
     session.ending().cancel("session closed");
     Optional<Error> carried = Optional.empty();
     if (run.isPresent()) {
-      if (runs.onWorkerThread()) {
+      if (runs.isWorkerThread()) {
         return;
       }
       var result = run.get().result();
