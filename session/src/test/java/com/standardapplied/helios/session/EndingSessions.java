@@ -10,8 +10,11 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -19,6 +22,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -134,5 +139,29 @@ final class EndingSessions {
             .map(LogRecord::getMessage)
             .toList();
     assertTrue(warnings.contains(warning), () -> "logged warnings: " + warnings);
+  }
+
+  /**
+   * Options whose run, once it decided to end, holds its end until {@code release} opens: a
+   * callback of its token's cancellation opens {@code ending} and waits.
+   */
+  static SessionOptions.Builder holdingItsEnd(
+      SessionOptions.Builder options, CountDownLatch ending, CountDownLatch release) {
+    var held = new AtomicBoolean();
+    PreStopHook holding =
+        (response, ctx) -> {
+          if (!held.getAndSet(true)) {
+            ctx.cancellation()
+                .onCancel(
+                    () -> {
+                      ending.countDown();
+                      Uninterruptible.await(release);
+                    });
+          }
+          return HookOutcome.cont();
+        };
+    return options
+        .withHook(holding)
+        .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build());
   }
 }
