@@ -629,22 +629,30 @@ final class SessionRunsTest {
           Uninterruptible.await(release);
           return HookOutcome.cont();
         };
-    OnStreamEventHook recording =
-        (event, ctx) -> {
-          if (event instanceof QueryEvent.RunStarted) {
-            runThread.set(Thread.currentThread());
-          }
-        };
 
     try (var session =
-        AgentSession.open(options(model).withHook(waiting).withHook(recording).build())) {
+        AgentSession.open(
+            options(model)
+                .withHook(waiting)
+                .withHook(
+                    (OnStreamEventHook)
+                        (event, ctx) -> {
+                          if (event instanceof QueryEvent.RunStarted) {
+                            runThread.set(Thread.currentThread());
+                          }
+                        })
+                .build())) {
       var run = session.send("go");
       Await.latch("the pre-stop hook to run", entered);
       synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
         release.countDown();
         Await.until(
             "the run's thread to wait to decide its end",
-            () -> isBlockedIn(runThread.get(), "end"));
+            () ->
+                runThread.get().getState() == Thread.State.BLOCKED
+                    && List.of(runThread.get().getStackTrace())
+                        .toString()
+                        .contains(SessionRuns.class.getName() + ".end("));
         session.interrupt();
       }
 
@@ -700,18 +708,19 @@ final class SessionRunsTest {
           });
     }
 
-    var closing =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  session.close();
-                  closeReturned.countDown();
-                });
+    var closing = new AtomicReference<Thread>();
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              closing.set(Thread.currentThread());
+              session.close();
+              closeReturned.countDown();
+            });
 
     Await.latch("close to return", closeReturned);
     assertTrue(run.isDone(), "the run ended before close returned");
     Await.until("both callbacks to run", () -> callbackThreads.size() == 2);
-    assertFalse(callbackThreads.contains(closing), "a callback ran on the closing thread");
+    assertFalse(callbackThreads.contains(closing.get()), "a callback ran on the closing thread");
   }
 
   @Test
@@ -1148,15 +1157,6 @@ final class SessionRunsTest {
   private static OnUserMessageHook blocking() {
     return (message, ctx) ->
         message.text().equals("blocked") ? HookOutcome.block("not allowed") : HookOutcome.cont();
-  }
-
-  private static boolean isBlockedIn(Thread thread, String method) {
-    return thread.getState() == Thread.State.BLOCKED
-        && Stream.of(thread.getStackTrace())
-            .anyMatch(
-                frame ->
-                    frame.getClassName().equals(SessionRuns.class.getName())
-                        && frame.getMethodName().equals(method));
   }
 
   private static Message notRun(ToolCall call) {
