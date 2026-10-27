@@ -34,8 +34,9 @@ final class Run {
 
   /**
    * The next run of {@code session}, its token cancelled with the session's reason as soon as the
-   * session is cancelled, at once if it already is; {@link #start} runs {@code body} on the run's
-   * own virtual thread.
+   * session is cancelled, at once if it already is. {@link #start} starts the run's own virtual
+   * thread, which binds itself, and every thread it starts, to this run, starts the wall clock on a
+   * virtual thread of its own, then runs {@code body}.
    */
   Run(
       SessionState session,
@@ -50,7 +51,15 @@ final class Run {
     this.thread =
         Thread.ofVirtual()
             .name("helios-agent-run-" + session.sessionId())
-            .unstarted(() -> body.accept(this));
+            .unstarted(
+                () -> {
+                  CURRENT.set(state);
+                  BoundedTask.start(
+                      "helios-wall-clock-" + state.sessionId(),
+                      this::awaitWallClock,
+                      state.ending()::failWith);
+                  body.accept(this);
+                });
   }
 
   SessionState state() {
@@ -94,16 +103,6 @@ final class Run {
   static boolean isThreadOf(SessionState session) {
     var bound = CURRENT.get();
     return bound != null && bound.ending() == session.ending();
-  }
-
-  /**
-   * Bind the calling thread, the run's own, and every thread it starts to this run, then start the
-   * wall clock on a virtual thread of its own.
-   */
-  void begin() {
-    CURRENT.set(state);
-    BoundedTask.start(
-        "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
   }
 
   /**
