@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * One run of a session: its {@link SessionState}, on a token of its own that follows the session's
@@ -27,21 +28,29 @@ final class Run {
   private final CancellationToken sessionToken;
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
-  private final CompletableFuture<Optional<Error>> left = new CompletableFuture<>();
-  private final CompletableFuture<Void> settled = new CompletableFuture<>();
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
+  private final Thread thread;
 
   /**
    * The next run of {@code session}, its token cancelled with the session's reason as soon as the
-   * session is cancelled, at once if it already is.
+   * session is cancelled, at once if it already is; {@link #start} runs {@code body} on the run's
+   * own virtual thread.
    */
-  Run(SessionState session, CompletableFuture<ResultMessage> result, Duration maxWallClock) {
+  Run(
+      SessionState session,
+      CompletableFuture<ResultMessage> result,
+      Duration maxWallClock,
+      Consumer<Run> body) {
     this.sessionToken = session.cancellation();
     this.state = new SessionState(session, new CancellationToken());
     this.result = result;
     this.maxWallClock = maxWallClock;
     this.link = sessionToken.onCancel(this::followSession);
+    this.thread =
+        Thread.ofVirtual()
+            .name("helios-agent-run-" + session.sessionId())
+            .unstarted(() -> body.accept(this));
   }
 
   SessionState state() {
@@ -52,21 +61,22 @@ final class Run {
     return result;
   }
 
-  /**
-   * Completes once the run's thread left the run, with the host {@link Error} that failed the
-   * session, if any. Only the session waits on it: a wait on {@link #result} may run a caller's
-   * callback of that future on the waiting thread.
-   */
-  CompletableFuture<Optional<Error>> left() {
-    return left;
+  void start() {
+    thread.start();
   }
 
   /**
-   * Completes once the run's thread settled {@link #result} and the callbacks of it that thread ran
-   * returned. As {@link #left}, only the session waits on it.
+   * Wait until the run's thread has ended, by the {@link System#nanoTime()} instant {@code
+   * deadlineNanos}. Its thread settles {@link #result} last, so the future is settled once the
+   * thread ended; a wait on the future itself may run a caller's callback of it on the waiting
+   * thread. An interrupt ends the wait, its status kept.
    */
-  CompletableFuture<Void> settled() {
-    return settled;
+  void awaitEnd(long deadlineNanos) {
+    try {
+      thread.join(Duration.ofNanos(deadlineNanos - System.nanoTime()));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /**
@@ -80,6 +90,12 @@ final class Run {
         .orElseThrow(() -> new IllegalStateException("no run started this thread"));
   }
 
+  /** Whether a run of {@code session}'s session started the calling thread, directly or not. */
+  static boolean isThreadOf(SessionState session) {
+    var bound = CURRENT.get();
+    return bound != null && bound.ending() == session.ending();
+  }
+
   /**
    * Bind the calling thread, the run's own, and every thread it starts to this run, then start the
    * wall clock on a virtual thread of its own.
@@ -88,6 +104,21 @@ final class Run {
     CURRENT.set(state);
     BoundedTask.start(
         "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
+  }
+
+  /**
+   * Cancel the run with the reason {@code "interrupted"}. The calling thread counts as the run's
+   * while it does, so the token's callbacks, which run on threads it starts, count as the run's
+   * too, and one that closes the session does not wait for the run it is part of.
+   */
+  void interrupt() {
+    var previous = CURRENT.get();
+    CURRENT.set(state);
+    try {
+      state.cancel("interrupted");
+    } finally {
+      CURRENT.set(previous);
+    }
   }
 
   /**
