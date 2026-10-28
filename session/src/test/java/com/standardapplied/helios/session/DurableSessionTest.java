@@ -131,6 +131,9 @@ final class DurableSessionTest {
     expected.add(Message.user("second"));
     assertEquals(expected, second.calls().getFirst());
     assertEquals(List.of(Message.system("new"), Message.user("hello")), other.calls().getFirst());
+    var reopened = messages(store.entries(SID));
+    assertEquals(expected.subList(1, expected.size()), reopened.subList(0, reopened.size() - 1));
+    assertEquals("two", reopened.getLast().content());
   }
 
   // ── 2. write rule ────────────────────────────────────────────────────────
@@ -301,6 +304,7 @@ final class DurableSessionTest {
       assertEquals("SessionStoreFailed", error.kind());
       assertEquals(
           RecordingStore.class.getName() + " failed to append to session chat-1", error.message());
+      assertThrows(IllegalStateException.class, () -> session.send("again"));
     }
   }
 
@@ -557,5 +561,17 @@ final class DurableSessionTest {
       inner.append(sessionId, expectedLastSeq, entries);
       batches.add(entries);
     }
+  }
+
+  @Test
+  void afterARefusedWriteNothingMoreIsWritten() {
+    var store =
+        new RecordingStore(index -> index == 0 ? new SessionStoreException("full", null) : null);
+    var model = ScriptedModel.newBuilder().withTextTurn("reply").build();
+
+    try (var session = AgentSession.open(options(model, store).build())) {
+      assertEquals("SessionStoreFailed", errorOf(Await.value("run", session.send("go"))).kind());
+    }
+    assertEquals(List.of(), store.batches);
   }
 }
