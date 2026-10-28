@@ -29,14 +29,18 @@ import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.store.FileSessionStore;
+import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Claude Opus 5.5 and Sonnet 5.5 driving a real {@code AgentSession} through a search-and-read tool
@@ -55,6 +59,8 @@ final class Claude55AgentSessionIntegrationTest {
           + " who the viewer should meet, run several different searches, read the most promising"
           + " profiles, and keep the user informed of what you found and what you will do next as"
           + " you go.";
+
+  private static final String THINKING_BLOCKS = "anthropic.thinkingBlocks";
 
   private static final String VIEWER =
       "Viewer: a climate-hardware founder in Austin seeking a seed investor and a supply-chain"
@@ -161,6 +167,80 @@ final class Claude55AgentSessionIntegrationTest {
       assertTrue(
           histories.get(1).stream().anyMatch(message -> first.equals(message.content())),
           "the second run's first request carries the first run's message");
+    }
+  }
+
+  /**
+   * A stored session on Opus 5.5 at high effort, reopened by a second handle: the first handle runs
+   * a turn that may read a profile and states a fact, then closes; a new handle on the same id and
+   * directory asks about the fact. Both runs end in an accepted terminal with no {@code Error}
+   * event, and the second handle's first request starts with every message the first run stored;
+   * what the model answers is not asserted. Whether that includes signed thinking is the model's
+   * choice; {@code DurableSessionTest} proves the reopen offline and {@code SessionStoreContract}
+   * the round trip of a thinking turn's metadata.
+   */
+  @Test
+  void opus55ReopenedStoredSessionCarriesTheFirstHandlesConversation(@TempDir Path directory) {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+            .withMaxOutputTokens(16_000)
+            .build();
+    var requests = new CopyOnWriteArrayList<List<Message>>();
+    PreModelTurnHook recording =
+        (history, ctx) -> {
+          requests.add(history);
+          return HookOutcome.cont();
+        };
+    var store = FileSessionStore.of(directory);
+    try (var model =
+        new AnthropicProvider()
+            .create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config, CachePolicy.shortLived())) {
+      var options =
+          SessionOptions.newBuilder()
+              .withModel(model)
+              .withSessionId("live-stored-chat")
+              .withStore(store)
+              .withTools(List.of(getProfile()))
+              .withHook(recording)
+              .withLimits(SessionLimits.newBuilder().withMaxTurns(6).build())
+              .build();
+
+      runOnce(
+          options,
+          "My project's code name is Heliotrope. Read profile p7 with get_profile, then reason"
+              + " carefully about whether that person fits a climate-hardware seed round, and tell"
+              + " me in one sentence.");
+      var stored =
+          store.entries("live-stored-chat").stream()
+              .map(entry -> ((SessionEntry.MessageAdded) entry).message())
+              .toList();
+      requests.clear();
+      runOnce(options, "What is my project's code name?");
+
+      assertEquals(stored, requests.getFirst().subList(0, stored.size()));
+      assumeTrue(
+          stored.stream().anyMatch(message -> message.metadata().containsKey(THINKING_BLOCKS)),
+          "claude-opus-5-5 signed no thinking in the first run; SessionStoreContract"
+              + "#aRichHistoryRoundTripsExactly covers a thinking turn's metadata");
+    }
+  }
+
+  /** Open a session from {@code options}, run {@code message} once, close it, check the run. */
+  private static void runOnce(SessionOptions options, String message) {
+    try (var session = AgentSession.open(options)) {
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
+      var terminal = session.send(message).join();
+      session.close();
+      events.awaitDone();
+
+      assertTrue(
+          terminal instanceof ResultMessage.Success
+              || terminal instanceof ResultMessage.ErrorMaxTurns,
+          () -> "claude-opus-5-5 ended a run as " + terminal);
+      assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
     }
   }
 

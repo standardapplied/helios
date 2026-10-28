@@ -6,6 +6,7 @@ import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StoredHistory;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,13 +42,14 @@ final class SessionLifecycle {
       SessionContext sessionContext,
       Optional<ExecutionProvider> executionProvider,
       SessionLimits limits,
-      SteeringQueue queue) {
+      SteeringQueue queue,
+      StoredHistory storedHistory) {
     this.session = session;
     this.limits = limits;
     this.events = new SessionEventPublisher(session.sessionId());
     this.teardown =
         new SessionTeardown(session, sessionContext, executionProvider, events, limits.stopGrace());
-    this.runs = new SessionRuns(session, queue, limits, this::endAfterRun);
+    this.runs = new SessionRuns(session, queue, limits, storedHistory, this::endAfterRun);
     this.start =
         executionProvider.map(
             provider ->

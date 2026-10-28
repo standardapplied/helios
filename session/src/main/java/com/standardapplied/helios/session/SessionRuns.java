@@ -5,6 +5,7 @@ package com.standardapplied.helios.session;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.RunBoundary;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StoredHistory;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -15,15 +16,16 @@ import java.util.function.Consumer;
  * to end meets {@code send}, both under one lock, so a message is either part of a run or starts
  * the next, and a message accepted after the run in progress decided to end starts the next run as
  * soon as that one has ended. Each {@link Run} runs on a virtual thread of its own. Once the
- * session is closed, or a host {@link Error} failed it, no run starts; the thread of the run that
- * was in progress tears the session down once that run ended, and a host {@code Error} that fails
- * an idle session tears it down on a thread of its own.
+ * session is closed, its store refused a write, or a host {@link Error} failed it, no run starts;
+ * the thread of the run that was in progress tears the session down once that run ended, and a host
+ * {@code Error} that fails an idle session tears it down on a thread of its own.
  */
 final class SessionRuns implements RunBoundary {
 
   private final SessionState session;
   private final SteeringQueue queue;
   private final SessionLimits limits;
+  private final StoredHistory storedHistory;
   private final Consumer<Optional<Error>> teardown;
 
   /** Package-private for tests that hold it to order a run's end against a host {@link Error}. */
@@ -38,6 +40,7 @@ final class SessionRuns implements RunBoundary {
 
   /**
    * @param session the session's own state: its id, history, ending and token
+   * @param storedHistory the session's history in its store, whose refused write closes the session
    * @param teardown ends the session after its last run, on that run's thread, given the {@link
    *     Error} that run failed with, if any
    */
@@ -45,10 +48,12 @@ final class SessionRuns implements RunBoundary {
       SessionState session,
       SteeringQueue queue,
       SessionLimits limits,
+      StoredHistory storedHistory,
       Consumer<Optional<Error>> teardown) {
     this.session = session;
     this.queue = queue;
     this.limits = limits;
+    this.storedHistory = storedHistory;
     this.teardown = teardown;
   }
 
@@ -62,13 +67,17 @@ final class SessionRuns implements RunBoundary {
    *
    * @return the future of the run the message is part of; the future of a next run the session's
    *     close prevents is cancelled
-   * @throws IllegalStateException if the session is closed or a host {@link Error} failed it
+   * @throws IllegalStateException if the session is closed, its store refused a write or a host
+   *     {@link Error} failed it
    * @throws SteeringQueueFullException if the queue is full; the message is not queued
    */
   CompletableFuture<ResultMessage> send(UserMessage message) {
     synchronized (lock) {
       if (failure != null) {
         throw new IllegalStateException("session failed: " + failure.getClass().getName());
+      }
+      if (storedHistory.refused()) {
+        throw new IllegalStateException("session is closed: its store refused a write");
       }
       if (closed) {
         throw new IllegalStateException("session is closed");
@@ -208,17 +217,18 @@ final class SessionRuns implements RunBoundary {
   /**
    * Leave the ended run: a host {@link Error} the session's ending recorded fails the session here
    * too, since its {@link #failed} listener may not have run yet, and it is read under the lock
-   * {@code failed} takes, so an {@code Error} recorded later finds the session idle; a run that
-   * ended without deciding it, such as one a host {@code Error} ended, decides it now, so no
-   * message stays queued for it; then the next run starts if a message is waiting for one and the
-   * session is open, or else that run's future is returned, to be cancelled or to fail with the
-   * {@code Error} that failed the session.
+   * {@code failed} takes, so an {@code Error} recorded later finds the session idle; a write the
+   * store refused closes the session, so the run's thread tears it down; a run that ended without
+   * deciding it, such as one a host {@code Error} ended, decides it now, so no message stays queued
+   * for it; then the next run starts if a message is waiting for one and the session is open, or
+   * else that run's future is returned, to be cancelled or to fail with the {@code Error} that
+   * failed the session.
    */
   private Left leave() {
     synchronized (lock) {
       var recorded = session.ending().first();
       failure = recorded.orElse(failure);
-      closed |= recorded.isPresent();
+      closed |= recorded.isPresent() || storedHistory.refused();
       if (!ending) {
         queue.drain();
       }

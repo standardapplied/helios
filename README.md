@@ -302,6 +302,18 @@ try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build
 
 `maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run. A run that ends with tool calls unanswered (a hook's `Stop`, an interrupt, an error) answers each with a "not run" tool message, so the next run's history is one a provider accepts. An execution provider that refuses at `open` makes it throw `SessionUnavailableException`.
 
+**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore` and `FileSessionStore` (one JSON-lines file per session); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
+
+<!-- snippet: QuickStarts#storedChat -->
+```java
+var store = FileSessionStore.of(Path.of("conversations"));
+try (var session =
+    AgentSession.open(
+        options.toBuilder().withSessionId("member-42").withStore(store).build())) {
+  session.send("Where did we leave off?").join();
+}
+```
+
 `SessionPresets` ships three curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
 - `minimal(model)` — model only, defaults for everything else.

@@ -116,7 +116,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    null));
+                    null,
+                    Optional.empty()));
     assertEquals("secretRegistry must not be null", ex.getMessage());
   }
 
@@ -145,7 +146,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("model must not be null", ex.getMessage());
   }
 
@@ -172,19 +174,20 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("sessionId must not be null", ex.getMessage());
   }
 
   @Test
-  void canonicalConstructorRejectsBlankSessionId() {
+  void canonicalConstructorRejectsAnIdOutsideTheRule() {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
             () ->
                 new SessionOptions(
                     stubModel(),
-                    "   ",
+                    "../x",
                     SessionLimits.defaults(),
                     256,
                     Clock.systemUTC(),
@@ -199,8 +202,11 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
-    assertEquals("sessionId must not be blank", ex.getMessage());
+                    new SecretRegistry(),
+                    Optional.empty()));
+    assertEquals(
+        "sessionId must be 1 to 128 characters of [A-Za-z0-9._:-] not starting with '.'",
+        ex.getMessage());
   }
 
   @Test
@@ -226,7 +232,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("limits must not be null", ex.getMessage());
   }
 
@@ -254,7 +261,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("maxQueuedUserMessages must be positive, got " + capacity, ex.getMessage());
   }
 
@@ -281,7 +289,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("clock must not be null", ex.getMessage());
   }
 
@@ -308,7 +317,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("tools must not be null", ex.getMessage());
   }
 
@@ -335,7 +345,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("hooks must not be null", ex.getMessage());
   }
 
@@ -362,7 +373,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("permission must not be null", ex.getMessage());
   }
 
@@ -389,7 +401,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("memoryBackend must not be null", ex.getMessage());
   }
 
@@ -416,7 +429,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("costCalculator must not be null", ex.getMessage());
   }
 
@@ -443,7 +457,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("executionProvider must not be null", ex.getMessage());
   }
 
@@ -470,7 +485,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("outputSchema must not be null", ex.getMessage());
   }
 
@@ -497,7 +513,8 @@ final class SessionOptionsTest {
                     null,
                     TokenCounter.charBased(),
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("systemPrompt must not be null", ex.getMessage());
   }
 
@@ -524,7 +541,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     null,
                     ContextCompactor.disabled(),
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("tokenCounter must not be null", ex.getMessage());
   }
 
@@ -551,7 +569,8 @@ final class SessionOptionsTest {
                     Optional.empty(),
                     TokenCounter.charBased(),
                     null,
-                    new SecretRegistry()));
+                    new SecretRegistry(),
+                    Optional.empty()));
     assertEquals("contextCompactor must not be null", ex.getMessage());
   }
 
@@ -819,11 +838,24 @@ final class SessionOptionsTest {
   }
 
   @Test
-  void withSessionIdRejectsBlank() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> SessionOptions.newBuilder().withSessionId("  "));
-    assertEquals("sessionId must not be blank", ex.getMessage());
+  void withSessionIdRejectsAnIdOutsideTheRule() {
+    var builder = SessionOptions.newBuilder();
+    for (var id : List.of("", "  ", "../x", "a/b", ".hidden", "a".repeat(129), "a b")) {
+      var ex = assertThrows(IllegalArgumentException.class, () -> builder.withSessionId(id), id);
+      assertEquals(
+          "sessionId must be 1 to 128 characters of [A-Za-z0-9._:-] not starting with '.'",
+          ex.getMessage());
+    }
+  }
+
+  @Test
+  void withSessionIdAcceptsAnIdInsideTheRule() {
+    var generated = SessionOptions.newBuilder().withModel(stubModel()).build().sessionId();
+    for (var id : List.of(generated, "member:42", "a.b_c-1", "a".repeat(128))) {
+      assertEquals(
+          id,
+          SessionOptions.newBuilder().withModel(stubModel()).withSessionId(id).build().sessionId());
+    }
   }
 
   @Test
