@@ -314,7 +314,9 @@ final class FileSessionStoreTest extends SessionStoreContract {
 
   @Test
   void aFileHoldingOnlyATornLineLoadsEmpty() throws IOException {
-    Files.createDirectories(directory());
+    Files.createDirectories(
+        directory(),
+        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
     Files.write(file(), "{\"seq\":1".getBytes(UTF_8));
     var store = FileSessionStore.of(directory());
 
