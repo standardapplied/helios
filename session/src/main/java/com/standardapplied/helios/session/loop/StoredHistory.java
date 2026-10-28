@@ -81,53 +81,39 @@ public final class StoredHistory {
 
   /**
    * Append what {@code state}'s history gained since the last write, each entry carrying the run's
-   * id and {@code at}.
+   * id and {@code at}. A refused write is the run's final terminal: {@code ErrorDuringExecution} of
+   * kind {@code SessionConflict} for a conflict, {@code SessionStoreFailed} otherwise, its message
+   * redacted.
    *
-   * @throws SessionStoreException if the store refused the batch, or failed in any other way
+   * @return the refusal; empty when the write succeeded or there was nothing to write
    * @throws Error an {@link Error} the store threw, as itself or as a joined future's cause: a host
    *     failure, never a refusal
    */
-  void write(SessionState state, Instant at) {
+  Optional<ResultMessage> write(SessionState state, Instant at, Redactor redactor) {
     if (store.isEmpty() || refused) {
-      return;
+      return Optional.empty();
     }
     var history = state.history();
     var replaced = history.replacements();
     var snapshot = history.snapshot();
     var entries = entries(snapshot, replaced != replacements, state.runId(), at);
     if (entries.isEmpty()) {
-      return;
+      return Optional.empty();
     }
-    append(store.get(), state.sessionId(), entries);
+    try {
+      append(store.get(), state.sessionId(), entries);
+    } catch (SessionStoreException e) {
+      var kind = e instanceof SessionConflictException ? "SessionConflict" : "SessionStoreFailed";
+      var refusal =
+          StopClassifier.errorDuringExecution(
+              state, SerializedError.of(kind, e.getMessage()).redactedBy(redactor));
+      state.setFinalTerminal(refusal);
+      return Optional.of(refusal);
+    }
     lastSeq += entries.size();
     stored = snapshot.size();
     replacements = replaced;
-  }
-
-  /**
-   * Write at the end of a run that ended with {@code terminal}: {@code terminal}, or, when the
-   * store refuses, the refusal, recorded as the run's final terminal.
-   */
-  ResultMessage written(SessionState state, Instant at, ResultMessage terminal, Redactor redactor) {
-    try {
-      write(state, at);
-      return terminal;
-    } catch (SessionStoreException e) {
-      var refusal = refusal(state, e, redactor);
-      state.setFinalTerminal(refusal);
-      return refusal;
-    }
-  }
-
-  /**
-   * The terminal of a run whose write the store refused: {@code ErrorDuringExecution} of kind
-   * {@code SessionConflict} for a conflict, {@code SessionStoreFailed} otherwise, its message
-   * redacted.
-   */
-  static ResultMessage refusal(SessionState state, SessionStoreException e, Redactor redactor) {
-    var kind = e instanceof SessionConflictException ? "SessionConflict" : "SessionStoreFailed";
-    return StopClassifier.errorDuringExecution(
-        state, SerializedError.of(kind, e.getMessage()).redactedBy(redactor));
+    return Optional.empty();
   }
 
   private void append(SessionStore store, String sessionId, List<SessionEntry> entries) {
