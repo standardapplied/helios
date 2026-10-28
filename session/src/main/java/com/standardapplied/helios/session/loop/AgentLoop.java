@@ -14,7 +14,6 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.store.SessionStoreException;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -144,10 +143,6 @@ public final class AgentLoop {
         ended = iterate(state, limits, boundary);
       }
       terminal = ended.orElseThrow();
-    } catch (SessionStoreException e) {
-      boundary.end(false);
-      terminal = StoredHistory.refusal(state, e, collaborators.secrets().redactor());
-      state.setFinalTerminal(terminal);
     } catch (Exception e) {
       state.ending().failWith(e);
       terminal =
@@ -185,7 +180,13 @@ public final class AgentLoop {
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
-    storedHistory.write(state, collaborators.clock().instant());
+    var refusal =
+        storedHistory.write(
+            state, collaborators.clock().instant(), collaborators.secrets().redactor());
+    if (refusal.isPresent()) {
+      boundary.end(false);
+      return refusal;
+    }
     compaction.check(state, limits);
     return classify(state, limits, boundary, outcome);
   }
@@ -254,8 +255,9 @@ public final class AgentLoop {
     Thread.interrupted();
     state.history().closeOpenRound(NOT_RUN);
     var terminal =
-        storedHistory.written(
-            state, collaborators.clock().instant(), decided, collaborators.secrets().redactor());
+        storedHistory
+            .write(state, collaborators.clock().instant(), collaborators.secrets().redactor())
+            .orElse(decided);
     var deadline = System.nanoTime() + limits.stopGrace().toNanos();
     var run = "run " + state.runId() + " of session " + state.sessionId();
     if (!settlesBy(state.cancel("run ended"), deadline)) {
