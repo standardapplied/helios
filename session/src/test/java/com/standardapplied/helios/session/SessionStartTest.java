@@ -20,6 +20,7 @@ import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
+import com.standardapplied.helios.session.loop.StoredHistory;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -495,7 +496,8 @@ final class SessionStartTest {
         context,
         Optional.of(provider),
         limits,
-        new SteeringQueue(4));
+        new SteeringQueue(4),
+        StoredHistory.none());
   }
 
   private static AgentLoop loop(SessionLifecycle lifecycle, RecordingProvider provider) {
@@ -509,7 +511,8 @@ final class SessionStartTest {
         new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
         new SteeringQueue(4),
         lifecycle.events(),
-        state.ending());
+        state.ending(),
+        StoredHistory.none());
   }
 
   /** Whether {@code events} holds an event, read on a thread of its own. */

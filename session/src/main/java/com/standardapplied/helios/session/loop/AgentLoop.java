@@ -38,7 +38,9 @@ import java.util.logging.Logger;
  *   <li>Before the run's first turn, if no message reached the history (every one was blocked) and
  *       none was sent meanwhile, end with {@link ResultMessage.ErrorDuringExecution} of kind {@code
  *       NoUserMessage}: a run calls the model only after a user message of its own.
- *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)}.
+ *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)},
+ *       then append what the turn added to the session's store, if it has one ({@link
+ *       StoredHistory}).
  *   <li>If the turn left a terminal value on {@link SessionState} (hook-driven stop), respect it.
  *       Otherwise hand the outcome to {@link StopClassifier}; if it returns terminal, fire {@link
  *       HookRegistry#firePreStop pre-stop hooks} — {@link HookOutcome.Inject Inject} cancels the
@@ -52,10 +54,12 @@ import java.util.logging.Logger;
  * send} takes: a {@code Success} that holds only while no message is queued gives way to a message
  * sent meanwhile, and the run goes on with it. Once decided, the run ends: an assistant message
  * whose tool calls are not all answered gets a "not run" tool message per unanswered call, in call
- * order, so the next run's history is one a provider accepts; the run's token is cancelled, and its
- * callbacks and the tool calls still running are awaited until one deadline, {@link
- * SessionLimits#stopGrace()} away, each one still running then logged; then {@link
- * QueryEvent.RunEnded} is emitted.
+ * order, so the next run's history is one a provider accepts; what the history gained is appended
+ * to the session's store, a refused write ending the run with {@link
+ * ResultMessage.ErrorDuringExecution} of kind {@code SessionConflict} or {@code SessionStoreFailed}
+ * instead; the run's token is cancelled, and its callbacks and the tool calls still running are
+ * awaited until one deadline, {@link SessionLimits#stopGrace()} away, each one still running then
+ * logged; then {@link QueryEvent.RunEnded} is emitted.
  *
  * <p>Every emitted {@link QueryEvent} fires {@link HookRegistry#fireOnStreamEvent stream-event
  * hooks} for observe-only consumers.
@@ -87,14 +91,17 @@ public final class AgentLoop {
   private final SteeringDrain steeringDrain;
   private final ContextCompaction compaction;
   private final PreStopDecision preStop;
+  private final StoredHistory storedHistory;
 
   public AgentLoop(
       LoopCollaborators collaborators,
       TurnRunner turnRunner,
       StopClassifier classifier,
       TokenCounter tokenCounter,
-      ContextCompactor contextCompactor) {
+      ContextCompactor contextCompactor,
+      StoredHistory storedHistory) {
     this.collaborators = collaborators;
+    this.storedHistory = storedHistory;
     this.turnRunner = turnRunner;
     this.classifier = classifier;
     this.emitter = collaborators.emitter();
@@ -173,6 +180,13 @@ public final class AgentLoop {
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
+    var refusal =
+        storedHistory.write(
+            state, collaborators.clock().instant(), collaborators.secrets().redactor());
+    if (refusal.isPresent()) {
+      boundary.end(false);
+      return refusal;
+    }
     compaction.check(state, limits);
     return classify(state, limits, boundary, outcome);
   }
@@ -232,13 +246,18 @@ public final class AgentLoop {
   }
 
   /**
-   * End the decided run: close an open tool round, cancel the run's token, wait up to {@code
-   * stopGrace} for its tool calls still running, then emit {@link QueryEvent.RunEnded}.
+   * End the decided run: close an open tool round, append what the history gained to the store,
+   * cancel the run's token, wait up to {@code stopGrace} for its tool calls still running, then
+   * emit {@link QueryEvent.RunEnded}.
    */
-  private ResultMessage end(SessionState state, SessionLimits limits, ResultMessage terminal) {
+  private ResultMessage end(SessionState state, SessionLimits limits, ResultMessage decided) {
     // An interrupt host code left on this thread is no request to cut the run's waits short.
     Thread.interrupted();
     state.history().closeOpenRound(NOT_RUN);
+    var terminal =
+        storedHistory
+            .write(state, collaborators.clock().instant(), collaborators.secrets().redactor())
+            .orElse(decided);
     var deadline = System.nanoTime() + limits.stopGrace().toNanos();
     var run = "run " + state.runId() + " of session " + state.sessionId();
     if (!settlesBy(state.cancel("run ended"), deadline)) {

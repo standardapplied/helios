@@ -6,6 +6,15 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Session ids follow one rule.** `SessionOptions` accepts only ids of 1 to 128 characters of
+`[A-Za-z0-9._:-]` that do not start with `.`, so an id works with every session store and can
+never name a path outside a file store's directory.
+
+| Before | 3.0 |
+|---|---|
+| any non-blank `withSessionId(id)` | `IllegalArgumentException` stating the rule for an id outside it; the generated `sess-<id>` matches |
+| `SessionOptions`' 17-component canonical constructor | 18 components: `Optional<SessionStore> store` last |
+
 **A session is a conversation that runs many times.** `send` steers the run in progress or starts
 the next one, and returns that run's `ResultMessage` future; a session runs again after any
 ending until it is closed. `maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run, as do
@@ -901,6 +910,20 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 
 ### Added
 
+- **Sessions can be stored and reopened.** `SessionOptions.Builder.withStore(store)` makes a
+  session durable: `AgentSession.open` loads the conversation stored under the session id, or
+  starts it when there is none, after the options' system prompt, which is never stored. Each
+  turn appends one batch (`MessageAdded` per message, or one `HistoryReplaced` after compaction
+  or a `MutateHistory` hook), and so does each run's end. Each append names the last sequence
+  number the session read or wrote; a store holding another refuses it with
+  `SessionConflictException`, the run ends `ErrorDuringExecution` kind `SessionConflict` (any other
+  store failure: `SessionStoreFailed`) and the session closes itself. `InMemorySessionStore` and
+  `FileSessionStore` (one `<sessionId>.jsonl` per session, owner-only on POSIX, refusing a
+  directory group or others can write and a file whose name on disk is not its id's, a torn last
+  line ignored and truncated) ship in `com.standardapplied.helios.session.store`, with the
+  `SessionStore` SPI, `SessionEntryJson` (an entry reads back as the same JSON value, a number
+  exact in value but not always in Java type) and the `SessionStoreContract` test case in the
+  session test jar.
 - **A session is a conversation that runs many times.** `send` steers the run in progress or
   starts the next one and returns that run's result future; a session runs again after any ending
   until it is closed; `interrupt()` stops the current run and keeps the session; events carry

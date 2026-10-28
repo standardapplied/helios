@@ -16,6 +16,7 @@ import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import java.time.Clock;
 import java.time.InstantSource;
@@ -34,7 +35,9 @@ import java.util.Optional;
  * record.
  *
  * @param model the LLM the session loop drives; non-null
- * @param sessionId stable, non-blank session id; auto-generated UUID if not set on the builder
+ * @param sessionId stable session id, one to 128 characters of {@code [A-Za-z0-9._:-]} not starting
+ *     with {@code .} ({@link SessionStore#requireValidId}); {@code "sess-"} and a fresh id if not
+ *     set on the builder
  * @param limits per-session ceilings; non-null
  * @param maxQueuedUserMessages how many user messages {@link AgentSession#send} may queue before
  *     the loop consumes them; a send beyond it throws {@link SteeringQueueFullException}; positive,
@@ -89,6 +92,9 @@ import java.util.Optional;
  *     registry so a secret registered mid-session is honoured from the next redaction on. Sessions
  *     built from the same options share it. Defaults to a new empty registry, which redacts
  *     nothing. Non-null
+ * @param store optional store that makes the session durable: {@link AgentSession#open} loads the
+ *     conversation stored under {@code sessionId}, or starts it when there is none, and every turn
+ *     appends what it added. Absent by default: the conversation lives only in the session
  */
 public record SessionOptions(
     Model model,
@@ -107,22 +113,20 @@ public record SessionOptions(
     Optional<String> systemPrompt,
     TokenCounter tokenCounter,
     ContextCompactor contextCompactor,
-    SecretRegistry secretRegistry) {
+    SecretRegistry secretRegistry,
+    Optional<SessionStore> store) {
 
   /**
    * Canonical constructor.
    *
    * @throws NullPointerException if any argument is null or {@code tools} or {@code hooks} holds a
    *     null element
-   * @throws IllegalArgumentException if {@code sessionId} is blank or {@code maxQueuedUserMessages}
-   *     is not positive
+   * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule or {@code
+   *     maxQueuedUserMessages} is not positive
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
-    Objects.requireNonNull(sessionId, "sessionId must not be null");
-    if (Strings.isBlank(sessionId)) {
-      throw new IllegalArgumentException("sessionId must not be blank");
-    }
+    SessionStore.requireValidId(sessionId);
     Objects.requireNonNull(limits, "limits must not be null");
     requirePositiveQueue(maxQueuedUserMessages);
     Objects.requireNonNull(clock, "clock must not be null");
@@ -138,6 +142,7 @@ public record SessionOptions(
     Objects.requireNonNull(tokenCounter, "tokenCounter must not be null");
     Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
     Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
+    Objects.requireNonNull(store, "store must not be null");
   }
 
   private static int requirePositiveQueue(int maxQueuedUserMessages) {
@@ -166,6 +171,7 @@ public record SessionOptions(
   public Builder toBuilder() {
     var builder = new Builder();
     executionProvider.ifPresent(builder::withExecutionProvider);
+    store.ifPresent(builder::withStore);
     if (askUserQuestion) {
       builder.withAskUserQuestion();
     }
@@ -202,15 +208,14 @@ public record SessionOptions(
     private final ArrayList<ToolBinding> tools = new ArrayList<>();
     private final ArrayList<Hook> hooks = new ArrayList<>();
     private Permission permission = Permission.empty(PermissionMode.DEFAULT);
-    private MemoryBackend memoryBackend;
     private CostCalculator costCalculator = CostCalculator.ZERO;
-    private ExecutionProvider executionProvider;
-    private boolean askUserQuestion;
+    private final BuiltInTools builtInTools = new BuiltInTools();
     private OutputSchema<?> outputSchema;
     private String systemPrompt;
     private TokenCounter tokenCounter = TokenCounter.charBased();
     private ContextCompactor contextCompactor;
     private SecretRegistry secretRegistry;
+    private SessionStore store;
 
     private Builder() {}
 
@@ -227,19 +232,18 @@ public record SessionOptions(
     }
 
     /**
-     * Set the session id. Defaults to a fresh UUID if not set.
+     * Set the session id, the key of the conversation in the session's store. An id is one to 128
+     * characters of {@code [A-Za-z0-9._:-]} and does not start with {@code .}, so it works with
+     * every store and never names a path outside a file store's directory. Defaults to {@code
+     * "sess-"} and a fresh id.
      *
-     * @param sessionId non-blank id
+     * @param sessionId the id
      * @return this builder
      * @throws NullPointerException if {@code sessionId} is null
-     * @throws IllegalArgumentException if {@code sessionId} is blank
+     * @throws IllegalArgumentException if {@code sessionId} breaks the rule
      */
     public Builder withSessionId(String sessionId) {
-      Objects.requireNonNull(sessionId, "sessionId must not be null");
-      if (Strings.isBlank(sessionId)) {
-        throw new IllegalArgumentException("sessionId must not be blank");
-      }
-      this.sessionId = sessionId;
+      this.sessionId = SessionStore.requireValidId(sessionId);
       return this;
     }
 
@@ -364,7 +368,7 @@ public record SessionOptions(
      * @return this builder
      */
     public Builder withMemoryBackend(MemoryBackend memoryBackend) {
-      this.memoryBackend = memoryBackend;
+      builtInTools.memoryBackend = memoryBackend;
       return this;
     }
 
@@ -396,7 +400,7 @@ public record SessionOptions(
      * @throws NullPointerException if {@code executionProvider} is null
      */
     public Builder withExecutionProvider(ExecutionProvider executionProvider) {
-      this.executionProvider =
+      builtInTools.executionProvider =
           Objects.requireNonNull(executionProvider, "executionProvider must not be null");
       return this;
     }
@@ -409,7 +413,7 @@ public record SessionOptions(
      * @return this builder
      */
     public Builder withAskUserQuestion() {
-      this.askUserQuestion = true;
+      builtInTools.askUserQuestion = true;
       return this;
     }
 
@@ -501,6 +505,21 @@ public record SessionOptions(
     }
 
     /**
+     * Store the session in {@code store}: {@link AgentSession#open} loads the conversation stored
+     * under the session id, or starts it when there is none, and every turn appends what it added.
+     * One writer per session id at a time is the caller's job; a second writer's append fails its
+     * run with {@code ErrorDuringExecution} of kind {@code SessionConflict} and closes its session.
+     *
+     * @param store non-null store
+     * @return this builder
+     * @throws NullPointerException if {@code store} is null
+     */
+    public Builder withStore(SessionStore store) {
+      this.store = Objects.requireNonNull(store, "store must not be null");
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the options
@@ -524,15 +543,27 @@ public record SessionOptions(
           tools,
           hooks,
           permission,
-          Optional.ofNullable(memoryBackend),
+          Optional.ofNullable(builtInTools.memoryBackend),
           costCalculator,
-          Optional.ofNullable(executionProvider),
-          askUserQuestion,
+          Optional.ofNullable(builtInTools.executionProvider),
+          builtInTools.askUserQuestion,
           Optional.ofNullable(outputSchema),
           Optional.ofNullable(systemPrompt),
           tokenCounter,
           compactor,
-          secretRegistry != null ? secretRegistry : new SecretRegistry());
+          secretRegistry != null ? secretRegistry : new SecretRegistry(),
+          Optional.ofNullable(store));
+    }
+
+    /**
+     * The built-in tools the session registers when switched on: the memory tools over a backend,
+     * {@code Execute} over a provider, and {@code AskUserQuestion}.
+     */
+    private static final class BuiltInTools {
+
+      private MemoryBackend memoryBackend;
+      private ExecutionProvider executionProvider;
+      private boolean askUserQuestion;
     }
   }
 }

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -16,7 +17,8 @@ import java.util.stream.Collectors;
  * model on every turn, appended by the session and the loop and replaced wholesale only by the loop
  * (compaction, or a {@code PreModelTurnHook} returning {@code MutateHistory}). It also records
  * whether the session's {@code ContextWarning} has fired for this history: at most once, until a
- * replacement re-arms it.
+ * replacement re-arms it; and how many replacements there have been, so the session's store learns
+ * of each.
  *
  * <h2>Thread-safety</h2>
  *
@@ -26,6 +28,7 @@ public final class ConversationHistory {
 
   private final CopyOnWriteArrayList<Message> messages = new CopyOnWriteArrayList<>();
   private final AtomicBoolean contextWarningFired = new AtomicBoolean(false);
+  private final AtomicLong replacements = new AtomicLong();
 
   ConversationHistory() {}
 
@@ -90,6 +93,12 @@ public final class ConversationHistory {
     messages.clear();
     messages.addAll(copy);
     contextWarningFired.set(false);
+    replacements.incrementAndGet();
+  }
+
+  /** How many times {@link #replace(List)} ran. */
+  long replacements() {
+    return replacements.get();
   }
 
   /**

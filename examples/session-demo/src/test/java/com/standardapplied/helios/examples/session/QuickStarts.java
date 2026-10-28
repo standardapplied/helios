@@ -12,6 +12,7 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
+import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SessionPresets;
 import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
@@ -20,6 +21,7 @@ import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
+import com.standardapplied.helios.session.store.FileSessionStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -56,6 +58,15 @@ final class QuickStarts {
       var answer = session.send("Which classes form the session's public API?").join();
       var followUp = session.send("Which of them does a chat application need?").join();
       System.out.println(answer + "\n" + followUp);
+    }
+  }
+
+  static void storedChat(SessionOptions options) {
+    var store = FileSessionStore.of(Path.of("conversations"));
+    try (var session =
+        AgentSession.open(
+            options.toBuilder().withSessionId("member-42").withStore(store).build())) {
+      session.send("Where did we leave off?").join();
     }
   }
 
