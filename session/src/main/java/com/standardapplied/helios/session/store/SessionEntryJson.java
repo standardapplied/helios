@@ -83,16 +83,15 @@ public final class SessionEntryJson {
           var line = SessionJson.BINDING.toMap(json);
           var entries =
               ((List<?>) line.get("entries")).stream().map(entry -> entry(object(entry))).toList();
-          return new Batch(seq(line.get("seq")), entries);
+          long seq =
+              switch (line.get("seq")) {
+                case Integer value -> value;
+                case Long value -> value;
+                case null, default ->
+                    throw new IllegalArgumentException("seq is not a 64-bit integer");
+              };
+          return new Batch(seq, entries);
         });
-  }
-
-  private static long seq(Object value) {
-    return switch (value) {
-      case Integer seq -> seq;
-      case Long seq -> seq;
-      case null, default -> throw new IllegalArgumentException("seq is not a 64-bit integer");
-    };
   }
 
   private static Map<String, Object> fields(SessionEntry entry) {
