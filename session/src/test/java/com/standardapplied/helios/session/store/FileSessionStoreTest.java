@@ -174,12 +174,13 @@ final class FileSessionStoreTest extends SessionStoreContract {
 
   /**
    * Closing any descriptor of a file releases this process's {@code FileLock} on it, so a read that
-   * ran during an append would let another process write: every read waits for the process lock an
-   * append holds.
+   * ran during an append would let another process write: every read, of any store on the
+   * directory, waits for the process lock an append holds.
    */
   @Test
   void aReadWaitsForTheProcessLockOnTheSessionsFile() {
     var store = FileSessionStore.of(directory());
+    var other = FileSessionStore.of(directory());
     store.append(SID, 0, List.of(added(Message.user("a"))));
     var loaded = new CompletableFuture<StoredSession>();
     var listed = new CompletableFuture<List<SessionEntry>>();
@@ -187,7 +188,7 @@ final class FileSessionStoreTest extends SessionStoreContract {
     Thread listing;
     synchronized (store.lockOf(SID)) {
       loading = Thread.ofPlatform().start(() -> loaded.complete(store.load(SID)));
-      listing = Thread.ofPlatform().start(() -> listed.complete(store.entries(SID)));
+      listing = Thread.ofPlatform().start(() -> listed.complete(other.entries(SID)));
       Await.until("the load to wait", () -> loading.getState() == Thread.State.BLOCKED);
       Await.until("the listing to wait", () -> listing.getState() == Thread.State.BLOCKED);
       assertFalse(loaded.isDone() || listed.isDone());
