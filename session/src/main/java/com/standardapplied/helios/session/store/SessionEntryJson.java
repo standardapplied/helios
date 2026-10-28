@@ -17,8 +17,11 @@ import java.util.concurrent.Callable;
  * {"type":"replaced","runId":…,"at":…,"history":[…]}}, {@code at} an ISO-8601 instant and each
  * {@link Message} written by Jackson's defaults. A lone UTF-16 surrogate is escaped, and a decimal
  * reads back as a {@link Double} only when that is its exact value, otherwise as a {@link
- * java.math.BigDecimal}, so an entry reads back as it was written. Reading a {@code type} this
- * version does not know fails, so an entry of a later kind is never skipped.
+ * java.math.BigDecimal}, so an entry reads back as the same JSON value it was written as. A number
+ * keeps its value but not always its Java type: a {@code Long} that fits reads back as an {@code
+ * Integer}, a {@code Float} as a {@code Double}, a {@code BigDecimal} {@code 1.50} as {@code 1.5}.
+ * Reading a {@code type} this version does not know fails, so an entry of a later kind is never
+ * skipped.
  */
 public final class SessionEntryJson {
 

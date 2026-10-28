@@ -7,6 +7,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Objects;
@@ -17,7 +18,10 @@ import java.util.stream.Stream;
  * in one directory. Each line is one batch, {@code {"seq":<first sequence number>,"entries":[…]}}
  * with each entry in {@link SessionEntryJson}'s form, ended by {@code \n}: a line is the unit of
  * atomicity. On a POSIX file system the directory is created {@code rwx------} and each file {@code
- * rw-------}, since a conversation is user data; a file is never opened through a symbolic link.
+ * rw-------}, since a conversation is user data, and an existing directory that group or others can
+ * write is refused, since another user could plant a conversation in it. A file is never opened
+ * through a symbolic link, and one whose name on disk is not its session's (a file system that
+ * ignores case gives {@code Chat} and {@code chat} one file) is refused.
  *
  * <p>Every read and write of a session's file holds a lock of this process on it, and {@link
  * #append} also an exclusive {@link java.nio.channels.FileLock}, so a second process writing the
@@ -44,19 +48,35 @@ public final class FileSessionStore implements SessionStore {
   }
 
   /**
-   * A store over {@code directory}, created when missing.
+   * A store over {@code directory}, created when missing, which no one but its owner may write on a
+   * POSIX file system.
    *
    * @param directory the directory holding the session files; non-null
    * @return the store
    * @throws NullPointerException if {@code directory} is null
-   * @throws SessionStoreException if the directory cannot be created or resolved
+   * @throws SessionStoreException if the directory cannot be created or resolved, or group or
+   *     others can write it
    */
   public static FileSessionStore of(Path directory) {
     Objects.requireNonNull(directory, "directory must not be null");
     var fileSystem = directory.getFileSystem();
     try {
       Files.createDirectories(directory, permissions(fileSystem, "rwx------"));
-      return new FileSessionStore(directory.toRealPath(), permissions(fileSystem, "rw-------"));
+      var real = directory.toRealPath();
+      if (fileSystem.supportedFileAttributeViews().contains("posix")) {
+        var permissions = Files.getPosixFilePermissions(real);
+        if (permissions.contains(PosixFilePermission.GROUP_WRITE)
+            || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+          throw new SessionStoreException(
+              "session directory "
+                  + real
+                  + " is "
+                  + PosixFilePermissions.toString(permissions)
+                  + ": give FileSessionStore a directory that only its user can write",
+              null);
+        }
+      }
+      return new FileSessionStore(real, permissions(fileSystem, "rw-------"));
     } catch (IOException e) {
       throw new SessionStoreException("cannot create session directory " + directory, e);
     }
