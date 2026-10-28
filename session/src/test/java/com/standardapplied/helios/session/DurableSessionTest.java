@@ -23,12 +23,14 @@ import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.store.SessionStoreException;
 import com.standardapplied.helios.session.store.StoredSession;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -270,6 +272,30 @@ final class DurableSessionTest {
   }
 
   @Test
+  void anErrorAnAppendJoinsFromAFailedFutureFailsTheRunAsItselfWithoutARunEnded() {
+    var atTurnEnd = new AssertionError("store worker failed at the turn's end");
+    var atRunEnd = new AssertionError("store worker failed at the run's end");
+    PreToolUseHook stopping = (call, ctx) -> HookOutcome.stop("halted");
+
+    var turn =
+        endedRun(
+            options(
+                ScriptedModel.newBuilder().withTextTurn("reply").build(),
+                joiningFailed(atTurnEnd)));
+    var run =
+        endedRun(
+            options(
+                    ScriptedModel.newBuilder().withToolCallsTurn(ECHO).build(),
+                    joiningFailed(atRunEnd))
+                .withTools(List.of(echo()))
+                .withHook(stopping));
+
+    assertEquals(
+        List.of(Map.entry(atTurnEnd, List.of()), Map.entry(atRunEnd, List.of())),
+        List.of(turn, run));
+  }
+
+  @Test
   void aConflictIsTheTerminalEvenWhenAnInterruptArrivesWhileItIsRefused() {
     assertRefusalOutranksAnInterrupt(new SessionConflictException(SID, 0, 1), "SessionConflict");
   }
@@ -396,6 +422,25 @@ final class DurableSessionTest {
 
       assertEquals(List.of(kind, refusal.getMessage()), List.of(error.kind(), error.message()));
       assertThrows(IllegalStateException.class, () -> opened.send("again"));
+    }
+  }
+
+  /** A store whose every append joins a future that failed with {@code error}. */
+  private static RecordingStore joiningFailed(Error error) {
+    return new RecordingStore(
+        index -> CompletableFuture.<RuntimeException>failedFuture(error).join());
+  }
+
+  /** What the run {@code options} open fails with, and the {@code RunEnded} events it emitted. */
+  private static Map.Entry<Throwable, List<QueryEvent.RunEnded>> endedRun(
+      SessionOptions.Builder options) {
+    var events = new EventCollector();
+    try (var session = AgentSession.open(options.build())) {
+      events.read(session.events());
+      var failure = Await.failure("the result to fail", session.send("go"));
+      session.close();
+      events.awaitDone();
+      return Map.entry(failure, events.eventsOf(QueryEvent.RunEnded.class));
     }
   }
 

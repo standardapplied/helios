@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
@@ -116,7 +117,7 @@ final class SessionFile {
       for (var i = 0; i < bytes.length; i++) {
         if (bytes[i] == '\n') {
           lineNumber++;
-          var batch = batch(file, lineNumber, new String(bytes, start, i - start, UTF_8));
+          var batch = batch(file, lineNumber, ByteBuffer.wrap(bytes, start, i - start));
           if (batch.seq() != lastSeq + 1) {
             throw corrupt(file, lineNumber, batch.seq(), lastSeq + 1);
           }
@@ -128,10 +129,10 @@ final class SessionFile {
       return new Log(List.copyOf(entries), lastSeq, start);
     }
 
-    private static SessionEntryJson.Batch batch(Path file, int lineNumber, String line) {
+    private static SessionEntryJson.Batch batch(Path file, int lineNumber, ByteBuffer line) {
       try {
-        return SessionEntryJson.readBatch(line);
-      } catch (SessionStoreException e) {
+        return SessionEntryJson.readBatch(UTF_8.newDecoder().decode(line).toString());
+      } catch (CharacterCodingException | SessionStoreException e) {
         throw new SessionStoreException(
             "session file " + file + " line " + lineNumber + " is not a batch", e);
       }

@@ -86,4 +86,25 @@ final class SessionEntryJsonTest {
         SessionStoreException.class,
         assertThrows(RuntimeException.class, () -> SessionEntryJson.readBatch("{\"seq\":1}")));
   }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"seq\":1.9,\"entries\":[%s]}",
+        "{\"seq\":9223372036854775808,\"entries\":[%s]}",
+        "{\"seq\":\"1\",\"entries\":[%s]}",
+        "{\"entries\":[%s]}",
+        "{\"seq\":0,\"entries\":[%s]}",
+        "{\"seq\":1,\"entries\":[]}"
+      })
+  void aLineThatIsNoBatchAStoreWritesFailsAsAStoreFailure(String line) {
+    var json =
+        line.formatted(
+            SessionEntryJson.write(new SessionEntry.MessageAdded("run-1", AT, Message.user("a"))));
+
+    var thrown = assertThrows(SessionStoreException.class, () -> SessionEntryJson.readBatch(json));
+
+    assertEquals(
+        "not a session entry: " + IllegalArgumentException.class.getName(), thrown.getMessage());
+  }
 }
