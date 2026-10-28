@@ -35,14 +35,17 @@ final class AnthropicStreams {
     this.httpClient = httpClient;
   }
 
-  /** The stream answering {@code request}, sent on its first {@code hasNext()}. */
-  SseReader open(MessagesRequest request) {
+  /**
+   * The stream answering {@code request}, sent on its first {@code hasNext()}, whose response
+   * carries the request's prompt stamp.
+   */
+  SseReader open(StampedRequest request) {
     return new SseReader(
         httpClient,
-        httpRequest(serialize(request)),
+        httpRequest(serialize(request.body())),
         "Anthropic API",
         config.streamIdleTimeout(),
-        new AnthropicStreamParser(),
+        new AnthropicStreamParser(request.promptStamp()),
         AnthropicException::new,
         AnthropicProvider.PROVIDER_NAME);
   }

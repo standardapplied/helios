@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
@@ -92,7 +91,7 @@ class StreamReadErrorCausePreservationReproTest {
         new SseReader(
             failingStream,
             Duration.ofSeconds(5),
-            new AnthropicStreamParser(),
+            new AnthropicStreamParser("stamp"),
             AnthropicException::new)) {
       assertEquals(new StreamEvent.KeepAlive(), iterator.next());
       assertEquals(new StreamEvent.KeepAlive(), iterator.next());
@@ -119,7 +118,10 @@ class StreamReadErrorCausePreservationReproTest {
 
     try (var iterator =
         new SseReader(
-            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
+            stream,
+            Duration.ofSeconds(5),
+            new AnthropicStreamParser("stamp"),
+            AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().startsWith("API stream error:"));
@@ -224,12 +226,12 @@ class StreamReadErrorCausePreservationReproTest {
     var request =
         new AnthropicRequestBuilder(opus.id(), opus, config, CachePolicy.shortLived())
             .build(List.of(Message.user("hi")), List.<Tool>of(), null);
-    Exchange<MessagesRequest> segments =
+    Exchange<StampedRequest> segments =
         ignored ->
             new SseReader(
                 new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
                 Duration.ofSeconds(5),
-                new AnthropicStreamParser(),
+                new AnthropicStreamParser("stamp"),
                 AnthropicException::new);
     return org.junit.jupiter.api.Assertions.assertThrows(
         RuntimeException.class, () -> PauseContinuationTest.turn(segments, request));
@@ -263,7 +265,10 @@ class StreamReadErrorCausePreservationReproTest {
 
     try (var iterator =
         new SseReader(
-            stream, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new)) {
+            stream,
+            Duration.ofSeconds(5),
+            new AnthropicStreamParser("stamp"),
+            AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
       assertTrue(error.message().contains("Failed to parse"));

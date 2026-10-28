@@ -275,7 +275,7 @@ class StreamingIteratorTest {
         new SseReader(
             neverDelivers,
             SHORT_IDLE_TIMEOUT,
-            new AnthropicStreamParser(),
+            new AnthropicStreamParser("stamp"),
             AnthropicException::new)) {
       assertTrue(iterator.hasNext());
       var error = assertInstanceOf(StreamEvent.Error.class, iterator.next());
@@ -717,7 +717,7 @@ class StreamingIteratorTest {
 
   private static SseReader reader(InputStream body) {
     return new SseReader(
-        body, SseEvents.NEVER_IDLE, new AnthropicStreamParser(), AnthropicException::new);
+        body, SseEvents.NEVER_IDLE, new AnthropicStreamParser("stamp"), AnthropicException::new);
   }
 
   private static List<StreamEvent> drain(String sse) {

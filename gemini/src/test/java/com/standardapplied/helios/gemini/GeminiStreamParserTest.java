@@ -409,7 +409,7 @@ class GeminiStreamParserTest {
             new SseReader(
                 SseEvents.body(sse),
                 SseEvents.NEVER_IDLE,
-                new GeminiStreamParser(false, "v1beta"),
+                new GeminiStreamParser(false, "v1beta", "stamp"),
                 GeminiException::new));
     var done = (StreamEvent.Done) events.getLast();
     assertFalse(done.response().metadata().containsKey(ContinuationPoint.INTERACTION_ID_KEY));

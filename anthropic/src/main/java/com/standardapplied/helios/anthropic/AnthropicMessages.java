@@ -15,23 +15,36 @@ import java.util.Map;
 
 /**
  * A conversation in the Messages API's shape: system messages joined into the system prompt, each
- * user and assistant turn one entry, and each run of tool results one user entry.
- *
- * @param system the system prompt, or {@code null} when the conversation has none
- * @param entries the wire messages
+ * user and assistant turn one entry, and each run of tool results one user entry. An assistant turn
+ * before the point {@link ReasoningReplay} names goes without its reasoning.
  */
-record AnthropicMessages(String system, List<MessageEntry> entries) {
+final class AnthropicMessages {
 
-  /** {@code messages} converted. */
-  static AnthropicMessages of(List<Message> messages) {
-    var entries = new ArrayList<MessageEntry>();
+  private AnthropicMessages() {}
+
+  /** The system prompt of {@code messages}, their system messages joined, or {@code null}. */
+  static String system(List<Message> messages) {
     String system = null;
+    for (var message : messages) {
+      if (message.role() == Role.SYSTEM) {
+        system = appendSystemText(system, message.content());
+      }
+    }
+    return system;
+  }
+
+  /**
+   * The wire messages of {@code messages}, their system messages left out; an assistant turn
+   * replays its reasoning only from index {@code reasoningFrom} on.
+   */
+  static List<MessageEntry> entries(List<Message> messages, int reasoningFrom) {
+    var entries = new ArrayList<MessageEntry>();
     for (var i = 0; i < messages.size(); i++) {
       var message = messages.get(i);
       switch (message.role()) {
-        case SYSTEM -> system = appendSystemText(system, message.content());
+        case SYSTEM -> {}
         case USER -> entries.add(user(message));
-        case ASSISTANT -> entries.add(assistant(message));
+        case ASSISTANT -> entries.add(assistant(message, i >= reasoningFrom));
         case TOOL -> {
           var results = toolResultsFrom(messages, i);
           entries.add(MessageEntry.user(results));
@@ -39,7 +52,7 @@ record AnthropicMessages(String system, List<MessageEntry> entries) {
         }
       }
     }
-    return new AnthropicMessages(system, List.copyOf(entries));
+    return List.copyOf(entries);
   }
 
   /** {@code additional} appended to {@code existing} as a new paragraph. */
@@ -53,18 +66,31 @@ record AnthropicMessages(String system, List<MessageEntry> entries) {
   /**
    * An assistant turn on the wire. A turn recorded with {@link RawContentEcho#RAW_CONTENT_KEY}
    * replays that content verbatim; any other turn sends its thinking blocks, text and tool calls.
+   * Without {@code withReasoning} its {@code thinking} and {@code redacted_thinking} blocks are
+   * left out, and a turn left with no content is sent as {@link ReasoningReplay#OMITTED}.
    */
-  static MessageEntry assistant(Message message) {
+  static MessageEntry assistant(Message message, boolean withReasoning) {
     var metadata = message.metadata() == null ? Map.<String, String>of() : message.metadata();
     var rawContent = metadata.get(RawContentEcho.RAW_CONTENT_KEY);
     if (rawContent != null && !rawContent.isEmpty()) {
-      return new MessageEntry("assistant", verbatim(rawContent));
+      var blocks = verbatim(rawContent);
+      return withReasoning ? new MessageEntry("assistant", blocks) : withoutReasoning(blocks);
     }
-    var thinkingBlocks = ThinkingBlock.decodeAll(metadata);
+    var recorded = ThinkingBlock.decodeAll(metadata);
+    var thinkingBlocks = withReasoning ? recorded : List.<ThinkingBlock>of();
     if (!message.hasToolCalls() && thinkingBlocks.isEmpty()) {
-      return MessageEntry.assistant(message.content() != null ? message.content() : "");
+      var text = message.content() != null ? message.content() : "";
+      return MessageEntry.assistant(
+          text.isEmpty() && !withReasoning ? ReasoningReplay.OMITTED : text);
     }
     return MessageEntry.assistant(blocks(message, thinkingBlocks));
+  }
+
+  private static MessageEntry withoutReasoning(List<Object> blocks) {
+    var kept = ReasoningReplay.withoutReasoning(blocks);
+    return kept.isEmpty()
+        ? MessageEntry.assistant(ReasoningReplay.OMITTED)
+        : new MessageEntry("assistant", kept);
   }
 
   private static List<ContentBlock> blocks(Message message, List<ThinkingBlock> thinkingBlocks) {

@@ -4,7 +4,7 @@ KeepAlive[]
 TextDelta[text=I cannot]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}, citations=[]]
+MessageStop[stopReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}, citations=[]]
 onComplete
 == chat
-Response[content=I cannot, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], thinking=null, citations=[], metadata={anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}]
+Response[content=I cannot, parsed=null, toolCalls=[], finishReason=REFUSAL, usage=Usage[inputTokens=25, outputTokens=3, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=40], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=refusal, refusal.category=cyber, refusal.explanation=This request was declined because it could enable cyber harm.}]

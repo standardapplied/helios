@@ -8,6 +8,7 @@ package com.standardapplied.helios.gemini;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -18,6 +19,9 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
@@ -99,5 +103,37 @@ class GeminiContinuationIntegrationTest {
     }
 
     Accepted.toolTurn(model.chat(messages, tools));
+  }
+
+  /**
+   * A continuation whose interaction the server no longer holds is resent with the whole
+   * conversation: the test deletes the first turn's interaction through the Interactions API.
+   */
+  @Test
+  void aTurnAfterItsInteractionWasDeletedIsAcceptedThroughTheResend() throws Exception {
+    var apiKey = System.getenv("GEMINI_API_KEY");
+    var config = ModelConfig.newBuilder().withApiKey(apiKey).build();
+    var messages = new ArrayList<>(List.of(Message.user("Name one primary colour.")));
+    try (var flash = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
+        var client = HttpClientFactory.create()) {
+      var first = Accepted.textReply(flash.chat(messages, List.of()));
+      var interactionId = first.metadata().get(ContinuationPoint.INTERACTION_ID_KEY);
+      assertNotNull(interactionId, "response must carry interactionId for continuation");
+
+      var deleted =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create(
+                          GeminiEndpoint.of(config).baseUrl() + "/interactions/" + interactionId))
+                  .header("x-goog-api-key", apiKey)
+                  .DELETE()
+                  .build(),
+              HttpResponse.BodyHandlers.discarding());
+      assertEquals(200, deleted.statusCode());
+
+      messages.add(first.toMessage());
+      messages.add(Message.user("Name another."));
+      Accepted.textReply(flash.chat(messages, List.of()));
+    }
   }
 }

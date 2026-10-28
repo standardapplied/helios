@@ -3,8 +3,10 @@
 package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
@@ -13,6 +15,12 @@ import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.core.test.ConversationRequestContract;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
+import com.standardapplied.helios.core.test.SseReplies;
+import com.standardapplied.helios.core.test.StubHttpServer;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import java.io.IOException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,16 +38,22 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
 
+  private static final StubHttpServer.Reply GONE =
+      new StubHttpServer.Reply(
+          404,
+          Map.of("Content-Type", "application/json"),
+          "{\"error\":{\"code\":\"not_found\",\"message\":\"Interaction not found\"}}");
+
   @Override
   protected Function<URI, Model> modelAt() {
+    return modelAt(ModelConfig.newBuilder().withApiKey("test-key"));
+  }
+
+  private static Function<URI, Model> modelAt(ModelConfig.Builder config) {
     return uri ->
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
-                ModelConfig.newBuilder()
-                    .withApiKey("test-key")
-                    .withBaseUrl(uri + "/v1beta")
-                    .build());
+                GeminiModelId.GEMINI_3_5_FLASH.id(), config.withBaseUrl(uri + "/v1beta").build());
   }
 
   @Override
@@ -118,7 +132,9 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
                   List.of(
                       Message.system("sys"),
                       Message.user("[Earlier context summary]\nParis is 22C and sunny."));
-              assertNull(ContinuationPoint.find(compacted));
+              assertNull(
+                  ContinuationPoint.find(
+                      compacted, PromptStamps.of(compacted, ConversationFixture.tools())));
               model.chat(compacted, ConversationFixture.tools());
             });
 
@@ -126,6 +142,168 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
     assertNull(compactedRequest.get("previous_interaction_id"));
     assertEquals(
         List.of("[Earlier context summary]\nParis is 22C and sunny."), turnTexts(compactedRequest));
+  }
+
+  @Test
+  void aRequestsStampFollowsItsSystemInstructionAndToolsOnly() {
+    var tools = List.of(tool("weather", "Current weather"));
+    var stamp = stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", tools);
+
+    assertEquals(stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", tools));
+    assertEquals(stamp, stamp(GeminiModelId.GEMINI_3_8_FLASH, "sys", tools));
+    assertNotEquals(stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "other", tools));
+    assertNotEquals(
+        stamp,
+        stamp(
+            GeminiModelId.GEMINI_3_5_FLASH,
+            "sys",
+            List.of(tool("weather", "Current weather"), tool("time", "Current time"))));
+    assertNotEquals(
+        stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", List.of(tool("weather", "Forecast"))));
+    assertEquals(64, stamp.length());
+  }
+
+  @Test
+  void theAssistantTurnCarriesTheStampOfTheRequestThatProducedIt() {
+    var history = List.of(Message.system("sys"), Message.user("Hi"));
+    var stamps = new ArrayList<String>();
+
+    ModelHarness.exchange(
+        List.of(Golden.read(reply())),
+        modelAt(),
+        model ->
+            stamps.add(
+                model
+                    .chat(history, ConversationFixture.tools())
+                    .metadata()
+                    .get(ContinuationPoint.PROMPT_STAMP_KEY)));
+
+    assertEquals(List.of(PromptStamps.of(history, ConversationFixture.tools())), stamps);
+  }
+
+  @Test
+  void aTurnProducedUnderAnotherPromptIsSentWholeWithoutAPreviousInteraction() {
+    var history = new ArrayList<>(List.of(Message.system("before"), Message.user("Hi")));
+
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model -> {
+              history.add(model.chat(history, List.of()).toMessage());
+              history.set(0, Message.system("after"));
+              history.add(Message.user("Again"));
+              model.chat(history, List.of());
+            });
+
+    var second = parse(requests.getLast().body());
+    assertNull(second.get("previous_interaction_id"));
+    assertEquals("after", second.get("system_instruction"));
+    assertEquals(List.of("Hi", "Hello, world.", "Again"), turnTexts(second));
+  }
+
+  @Test
+  void aRolledBackPromptDoesNotContinuePastATurnMadeWithoutContinuation() {
+    var history = new ArrayList<>(List.of(Message.system("before"), Message.user("Hi")));
+    var withoutContinuation =
+        modelAt(ModelConfig.newBuilder().withApiKey("test-key").withProviderContinuation(false));
+
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model -> {
+              history.add(model.chat(history, List.of()).toMessage());
+              history.set(0, Message.system("after"));
+              history.add(Message.user("Again"));
+              ModelHarness.exchange(
+                  List.of(Golden.read(reply())),
+                  withoutContinuation,
+                  other -> history.add(other.chat(history, List.of()).toMessage()));
+              history.set(0, Message.system("before"));
+              history.add(Message.user("Once more"));
+              model.chat(history, List.of());
+            });
+
+    var last = parse(requests.getLast().body());
+    assertNull(last.get("previous_interaction_id"));
+    assertEquals(
+        List.of("Hi", "Hello, world.", "Again", "Hello, world.", "Once more"), turnTexts(last));
+  }
+
+  @Test
+  void aGoneInteractionIsResentOnceWithTheWholeConversation() throws IOException {
+    var history = continuedHistory();
+    try (var server = StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, goneThenText());
+        var model = modelAt().apply(server.uri())) {
+      var response = model.chat(history, List.of());
+
+      assertEquals("Hello, world.", response.content());
+      var requests = server.requests();
+      assertEquals(2, requests.size());
+      assertEquals("int_gone", parse(requests.get(0).body()).get("previous_interaction_id"));
+      var resend = parse(requests.get(1).body());
+      assertNull(resend.get("previous_interaction_id"));
+      assertEquals(List.of("Hi", "Earlier answer", "Again"), turnTexts(resend));
+    }
+  }
+
+  @Test
+  void anInteractionGoneOnTheResendFailsTheTurn() throws IOException {
+    var history = continuedHistory();
+    try (var server = StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, request -> GONE);
+        var model = modelAt().apply(server.uri())) {
+      var error = assertThrows(GeminiException.class, () -> model.chat(history, List.of()));
+
+      assertEquals(404, error.statusCode());
+      assertEquals(2, server.requests().size());
+    }
+  }
+
+  @Test
+  void aWholeConversationAnswered404IsNotResent() throws IOException {
+    var history = List.of(Message.user("Hi"));
+    try (var server = StubHttpServer.start(InetAddress.getLoopbackAddress(), 0, request -> GONE);
+        var model = modelAt().apply(server.uri())) {
+      var error = assertThrows(GeminiException.class, () -> model.chat(history, List.of()));
+
+      assertEquals(404, error.statusCode());
+      assertEquals(1, server.requests().size());
+    }
+  }
+
+  private Function<StubHttpServer.Request, StubHttpServer.Reply> goneThenText() {
+    var text = SseReplies.stream(Golden.read(reply()));
+    return request -> request.body().contains("previous_interaction_id") ? GONE : text;
+  }
+
+  /** A conversation whose assistant turn continues interaction {@code int_gone}. */
+  private static List<Message> continuedHistory() {
+    var asked = List.of(Message.user("Hi"));
+    var metadata =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "int_gone",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            PromptStamps.of(asked, List.of()));
+    return List.of(
+        Message.user("Hi"),
+        Message.assistant("Earlier answer", List.of(), metadata),
+        Message.user("Again"));
+  }
+
+  private static String stamp(GeminiModelId model, String system, List<Tool> tools) {
+    return new GeminiRequestBuilder(model, ModelConfig.of("k"))
+        .build(List.of(Message.system(system), Message.user("Hi")), tools, null)
+        .promptStamp();
+  }
+
+  private static Tool tool(String name, String description) {
+    return Tool.newBuilder()
+        .withName(name)
+        .withDescription(description)
+        .withExecutor((arguments, context) -> ToolResult.success("ok"))
+        .build();
   }
 
   @Override

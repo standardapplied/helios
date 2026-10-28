@@ -6,6 +6,7 @@ import static com.standardapplied.helios.anthropic.AnthropicFixture.INTERLEAVED_
 import static com.standardapplied.helios.anthropic.AnthropicFixture.drainSseFixture;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.model;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.requests;
+import static com.standardapplied.helios.anthropic.AnthropicFixture.underCurrentPrompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -37,7 +38,8 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var request =
         requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.disabled())
-            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
+            .body();
 
     // System emits the legacy plain-string shape — no cache_control, no array wrapping.
     assertEquals("Be helpful", request.system());
@@ -60,7 +62,8 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var request =
         requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.longLived())
-            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
+            .body();
 
     @SuppressWarnings("unchecked")
     var systemBlocks =
@@ -85,7 +88,9 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.shortLived());
     var request =
-        requests.build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null);
+        requests
+            .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
+            .body();
 
     @SuppressWarnings("unchecked")
     var systemBlocks =
@@ -103,10 +108,12 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        requests.build(
-            List.of(Message.system("You are a careful assistant."), Message.user("Hi")),
-            List.of(),
-            null);
+        requests
+            .build(
+                List.of(Message.system("You are a careful assistant."), Message.user("Hi")),
+                List.of(),
+                null)
+            .body();
 
     @SuppressWarnings("unchecked")
     var systemBlocks =
@@ -129,7 +136,7 @@ class PromptCacheTest {
     // block — Anthropic rejects empty system arrays and an empty text block wastes a breakpoint.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
     assertNull(request.system(), "blank system must serialize as omitted, not as an empty array");
   }
 
@@ -163,7 +170,7 @@ class PromptCacheTest {
                     .build())
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool1, tool2), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool1, tool2), null).body();
 
     assertEquals(2, request.tools().size());
     assertNull(
@@ -187,7 +194,7 @@ class PromptCacheTest {
             .withDescription("a lone tool")
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
     assertNotNull(request.tools().getFirst().cacheControl());
   }
 
@@ -195,7 +202,7 @@ class PromptCacheTest {
   void promptCachingOmitsToolBreakpointWhenToolsEmpty() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
     assertNull(request.tools(), "empty tools list serializes as omitted, no breakpoint");
   }
 
@@ -206,7 +213,7 @@ class PromptCacheTest {
     // single-block list with the block annotated.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = requests.build(List.of(Message.user("Latest turn")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Latest turn")), List.of(), null).body();
 
     var last = request.messages().getLast();
     @SuppressWarnings("unchecked")
@@ -228,7 +235,7 @@ class PromptCacheTest {
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var msg = Message.user("Look at this", List.of(InlineFile.of(pngBytes, "image/png")));
-    var request = requests.build(List.of(msg), List.of(), null);
+    var request = requests.build(List.of(msg), List.of(), null).body();
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -246,10 +253,13 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        requests.build(
-            List.of(Message.user("hello"), Message.assistant("hi"), Message.user("how are you")),
-            List.of(),
-            null);
+        requests
+            .build(
+                List.of(
+                    Message.user("hello"), Message.assistant("hi"), Message.user("how are you")),
+                List.of(),
+                null)
+            .body();
 
     assertEquals(3, request.messages().size());
     // First user (anchor of conversation) — plain string, no annotation.
@@ -274,7 +284,7 @@ class PromptCacheTest {
     // breakpoint — no synthetic empty breakpoint, no off-by-one.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = requests.build(List.of(Message.user("solo")), List.of(), null);
+    var request = requests.build(List.of(Message.user("solo")), List.of(), null).body();
 
     assertEquals(1, request.messages().size());
     @SuppressWarnings("unchecked")
@@ -289,7 +299,9 @@ class PromptCacheTest {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
     var request =
-        requests.build(List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null);
+        requests
+            .build(List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null)
+            .body();
 
     @SuppressWarnings("unchecked")
     var penultimate = (List<ContentBlock>) request.messages().get(0).content();
@@ -308,7 +320,8 @@ class PromptCacheTest {
     // tools) still apply.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    var request = requests.build(List.of(Message.system("S"), Message.user("")), List.of(), null);
+    var request =
+        requests.build(List.of(Message.system("S"), Message.user("")), List.of(), null).body();
     // Last message stays as an empty string — no promotion to an empty block.
     assertEquals("", request.messages().getFirst().content());
     // System still cached.
@@ -332,14 +345,16 @@ class PromptCacheTest {
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
     var request =
-        requests.build(
-            List.of(
-                Message.system("be helpful"),
-                Message.user("hello"),
-                Message.assistant("hi"),
-                Message.user("how are you")),
-            List.of(tool),
-            null);
+        requests
+            .build(
+                List.of(
+                    Message.system("be helpful"),
+                    Message.user("hello"),
+                    Message.assistant("hi"),
+                    Message.user("how are you")),
+                List.of(tool),
+                null)
+            .body();
 
     var breakpointCount = 0;
     @SuppressWarnings("unchecked")
@@ -375,8 +390,9 @@ class PromptCacheTest {
             .withExecutor((args, ctx) -> ToolResult.success(""))
             .build();
     var request =
-        requests.build(
-            List.of(Message.system("be helpful"), Message.user("hi")), List.of(tool), null);
+        requests
+            .build(List.of(Message.system("be helpful"), Message.user("hi")), List.of(tool), null)
+            .body();
 
     var breakpointCount = 0;
     @SuppressWarnings("unchecked")
@@ -402,14 +418,16 @@ class PromptCacheTest {
     var assistantMessage = response.toMessage();
 
     var request =
-        requests.build(
-            List.of(
-                Message.user("Compare profiles 1 and 2"),
-                assistantMessage,
-                Message.tool("toolu_1", "get_profile", "profile one"),
-                Message.tool("toolu_2", "get_profile", "profile two")),
-            List.of(),
-            null);
+        requests
+            .build(
+                List.of(
+                    Message.user("Compare profiles 1 and 2"),
+                    underCurrentPrompt(assistantMessage, requests, List.of()),
+                    Message.tool("toolu_1", "get_profile", "profile one"),
+                    Message.tool("toolu_2", "get_profile", "profile two")),
+                List.of(),
+                null)
+            .body();
 
     var assistant = (List<Map<String, Object>>) request.messages().get(1).content();
     assertNotNull(
@@ -435,8 +453,15 @@ class PromptCacheTest {
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        requests.build(
-            List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+        requests
+            .build(
+                List.of(
+                    Message.user("go"),
+                    underCurrentPrompt(assistant, requests, List.of()),
+                    Message.user("more")),
+                List.of(),
+                null)
+            .body();
 
     var blocks = (List<Map<String, Object>>) request.messages().get(1).content();
     assertEquals(
@@ -455,8 +480,9 @@ class PromptCacheTest {
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        requests.build(
-            List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+        requests
+            .build(List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null)
+            .body();
 
     assertEquals(List.of("not-a-block"), request.messages().get(1).content());
   }

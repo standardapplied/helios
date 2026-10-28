@@ -29,17 +29,20 @@ final class GeminiStreamParser implements SseReader.Parser {
 
   private final boolean propagateInteractionId;
   private final String apiVersion;
+  private final String promptStamp;
   private final StreamedSteps steps = new StreamedSteps();
   private Response.Usage usage;
   private String interactionId;
 
   /**
-   * A parser for a stream of the interactions API {@code apiVersion}, whose response records its
-   * interaction id when {@code propagateInteractionId} is set, for server-side continuation.
+   * A parser for a stream of the interactions API {@code apiVersion} answering a request built
+   * under {@code promptStamp}, whose response records its interaction id when {@code
+   * propagateInteractionId} is set, for server-side continuation.
    */
-  GeminiStreamParser(boolean propagateInteractionId, String apiVersion) {
+  GeminiStreamParser(boolean propagateInteractionId, String apiVersion, String promptStamp) {
     this.propagateInteractionId = propagateInteractionId;
     this.apiVersion = apiVersion;
+    this.promptStamp = promptStamp;
   }
 
   @Override
@@ -114,6 +117,7 @@ final class GeminiStreamParser implements SseReader.Parser {
         usage,
         propagateInteractionId ? interactionId : null,
         apiVersion,
+        promptStamp,
         finishReason);
   }
 
