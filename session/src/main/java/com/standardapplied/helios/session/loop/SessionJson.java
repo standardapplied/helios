@@ -37,8 +37,8 @@ public final class SessionJson {
           .build();
 
   /**
-   * Stored entries must read back exactly what was written: a decimal reads as a {@link Double}
-   * only when that is its exact value, otherwise as a {@link BigDecimal}.
+   * Stored entries read back as the JSON value written, numbers exact: a decimal reads as a {@link
+   * Double} only when that is its exact value, otherwise as a {@link BigDecimal}.
    */
   private static final ObjectMapper ENTRY_MAPPER =
       JsonMapper.builder(ANY_STRING_LENGTH)

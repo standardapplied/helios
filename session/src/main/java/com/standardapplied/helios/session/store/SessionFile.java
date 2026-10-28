@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.CharacterCodingException;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -56,6 +57,7 @@ final class SessionFile {
    */
   Log read() {
     try (var channel = FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+      requireNamed(path, path.toRealPath(LinkOption.NOFOLLOW_LINKS));
       return Log.parse(path, contents(channel));
     } catch (NoSuchFileException e) {
       return new Log(List.of(), 0, 0);
@@ -79,7 +81,7 @@ final class SessionFile {
             .getBytes(UTF_8);
     try (var channel =
             FileChannel.open(path, expectedLastSeq == 0 ? CREATE_OR_APPEND : APPEND, attributes);
-        var _ = channel.lock()) {
+        var _ = lockNamed(channel)) {
       var lastSeq = lastSeq(channel);
       if (lastSeq != expectedLastSeq) {
         throw new SessionConflictException(sessionId, expectedLastSeq, lastSeq);
@@ -95,6 +97,26 @@ final class SessionFile {
     } catch (IOException e) {
       throw new SessionStoreException("cannot append to session file " + path, e);
     }
+  }
+
+  /**
+   * Refuse a file whose name on disk is not {@code path}'s, as a file system that ignores case
+   * reports it for an id that differs from the file's only in case. The names are compared as
+   * strings, since a path of such a file system compares equal regardless of case.
+   *
+   * @throws SessionStoreException if the names differ
+   */
+  static void requireNamed(Path path, Path onDisk) {
+    var name = onDisk.getFileName().toString();
+    if (!name.equals(path.getFileName().toString())) {
+      throw new SessionStoreException(
+          "session file " + path + " is named " + name + " on disk, another session's file", null);
+    }
+  }
+
+  private FileLock lockNamed(FileChannel channel) throws IOException {
+    requireNamed(path, path.toRealPath(LinkOption.NOFOLLOW_LINKS));
+    return channel.lock();
   }
 
   private long lastSeq(FileChannel channel) throws IOException {

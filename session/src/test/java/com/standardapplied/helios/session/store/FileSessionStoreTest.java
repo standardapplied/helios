@@ -280,6 +280,39 @@ final class FileSessionStoreTest extends SessionStoreContract {
   }
 
   @Test
+  void aDirectoryGroupOrOthersCanWriteIsRefused() throws IOException {
+    Files.createDirectories(directory());
+    for (var permissions : List.of("rwxrwx---", "rwx---rwx")) {
+      Files.setPosixFilePermissions(directory(), PosixFilePermissions.fromString(permissions));
+
+      var thrown =
+          assertThrows(SessionStoreException.class, () -> FileSessionStore.of(directory()));
+
+      assertEquals(
+          "session directory "
+              + directory()
+              + " is "
+              + permissions
+              + ": give FileSessionStore a directory that only its user can write",
+          thrown.getMessage());
+    }
+  }
+
+  @Test
+  void aFileNamedOnDiskUnlikeItsSessionIsRefused() {
+    var path = directory().resolve("Chat.jsonl");
+
+    var thrown =
+        assertThrows(
+            SessionStoreException.class,
+            () -> SessionFile.requireNamed(path, directory().resolve("chat.jsonl")));
+
+    assertEquals(
+        "session file " + path + " is named chat.jsonl on disk, another session's file",
+        thrown.getMessage());
+  }
+
+  @Test
   void aFileHoldingOnlyATornLineLoadsEmpty() throws IOException {
     Files.createDirectories(directory());
     Files.write(file(), "{\"seq\":1".getBytes(UTF_8));

@@ -918,10 +918,12 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
   number the session read or wrote; a store holding another refuses it with
   `SessionConflictException`, the run ends `ErrorDuringExecution` kind `SessionConflict` (any other
   store failure: `SessionStoreFailed`) and the session closes itself. `InMemorySessionStore` and
-  `FileSessionStore` (one `<sessionId>.jsonl` per session, owner-only on POSIX, a torn last line
-  ignored and truncated) ship in `com.standardapplied.helios.session.store`, with the
-  `SessionStore` SPI, `SessionEntryJson` and the `SessionStoreContract` test case in the session
-  test jar.
+  `FileSessionStore` (one `<sessionId>.jsonl` per session, owner-only on POSIX, refusing a
+  directory group or others can write and a file whose name on disk is not its id's, a torn last
+  line ignored and truncated) ship in `com.standardapplied.helios.session.store`, with the
+  `SessionStore` SPI, `SessionEntryJson` (an entry reads back as the same JSON value, a number
+  exact in value but not always in Java type) and the `SessionStoreContract` test case in the
+  session test jar.
 - **A session is a conversation that runs many times.** `send` steers the run in progress or
   starts the next one and returns that run's result future; a session runs again after any ending
   until it is closed; `interrupt()` stops the current run and keeps the session; events carry
