@@ -78,16 +78,20 @@ final class FileSessionStoreTest extends SessionStoreContract {
     var store = FileSessionStore.of(directory());
     store.append(SID, 0, List.of(added(Message.user("a"))));
     Files.writeString(file(), "not a batch\n", StandardOpenOption.APPEND);
-    var other = FileSessionStore.of(directory());
 
-    var thrown = assertThrows(SessionStoreException.class, () -> store.load(SID));
-    var appending =
-        assertThrows(
-            SessionStoreException.class,
-            () -> other.append(SID, 2, List.of(added(Message.user("b")))));
+    assertLineTwoFailsEveryRead(store);
+  }
 
-    assertEquals("session file " + file() + " line 2 is not a batch", thrown.getMessage());
-    assertEquals(thrown.getMessage(), appending.getMessage());
+  @Test
+  void aLineOfMalformedUtf8FailsTheReadNamingTheFileAndTheLine() throws IOException {
+    var store = FileSessionStore.of(directory());
+    store.append(SID, 0, List.of(added(Message.user("a"))));
+    store.append(SID, 1, List.of(added(Message.user("hello"))));
+    var bytes = Files.readAllBytes(file());
+    bytes[new String(bytes, UTF_8).indexOf("hello")] = (byte) 0xFF;
+    Files.write(file(), bytes);
+
+    assertLineTwoFailsEveryRead(store);
   }
 
   @Test
@@ -258,6 +262,20 @@ final class FileSessionStoreTest extends SessionStoreContract {
     assertEquals(new StoredSession(SID, 0, List.of()), store.load(SID));
     store.append(SID, 0, List.of(added(Message.user("a"))));
     assertEquals(1, Files.readAllLines(file()).size());
+  }
+
+  /** Both a load and another store's append fail, naming the file and line 2. */
+  private void assertLineTwoFailsEveryRead(SessionStore store) {
+    var other = FileSessionStore.of(directory());
+
+    var thrown = assertThrows(SessionStoreException.class, () -> store.load(SID));
+    var appending =
+        assertThrows(
+            SessionStoreException.class,
+            () -> other.append(SID, 2, List.of(added(Message.user("b")))));
+
+    assertEquals("session file " + file() + " line 2 is not a batch", thrown.getMessage());
+    assertEquals(thrown.getMessage(), appending.getMessage());
   }
 
   private static int lineLength(List<SessionEntry> entries) {

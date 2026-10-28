@@ -14,6 +14,7 @@ import com.standardapplied.helios.session.store.SessionStoreException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletionException;
 
 /**
  * A session's history as its {@link SessionStore} holds it. {@link #open} loads the stored
@@ -83,6 +84,8 @@ public final class StoredHistory {
    * id and {@code at}.
    *
    * @throws SessionStoreException if the store refused the batch, or failed in any other way
+   * @throws Error an {@link Error} the store threw, as itself or as a joined future's cause: a host
+   *     failure, never a refusal
    */
   void write(SessionState state, Instant at) {
     if (store.isEmpty() || refused) {
@@ -134,6 +137,9 @@ public final class StoredHistory {
       refused = true;
       throw e;
     } catch (RuntimeException e) {
+      if (e instanceof CompletionException && e.getCause() instanceof Error error) {
+        throw error;
+      }
       refused = true;
       throw new SessionStoreException(
           store.getClass().getName() + " failed to append to session " + sessionId, e);

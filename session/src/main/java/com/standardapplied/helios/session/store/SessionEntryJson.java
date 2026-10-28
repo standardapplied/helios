@@ -55,7 +55,14 @@ public final class SessionEntryJson {
   }
 
   /** One line of a file store: a batch's first sequence number and its entries. */
-  record Batch(long seq, List<SessionEntry> entries) {}
+  record Batch(long seq, List<SessionEntry> entries) {
+
+    Batch {
+      if (seq < 1 || entries.isEmpty()) {
+        throw new IllegalArgumentException("a batch needs a positive seq and at least one entry");
+      }
+    }
+  }
 
   /** Write {@code batch} as {@code {"seq":…,"entries":[…]}}. */
   static String write(Batch batch) {
@@ -76,8 +83,16 @@ public final class SessionEntryJson {
           var line = SessionJson.BINDING.toMap(json);
           var entries =
               ((List<?>) line.get("entries")).stream().map(entry -> entry(object(entry))).toList();
-          return new Batch(((Number) line.get("seq")).longValue(), entries);
+          return new Batch(seq(line.get("seq")), entries);
         });
+  }
+
+  private static long seq(Object value) {
+    return switch (value) {
+      case Integer seq -> seq;
+      case Long seq -> seq;
+      case null, default -> throw new IllegalArgumentException("seq is not a 64-bit integer");
+    };
   }
 
   private static Map<String, Object> fields(SessionEntry entry) {
