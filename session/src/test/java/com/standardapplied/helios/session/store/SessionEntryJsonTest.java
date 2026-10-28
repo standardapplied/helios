@@ -82,6 +82,8 @@ final class SessionEntryJsonTest {
                 new SessionEntry.HistoryReplaced("run-1", AT, List.of(Message.user("s")))));
 
     assertEquals(batch, SessionEntryJson.readBatch(SessionEntryJson.write(batch)));
+    var past32Bits = new SessionEntryJson.Batch(Integer.MAX_VALUE + 1L, batch.entries());
+    assertEquals(past32Bits, SessionEntryJson.readBatch(SessionEntryJson.write(past32Bits)));
     assertInstanceOf(
         SessionStoreException.class,
         assertThrows(RuntimeException.class, () -> SessionEntryJson.readBatch("{\"seq\":1}")));
