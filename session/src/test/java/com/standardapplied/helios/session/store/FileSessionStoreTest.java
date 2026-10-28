@@ -214,6 +214,23 @@ final class FileSessionStoreTest extends SessionStoreContract {
   }
 
   @Test
+  void aRefusedAppendLeavesNoFileToDelete() {
+    var store = FileSessionStore.of(directory());
+
+    var refused =
+        assertThrows(
+            SessionConflictException.class,
+            () -> store.append(SID, 3, List.of(added(Message.user("a")))));
+
+    assertEquals(
+        "session chat-1 was written by another writer: the append expected last sequence number"
+            + " 3, the store holds 0",
+        refused.getMessage());
+    assertFalse(Files.exists(file()));
+    assertFalse(store.delete(SID));
+  }
+
+  @Test
   void aSessionFileReachedThroughASymbolicLinkIsRefused() throws IOException {
     var store = FileSessionStore.of(directory());
     var elsewhere = Files.writeString(temp.resolve("elsewhere.jsonl"), "");

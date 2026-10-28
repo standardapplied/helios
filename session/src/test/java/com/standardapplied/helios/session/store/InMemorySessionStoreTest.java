@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
@@ -30,5 +31,16 @@ final class InMemorySessionStoreTest extends SessionStoreContract {
     assertFalse(store.delete(SID));
     assertEquals(List.of(), store.entries(SID));
     assertEquals(0, store.load(SID).lastSeq());
+  }
+
+  @Test
+  void aRefusedAppendLeavesNoSessionToDelete() {
+    var store = new InMemorySessionStore();
+
+    assertThrows(
+        SessionConflictException.class,
+        () -> store.append(SID, 3, List.of(added(Message.user("a")))));
+
+    assertFalse(store.delete(SID));
   }
 }
