@@ -76,7 +76,7 @@ class StreamingIteratorTest {
         new SseReader(
             neverDelivers,
             SHORT_IDLE_TIMEOUT,
-            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+            new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION, "stamp"),
             GeminiException::new)) {
       assertTrue(iterator.hasNext());
       var event = iterator.next();

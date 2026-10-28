@@ -8,8 +8,8 @@ KeepAlive[]
 KeepAlive[]
 TextDelta[text=Hello!]
 KeepAlive[]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}, citations=[]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=wireSig}, citations=[]]
 onComplete
 == chat
 Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=Plan the answer.
-Then greet., citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.thoughtSignatures=wireSig}]
+Then greet., citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=wireSig}]

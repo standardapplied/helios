@@ -4,7 +4,7 @@ KeepAlive[]
 TextDelta[text=Hello, wor]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], metadata={anthropic.stopReason=max_tokens}, citations=[]]
+MessageStop[stopReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=max_tokens}, citations=[]]
 onComplete
 == chat
-Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], thinking=null, citations=[], metadata={anthropic.stopReason=max_tokens}]
+Response[content=Hello, wor, parsed=null, toolCalls=[], finishReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=max_tokens}]

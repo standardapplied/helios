@@ -87,7 +87,7 @@ final class GeminiSse {
     return new SseReader(
         body,
         SseEvents.NEVER_IDLE,
-        new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION),
+        new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION, "stamp"),
         GeminiException::new);
   }
 

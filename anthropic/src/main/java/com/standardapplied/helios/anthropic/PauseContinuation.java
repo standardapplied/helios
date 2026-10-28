@@ -22,11 +22,12 @@ import java.util.concurrent.CancellationException;
  * completion is swallowed, that segment's stream closed, and the continuation opened on the next
  * {@code hasNext()}; the one terminal carries the merged turn — the completion its response, an
  * error after a pause its partial response. A caller never sees the pause; a continuation's first
- * thinking delta carries the separator the merge puts before its thinking. Closing closes the
- * segment in flight and opens no further one. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes,
- * which turns a pause loop into a loud failure.
+ * thinking delta carries the separator the merge puts before its thinking, and every segment is
+ * sent under the turn's one prompt stamp. Closing closes the segment in flight and opens no further
+ * one. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud
+ * failure.
  */
-final class PauseContinuation implements Exchange<MessagesRequest> {
+final class PauseContinuation implements Exchange<StampedRequest> {
 
   /**
    * The most resumes of one turn; the API's own server loop runs about ten iterations a segment.
@@ -35,10 +36,10 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
 
   private static final String PAUSE_TURN = "pause_turn";
 
-  private final Exchange<MessagesRequest> exchange;
+  private final Exchange<StampedRequest> exchange;
 
   /** Continues turns segment by segment through {@code exchange}. */
-  PauseContinuation(Exchange<MessagesRequest> exchange) {
+  PauseContinuation(Exchange<StampedRequest> exchange) {
     this.exchange = Objects.requireNonNull(exchange, "exchange must not be null");
   }
 
@@ -47,7 +48,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
    * the exchange's one error event, passed through.
    */
   @Override
-  public CloseableIterator<StreamEvent> stream(MessagesRequest request) {
+  public CloseableIterator<StreamEvent> stream(StampedRequest request) {
     return new Turn(request, exchange.stream(request));
   }
 
@@ -70,7 +71,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
 
   /** {@code base} with the merged-so-far assistant content appended verbatim. */
   @SuppressWarnings("unchecked")
-  private static MessagesRequest continuation(MessagesRequest base, Response<Void> merged) {
+  private static StampedRequest continuation(StampedRequest base, Response<Void> merged) {
     var rawContent = merged.metadata().get(RawContentEcho.RAW_CONTENT_KEY);
     if (rawContent == null || rawContent.isEmpty()) {
       throw new AnthropicException(
@@ -82,7 +83,7 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
     } catch (RuntimeException e) {
       throw new AnthropicException("Failed to decode paused assistant content for resume", e);
     }
-    var messages = new ArrayList<>(base.messages());
+    var messages = new ArrayList<>(base.body().messages());
     messages.add(new MessagesRequest.MessageEntry("assistant", blocks));
     return base.continuationWith(messages);
   }
@@ -93,18 +94,18 @@ final class PauseContinuation implements Exchange<MessagesRequest> {
    */
   private final class Turn implements CloseableIterator<StreamEvent> {
 
-    private final MessagesRequest request;
+    private final StampedRequest request;
     private final Object lock = new Object();
     private CloseableIterator<StreamEvent> segment;
     private boolean closed;
-    private MessagesRequest continuation;
+    private StampedRequest continuation;
     private Response<Void> mergedSoFar;
     private int continuations;
     private boolean thinkingStreamed;
     private StreamEvent next;
     private boolean ended;
 
-    Turn(MessagesRequest request, CloseableIterator<StreamEvent> first) {
+    Turn(StampedRequest request, CloseableIterator<StreamEvent> first) {
       this.request = request;
       this.segment = first;
     }

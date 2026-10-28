@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.anthropic;
 
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Reasoning;
@@ -12,6 +13,7 @@ import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.tool.Tool;
 import java.net.URI;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,12 +99,27 @@ class AnthropicRequestSnapshotTest {
   }
 
   private static Consumer<Model> withTools() {
-    return model -> model.chat(ConversationFixture.history(THINKING), ConversationFixture.tools());
+    var tools = ConversationFixture.tools();
+    return model -> model.chat(history(tools, null), tools);
   }
 
   private static Consumer<Model> withSchema(List<Tool> tools) {
-    return model ->
-        model.chat(ConversationFixture.history(THINKING), tools, ConversationFixture.schema());
+    var schema = ConversationFixture.schema();
+    return model -> model.chat(history(tools, schema.schema().toMap()), tools, schema);
+  }
+
+  /**
+   * The fixture conversation, its assistant turn produced under the prompt a request offering
+   * {@code tools} and {@code schema} sends, so a binding model replays its thinking.
+   */
+  private static List<Message> history(List<Tool> tools, Map<String, Object> schema) {
+    var stamp =
+        AnthropicFixture.requests(AnthropicModelId.CLAUDE_SONNET_4_6, ModelConfig.of("k"))
+            .build(ConversationFixture.history(THINKING), tools, schema)
+            .promptStamp();
+    var metadata = new HashMap<>(THINKING);
+    metadata.put(ReasoningReplay.PROMPT_STAMP_KEY, stamp);
+    return ConversationFixture.history(metadata);
   }
 
   private static Function<URI, Model> modelAt(

@@ -11,6 +11,7 @@
  */
 module com.standardapplied.helios.gemini {
   requires com.standardapplied.helios.core;
+  requires java.logging;
   requires java.net.http;
   requires tools.jackson.databind;
   requires com.fasterxml.jackson.annotation;

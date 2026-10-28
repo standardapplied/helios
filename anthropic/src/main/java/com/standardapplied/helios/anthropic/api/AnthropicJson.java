@@ -5,7 +5,9 @@ package com.standardapplied.helios.anthropic.api;
 import com.standardapplied.helios.core.provider.JsonBinding;
 import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -20,6 +22,17 @@ public final class AnthropicJson {
 
   /** Jackson's defaults, for decoding the metadata this module records on a message. */
   public static final ObjectMapper DEFAULT = JsonMapper.builder().build();
+
+  /**
+   * Writes a value's canonical JSON, properties and map entries sorted by name, so equal values
+   * write equal bytes whatever order their maps were built in.
+   */
+  public static final ObjectMapper CANONICAL =
+      JsonMapper.builder()
+          .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+          .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
+          .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+          .build();
 
   /** Structured output read through {@link #LENIENT}. */
   public static final JsonBinding STRUCTURED =

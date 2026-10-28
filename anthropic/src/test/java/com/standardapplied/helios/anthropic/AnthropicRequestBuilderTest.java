@@ -31,7 +31,7 @@ class AnthropicRequestBuilderTest {
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var userMessage = Message.user("look at this", List.of(InlineFile.of(pngBytes, "image/png")));
 
-    var request = requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null).body();
 
     var entry = request.messages().getFirst();
     assertEquals("user", entry.role());
@@ -57,7 +57,7 @@ class AnthropicRequestBuilderTest {
     var userMessage =
         Message.user("summarize this", List.of(InlineFile.of(pdfBytes, "application/pdf")));
 
-    var request = requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null).body();
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -72,7 +72,7 @@ class AnthropicRequestBuilderTest {
     var csvBytes = "a,b\n1,2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var userMessage = Message.user("", List.of(InlineFile.of(csvBytes, "text/csv")));
 
-    var request = requests.build(List.of(userMessage), List.of(), null);
+    var request = requests.build(List.of(userMessage), List.of(), null).body();
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) request.messages().getFirst().content();
@@ -97,7 +97,7 @@ class AnthropicRequestBuilderTest {
     var error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> requests.build(List.of(message), List.of(), null));
+            () -> requests.build(List.of(message), List.of(), null).body());
 
     assertTrue(error.getMessage().contains("file references"));
   }
@@ -109,7 +109,7 @@ class AnthropicRequestBuilderTest {
 
     var messages = List.of(Message.system("You are helpful"), Message.user("Hello"));
 
-    var request = requests.build(messages, List.of(), null);
+    var request = requests.build(messages, List.of(), null).body();
 
     var system = (List<?>) request.system();
     assertEquals(1, system.size());
@@ -134,7 +134,7 @@ class AnthropicRequestBuilderTest {
             Message.tool("call_1", "tool1", "result1"),
             Message.tool("call_2", "tool2", "result2"));
 
-    var request = requests.build(messages, List.of(), null);
+    var request = requests.build(messages, List.of(), null).body();
 
     assertEquals(3, request.messages().size());
     assertEquals("user", request.messages().get(0).role());
@@ -157,7 +157,7 @@ class AnthropicRequestBuilderTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.maxOutputTokens(), request.maxTokens());
   }
@@ -168,8 +168,8 @@ class AnthropicRequestBuilderTest {
     var haikuRequests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
     var opus47Requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
 
-    var haikuReq = haikuRequests.build(List.of(Message.user("Hi")), List.of(), null);
-    var opusReq = opus47Requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var haikuReq = haikuRequests.build(List.of(Message.user("Hi")), List.of(), null).body();
+    var opusReq = opus47Requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(64_000, haikuReq.maxTokens());
     assertEquals(128_000, opusReq.maxTokens());
@@ -182,7 +182,8 @@ class AnthropicRequestBuilderTest {
 
     var request =
         requests("claude-some-future-model", config)
-            .build(List.of(Message.user("Hi")), List.of(), null);
+            .build(List.of(Message.user("Hi")), List.of(), null)
+            .body();
 
     assertEquals(AnthropicRequestBuilder.DEFAULT_MAX_OUTPUT_TOKENS, model.maxOutputTokens());
     assertEquals(AnthropicRequestBuilder.DEFAULT_MAX_OUTPUT_TOKENS, request.maxTokens());
@@ -193,7 +194,7 @@ class AnthropicRequestBuilderTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withMaxOutputTokens(8192).build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(8192, request.maxTokens());
   }
@@ -204,7 +205,7 @@ class AnthropicRequestBuilderTest {
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
-    var request = requests.build(List.of(Message.user("Extract")), List.of(), schema);
+    var request = requests.build(List.of(Message.user("Extract")), List.of(), schema).body();
 
     assertNotNull(request.system());
     var system = (List<?>) request.system();
@@ -221,7 +222,7 @@ class AnthropicRequestBuilderTest {
 
     var schema = Map.<String, Object>of("type", "object");
     var messages = List.of(Message.system("Be helpful"), Message.user("Extract"));
-    var request = requests.build(messages, List.of(), schema);
+    var request = requests.build(messages, List.of(), schema).body();
 
     var system = (List<?>) request.system();
     assertEquals(1, system.size());
@@ -240,7 +241,7 @@ class AnthropicRequestBuilderTest {
             .build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(0.7, request.temperature());
     assertEquals(List.of("END"), request.stopSequences());
@@ -251,7 +252,7 @@ class AnthropicRequestBuilderTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertTrue(request.stream());
   }
@@ -261,7 +262,7 @@ class AnthropicRequestBuilderTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals("claude-opus-4-6", request.model());
   }
@@ -276,7 +277,7 @@ class AnthropicRequestBuilderTest {
             .build();
     var requests = requests("claude-sonnet-4-6-20251114", config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(
         0.2,

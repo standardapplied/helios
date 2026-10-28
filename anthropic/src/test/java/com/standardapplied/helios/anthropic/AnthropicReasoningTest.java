@@ -46,6 +46,15 @@ class AnthropicReasoningTest {
 
   private static final String PROGRESS_BETA = "thinking-display-updates-2026-08-18";
 
+  private static final String BINDING_BETA = "thinking-binding-controls-2026-08-01";
+
+  /** The models "Preserved thinking" lists as binding a thinking block to its prefix (Oct 2026). */
+  private static final Set<AnthropicModelId> BINDING =
+      EnumSet.of(
+          AnthropicModelId.CLAUDE_FABLE_5_1,
+          AnthropicModelId.CLAUDE_OPUS_5_5,
+          AnthropicModelId.CLAUDE_SONNET_5_5);
+
   private static final Set<Level> LOW_TO_MAX = EnumSet.range(Level.LOW, Level.MAX);
 
   private static final Set<Display> WITH_PROGRESS = EnumSet.allOf(Display.class);
@@ -128,7 +137,8 @@ class AnthropicReasoningTest {
 
     var body = wire(model.id(), config);
 
-    assertEquals(thinking(DOCUMENTED.get(model), reasoning), body.get("thinking"));
+    assertEquals(
+        thinking(DOCUMENTED.get(model), reasoning, BINDING.contains(model)), body.get("thinking"));
     assertEquals(outputConfig(reasoning), body.get("output_config"));
   }
 
@@ -205,16 +215,17 @@ class AnthropicReasoningTest {
             reasoning -> {
               var body = wire("claude-opus-6", config(reasoning));
 
-              assertEquals(thinking(null, reasoning), body.get("thinking"), reasoning::toString);
+              assertEquals(
+                  thinking(null, reasoning, false), body.get("thinking"), reasoning::toString);
               assertEquals(outputConfig(reasoning), body.get("output_config"));
             });
   }
 
   @Test
-  void progressOnOpus55SendsUpdatesWithTheBetaTheCallerNeverNamed() {
+  void progressOnMythos51SendsUpdatesWithTheBetaTheCallerNeverNamed() {
     var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
 
-    var request = exchange("claude-opus-5-5", builder(progress));
+    var request = exchange("claude-mythos-5-1", builder(progress));
 
     assertEquals(PROGRESS_BETA, request.headers().get("anthropic-beta"));
     assertEquals(
@@ -227,7 +238,7 @@ class AnthropicReasoningTest {
     var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
 
     var request =
-        exchange("claude-opus-5-5", builder(progress).withHeader("Anthropic-Beta", "own-beta"));
+        exchange("claude-mythos-5-1", builder(progress).withHeader("Anthropic-Beta", "own-beta"));
 
     assertEquals("own-beta," + PROGRESS_BETA, request.headers().get("anthropic-beta"));
   }
@@ -236,14 +247,14 @@ class AnthropicReasoningTest {
   void noOtherDisplayAndNoAbsentReasoningAddsTheBeta() {
     for (var display : List.of(Display.HIDDEN, Display.SUMMARY)) {
       var request =
-          exchange("claude-opus-5-5", builder(new Reasoning.Effort(Level.MEDIUM, display)));
+          exchange("claude-mythos-5-1", builder(new Reasoning.Effort(Level.MEDIUM, display)));
 
       assertNull(request.headers().get("anthropic-beta"), display::toString);
     }
-    var absent = exchange("claude-opus-5-5", ModelConfig.newBuilder().withApiKey("test-key"));
+    var absent = exchange("claude-mythos-5-1", ModelConfig.newBuilder().withApiKey("test-key"));
     var own =
         exchange(
-            "claude-opus-5-5",
+            "claude-mythos-5-1",
             builder(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
                 .withHeader("anthropic-beta", "own-beta"));
 
@@ -251,10 +262,58 @@ class AnthropicReasoningTest {
     assertEquals("own-beta", own.headers().get("anthropic-beta"));
   }
 
-  private static Map<String, Object> thinking(Documented documented, Reasoning reasoning) {
+  @Test
+  void aBindingModelAsksTheApiToRejectAMismatchedBlockAlongsideEveryOtherBeta() {
+    var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
+
+    var request =
+        exchange("claude-opus-5-5", builder(progress).withHeader("anthropic-beta", "own-beta"));
+
+    assertEquals(
+        "own-beta," + PROGRESS_BETA + "," + BINDING_BETA, request.headers().get("anthropic-beta"));
+    assertEquals(
+        Map.of("prefix_mismatch_behavior", "error"),
+        ((Map<?, ?>) JSON.readValue(request.body(), Map.class).get("thinking"))
+            .get("block_binding"));
+  }
+
+  @Test
+  void aBindingModelWithoutAdaptiveThinkingSendsNoBinding() {
+    var betweenTools = exchange("claude-sonnet-5-5", builder(new Reasoning.Off()));
+    var absent = exchange("claude-fable-5-1", ModelConfig.newBuilder().withApiKey("test-key"));
+
+    assertNull(betweenTools.headers().get("anthropic-beta"));
+    assertEquals(
+        Map.of("type", "between_tools"),
+        JSON.readValue(betweenTools.body(), Map.class).get("thinking"));
+    assertNull(absent.headers().get("anthropic-beta"));
+    assertNull(JSON.readValue(absent.body(), Map.class).get("thinking"));
+  }
+
+  @Test
+  void aNonBindingModelSendsNoBinding() {
+    var request =
+        exchange("claude-opus-5", builder(new Reasoning.Effort(Level.HIGH, Display.SUMMARY)));
+
+    assertNull(request.headers().get("anthropic-beta"));
+    assertNull(
+        ((Map<?, ?>) JSON.readValue(request.body(), Map.class).get("thinking"))
+            .get("block_binding"));
+  }
+
+  private static Map<String, Object> thinking(
+      Documented documented, Reasoning reasoning, boolean binding) {
     return switch (reasoning) {
       case Reasoning.Off _ when documented == null -> Map.of("type", "disabled");
       case Reasoning.Off _ -> documented.off().isEmpty() ? null : documented.off();
+      case Reasoning.Effort e when binding ->
+          Map.of(
+              "type",
+              "adaptive",
+              "display",
+              DISPLAY.get(e.display()),
+              "block_binding",
+              Map.of("prefix_mismatch_behavior", "error"));
       case Reasoning.Effort e -> Map.of("type", "adaptive", "display", DISPLAY.get(e.display()));
     };
   }

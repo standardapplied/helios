@@ -9,12 +9,14 @@ import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.anthropic.api.OutputConfig;
 import com.standardapplied.helios.anthropic.api.ThinkingConfig;
+import com.standardapplied.helios.anthropic.api.ThinkingConfig.BlockBinding;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,11 +24,13 @@ import java.util.Map;
 /**
  * Builds the Messages API request for one turn of one model: the conversation, the output-schema
  * instruction, tools and tool choice, reasoning and sampling settings, and prompt-cache
- * breakpoints. It is the one place that reads a model's {@link ReasoningRules}: what the
+ * breakpoints. On a model that {@linkplain AnthropicModelId#bindsReasoning() binds reasoning} it
+ * replays reasoning as {@link ReasoningReplay} rules and asks the API to reject a mismatched
+ * thinking block. It is the one place that reads a model's {@link ReasoningRules}: what the
  * configuration may ask for is checked when it is built, and an accepted {@link Reasoning} is
  * looked up into its wire fields exactly, never clamped or substituted.
  */
-final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
+final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
 
   /**
    * Output-token ceiling assumed for a Claude model ID this build does not recognise (one not in
@@ -38,6 +42,9 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
 
   /** The beta a request carrying {@code thinking.display=updates} needs. */
   static final String PROGRESS_DISPLAY_BETA = "thinking-display-updates-2026-08-18";
+
+  /** The beta a request carrying {@code thinking.block_binding} needs. */
+  static final String BINDING_CONTROLS_BETA = "thinking-binding-controls-2026-08-01";
 
   private static final double LOWEST_TOP_P_WITH_EFFORT = 0.95;
 
@@ -58,6 +65,7 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
   private final int defaultMaxTokens;
   private final ModelConfig config;
   private final CachePolicy cachePolicy;
+  private final boolean bindsReasoning;
   private final ThinkingConfig thinking;
   private final OutputConfig outputConfig;
   private final List<String> betas;
@@ -85,13 +93,11 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
         knownModel != null ? knownModel.maxOutputTokens() : DEFAULT_MAX_OUTPUT_TOKENS;
     this.config = config;
     this.cachePolicy = cachePolicy;
-    this.thinking = thinking(rules, config.reasoning().orElse(null));
+    this.bindsReasoning = knownModel != null && knownModel.bindsReasoning();
+    this.thinking = thinking(rules, config.reasoning().orElse(null), bindsReasoning);
     this.outputConfig =
         effort != null ? new OutputConfig(effort.level().name().toLowerCase(Locale.ROOT)) : null;
-    this.betas =
-        effort != null && effort.display() == Display.PROGRESS
-            ? List.of(PROGRESS_DISPLAY_BETA)
-            : List.of();
+    this.betas = betas(effort, bindsReasoning);
   }
 
   /** The output-token ceiling a request carries when the configuration sets none. */
@@ -99,21 +105,26 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
     return defaultMaxTokens;
   }
 
-  /** The betas every request needs: the progress display's, when it is asked for. */
+  /**
+   * The betas every request needs: the progress display's when it is asked for, and the binding
+   * controls' when the request sets {@code thinking.block_binding}.
+   */
   List<String> betas() {
     return betas;
   }
 
   /**
    * The request for {@code messages}, offering {@code tools} and, when {@code outputSchema} is not
-   * null, instructing the model to answer with JSON matching it.
+   * null, instructing the model to answer with JSON matching it, stamped with its system prompt and
+   * tools.
    */
   @Override
-  public MessagesRequest build(
+  public StampedRequest build(
       List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
-    var conversation = AnthropicMessages.of(messages);
-    var system = withSchemaInstruction(conversation.system(), outputSchema, tools);
+    var system = withSchemaInstruction(AnthropicMessages.system(messages), outputSchema, tools);
     var toolDefinitions = AnthropicTools.of(tools, config);
+    var stamp = ReasoningReplay.stamp(system, toolDefinitions.all());
+    var reasoningFrom = ReasoningReplay.keptFrom(messages, stamp, bindsReasoning);
     var toolChoice = AnthropicTools.choice(config.toolChoice());
     var request =
         MessagesRequest.newBuilder()
@@ -126,8 +137,13 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
             .withStopSequences(config.stopSequences())
             .withThinking(thinking)
             .withOutputConfig(outputConfig);
-    PromptCache.apply(cachePolicy, request, system, toolDefinitions, conversation.entries());
-    return request.build();
+    PromptCache.apply(
+        cachePolicy,
+        request,
+        system,
+        toolDefinitions,
+        AnthropicMessages.entries(messages, reasoningFrom));
+    return new StampedRequest(request.build(), stamp);
   }
 
   private static void rejectForcedToolChoice(
@@ -143,13 +159,34 @@ final class AnthropicRequestBuilder implements RequestFactory<MessagesRequest> {
     }
   }
 
-  /** The {@code thinking} field for an accepted {@code reasoning}; null leaves it out. */
-  private static ThinkingConfig thinking(ReasoningRules rules, Reasoning reasoning) {
+  /**
+   * The {@code thinking} field for an accepted {@code reasoning}; null leaves it out. Adaptive
+   * thinking on a model that {@code binds} its blocks asks the API to reject a mismatched one; the
+   * other shapes take no binding.
+   */
+  private static ThinkingConfig thinking(ReasoningRules rules, Reasoning reasoning, boolean binds) {
     return switch (reasoning) {
       case null -> null;
       case Reasoning.Off _ -> OFF.get(rules.off());
+      case Reasoning.Effort e when binds ->
+          ThinkingConfig.adaptive(DISPLAY.get(e.display()))
+              .withBlockBinding(BlockBinding.rejectMismatch());
       case Reasoning.Effort e -> ThinkingConfig.adaptive(DISPLAY.get(e.display()));
     };
+  }
+
+  private static List<String> betas(Reasoning.Effort effort, boolean binds) {
+    if (effort == null) {
+      return List.of();
+    }
+    var betas = new ArrayList<String>();
+    if (effort.display() == Display.PROGRESS) {
+      betas.add(PROGRESS_DISPLAY_BETA);
+    }
+    if (binds) {
+      betas.add(BINDING_CONTROLS_BETA);
+    }
+    return List.copyOf(betas);
   }
 
   /**

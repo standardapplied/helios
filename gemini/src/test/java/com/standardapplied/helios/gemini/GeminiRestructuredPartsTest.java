@@ -20,7 +20,10 @@ import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.test.ConversationFixture;
 import com.standardapplied.helios.gemini.api.ContentItem;
 import com.standardapplied.helios.gemini.api.GeminiJson;
+import com.standardapplied.helios.gemini.api.InteractionRequest;
+import com.standardapplied.helios.gemini.api.ResponseFormat;
 import com.standardapplied.helios.gemini.api.Step;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -36,7 +39,8 @@ class GeminiRestructuredPartsTest {
               GeminiModelId.GEMINI_3_5_FLASH,
               ModelConfig.newBuilder().withApiKey("k").withToolChoice(choice).build());
 
-      var config = requests.build(List.of(Message.user("hi")), List.of(), null).generationConfig();
+      var config =
+          requests.build(List.of(Message.user("hi")), List.of(), null).request().generationConfig();
 
       assertEquals(
           choice.getClass().getSimpleName().toLowerCase(Locale.ROOT), config.toolChoice().mode());
@@ -101,8 +105,27 @@ class GeminiRestructuredPartsTest {
   }
 
   @Test
+  void aRequestBodyThatCannotBeWrittenIsNeverOpened() {
+    var self = new HashMap<String, Object>();
+    self.put("self", self);
+    var request =
+        InteractionRequest.newBuilder()
+            .withModel("m")
+            .withResponseFormat(ResponseFormat.json(self))
+            .build();
+    var config = ModelConfig.of("k");
+    try (var client = HttpClientFactory.create()) {
+      var streams = new GeminiStreams(config, client, GeminiEndpoint.of(config));
+
+      var failure = assertThrows(GeminiException.class, () -> streams.open(request, "stamp"));
+
+      assertEquals("Failed to serialize request", failure.getMessage());
+    }
+  }
+
+  @Test
   void anErrorEventNamesAStringCodeWithoutTakingItForAStatus() {
-    var parser = new GeminiStreamParser(true, "v1");
+    var parser = new GeminiStreamParser(true, "v1", "stamp");
 
     var error =
         assertInstanceOf(
@@ -115,7 +138,7 @@ class GeminiRestructuredPartsTest {
 
   @Test
   void anErrorEventWithANonPositiveCodeIsANonRetryableFailureWithoutAStatus() {
-    var parser = new GeminiStreamParser(true, "v1");
+    var parser = new GeminiStreamParser(true, "v1", "stamp");
 
     var error =
         assertInstanceOf(

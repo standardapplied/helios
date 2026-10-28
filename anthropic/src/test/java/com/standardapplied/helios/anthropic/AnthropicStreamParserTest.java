@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 class AnthropicStreamParserTest {
 
-  private final AnthropicStreamParser parser = new AnthropicStreamParser();
+  private final AnthropicStreamParser parser = new AnthropicStreamParser("stamp");
 
   @Test
   void eventsWithoutTheirPayloadChangeNothing() {
@@ -35,7 +35,7 @@ class AnthropicStreamParserTest {
     var partial = parser.partial();
     assertNull(partial.usage());
     assertEquals(FinishReason.ERROR, partial.finishReason());
-    assertEquals(Map.of(), partial.metadata());
+    assertEquals(Map.of(ReasoningReplay.PROMPT_STAMP_KEY, "stamp"), partial.metadata());
   }
 
   @Test
@@ -48,9 +48,9 @@ class AnthropicStreamParserTest {
 
   @Test
   void anyReportedTokenClassMakesTheUsage() {
-    var outputOnly = new AnthropicStreamParser();
+    var outputOnly = new AnthropicStreamParser("stamp");
     outputOnly.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4}}");
-    var cacheWritesOnly = new AnthropicStreamParser();
+    var cacheWritesOnly = new AnthropicStreamParser("stamp");
     cacheWritesOnly.parse(
         "{\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":2}}}");
 
