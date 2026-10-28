@@ -14,10 +14,10 @@ import java.util.Objects;
  * The one JSON form of a {@link SessionEntry}, which every store that writes JSON uses: {@code
  * {"type":"message","runId":…,"at":…,"message":{…}}} and {@code
  * {"type":"replaced","runId":…,"at":…,"history":[…]}}, {@code at} an ISO-8601 instant and each
- * {@link Message} written by Jackson's defaults. The JSON is all ASCII, every other character
- * escaped, and a decimal reads back as a {@link Double} only when that is its exact value,
- * otherwise as a {@link java.math.BigDecimal}, so an entry reads back as it was written. Reading a
- * {@code type} this version does not know fails, so an entry of a later kind is never skipped.
+ * {@link Message} written by Jackson's defaults. A lone UTF-16 surrogate is escaped, and a decimal
+ * reads back as a {@link Double} only when that is its exact value, otherwise as a {@link
+ * java.math.BigDecimal}, so an entry reads back as it was written. Reading a {@code type} this
+ * version does not know fails, so an entry of a later kind is never skipped.
  */
 public final class SessionEntryJson {
 
