@@ -529,6 +529,28 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   }
 
   @Test
+  void findContinuationPointStopsAtANewerAssistantWithoutAnInteraction() {
+    var continued =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "interaction-1",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            "s");
+    var messages =
+        List.of(
+            Message.user("Hello"),
+            Message.assistant("First", List.of(), continued),
+            Message.user("More"),
+            Message.assistant(
+                "Second", List.of(), Map.of(ContinuationPoint.PROMPT_STAMP_KEY, "other")),
+            Message.user("Again"));
+
+    var result = ContinuationPoint.find(messages, "s");
+
+    assertNull(result);
+  }
+
+  @Test
   void findContinuationPointSkipsAssistantWithEmptyId() {
     var metadata =
         Map.of(ContinuationPoint.INTERACTION_ID_KEY, "", ContinuationPoint.PROMPT_STAMP_KEY, "s");
