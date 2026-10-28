@@ -142,7 +142,7 @@ public final class StoredHistory {
       return List.of(
           new SessionEntry.HistoryReplaced(runId, at, snapshot.subList(system, snapshot.size())));
     }
-    return snapshot.subList(Math.max(stored, system), snapshot.size()).stream()
+    return snapshot.subList(stored, snapshot.size()).stream()
         .<SessionEntry>map(message -> new SessionEntry.MessageAdded(runId, at, message))
         .toList();
   }
