@@ -27,6 +27,9 @@ import java.util.Set;
 final class SessionFile {
 
   private static final Set<OpenOption> APPEND =
+      Set.of(StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+
+  private static final Set<OpenOption> CREATE_OR_APPEND =
       Set.of(
           StandardOpenOption.CREATE,
           StandardOpenOption.READ,
@@ -74,7 +77,8 @@ final class SessionFile {
     var line =
         (SessionEntryJson.write(new SessionEntryJson.Batch(expectedLastSeq + 1, batch)) + "\n")
             .getBytes(UTF_8);
-    try (var channel = FileChannel.open(path, APPEND, attributes);
+    try (var channel =
+            FileChannel.open(path, expectedLastSeq == 0 ? CREATE_OR_APPEND : APPEND, attributes);
         var _ = channel.lock()) {
       var lastSeq = lastSeq(channel);
       if (lastSeq != expectedLastSeq) {
@@ -86,6 +90,8 @@ final class SessionFile {
         channel.write(bytes, end + bytes.position());
       }
       channel.force(false);
+    } catch (NoSuchFileException e) {
+      throw new SessionConflictException(sessionId, expectedLastSeq, 0);
     } catch (IOException e) {
       throw new SessionStoreException("cannot append to session file " + path, e);
     }

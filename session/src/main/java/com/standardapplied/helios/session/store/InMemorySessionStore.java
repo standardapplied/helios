@@ -26,11 +26,11 @@ public final class InMemorySessionStore implements SessionStore {
   public void append(String sessionId, long expectedLastSeq, List<SessionEntry> entries) {
     var batch = AppendArguments.batch(sessionId, entries);
     synchronized (logs) {
-      var log = logs.computeIfAbsent(sessionId, id -> new ArrayList<>());
-      if (log.size() != expectedLastSeq) {
-        throw new SessionConflictException(sessionId, expectedLastSeq, log.size());
+      var lastSeq = logs.getOrDefault(sessionId, List.of()).size();
+      if (lastSeq != expectedLastSeq) {
+        throw new SessionConflictException(sessionId, expectedLastSeq, lastSeq);
       }
-      log.addAll(batch);
+      logs.computeIfAbsent(sessionId, id -> new ArrayList<>()).addAll(batch);
     }
   }
 
