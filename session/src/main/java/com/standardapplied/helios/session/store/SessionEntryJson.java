@@ -14,8 +14,10 @@ import java.util.Objects;
  * The one JSON form of a {@link SessionEntry}, which every store that writes JSON uses: {@code
  * {"type":"message","runId":…,"at":…,"message":{…}}} and {@code
  * {"type":"replaced","runId":…,"at":…,"history":[…]}}, {@code at} an ISO-8601 instant and each
- * {@link Message} written by Jackson's defaults. Reading a {@code type} this version does not know
- * fails, so an entry of a later kind is never skipped.
+ * {@link Message} written by Jackson's defaults. The JSON is all ASCII, every other character
+ * escaped, and a decimal reads back as a {@link Double} only when that is its exact value,
+ * otherwise as a {@link java.math.BigDecimal}, so an entry reads back as it was written. Reading a
+ * {@code type} this version does not know fails, so an entry of a later kind is never skipped.
  */
 public final class SessionEntryJson {
 
@@ -51,7 +53,7 @@ public final class SessionEntryJson {
    */
   public static SessionEntry read(String json) {
     Objects.requireNonNull(json, "json must not be null");
-    return parsed(() -> entry(SessionJson.BINDING.toMap(json)));
+    return parsed(() -> entry(SessionJson.ENTRIES.toMap(json)));
   }
 
   /** One line of a file store: a batch's first sequence number and its entries. */
@@ -80,7 +82,7 @@ public final class SessionEntryJson {
   static Batch readBatch(String json) {
     return parsed(
         () -> {
-          var line = SessionJson.BINDING.toMap(json);
+          var line = SessionJson.ENTRIES.toMap(json);
           var entries =
               ((List<?>) line.get("entries")).stream().map(entry -> entry(object(entry))).toList();
           long seq =
@@ -131,7 +133,7 @@ public final class SessionEntryJson {
   }
 
   private static Message message(Object fields) {
-    return SessionJson.BINDING.fromMap(object(fields), Message.class);
+    return SessionJson.ENTRIES.fromMap(object(fields), Message.class);
   }
 
   @SuppressWarnings("unchecked")
@@ -150,7 +152,7 @@ public final class SessionEntryJson {
     }
   }
 
-  /** A read that may throw what {@link SessionJson#BINDING} throws. */
+  /** A read that may throw what {@link SessionJson#ENTRIES} throws. */
   @FunctionalInterface
   private interface Reading<T> {
     T value() throws Exception;

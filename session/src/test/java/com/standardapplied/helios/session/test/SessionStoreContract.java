@@ -15,6 +15,7 @@ import com.standardapplied.helios.session.store.SessionConflictException;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.store.StoredSession;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,7 +66,9 @@ public abstract class SessionStoreContract {
 
   /**
    * A history holding what a provider round trip carries: inline bytes, file references, numeric,
-   * {@code null}, nested list and map tool arguments, provider metadata and a tool result.
+   * {@code null}, nested list and map tool arguments, provider metadata and a tool result; decimals
+   * a {@link Double} cannot hold, and text with lone UTF-16 surrogates and a supplementary
+   * character.
    *
    * @return the history
    */
@@ -74,6 +77,10 @@ public abstract class SessionStoreContract {
     arguments.put("int", 7);
     arguments.put("long", 5_000_000_000L);
     arguments.put("double", 1.5);
+    arguments.put("doubles", List.of(0.1, -0.0, Double.MIN_VALUE, Double.MAX_VALUE));
+    arguments.put("precise", new BigDecimal("0.12345678901234567890123456789"));
+    arguments.put("huge", new BigDecimal("1E+400"));
+    arguments.put("tiny", new BigDecimal("-1E-400"));
     arguments.put("none", null);
     arguments.put("list", List.of(1, "two", Map.of("three", true)));
     arguments.put("map", Map.of("nested", List.of()));
@@ -92,6 +99,7 @@ public abstract class SessionStoreContract {
             List.of(call),
             Map.of("anthropic.rawContent", "[{\"type\":\"thinking\",\"signature\":\"sig\"}]")),
         Message.tool("call-1", "lookup", "found"),
+        Message.user("high \uD800, low \uDC00, pair \uD83D\uDE00, accent \u00E9"),
         Message.assistant("done"));
   }
 
