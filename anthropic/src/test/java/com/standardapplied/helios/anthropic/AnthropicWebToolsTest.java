@@ -46,7 +46,7 @@ class AnthropicWebToolsTest {
   void webSearchToggleEmitsServerTool() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
 
-    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertNotNull(request.tools());
     var search = request.tools().getLast();
@@ -59,7 +59,7 @@ class AnthropicWebToolsTest {
   void webFetchToggleEmitsServerTool() {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebFetch(true).build();
 
-    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null).body();
 
     var fetch = request.tools().getLast();
     assertEquals("web_fetch_20260318", fetch.type());
@@ -70,7 +70,7 @@ class AnthropicWebToolsTest {
   void webTogglesOffEmitNoServerTools() {
     var config = ModelConfig.newBuilder().withApiKey("k").build();
 
-    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests(config).build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertNull(request.tools());
   }
@@ -80,7 +80,8 @@ class AnthropicWebToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var clientTool = lookupTool();
 
-    var request = requests(config).build(List.of(Message.user("Hi")), List.of(clientTool), null);
+    var request =
+        requests(config).build(List.of(Message.user("Hi")), List.of(clientTool), null).body();
 
     assertEquals(2, request.tools().size());
     assertEquals("lookup", request.tools().getFirst().name());
@@ -211,7 +212,7 @@ class AnthropicWebToolsTest {
         Message.assistant(
             "I'll search.", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, rawJson));
 
-    var entry = AnthropicMessages.assistant(message);
+    var entry = AnthropicMessages.assistant(message, true);
 
     assertEquals("assistant", entry.role());
     @SuppressWarnings("unchecked")
@@ -234,7 +235,8 @@ class AnthropicWebToolsTest {
 
     var request =
         requests(config)
-            .build(List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null);
+            .build(List.of(Message.user("go"), assistant, Message.user("more")), List.of(), null)
+            .body();
 
     assertNotNull(request, "raw-echo assistant content must not break cache annotation");
   }
@@ -296,7 +298,7 @@ class AnthropicWebToolsTest {
     var response =
         PauseContinuationTest.turn(
             request -> {
-              openedRequests.add(request);
+              openedRequests.add(request.body());
               return iterator(segments.removeFirst());
             },
             initial);
@@ -523,13 +525,14 @@ class AnthropicWebToolsTest {
             .withToolChoice(new com.standardapplied.helios.core.model.ToolChoice.Any())
             .build();
     var initial = requests(config).build(List.of(Message.user("go")), List.of(), null);
-    assertNotNull(initial.toolChoice(), "precondition: forced tool choice rides the base request");
+    assertNotNull(
+        initial.body().toolChoice(), "precondition: forced tool choice rides the base request");
 
     var openedRequests = new ArrayList<MessagesRequest>();
     var segments = new ArrayList<>(List.of(PAUSED_SEGMENT_SSE, FINAL_SEGMENT_SSE));
     PauseContinuationTest.turn(
         request -> {
-          openedRequests.add(request);
+          openedRequests.add(request.body());
           return iterator(segments.removeFirst());
         },
         initial);
@@ -575,7 +578,8 @@ class AnthropicWebToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
     var clientTool = lookupTool();
 
-    var request = requests(config).build(List.of(Message.user("Hi")), List.of(clientTool), null);
+    var request =
+        requests(config).build(List.of(Message.user("Hi")), List.of(clientTool), null).body();
 
     assertNotNull(request.tools().getFirst().cacheControl(), "client tail carries the breakpoint");
     assertNull(
@@ -596,7 +600,10 @@ class AnthropicWebToolsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> requests(config).build(List.of(Message.user("Hi")), List.of(collider), null));
+            () ->
+                requests(config)
+                    .build(List.of(Message.user("Hi")), List.of(collider), null)
+                    .body());
     assertTrue(ex.getMessage().contains("web_search"));
   }
 
@@ -638,6 +645,6 @@ class AnthropicWebToolsTest {
   private SseReader iterator(String sse) {
     var in = new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8));
     return new SseReader(
-        in, Duration.ofSeconds(5), new AnthropicStreamParser(), AnthropicException::new);
+        in, Duration.ofSeconds(5), new AnthropicStreamParser("stamp"), AnthropicException::new);
   }
 }

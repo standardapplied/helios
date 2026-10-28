@@ -1072,6 +1072,13 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
   full stream, then are dropped there with a WARNING; the terminal stays readable through
   `result()`, an open question through `pendingQuestions()`. The session's event executor and its
   drain at teardown are gone.
+- **Requests to Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 ask the API to verify replayed
+  thinking.** With adaptive thinking they carry the beta `thinking-binding-controls-2026-08-01`
+  and `thinking.block_binding.prefix_mismatch_behavior: "error"`, so a mismatched block fails the
+  same way on every account, whatever its age. `AnthropicModelId.bindsReasoning()` names those
+  models. Every assistant message records the stamp of the prompt it was produced under,
+  `anthropic.promptStamp` or `gemini.promptStamp` (`core.provider.PromptStamp`: the SHA-256 of
+  the canonical JSON of the system prompt and tools sent).
 
 ### Fixed
 
@@ -1234,6 +1241,17 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
   `java.lang.reflect` denied, a reference to `java.lang.reflect.Method` was labelled with either
   package depending on the JVM run. It is now labelled with the most specific one,
   `deniedPackages:java.lang.reflect`.
+- **A changed system prompt or tool set no longer breaks a conversation on Claude models that bind
+  reasoning.** Fable 5.1, Opus 5.5 and Sonnet 5.5 bind each thinking block to the system prompt,
+  tools and messages before it, so a deploy that edits the prompt, a stored conversation reopened
+  under a new tool set, or a tool shown only on some turns made the next request fail on accounts
+  created from 2026-08-31. Thinking is now dropped from every assistant turn up to the last one
+  produced under another prompt, oldest first as Anthropic documents, and requests ask the API to
+  verify the rest.
+- **An expired Gemini interaction no longer fails the turn.** A continued request answered `404`
+  before any event is resent once with the whole conversation, logged at INFO with the interaction
+  id; a turn produced under another system instruction or tool set is never continued, since an
+  interaction keeps the ones it was created with.
 
 ### Security
 

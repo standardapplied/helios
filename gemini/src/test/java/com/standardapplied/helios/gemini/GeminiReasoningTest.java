@@ -128,7 +128,9 @@ class GeminiReasoningTest {
   @SuppressWarnings("unchecked")
   private static Map<String, Object> generationConfig(GeminiModelId model, ModelConfig config) {
     var request =
-        new GeminiRequestBuilder(model, config).build(List.of(Message.user("Hi")), null, null);
+        new GeminiRequestBuilder(model, config)
+            .build(List.of(Message.user("Hi")), null, null)
+            .request();
     var body = JSON.readValue(GeminiJson.LENIENT.writeValueAsString(request), Map.class);
     return (Map<String, Object>) body.get("generation_config");
   }

@@ -5,6 +5,7 @@ package com.standardapplied.helios.anthropic;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.INTERLEAVED_THINKING_SSE;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.drainSseFixture;
 import static com.standardapplied.helios.anthropic.AnthropicFixture.requests;
+import static com.standardapplied.helios.anthropic.AnthropicFixture.underCurrentPrompt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,8 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -22,11 +25,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class AnthropicMessagesTest {
 
+  private static final String THINKING = "[{\"text\":\"t\",\"signature\":\"sig\"}]";
+
+  private static final String OMITTED = "[earlier output omitted]";
+
   @Test
   void convertAssistantMessageSimpleText() {
     var message = Message.assistant("Hello");
 
-    var entry = AnthropicMessages.assistant(message);
+    var entry = AnthropicMessages.assistant(message, true);
 
     assertEquals("assistant", entry.role());
     assertEquals("Hello", entry.content());
@@ -42,7 +49,7 @@ class AnthropicMessagesTest {
             .build();
     var message = Message.assistant("", List.of(tc));
 
-    var entry = AnthropicMessages.assistant(message);
+    var entry = AnthropicMessages.assistant(message, true);
 
     assertEquals("assistant", entry.role());
     @SuppressWarnings("unchecked")
@@ -61,7 +68,7 @@ class AnthropicMessagesTest {
             "[{\"text\":\"I need to think about this\",\"signature\":\"sig123\"}]");
     var message = Message.assistant("Answer", List.of(), metadata);
 
-    var entry = AnthropicMessages.assistant(message);
+    var entry = AnthropicMessages.assistant(message, true);
 
     assertEquals("assistant", entry.role());
     @SuppressWarnings("unchecked")
@@ -86,7 +93,7 @@ class AnthropicMessagesTest {
             Map.of(),
             List.of());
 
-    var entry = AnthropicMessages.assistant(message);
+    var entry = AnthropicMessages.assistant(message, true);
 
     assertEquals("assistant", entry.role());
     assertEquals("", entry.content());
@@ -161,7 +168,8 @@ class AnthropicMessagesTest {
             AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build());
 
     var failure =
-        assertThrows(AnthropicException.class, () -> builder.build(conversation, List.of(), null));
+        assertThrows(
+            AnthropicException.class, () -> builder.build(conversation, List.of(), null).body());
 
     assertTrue(
         failure.getMessage().contains(ThinkingBlock.THINKING_BLOCKS_KEY), failure.getMessage());
@@ -198,7 +206,7 @@ class AnthropicMessagesTest {
             .withMetadata(Map.of(ThinkingBlock.THINKING_BLOCKS_KEY, json))
             .build();
 
-    var entry = AnthropicMessages.assistant(msg);
+    var entry = AnthropicMessages.assistant(msg, true);
 
     @SuppressWarnings("unchecked")
     var blocks = (List<ContentBlock>) entry.content();
@@ -218,14 +226,16 @@ class AnthropicMessagesTest {
     var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request =
-        requests.build(
-            List.of(
-                Message.user("Compare profiles 1 and 2"),
-                response.toMessage(),
-                Message.tool("toolu_1", "get_profile", "profile one"),
-                Message.tool("toolu_2", "get_profile", "profile two")),
-            List.of(),
-            null);
+        requests
+            .build(
+                List.of(
+                    Message.user("Compare profiles 1 and 2"),
+                    underCurrentPrompt(response.toMessage(), requests, List.of()),
+                    Message.tool("toolu_1", "get_profile", "profile one"),
+                    Message.tool("toolu_2", "get_profile", "profile two")),
+                List.of(),
+                null)
+            .body();
 
     var assistant = (List<Map<String, Object>>) request.messages().get(1).content();
     assertEquals(
@@ -236,5 +246,129 @@ class AnthropicMessagesTest {
     assertEquals(Map.of("id", 1), assistant.get(1).get("input"));
     assertEquals("SIG-2", assistant.get(2).get("signature"));
     assertEquals(Map.of("id", 2), assistant.get(3).get("input"));
+  }
+
+  @Test
+  void aBindingModelReplaysReasoningOnlyAfterTheLastTurnUnderAnotherPrompt() {
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.of("k"));
+    var current = currentStamp(requests);
+
+    assertEquals(
+        List.of(false, false, true, true), thinkingKept(requests, "x", "x", current, current));
+    assertEquals(List.of(false, false, false, false), thinkingKept(requests, "x", "x", "z", "z"));
+    assertEquals(List.of(false, false, true), thinkingKept(requests, current, "x", current));
+    assertEquals(List.of(false, true), thinkingKept(requests, null, current));
+  }
+
+  @Test
+  void aTurnWithoutMetadataCountsAsProducedUnderAnotherPrompt() {
+    var bare = new Message(Role.ASSISTANT, "Hi", List.of(), null, null, null, List.of());
+
+    assertEquals(
+        2,
+        ReasoningReplay.keptFrom(List.of(Message.user("a"), bare, Message.user("b")), "s", true));
+  }
+
+  @Test
+  void aNonBindingModelReplaysEveryTurnsReasoning() {
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5, ModelConfig.of("k"));
+
+    assertEquals(List.of(true, true), thinkingKept(requests, "x", null));
+  }
+
+  @Test
+  void aRecordedTurnLosesOnlyItsReasoningBlocksKeepingEveryOtherInOrder() {
+    var raw =
+        "[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"},"
+            + "{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\"},"
+            + "{\"type\":\"redacted_thinking\",\"data\":\"ENC\"},"
+            + "{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"srv_1\","
+            + "\"content\":[{\"encrypted_content\":\"E\"}]},"
+            + "{\"type\":\"text\",\"text\":\"Found it.\"}]";
+    var message =
+        Message.assistant(
+            "Found it.",
+            List.of(),
+            Map.of(RawContentEcho.RAW_CONTENT_KEY, raw, ReasoningReplay.PROMPT_STAMP_KEY, "x"));
+
+    var entry = AnthropicMessages.assistant(message, false);
+
+    assertEquals(
+        List.of(
+            Map.of("type", "server_tool_use", "id", "srv_1", "name", "web_search"),
+            Map.of(
+                "type",
+                "web_search_tool_result",
+                "tool_use_id",
+                "srv_1",
+                "content",
+                List.of(Map.of("encrypted_content", "E"))),
+            Map.of("type", "text", "text", "Found it.")),
+        entry.content());
+  }
+
+  @Test
+  void aTurnWhoseOnlyContentWasReasoningIsSentAsThePlaceholder() {
+    var raw = "[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"}]";
+    var recorded = Message.assistant("", List.of(), Map.of(RawContentEcho.RAW_CONTENT_KEY, raw));
+    var typed = turn("", "x");
+
+    assertEquals(OMITTED, AnthropicMessages.assistant(recorded, false).content());
+    assertEquals(OMITTED, AnthropicMessages.assistant(typed, false).content());
+    assertEquals("", AnthropicMessages.assistant(Message.assistant(""), true).content());
+  }
+
+  @Test
+  void aTurnLosingItsReasoningKeepsItsTextAndToolCalls() {
+    var call = ToolCall.newBuilder().withId("t1").withName("search").build();
+    var message =
+        Message.assistant(
+            "Searching.",
+            List.of(call),
+            Map.of(
+                ThinkingBlock.THINKING_BLOCKS_KEY,
+                THINKING,
+                ReasoningReplay.PROMPT_STAMP_KEY,
+                "x"));
+
+    var entry = AnthropicMessages.assistant(message, false);
+
+    assertEquals(List.of("text", "tool_use"), types(entry.content()));
+  }
+
+  private static String currentStamp(AnthropicRequestBuilder requests) {
+    return requests.build(List.of(), List.of(), null).promptStamp();
+  }
+
+  /** Whether each assistant turn, stamped {@code stamps} in order, goes back with its thinking. */
+  private static List<Boolean> thinkingKept(AnthropicRequestBuilder requests, String... stamps) {
+    var messages = new ArrayList<Message>();
+    for (var stamp : stamps) {
+      messages.add(Message.user("Next?"));
+      messages.add(turn("Answer.", stamp));
+    }
+    messages.add(Message.user("Last."));
+    return requests.build(messages, List.of(), null).body().messages().stream()
+        .filter(entry -> "assistant".equals(entry.role()))
+        .map(entry -> types(entry.content()).contains("thinking"))
+        .toList();
+  }
+
+  private static Message turn(String text, String stamp) {
+    var metadata = new HashMap<String, String>();
+    metadata.put(ThinkingBlock.THINKING_BLOCKS_KEY, THINKING);
+    if (stamp != null) {
+      metadata.put(ReasoningReplay.PROMPT_STAMP_KEY, stamp);
+    }
+    return Message.assistant(text, List.of(), metadata);
+  }
+
+  private static List<String> types(Object content) {
+    if (!(content instanceof List<?> blocks)) {
+      return List.of("text");
+    }
+    return blocks.stream()
+        .map(block -> block instanceof ContentBlock typed ? typed.type() : null)
+        .toList();
   }
 }

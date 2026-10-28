@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
 import com.standardapplied.helios.core.provider.StreamingModel;
 import com.standardapplied.helios.gemini.api.GeminiJson;
-import com.standardapplied.helios.gemini.api.InteractionRequest;
 
 /**
  * ModelProvider implementation for Google's Gemini API.
@@ -20,7 +19,8 @@ import com.standardapplied.helios.gemini.api.InteractionRequest;
  * <p>Supports Gemini 3 models through the Interactions API, at the configured API version. Every
  * request streams over SSE, so a blocking {@code chat} drains the stream rather than waiting on one
  * long HTTP read, and a per-line idle timeout turns a stalled stream into a {@link
- * GeminiException}, which is not retried.
+ * GeminiException}, which is not retried. A turn continuing an interaction the server no longer
+ * holds is resent once with the whole conversation.
  */
 public class GeminiProvider implements ModelProvider {
 
@@ -52,7 +52,7 @@ public class GeminiProvider implements ModelProvider {
     var requests = new GeminiRequestBuilder(id, config);
     var httpClient = HttpClientFactory.create(config);
     var streams = new GeminiStreams(config, httpClient, endpoint);
-    return StreamingModel.<InteractionRequest>newBuilder()
+    return StreamingModel.<InteractionTurn>newBuilder()
         .withId(id.id())
         .withProvider(PROVIDER_NAME)
         .withConfig(config)
@@ -60,7 +60,7 @@ public class GeminiProvider implements ModelProvider {
         .withMaxOutputTokens(id.maxOutputTokens())
         .withHttpClient(httpClient)
         .withRequests(requests)
-        .withExchange(streams::open)
+        .withExchange(new InteractionResend(streams::open))
         .withFailure(GeminiException::new)
         .withJson(GeminiJson.STRUCTURED)
         .build();

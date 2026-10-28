@@ -9,7 +9,7 @@ KeepAlive[]
 TextDelta[text=Hello!]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], metadata={anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}, citations=[]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}, citations=[]]
 onComplete
 == chat
-Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], thinking=The user greets me. I greet back., citations=[], metadata={anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}]
+Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=30, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=67], thinking=The user greets me. I greet back., citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, anthropic.thinkingBlocks=[{"signature":"SIG-A","text":"The user greets me. I greet back."}]}]

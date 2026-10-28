@@ -11,7 +11,8 @@ import java.util.Map;
 /**
  * Assembles the response of a streamed interaction, at its end or as far as it got: its output,
  * finish reason and usage, and the metadata a later turn needs — the API version, the thought
- * signatures to replay before its tool calls, and the interaction id to continue from.
+ * signatures to replay before its tool calls, the interaction id to continue from, and the stamp of
+ * the prompt it was produced under.
  */
 final class GeminiResponseAssembler {
 
@@ -25,12 +26,14 @@ final class GeminiResponseAssembler {
    * The response of an interaction, finishing with {@code finishReason}.
    *
    * @param interactionId the id to record for continuation, or {@code null} to record none
+   * @param promptStamp the stamp of the request's prompt
    */
   static Response<Void> response(
       StepOutput.Result output,
       Response.Usage usage,
       String interactionId,
       String apiVersion,
+      String promptStamp,
       FinishReason finishReason) {
     var metadata = new HashMap<String, String>();
     metadata.put(API_VERSION_KEY, apiVersion);
@@ -40,6 +43,7 @@ final class GeminiResponseAssembler {
     if (interactionId != null) {
       metadata.put(ContinuationPoint.INTERACTION_ID_KEY, interactionId);
     }
+    metadata.put(ContinuationPoint.PROMPT_STAMP_KEY, promptStamp);
     return Response.newBuilder()
         .withContent(output.content())
         .withToolCalls(output.calls())

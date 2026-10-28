@@ -26,10 +26,16 @@ import java.util.Objects;
  */
 final class AnthropicStreamParser implements SseReader.Parser {
 
+  private final String promptStamp;
   private final ContentBlocks blocks = new ContentBlocks();
   private Response.Usage counts = Response.Usage.of(0, 0, 0, 0);
   private String stopReason;
   private ContentDelta.StopDetails stopDetails;
+
+  /** A parser for the response to a request built under {@code promptStamp}. */
+  AnthropicStreamParser(String promptStamp) {
+    this.promptStamp = promptStamp;
+  }
 
   @Override
   public StreamEvent parse(String payload) {
@@ -45,7 +51,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
   @Override
   public Response<Void> partial() {
     return AnthropicResponseAssembler.response(
-        blocks, usage(), stopReason, stopDetails, FinishReason.ERROR);
+        blocks, usage(), stopReason, stopDetails, promptStamp, FinishReason.ERROR);
   }
 
   private StreamEvent on(ApiStreamEvent event, String payload) {
@@ -110,7 +116,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
     if (AnthropicResponseAssembler.finishReason(stopReason) == null) {
       return failed("message_stop with unknown stop_reason: " + stopReason, null);
     }
-    return AnthropicResponseAssembler.done(blocks, usage(), stopReason, stopDetails);
+    return AnthropicResponseAssembler.done(blocks, usage(), stopReason, stopDetails, promptStamp);
   }
 
   private StreamEvent error(ApiStreamEvent.ApiError error) {

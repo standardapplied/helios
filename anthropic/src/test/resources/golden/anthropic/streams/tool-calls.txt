@@ -11,7 +11,7 @@ ToolUseStart[callId=toolu_2, toolName=weather]
 ToolUseDelta[callId=toolu_2, argumentsDelta={"city":"Rome"}]
 ToolUseStop[toolCall=ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]]
 KeepAlive[]
-MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], metadata={anthropic.stopReason=tool_use}, citations=[]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=tool_use}, citations=[]]
 onComplete
 == chat
-Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], thinking=null, citations=[], metadata={anthropic.stopReason=tool_use}]
+Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=toolu_1, name=weather, arguments={city=Paris}], ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=40, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=77], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=tool_use}]

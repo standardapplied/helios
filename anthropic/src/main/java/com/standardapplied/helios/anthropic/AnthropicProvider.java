@@ -6,7 +6,6 @@
 package com.standardapplied.helios.anthropic;
 
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
-import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Model;
@@ -93,7 +92,7 @@ public class AnthropicProvider implements ModelProvider {
     var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
     var httpClient = HttpClientFactory.create(config);
     var streams = new AnthropicStreams(config, httpClient, requests.betas());
-    return StreamingModel.<MessagesRequest>newBuilder()
+    return StreamingModel.<StampedRequest>newBuilder()
         .withId(wireModelId)
         .withProvider(PROVIDER_NAME)
         .withConfig(config)

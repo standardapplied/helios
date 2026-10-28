@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * Assembles the response of a streamed turn, at its end or as far as it got: its text, tool calls,
  * finish reason, usage, thinking and citations, and the metadata a later turn needs to echo it —
- * each signed thinking block, the raw stop reason and refusal details, and the verbatim content
- * when the turn needs it.
+ * each signed thinking block, the raw stop reason and refusal details, the verbatim content when
+ * the turn needs it, and the stamp of the prompt the turn was produced under.
  */
 final class AnthropicResponseAssembler {
 
@@ -25,26 +25,33 @@ final class AnthropicResponseAssembler {
 
   /**
    * The completion event of the turn in {@code blocks}, whose {@code stopReason} {@link
-   * #finishReason} knows. A turn that called tools and stopped finishes with {@code TOOL_CALLS}.
+   * #finishReason} knows, produced under {@code promptStamp}. A turn that called tools and stopped
+   * finishes with {@code TOOL_CALLS}.
    */
   static StreamEvent.Done done(
       ContentBlocks blocks,
       Response.Usage usage,
       String stopReason,
-      ContentDelta.StopDetails stopDetails) {
+      ContentDelta.StopDetails stopDetails,
+      String promptStamp) {
     var finishReason = finishReason(stopReason);
     if (!blocks.toolUses().calls().isEmpty() && finishReason == FinishReason.STOP) {
       finishReason = FinishReason.TOOL_CALLS;
     }
-    return new StreamEvent.Done(response(blocks, usage, stopReason, stopDetails, finishReason));
+    return new StreamEvent.Done(
+        response(blocks, usage, stopReason, stopDetails, promptStamp, finishReason));
   }
 
-  /** The response of the turn in {@code blocks} so far, finishing with {@code finishReason}. */
+  /**
+   * The response of the turn in {@code blocks} so far, produced under {@code promptStamp},
+   * finishing with {@code finishReason}.
+   */
   static Response<Void> response(
       ContentBlocks blocks,
       Response.Usage usage,
       String stopReason,
       ContentDelta.StopDetails stopDetails,
+      String promptStamp,
       FinishReason finishReason) {
     var thinkingBlocks = blocks.thinking().signed();
     return Response.newBuilder()
@@ -54,7 +61,7 @@ final class AnthropicResponseAssembler {
         .withUsage(usage)
         .withThinking(blocks.thinking().text())
         .withCitations(blocks.text().citations())
-        .withMetadata(metadata(blocks, thinkingBlocks, stopReason, stopDetails))
+        .withMetadata(metadata(blocks, thinkingBlocks, stopReason, stopDetails, promptStamp))
         .build();
   }
 
@@ -77,12 +84,14 @@ final class AnthropicResponseAssembler {
       ContentBlocks blocks,
       List<ThinkingBlock> thinkingBlocks,
       String stopReason,
-      ContentDelta.StopDetails stopDetails) {
+      ContentDelta.StopDetails stopDetails,
+      String promptStamp) {
     var metadata = new HashMap<String, String>();
     if (!thinkingBlocks.isEmpty()) {
       metadata.put(ThinkingBlock.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
     }
     putIfPresent(metadata, STOP_REASON_KEY, stopReason);
+    putIfPresent(metadata, ReasoningReplay.PROMPT_STAMP_KEY, promptStamp);
     if (stopDetails != null) {
       putIfPresent(metadata, Response.REFUSAL_CATEGORY_KEY, stopDetails.category());
       putIfPresent(metadata, Response.REFUSAL_EXPLANATION_KEY, stopDetails.explanation());

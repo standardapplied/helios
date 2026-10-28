@@ -6,7 +6,7 @@ KeepAlive[]
 TextDelta[text=Answer.]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], metadata={anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}, citations=[]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}, citations=[]]
 onComplete
 == chat
-Response[content=Answer., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], thinking=null, citations=[], metadata={anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}]
+Response[content=Answer., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=12, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=49], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.rawContent=[{"data":"ENCRYPTED-PAYLOAD","type":"redacted_thinking"},{"text":"Answer.","type":"text"}], anthropic.stopReason=end_turn}]
