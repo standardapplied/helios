@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 
 /**
  * The one JSON form of a {@link SessionEntry}, which every store that writes JSON uses: {@code
@@ -142,19 +143,13 @@ public final class SessionEntryJson {
   }
 
   /** What {@code read} returns, any failure to read wrapped in a {@link SessionStoreException}. */
-  private static <T> T parsed(Reading<T> read) {
+  private static <T> T parsed(Callable<T> read) {
     try {
-      return read.value();
+      return read.call();
     } catch (SessionStoreException e) {
       throw e;
     } catch (Exception e) {
       throw new SessionStoreException("not a session entry: " + e.getClass().getName(), e);
     }
-  }
-
-  /** A read that may throw what {@link SessionJson#ENTRIES} throws. */
-  @FunctionalInterface
-  private interface Reading<T> {
-    T value() throws Exception;
   }
 }
