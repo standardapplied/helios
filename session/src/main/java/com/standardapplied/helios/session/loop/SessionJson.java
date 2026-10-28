@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 import java.util.Map;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.json.JsonFactory;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ValueDeserializer;
@@ -25,11 +27,21 @@ public final class SessionJson {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   /**
+   * Reads a string of any length, since a stored entry must read back whatever the session wrote:
+   * Jackson's default limit refuses an attachment over about 75 MB in base64.
+   */
+  private static final JsonFactory ANY_STRING_LENGTH =
+      JsonFactory.builder()
+          .streamReadConstraints(
+              StreamReadConstraints.builder().maxStringLength(Integer.MAX_VALUE).build())
+          .build();
+
+  /**
    * Stored entries must read back exactly what was written: a decimal reads as a {@link Double}
    * only when that is its exact value, otherwise as a {@link BigDecimal}.
    */
   private static final ObjectMapper ENTRY_MAPPER =
-      JsonMapper.builder()
+      JsonMapper.builder(ANY_STRING_LENGTH)
           .addModule(new SimpleModule().addDeserializer(Number.class, new StoredNumber()))
           .build();
 

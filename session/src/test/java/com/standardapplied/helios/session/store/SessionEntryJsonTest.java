@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.session.test.SessionStoreContract;
 import java.time.Instant;
@@ -29,6 +30,17 @@ final class SessionEntryJsonTest {
     assertEquals(replaced, SessionEntryJson.read(SessionEntryJson.write(replaced)));
     var emptied = new SessionEntry.HistoryReplaced("run-3", AT, List.of());
     assertEquals(emptied, SessionEntryJson.read(SessionEntryJson.write(emptied)));
+  }
+
+  @Test
+  void anAttachmentOverJacksonsDefaultStringLimitReadsBack() {
+    var bytes = new byte[75_000_003];
+    bytes[bytes.length - 1] = 1;
+    var added =
+        new SessionEntry.MessageAdded(
+            "run-1", AT, Message.user("look", List.of(InlineFile.of(bytes, "video/mp4"))));
+
+    assertEquals(added, SessionEntryJson.read(SessionEntryJson.write(added)));
   }
 
   @Test
