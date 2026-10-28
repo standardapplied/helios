@@ -46,14 +46,14 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
 
   @Override
   protected Function<URI, Model> modelAt() {
+    return modelAt(ModelConfig.newBuilder().withApiKey("test-key"));
+  }
+
+  private static Function<URI, Model> modelAt(ModelConfig.Builder config) {
     return uri ->
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
-                ModelConfig.newBuilder()
-                    .withApiKey("test-key")
-                    .withBaseUrl(uri + "/v1beta")
-                    .build());
+                GeminiModelId.GEMINI_3_5_FLASH.id(), config.withBaseUrl(uri + "/v1beta").build());
   }
 
   @Override
@@ -200,6 +200,35 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
     assertNull(second.get("previous_interaction_id"));
     assertEquals("after", second.get("system_instruction"));
     assertEquals(List.of("Hi", "Hello, world.", "Again"), turnTexts(second));
+  }
+
+  @Test
+  void aRolledBackPromptDoesNotContinuePastATurnMadeWithoutContinuation() {
+    var history = new ArrayList<>(List.of(Message.system("before"), Message.user("Hi")));
+    var withoutContinuation =
+        modelAt(ModelConfig.newBuilder().withApiKey("test-key").withProviderContinuation(false));
+
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model -> {
+              history.add(model.chat(history, List.of()).toMessage());
+              history.set(0, Message.system("after"));
+              history.add(Message.user("Again"));
+              ModelHarness.exchange(
+                  List.of(Golden.read(reply())),
+                  withoutContinuation,
+                  other -> history.add(other.chat(history, List.of()).toMessage()));
+              history.set(0, Message.system("before"));
+              history.add(Message.user("Once more"));
+              model.chat(history, List.of());
+            });
+
+    var last = parse(requests.getLast().body());
+    assertNull(last.get("previous_interaction_id"));
+    assertEquals(
+        List.of("Hi", "Hello, world.", "Again", "Hello, world.", "Once more"), turnTexts(last));
   }
 
   @Test
