@@ -4,7 +4,7 @@ ToolUseStart[callId=call_1, toolName=weather]
 ToolUseDelta[callId=call_1, argumentsDelta={"city":"Paris",]
 ToolUseDelta[callId=call_1, argumentsDelta="unit":null,"days":[1,null],"options":{"lang":null}}]
 ToolUseStop[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris, days=[1, null], options={lang=null}, unit=null}]]
-MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}, citations=[]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738}, citations=[]]
 onComplete
 == chat
-Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, days=[1, null], options={lang=null}, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz}]
+Response[content=, parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris, days=[1, null], options={lang=null}, unit=null}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156], thinking=null, citations=[], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_xyz, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738}]

@@ -9,9 +9,9 @@ KeepAlive[]
 TextDelta[text=Done.]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], metadata={anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}, citations=[]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}, citations=[]]
 onComplete
 == chat
-Response[content=Done., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], thinking=null, citations=[], metadata={anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}]
+Response[content=Done., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=50, outputTokens=7, cacheCreationInputTokens=10, cacheReadInputTokens=14, totalTokens=81], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.rawContent=[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"},{"text":"Done.","type":"text"}], anthropic.stopReason=end_turn}]
 == follow-up request
 {"max_tokens":128000,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"Hi","type":"text"}],"role":"user"},{"content":[{"id":"srv1","input":{"query":"q"},"name":"web_search","type":"server_tool_use"}],"role":"assistant"}],"model":"claude-opus-5-5","stream":true}

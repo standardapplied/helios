@@ -473,21 +473,26 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   void findContinuationPointReturnsNullWhenNoInteractionId() {
     var messages = List.of(Message.user("Hello"), Message.assistant("Hi"));
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNull(result);
   }
 
   @Test
   void findContinuationPointFindsLastAssistantWithId() {
-    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-123");
+    var metadata =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "interaction-123",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            "s");
     var messages =
         List.of(
             Message.user("Hello"),
             Message.assistant("Hi", List.of(), metadata),
             Message.user("Follow-up"));
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNotNull(result);
     assertEquals("interaction-123", result.interactionId());
@@ -496,8 +501,18 @@ class GeminiModelTest extends BoundedErrorBodyContract {
 
   @Test
   void findContinuationPointPicksLastOfMultipleAssistants() {
-    var meta1 = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-1");
-    var meta2 = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-2");
+    var meta1 =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "interaction-1",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            "s");
+    var meta2 =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "interaction-2",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            "s");
     var messages =
         List.of(
             Message.user("Hello"),
@@ -506,7 +521,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
             Message.assistant("Second", List.of(), meta2),
             Message.tool("c1", "search", "result"));
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNotNull(result);
     assertEquals("interaction-2", result.interactionId());
@@ -515,10 +530,11 @@ class GeminiModelTest extends BoundedErrorBodyContract {
 
   @Test
   void findContinuationPointSkipsAssistantWithEmptyId() {
-    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "");
+    var metadata =
+        Map.of(ContinuationPoint.INTERACTION_ID_KEY, "", ContinuationPoint.PROMPT_STAMP_KEY, "s");
     var messages = List.of(Message.user("Hello"), Message.assistant("Hi", List.of(), metadata));
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNull(result);
   }
@@ -532,14 +548,19 @@ class GeminiModelTest extends BoundedErrorBodyContract {
                 .withName("search")
                 .withArguments(Map.of("q", "test"))
                 .build());
-    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-456");
+    var metadata =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "interaction-456",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            "s");
     var messages =
         List.of(
             Message.user("Search for something"),
             Message.assistant(null, toolCalls, metadata),
             Message.tool("c1", "search", "found it"));
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNotNull(result);
     assertEquals("interaction-456", result.interactionId());
@@ -634,7 +655,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
     var msg = new Message(Role.ASSISTANT, "Hi", List.of(), null, null, null, List.of());
     var messages = List.of(Message.user("Hello"), msg);
 
-    var result = ContinuationPoint.find(messages);
+    var result = ContinuationPoint.find(messages, "s");
 
     assertNull(result);
   }
@@ -670,7 +691,12 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void buildRequestContinuationIncludesSystemInstruction() {
     var requests = defaultRequests();
-    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "int-abc");
+    var metadata =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "int-abc",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            PromptStamps.of(List.of(Message.system("You are a helpful assistant")), null));
     var toolCalls =
         List.of(
             ToolCall.newBuilder()
@@ -685,7 +711,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
             Message.assistant(null, toolCalls, metadata),
             Message.tool("c1", "search", "found it"));
 
-    var request = requests.build(messages, null, null);
+    var request = requests.build(messages, null, null).request();
 
     assertNotNull(request.previousInteractionId(), "continuation must use previous_interaction_id");
     assertEquals("int-abc", request.previousInteractionId());
@@ -710,7 +736,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
                 Map.of(ContinuationPoint.INTERACTION_ID_KEY, "interaction-secret")),
             Message.user("second"));
 
-    var request = requests.build(messages, null, null);
+    var request = requests.build(messages, null, null).request();
 
     assertNull(request.previousInteractionId());
     assertEquals("system", request.systemInstruction());
@@ -741,14 +767,19 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void buildRequestContinuationWithoutSystemMessageOmitsIt() {
     var requests = defaultRequests();
-    var metadata = Map.of(ContinuationPoint.INTERACTION_ID_KEY, "int-abc");
+    var metadata =
+        Map.of(
+            ContinuationPoint.INTERACTION_ID_KEY,
+            "int-abc",
+            ContinuationPoint.PROMPT_STAMP_KEY,
+            PromptStamps.of(List.of(), null));
     var messages =
         List.of(
             Message.user("Search for X"),
             Message.assistant("ok", List.of(), metadata),
             Message.user("Follow-up"));
 
-    var request = requests.build(messages, null, null);
+    var request = requests.build(messages, null, null).request();
 
     assertNotNull(request.previousInteractionId());
     assertNull(request.systemInstruction());

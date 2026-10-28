@@ -101,6 +101,9 @@ class GeminiRequestSnapshotTest {
   private static Consumer<Model> continuation() {
     var metadata = new LinkedHashMap<>(THOUGHTS);
     metadata.put(ContinuationPoint.INTERACTION_ID_KEY, "int_prev");
+    metadata.put(
+        ContinuationPoint.PROMPT_STAMP_KEY,
+        PromptStamps.of(ConversationFixture.history(THOUGHTS), ConversationFixture.tools()));
     return model -> {
       var history = new ArrayList<>(ConversationFixture.history(metadata));
       history.add(Message.user("And Berlin?"));

@@ -5,7 +5,9 @@ package com.standardapplied.helios.gemini.api;
 import com.standardapplied.helios.core.provider.JsonBinding;
 import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -17,6 +19,17 @@ public final class GeminiJson {
   /** Reads and writes the wire format, ignoring response fields this client does not model. */
   public static final ObjectMapper LENIENT =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
+
+  /**
+   * Writes a value's canonical JSON, properties and map entries sorted by name, so equal values
+   * write equal bytes whatever order their maps were built in.
+   */
+  public static final ObjectMapper CANONICAL =
+      JsonMapper.builder()
+          .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+          .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
+          .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+          .build();
 
   /** Structured output read through {@link #LENIENT}. */
   public static final JsonBinding STRUCTURED =

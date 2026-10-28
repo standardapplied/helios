@@ -36,6 +36,8 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * {@link ModelIntegrationContract} and the Anthropic-specific live cases. Each asserts only that
@@ -370,6 +372,51 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
               + " wrote no progress note; AnthropicStreamTranscriptTest \"progress-notes\" covers"
               + " the parsing");
       assertFalse(ThinkingBlock.decodeAll(noted.get().metadata()).isEmpty());
+    }
+  }
+
+  /**
+   * A conversation whose system prompt, then tool set, changed after a tool round on a model that
+   * binds its thinking to its prefix: every request asks the API to reject a mismatched block, so
+   * this key's older account is checked as a new one would be.
+   */
+  @ParameterizedTest
+  @EnumSource(names = {"CLAUDE_OPUS_5_5", "CLAUDE_SONNET_5_5"})
+  void aChangedPromptAndToolSetAreAcceptedAfterSignedThinking(AnthropicModelId modelId) {
+    var calculate =
+        stringTool("calculate", "Evaluate an arithmetic expression exactly", "expression");
+    var history =
+        new ArrayList<>(
+            List.of(
+                Message.system("You are a careful puzzle solver."),
+                Message.user(
+                    "A farm has chickens and cows: 35 heads and 94 legs. Work it out, then call"
+                        + " calculate once to check your answer before you reply.")));
+    try (var candidate =
+        modelFor(modelId.id(), new Reasoning.Effort(Level.HIGH, Display.SUMMARY))) {
+      var round = Accepted.toolTurn(candidate.chat(history, List.of(calculate)));
+      assumeTrue(round.hasToolCalls(), () -> noToolCall(modelId.id()));
+      assumeTrue(
+          !ThinkingBlock.decodeAll(round.metadata()).isEmpty(),
+          () ->
+              modelId.id()
+                  + " signed no thinking before its tool call; AnthropicMessagesTest covers which"
+                  + " turns replay their thinking");
+      history.add(round.toMessage());
+      round.toolCalls().forEach(call -> history.add(Message.tool(call.id(), call.name(), "ok")));
+
+      history.set(0, Message.system("You are a careful puzzle solver. Answer in one sentence."));
+      var changedPrompt = Accepted.toolTurn(candidate.chat(history, List.of(calculate)));
+      history.add(changedPrompt.toMessage());
+      changedPrompt
+          .toolCalls()
+          .forEach(call -> history.add(Message.tool(call.id(), call.name(), "ok")));
+      if (!changedPrompt.hasToolCalls()) {
+        history.add(Message.user("Thanks. Now save the answer as a note."));
+      }
+
+      var saveNote = stringTool("save_note", "Save a note for the user", "text");
+      Accepted.toolTurn(candidate.chat(history, List.of(calculate, saveNote)));
     }
   }
 

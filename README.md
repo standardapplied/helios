@@ -182,7 +182,8 @@ try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
 ```
 
 `withProviderContinuation(false)` resends local history and neither sends nor returns Gemini
-interaction IDs. `RawOutputCapturePolicy.DISABLED` preserves actionable schema and submit-validator
+interaction IDs. A changed system prompt or tool set, or an interaction that expired or was
+deleted, costs one resend of the whole conversation, never the request. `RawOutputCapturePolicy.DISABLED` preserves actionable schema and submit-validator
 corrections while keeping raw model text out of structured-output exceptions. The effective
 Interactions version is reported in response metadata under `gemini.apiVersion`; base URLs and
 credentials are excluded from that diagnostic.
@@ -199,6 +200,10 @@ retention terms for the deployed account and region.
 Keep video traffic on `v1beta` until the credential-gated `GeminiVideoIntegrationTest` also passes
 when configured for `v1` with the same model, Files API upload, and structured-output schema. Only
 then change the configured version; endpoint selection is immutable for each model instance.
+
+On Claude models that bind thinking to its prompt (Fable 5.1, Opus 5.5, Sonnet 5.5), a changed
+system prompt or tool set costs the earlier turns' reasoning, and the prompt cache, once, never the
+request.
 
 Anthropic models use managed five-minute prompt caching by default. Select the one-hour
 cache for conversations whose reusable prefixes must survive longer gaps, or disable caching

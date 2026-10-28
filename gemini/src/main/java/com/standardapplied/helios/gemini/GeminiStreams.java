@@ -25,14 +25,17 @@ final class GeminiStreams {
     this.endpoint = endpoint;
   }
 
-  /** The stream answering {@code request}, sent on its first {@code hasNext()}. */
-  SseReader open(InteractionRequest request) {
+  /**
+   * The stream answering {@code request}, sent on its first {@code hasNext()}, whose response
+   * carries {@code promptStamp}.
+   */
+  SseReader open(InteractionRequest request, String promptStamp) {
     return new SseReader(
         httpClient,
         httpRequest(serialize(request)),
         "Gemini API",
         config.streamIdleTimeout(),
-        new GeminiStreamParser(config.providerContinuation(), endpoint.apiVersion()),
+        new GeminiStreamParser(config.providerContinuation(), endpoint.apiVersion(), promptStamp),
         GeminiException::new,
         GeminiProvider.PROVIDER_NAME);
   }

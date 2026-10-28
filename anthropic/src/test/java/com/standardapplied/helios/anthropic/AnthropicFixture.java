@@ -8,9 +8,11 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -80,9 +82,21 @@ final class AnthropicFixture {
         wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
   }
 
+  /**
+   * {@code message} as produced under the prompt {@code requests} sends with {@code tools} and no
+   * system prompt, so a binding model replays its reasoning.
+   */
+  static Message underCurrentPrompt(
+      Message message, AnthropicRequestBuilder requests, List<Tool> tools) {
+    var metadata = new HashMap<>(message.metadata());
+    metadata.put(
+        ReasoningReplay.PROMPT_STAMP_KEY, requests.build(List.of(), tools, null).promptStamp());
+    return Message.newBuilder(message).withMetadata(metadata).build();
+  }
+
   /** The request for a one-message conversation with {@code wireModelId} under {@code config}. */
   static MessagesRequest requestFor(String wireModelId, ModelConfig config) {
-    return requests(wireModelId, config).build(List.of(Message.user("Hi")), List.of(), null);
+    return requests(wireModelId, config).build(List.of(Message.user("Hi")), List.of(), null).body();
   }
 
   /** Reads {@code sseBody} through an {@link SseReader} and returns its last {@code Done} event. */
@@ -92,7 +106,7 @@ final class AnthropicFixture {
         new SseReader(
             inputStream,
             Duration.ofSeconds(5),
-            new AnthropicStreamParser(),
+            new AnthropicStreamParser("stamp"),
             AnthropicException::new)) {
       StreamEvent.Done done = null;
       while (iterator.hasNext()) {

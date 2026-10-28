@@ -499,6 +499,9 @@
       "type" : "text"
     } ],
     "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
       "display" : "summarized",
       "type" : "adaptive"
     },
@@ -1808,6 +1811,9 @@
       "type" : "text"
     } ],
     "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
       "display" : "summarized",
       "type" : "adaptive"
     },
@@ -2333,6 +2339,9 @@
       "type" : "text"
     } ],
     "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
       "display" : "summarized",
       "type" : "adaptive"
     },

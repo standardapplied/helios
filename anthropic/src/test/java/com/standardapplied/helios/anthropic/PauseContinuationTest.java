@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
@@ -85,7 +84,7 @@ class PauseContinuationTest {
 
       """;
 
-  private final MessagesRequest request =
+  private final StampedRequest request =
       new AnthropicRequestBuilder(
               AnthropicModelId.CLAUDE_OPUS_5_5.id(),
               AnthropicModelId.CLAUDE_OPUS_5_5,
@@ -217,7 +216,7 @@ class PauseContinuationTest {
 
   @Test
   void theContinuationResendsTheRequestWithThePausedContentAppended() {
-    var sent = new ArrayList<MessagesRequest>();
+    var sent = new ArrayList<StampedRequest>();
 
     events(
         r -> {
@@ -226,8 +225,9 @@ class PauseContinuationTest {
         });
 
     assertSame(request, sent.getFirst());
-    var resent = sent.get(1).messages();
-    assertEquals(request.messages(), resent.subList(0, resent.size() - 1));
+    assertEquals(request.promptStamp(), sent.get(1).promptStamp());
+    var resent = sent.get(1).body().messages();
+    assertEquals(request.body().messages(), resent.subList(0, resent.size() - 1));
     assertEquals("assistant", resent.getLast().role());
   }
 
@@ -450,7 +450,7 @@ class PauseContinuationTest {
     assertFalse(continuation.read);
   }
 
-  private StreamEvent.Error resumeFailingWith(Exchange<MessagesRequest> resume) {
+  private StreamEvent.Error resumeFailingWith(Exchange<StampedRequest> resume) {
     var opened = new AtomicInteger();
     var error =
         lastError(
@@ -460,13 +460,13 @@ class PauseContinuationTest {
     return error;
   }
 
-  private StreamEvent.Error lastError(Exchange<MessagesRequest> segments) {
+  private StreamEvent.Error lastError(Exchange<StampedRequest> segments) {
     var events = events(segments);
     assertEquals(1, events.stream().filter(StreamEvent.Error.class::isInstance).count());
     return assertInstanceOf(StreamEvent.Error.class, events.getLast());
   }
 
-  private List<StreamEvent> events(Exchange<MessagesRequest> segments) {
+  private List<StreamEvent> events(Exchange<StampedRequest> segments) {
     var read = StreamRead.of(new PauseContinuation(segments).stream(request));
     assertNull(read.failure());
     return read.items();
@@ -476,7 +476,7 @@ class PauseContinuationTest {
    * The response of the whole turn {@code segments} answer {@code request} with, drained the way
    * the provider's model drains it; a failed turn throws the exception the model would.
    */
-  static Response<Void> turn(Exchange<MessagesRequest> segments, MessagesRequest request) {
+  static Response<Void> turn(Exchange<StampedRequest> segments, StampedRequest request) {
     return ExchangeTurns.chat(
         new PauseContinuation(segments),
         request,

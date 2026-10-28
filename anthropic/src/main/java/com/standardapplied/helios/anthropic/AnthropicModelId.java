@@ -210,6 +210,22 @@ public enum AnthropicModelId {
   }
 
   /**
+   * Whether this model binds each thinking block to its prefix — the system prompt, the tools and
+   * every earlier message — so a block replayed after any of them changed is rejected ("Preserved
+   * thinking", Oct 2026). A newly released binding model is catalogued here: an uncatalogued model
+   * is taken not to bind.
+   *
+   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_OPUS_5_5} and {@link
+   *     #CLAUDE_SONNET_5_5}, false otherwise
+   */
+  public boolean bindsReasoning() {
+    return switch (this) {
+      case CLAUDE_FABLE_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5 -> true;
+      default -> false;
+    };
+  }
+
+  /**
    * Returns the API model identifier string.
    *
    * @return the model ID used in API requests

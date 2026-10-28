@@ -110,9 +110,17 @@ final class ProgressNotesSessionTest {
               .toList();
       assertEquals(List.of("AssistantThinking", "ToolUse"), order);
       var first = server.requests().getFirst();
-      assertEquals("thinking-display-updates-2026-08-18", first.headers().get("anthropic-beta"));
       assertEquals(
-          Map.of("type", "adaptive", "display", "updates"),
+          "thinking-display-updates-2026-08-18,thinking-binding-controls-2026-08-01",
+          first.headers().get("anthropic-beta"));
+      assertEquals(
+          Map.of(
+              "type",
+              "adaptive",
+              "display",
+              "updates",
+              "block_binding",
+              Map.of("prefix_mismatch_behavior", "error")),
           JsonMapper.builder().build().readValue(first.body(), Map.class).get("thinking"));
     }
   }

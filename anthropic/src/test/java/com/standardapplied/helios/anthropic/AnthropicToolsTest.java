@@ -25,7 +25,7 @@ class AnthropicToolsTest {
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
     var messages = List.of(Message.user("Weather?"));
-    var request = requests.build(messages, ConversationFixture.tools(), null);
+    var request = requests.build(messages, ConversationFixture.tools(), null).body();
 
     assertNotNull(request.tools());
     assertEquals(1, request.tools().size());
@@ -39,7 +39,7 @@ class AnthropicToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), List.of(), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertNull(request.tools());
   }
@@ -49,7 +49,7 @@ class AnthropicToolsTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
 
-    var request = requests.build(List.of(Message.user("Hi")), null, null);
+    var request = requests.build(List.of(Message.user("Hi")), null, null).body();
 
     assertNull(request.tools());
   }
@@ -66,7 +66,7 @@ class AnthropicToolsTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
 
     assertNotNull(request.toolChoice());
     assertEquals("auto", request.toolChoice().type());
@@ -84,7 +84,7 @@ class AnthropicToolsTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
 
     assertNotNull(request.toolChoice());
     assertEquals("any", request.toolChoice().type());
@@ -102,7 +102,7 @@ class AnthropicToolsTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
 
     assertNull(request.toolChoice());
   }
@@ -122,7 +122,7 @@ class AnthropicToolsTest {
             .withDescription("test")
             .withExecutor((args, ctx) -> ToolResult.success("ok"))
             .build();
-    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null);
+    var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
 
     assertNotNull(request.toolChoice());
     assertEquals("tool", request.toolChoice().type());
@@ -147,7 +147,7 @@ class AnthropicToolsTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> requests.build(List.of(Message.user("Hi")), List.of(tool), null));
+        () -> requests.build(List.of(Message.user("Hi")), List.of(tool), null).body());
   }
 
   @Test
@@ -163,7 +163,8 @@ class AnthropicToolsTest {
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
     var autoRequest =
         requests(AnthropicModelId.CLAUDE_FABLE_5_1, auto)
-            .build(List.of(Message.user("Hi")), List.of(tool), null);
+            .build(List.of(Message.user("Hi")), List.of(tool), null)
+            .body();
     assertEquals("auto", autoRequest.toolChoice().type());
     assertNull(autoRequest.thinking());
     assertNull(autoRequest.temperature());
@@ -172,7 +173,8 @@ class AnthropicToolsTest {
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
     var noneRequest =
         requests(AnthropicModelId.CLAUDE_FABLE_5_1, none)
-            .build(List.of(Message.user("Hi")), List.of(tool), null);
+            .build(List.of(Message.user("Hi")), List.of(tool), null)
+            .body();
     assertNull(noneRequest.toolChoice());
   }
 
@@ -183,7 +185,8 @@ class AnthropicToolsTest {
       var config =
           ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
 
-      var request = requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null);
+      var request =
+          requests(modelId, config).build(List.of(Message.user("Hi")), List.of(), null).body();
 
       assertEquals("auto", request.toolChoice().type(), modelId.name());
     }
