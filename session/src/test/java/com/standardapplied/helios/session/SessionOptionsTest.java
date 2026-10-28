@@ -30,7 +30,6 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
-import com.standardapplied.helios.session.store.InMemorySessionStore;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Clock;
@@ -88,23 +87,6 @@ final class SessionOptionsTest {
   }
 
   @Test
-  void withStoreRejectsNull() {
-    var builder = SessionOptions.newBuilder();
-    var ex = assertThrows(NullPointerException.class, () -> builder.withStore(null));
-    assertEquals("store must not be null", ex.getMessage());
-  }
-
-  @Test
-  void aStoreIsAbsentByDefaultAndKeptByToBuilder() {
-    var store = new InMemorySessionStore();
-    var plain = SessionOptions.newBuilder().withModel(stubModel()).build();
-    var stored = plain.toBuilder().withStore(store).build();
-
-    assertEquals(Optional.empty(), plain.store());
-    assertSame(store, stored.toBuilder().build().store().orElseThrow());
-  }
-
-  @Test
   void withSecretRegistryRejectsNull() {
     var builder = SessionOptions.newBuilder();
     var ex = assertThrows(NullPointerException.class, () -> builder.withSecretRegistry(null));
@@ -137,35 +119,6 @@ final class SessionOptionsTest {
                     null,
                     Optional.empty()));
     assertEquals("secretRegistry must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullStore() {
-    var o = SessionOptions.newBuilder().withModel(stubModel()).build();
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    o.model(),
-                    o.sessionId(),
-                    o.limits(),
-                    o.maxQueuedUserMessages(),
-                    o.clock(),
-                    o.tools(),
-                    o.hooks(),
-                    o.permission(),
-                    o.memoryBackend(),
-                    o.costCalculator(),
-                    o.executionProvider(),
-                    o.askUserQuestion(),
-                    o.outputSchema(),
-                    o.systemPrompt(),
-                    o.tokenCounter(),
-                    o.contextCompactor(),
-                    o.secretRegistry(),
-                    null));
-    assertEquals("store must not be null", ex.getMessage());
   }
 
   // ── canonical constructor validation ──────────────────────────────────────

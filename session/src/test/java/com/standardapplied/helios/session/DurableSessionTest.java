@@ -30,6 +30,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,6 +49,54 @@ final class DurableSessionTest {
   private static final ToolCall ECHO = new ToolCall("c1", "echo", Map.of("v", "one"));
   private static final ToolCall ECHO_TWO = new ToolCall("c2", "echo", Map.of("v", "two"));
   private static final String SECRET = "s3cr3t-value-123";
+
+  // ── options ─────────────────────────────────────────────────────────────
+
+  @Test
+  void withStoreRejectsNull() {
+    var builder = SessionOptions.newBuilder();
+    var ex = assertThrows(NullPointerException.class, () -> builder.withStore(null));
+    assertEquals("store must not be null", ex.getMessage());
+  }
+
+  @Test
+  void aStoreIsAbsentByDefaultAndKeptByToBuilder() {
+    var store = new InMemorySessionStore();
+    var plain = SessionOptions.newBuilder().withModel(ScriptedModel.newBuilder().build()).build();
+    var stored = plain.toBuilder().withStore(store).build();
+
+    assertEquals(Optional.empty(), plain.store());
+    assertSame(store, stored.toBuilder().build().store().orElseThrow());
+  }
+
+  @Test
+  void canonicalConstructorRejectsNullStore() {
+    var o = SessionOptions.newBuilder().withModel(ScriptedModel.newBuilder().build()).build();
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () ->
+                new SessionOptions(
+                    o.model(),
+                    o.sessionId(),
+                    o.limits(),
+                    o.maxQueuedUserMessages(),
+                    o.clock(),
+                    o.tools(),
+                    o.hooks(),
+                    o.permission(),
+                    o.memoryBackend(),
+                    o.costCalculator(),
+                    o.executionProvider(),
+                    o.askUserQuestion(),
+                    o.outputSchema(),
+                    o.systemPrompt(),
+                    o.tokenCounter(),
+                    o.contextCompactor(),
+                    o.secretRegistry(),
+                    null));
+    assertEquals("store must not be null", ex.getMessage());
+  }
 
   // ── 1. reopen ────────────────────────────────────────────────────────────
 
