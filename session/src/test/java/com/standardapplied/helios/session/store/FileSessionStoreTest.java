@@ -56,6 +56,14 @@ final class FileSessionStoreTest extends SessionStoreContract {
   }
 
   @Test
+  void textIsStoredAsUtf8WithOnlyALoneSurrogateEscaped() throws IOException {
+    var store = FileSessionStore.of(directory());
+    store.append(SID, 0, List.of(added(Message.user("é 😀 \uD800"))));
+
+    assertTrue(Files.readString(file()).contains("é 😀 \\uD800"));
+  }
+
+  @Test
   void aTornLastLineIsIgnoredByLoadAndTruncatedByTheNextAppend() throws IOException {
     var store = FileSessionStore.of(directory());
     store.append(SID, 0, List.of(added(Message.user("a"))));

@@ -2,12 +2,13 @@
 
 package com.standardapplied.helios.session.loop;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import com.standardapplied.helios.core.provider.JsonBinding;
 import java.math.BigDecimal;
 import java.util.Map;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
-import tools.jackson.core.json.JsonWriteFeature;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ValueDeserializer;
@@ -25,13 +26,11 @@ public final class SessionJson {
 
   /**
    * Stored entries must read back exactly what was written: a decimal reads as a {@link Double}
-   * only when that is its exact value, otherwise as a {@link BigDecimal}, and every non-ASCII
-   * character is escaped, so a lone UTF-16 surrogate survives the file's UTF-8.
+   * only when that is its exact value, otherwise as a {@link BigDecimal}.
    */
   private static final ObjectMapper ENTRY_MAPPER =
       JsonMapper.builder()
           .addModule(new SimpleModule().addDeserializer(Number.class, new StoredNumber()))
-          .enable(JsonWriteFeature.ESCAPE_NON_ASCII)
           .build();
 
   /** JSON read into maps, and maps converted into types, through Jackson's defaults. */
@@ -45,13 +44,14 @@ public final class SessionJson {
   private SessionJson() {}
 
   /**
-   * Write {@code value} as the JSON of a stored entry, every non-ASCII character escaped.
+   * Write {@code value} as the JSON of a stored entry. It is written through Jackson's UTF-8
+   * writer, which escapes a lone UTF-16 surrogate, so the JSON survives encoding as UTF-8.
    *
    * @param value the value; maps, lists and records nest
-   * @return its JSON, all ASCII
+   * @return its JSON
    */
   public static String write(Object value) {
-    return ENTRY_MAPPER.writeValueAsString(value);
+    return new String(ENTRY_MAPPER.writeValueAsBytes(value), UTF_8);
   }
 
   private static final class StoredNumber extends ValueDeserializer<Number> {
