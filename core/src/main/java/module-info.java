@@ -24,7 +24,7 @@
  *   <li>{@code prompt} — versioned prompt registry + template rendering.
  *   <li>{@code provider} — the mechanics every streaming model provider shares: the SSE reader, the
  *       chat exchange and the JSON request assembly.
- *   <li>{@code trace} / {@code events} — observability primitives.
+ *   <li>{@code trace} — the trace model and {@code TraceListener}.
  *   <li>{@code runtime} — durable-run primitives (RunStore, ToolCallJournal, DurableResumeScanner)
  *       the v2 session SDK can plug into.
  * </ul>
@@ -39,7 +39,6 @@ module com.standardapplied.helios.core {
   exports com.standardapplied.helios.core.common;
   exports com.standardapplied.helios.core.context;
   exports com.standardapplied.helios.core.embedding;
-  exports com.standardapplied.helios.core.events;
   exports com.standardapplied.helios.core.fault;
   exports com.standardapplied.helios.core.model;
   exports com.standardapplied.helios.core.process;

@@ -924,6 +924,16 @@ DROP TABLE IF EXISTS helios_core_blocks CASCADE;
 |---|---|
 | `persistence.sql.MessageSql`, `persistence.sql.SessionSql`, `persistence.mapper.MessageMapper`, `JsonbMapper.toolCallsFromJsonb` | removed; a deployment that stored conversations in its own copies of these tables moves to `PgSessionStore` |
 
+**`core.events` is gone; a finished trace goes to one `TraceListener`.** Nothing emitted a
+`HeliosEvent` since the v1 agent was deleted, so the package, its sinks and the span open/close
+events go. `core.trace.TraceListener.onTrace(Trace)` receives a finished trace.
+
+| 2.x | 3.0 |
+|---|---|
+| `core.events` (`HeliosEvent`, `EventSink`, `CollectingEventSink`, `JsonlEventSink`; `EventSinkPolicy` has its own row above) | removed; nothing emitted these events. Session activity: read `AgentSession.events()` (`QueryEvent`). Finished traces: implement `core.trace.TraceListener` |
+| `TraceBuilder.start(String, UUID, List<EventSink>)` | `TraceBuilder.start(String)`; spans no longer emit open/close events |
+| `PgTraceStore implements EventSink`: `onEvent(HeliosEvent)` and `store(Trace)` | `PgTraceStore implements TraceListener`: `onTrace(Trace)`, one transaction as before |
+
 ### Added
 
 - **Sessions can be stored and reopened.** `SessionOptions.Builder.withStore(store)` makes a
