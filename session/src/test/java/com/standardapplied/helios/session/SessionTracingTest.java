@@ -55,7 +55,7 @@ import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * A session given a trace listener hands it one trace per run, however the run ends: a span per
@@ -242,9 +242,9 @@ final class SessionTracingTest {
   }
 
   @ParameterizedTest
-  @ValueSource(booleans = {true, false})
-  void aModelAttemptAHostErrorEndsIsAFailedModelCallWithNoUsage(boolean atOpen) {
-    var failure = new HostFailure();
+  @CsvSource({"true, true", "false, true", "true, false", "false, false"})
+  void aModelAttemptAHostErrorEndsIsAFailedModelCallWithNoUsage(boolean atOpen, boolean readable) {
+    Error failure = readable ? new HostFailure() : new UnreadableHostFailure();
     var model =
         EndingSessions.model(
             () -> {
@@ -254,13 +254,19 @@ final class SessionTracingTest {
               return ModelStreams.failing(failure);
             });
 
+    var events = new EventCollector();
     try (var session = AgentSession.open(traced(model).build())) {
+      events.read(session.events());
       assertSame(failure, Await.failure("the result to fail", session.send("go")));
     }
+    events.awaitDone();
 
+    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
+    assertEquals(1, ended.size());
+    assertEquals(failure.getClass().getName(), ended.getFirst().error().kind());
     var call = onlySpan(onlyTrace(), "model.call");
     assertFalse(call.success());
-    assertEquals(HostFailure.class.getName(), call.attributes().get("error.type"));
+    assertEquals(failure.getClass().getName(), call.attributes().get("error.type"));
     assertEquals("1", call.attributes().get("attempt"));
     assertEquals(Usage.of(0, 0), call.usage());
     assertEquals(Usage.of(0, 0), onlyTrace().usage());
@@ -741,6 +747,14 @@ final class SessionTracingTest {
 
     HostFailure() {
       super("host failure");
+    }
+  }
+
+  /** A host {@link Error} whose message cannot be read: {@link #getMessage()} throws. */
+  private static final class UnreadableHostFailure extends Error {
+    @Override
+    public String getMessage() {
+      throw new IllegalStateException("unreadable");
     }
   }
 }

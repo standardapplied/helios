@@ -92,10 +92,7 @@ final class UsageAccounting {
 
   private void emit(
       SessionState state, Call call, CostEstimate cost, Instant started, Instant ended) {
-    var error =
-        call.error() == null
-            ? null
-            : SerializedError.of(call.error()).redactedBy(collaborators.secrets().redactor());
+    var error = call.error() == null ? null : redacted(call.error());
     emitter.emit(
         state,
         new QueryEvent.ModelCallEnded(
@@ -110,6 +107,15 @@ final class UsageAccounting {
             cost,
             ended.isBefore(started) ? Duration.ZERO : Duration.between(started, ended),
             error));
+  }
+
+  /** {@code error} serialized and redacted, or only its class name when it cannot be read. */
+  private SerializedError redacted(Throwable error) {
+    try {
+      return SerializedError.of(error).redactedBy(collaborators.secrets().redactor());
+    } catch (RuntimeException unreadable) {
+      return SerializedError.of(error.getClass().getName(), "");
+    }
   }
 
   /** One model attempt: the model id its usage is priced at, and what it reported. */
