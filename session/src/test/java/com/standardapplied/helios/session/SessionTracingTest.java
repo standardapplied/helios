@@ -22,6 +22,7 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Span;
 import com.standardapplied.helios.core.trace.SpanKind;
@@ -702,6 +703,32 @@ final class SessionTracingTest {
     try (var session = AgentSession.open(options)) {
       assertSame(failure, Await.failure("the result to fail", session.send("go")));
     }
+  }
+
+  @Test
+  void aListenerErrorThrownAfterACloseReturnedStillFailsTheRunWithThatError() {
+    var failure = new HostFailure();
+    var released = new CountDownLatch(1);
+    var options =
+        traced(ScriptedModel.newBuilder().withTextTurn("done").build())
+            .withLimits(
+                SessionLimits.newBuilder().withStopGrace(EndingSessions.SHORT_GRACE).build())
+            .withTraceListener(
+                trace -> {
+                  entered.countDown();
+                  Uninterruptible.await(released);
+                  throw failure;
+                })
+            .build();
+    var session = AgentSession.open(options);
+    var result = session.send("go");
+    Await.latch("the listener to be called", entered);
+
+    session.close();
+    assertFalse(result.isDone(), "the close returned before the listener did");
+    released.countDown();
+
+    assertSame(failure, Await.failure("the result to fail", result));
   }
 
   @Test

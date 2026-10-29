@@ -20,7 +20,8 @@ import java.util.logging.Logger;
  * accept fails the open. Its {@link SessionRuns} run the session's runs in between. Its {@link
  * SessionTeardown} releases what the session acquired, in reverse order, exactly once: on {@link
  * #close}, or on the thread of the last run once the session closed or a host {@link Error} failed
- * it.
+ * it. The session's ending is sealed once too, only once no run is left to fail with what it
+ * recorded.
  */
 final class SessionLifecycle {
 
@@ -34,6 +35,7 @@ final class SessionLifecycle {
   private final SessionRuns runs;
   private final AtomicBoolean tearingDown = new AtomicBoolean();
   private final CompletableFuture<Void> tornDown = new CompletableFuture<>();
+  private final AtomicBoolean sealed = new AtomicBoolean();
   private volatile Long closeDeadline;
   private AgentLoop loop;
 
@@ -109,9 +111,10 @@ final class SessionLifecycle {
    * keeps from starting; the close waits for those threads to end, so both futures are settled when
    * it returns and none of their callbacks runs on the closing thread. Without a run in progress
    * the caller tears the session down. The run's end and the teardown share one deadline, {@code
-   * stopGrace} from now; a step after one that used it up still runs but is not waited for. Called
-   * on a thread the run in progress started, it returns once the session is cancelled. Never
-   * throws.
+   * stopGrace} from now; a step after one that used it up still runs but is not waited for. A run
+   * still running at the deadline seals the session's ending itself once it was left, so an {@link
+   * Error} it records after the close returned still fails its future. Called on a thread the run
+   * in progress started, it returns once the session is cancelled. Never throws.
    */
   void close() {
     var deadline = BoundedTask.deadlineAfter(limits.stopGrace());
@@ -123,7 +126,10 @@ final class SessionLifecycle {
       return;
     }
     run.ifPresent(running -> running.awaitEnd(deadline));
-    tearDown(deadline, Optional.empty());
+    end(deadline);
+    if (run.isEmpty()) {
+      seal(Optional.empty());
+    }
   }
 
   /** Expire the run in progress as its wall clock does, for tests. */
@@ -133,35 +139,47 @@ final class SessionLifecycle {
 
   /**
    * Tear down after the last run, which failed with {@code carried} if present, by the close's
-   * deadline, or {@code stopGrace} from now.
+   * deadline, or {@code stopGrace} from now, then seal the session's ending: once the run was left,
+   * no {@link Error} recorded after that has a run to fail.
    */
   private void endAfterRun(Optional<Error> carried) {
     var deadline = closeDeadline;
-    tearDown(deadline != null ? deadline : BoundedTask.deadlineAfter(limits.stopGrace()), carried);
+    end(deadline != null ? deadline : BoundedTask.deadlineAfter(limits.stopGrace()));
+    seal(carried);
   }
 
   /**
    * Run the teardown once, by {@code deadlineNanos}; a caller that finds it under way waits for it
-   * until the same deadline. An {@link Error} the teardown sealed that no run failed with, {@code
-   * carried}, is logged, since no future carries it.
+   * until the same deadline.
    */
-  private void tearDown(long deadlineNanos, Optional<Error> carried) {
+  private void end(long deadlineNanos) {
     if (!tearingDown.compareAndSet(false, true)) {
       BoundedTask.settlesBy(tornDown, deadlineNanos);
       return;
     }
     try {
-      teardown
-          .endAndSeal(loop.toolDispatch(), deadlineNanos)
-          .filter(error -> carried.orElse(null) != error)
-          .ifPresent(
-              error ->
-                  LOGGER.log(
-                      Level.SEVERE,
-                      "an Error reached session " + session.sessionId() + " while it closed",
-                      error));
+      teardown.end(loop.toolDispatch(), deadlineNanos);
     } finally {
       tornDown.complete(null);
     }
+  }
+
+  /**
+   * Seal the session's ending once. An {@link Error} it sealed that no run failed with, {@code
+   * carried}, is logged, since no future carries it.
+   */
+  private void seal(Optional<Error> carried) {
+    if (!sealed.compareAndSet(false, true)) {
+      return;
+    }
+    teardown
+        .seal()
+        .filter(error -> carried.orElse(null) != error)
+        .ifPresent(
+            error ->
+                LOGGER.log(
+                    Level.SEVERE,
+                    "an Error reached session " + session.sessionId() + " while it closed",
+                    error));
   }
 }
