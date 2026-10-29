@@ -21,12 +21,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Drives one model turn end-to-end, in order: the {@code PreModelTurn} hook, the model call, the
- * tool round, usage and cost accounting, and the {@code PostModelTurn} hook. Each stage is its own
- * type — {@link TurnHooks}, {@link ModelCall}, {@link ToolRound}, {@link UsageAccounting} — and
- * this class only sequences them, appends the assistant message to {@link SessionState} history,
- * emits {@link QueryEvent.TurnEnded} and returns a {@link TurnOutcome} the agent loop hands to
- * {@link StopClassifier}.
+ * Drives one model turn end-to-end, in order: the {@code PreModelTurn} hook, the model call with
+ * its usage and cost accounting, the tool round, and the {@code PostModelTurn} hook. Each stage is
+ * its own type — {@link TurnHooks}, {@link ModelCall}, {@link ToolRound}, {@link UsageAccounting} —
+ * and this class only sequences them, appends the assistant message to {@link SessionState}
+ * history, emits {@link QueryEvent.TurnEnded} and returns a {@link TurnOutcome} the agent loop
+ * hands to {@link StopClassifier}.
  *
  * <h2>Hook outcomes</h2>
  *
@@ -68,9 +68,9 @@ public final class TurnRunner {
     this.emitter = collaborators.emitter();
     var effects = new HookEffects(emitter, collaborators.steeringQueue());
     this.turnHooks = new TurnHooks(collaborators, emitter, effects);
-    this.modelCall = new ModelCall(collaborators, emitter, model, outputSchema);
+    this.accounting = new UsageAccounting(collaborators, emitter, model, costCalculator);
+    this.modelCall = new ModelCall(collaborators, emitter, accounting, model, outputSchema);
     this.toolRound = new ToolRound(collaborators, emitter, effects);
-    this.accounting = new UsageAccounting(model, costCalculator);
   }
 
   /**
@@ -94,7 +94,6 @@ public final class TurnRunner {
     }
 
     var streamed = modelCall.stream(state, limits, visibleTools(state));
-    accounting.add(state, streamed.usage());
     if (modelCall.selfCorrectSchema(state, streamed)) {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.totals().usage()));
     }

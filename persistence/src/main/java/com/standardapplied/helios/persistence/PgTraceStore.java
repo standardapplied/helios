@@ -66,7 +66,7 @@ public class PgTraceStore implements TraceListener {
       params.add(config.redact(trace.inputText()));
       params.add(config.redact(trace.outputText()));
       params.add(trace.userId());
-      params.add(trace.sessionId() != null ? trace.sessionId().toString() : null);
+      params.add(trace.sessionId());
       params.add(trace.modelId());
       params.add(trace.promptName());
       params.add(trace.promptVersion());

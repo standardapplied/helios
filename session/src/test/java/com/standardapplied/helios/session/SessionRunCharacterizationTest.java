@@ -158,6 +158,8 @@ class SessionRunCharacterizationTest {
           "TurnEnded turn=1 TOOL_CALLS",
           "UserMessageReceived turn=1 pre-model inject files=0",
           "TurnRetried turn=2 attempt=1 delay=PT0S test",
+          "ModelCallEnded turn=2 attempt=1 ERROR tokens=0 error=true",
+          "ModelCallEnded turn=2 attempt=2 TOOL_CALLS tokens=15 error=false",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook MutateArgs",
           "ToolMutated turn=2 c1 SessionRunCharacterizationTest$Run {v=one}->{v=mutated}",
           "ToolUse turn=2 c1 {v=mutated}",
@@ -169,15 +171,19 @@ class SessionRunCharacterizationTest {
           "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
           "TurnEnded turn=2 TOOL_CALLS",
           "ContextWarning turn=2 0.96",
+          "ModelCallEnded turn=2 attempt=1 STOP tokens=7 error=false",
           "ContextEdited turn=2 removed=3 96->10",
           "AssistantText turn=3 not json",
+          "ModelCallEnded turn=3 attempt=1 ERROR tokens=0 error=true",
           "TurnEnded turn=3 TOOL_CALLS",
           "UserMessageReceived turn=3 Your structured output did not match the schema. Fix the listed fields and re-emit the structured output:\\n  - answer is required but missing\\n files=0",
           "AssistantText turn=4 {\"answer\":\"draft\"}",
+          "ModelCallEnded turn=4 attempt=1 STOP tokens=26 error=false",
           "TurnEnded turn=4 STOP",
           "HookFired turn=4 SessionRunCharacterizationTest$Run PreStopHook Inject",
           "UserMessageReceived turn=4 pre-stop inject files=0",
           "AssistantText turn=5 {\"answer\":\"final\"}",
+          "ModelCallEnded turn=5 attempt=1 STOP tokens=37 error=false",
           "TurnEnded turn=5 STOP",
           "RunEnded turn=5 Success");
 
@@ -360,6 +366,15 @@ class SessionRunCharacterizationTest {
                   + " "
                   + hook(e.result().output());
           case QueryEvent.AssistantText e -> e.text();
+          case QueryEvent.ModelCallEnded e ->
+              "attempt="
+                  + e.attempt()
+                  + " "
+                  + e.finishReason()
+                  + " tokens="
+                  + e.usage().totalTokens()
+                  + " error="
+                  + (e.error() != null);
           case QueryEvent.ContextWarning e -> String.valueOf(e.usagePct());
           case QueryEvent.ContextEdited e ->
               "removed=" + e.removedBlocks() + " " + e.tokensBefore() + "->" + e.tokensAfter();

@@ -163,7 +163,7 @@ class TraceTest {
 
   @Test
   void newFieldsRoundTrip() {
-    var sessionId = UUID.randomUUID();
+    var sessionId = "member:42";
     var original =
         Trace.newBuilder()
             .withName("full")

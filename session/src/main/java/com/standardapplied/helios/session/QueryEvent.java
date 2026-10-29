@@ -4,11 +4,13 @@
  */
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.common.OrderedMaps;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
@@ -21,9 +23,10 @@ import java.util.Objects;
 /**
  * Streamed event from an agent session.
  *
- * <p>Sealed; pattern-matched by subscribers (HTTP SSE, audit sink, trace listeners, custom UI) to
- * surface assistant text, tool activity, context-editing decisions, and lifecycle transitions.
- * Subscribers branch on the subtype via {@code switch}; they never parse strings.
+ * <p>Sealed; pattern-matched by subscribers (HTTP SSE, audit sink, the session's own trace
+ * recorder, custom UI) to surface assistant text, tool activity, context-editing decisions, and
+ * lifecycle transitions. Subscribers branch on the subtype via {@code switch}; they never parse
+ * strings.
  *
  * <p>Every subtype carries the same four common fields ({@code sessionId}, {@code runId}, {@code
  * turnIndex}, {@code timestamp}) plus subtype-specific detail. Common-field validation lives in
@@ -32,9 +35,9 @@ import java.util.Objects;
  * run, and every event names the run it belongs to, so the events of one run are a filter on {@code
  * runId}.
  *
- * <p>The 18 subtypes cover every observable lifecycle event the agent loop emits — run boundaries,
- * assistant output (text, thinking, grounding citations), user input, context lifecycle, tool
- * dispatch, hook activity, and terminal results.
+ * <p>The subtypes cover every observable lifecycle event the agent loop emits — run boundaries,
+ * assistant output (text, thinking, grounding citations), user input, model calls ({@link
+ * ModelCallEnded}), context lifecycle, tool dispatch, hook activity, and terminal results.
  *
  * <p>Adding a subtype is a breaking change for {@code switch} consumers that lack a {@code default}
  * branch — by design, so the compiler flags consumers that need updating.
@@ -55,6 +58,7 @@ public sealed interface QueryEvent
         QueryEvent.QuestionAsked,
         QueryEvent.TurnEnded,
         QueryEvent.TurnRetried,
+        QueryEvent.ModelCallEnded,
         QueryEvent.RunStarted,
         QueryEvent.RunEnded,
         QueryEvent.Error {
@@ -378,6 +382,60 @@ public sealed interface QueryEvent
         throw new IllegalArgumentException("providerName must not be blank");
       }
       Objects.requireNonNull(error, "error must not be null");
+    }
+  }
+
+  /**
+   * A model attempt ended: one event per attempt, a compactor's summary call included. An attempt
+   * the session accounts (a turn's final attempt, which a schema self-correction also is, and a
+   * compactor's call that reports tokens) carries exactly the usage it added to the run's totals
+   * and the cost computed for that usage, so the events' usage sums to the run's; an attempt that
+   * failed transiently and is retried carries zero usage and cost, and follows its {@link
+   * TurnRetried} once the back-off elapsed. An attempt a host {@link java.lang.Error} ended has
+   * none. A cost calculator that fails leaves the call's usage accounted at zero cost.
+   *
+   * @param sessionId the session id
+   * @param runId the run id
+   * @param turnIndex the turn index of the call
+   * @param timestamp when the attempt ended
+   * @param modelId the model id the usage was priced at; non-null
+   * @param attempt the 1-based attempt number within the turn; a compactor's call is attempt 1
+   * @param finishReason the stream's finish reason, {@code ERROR} for a failed attempt and {@code
+   *     STOP} for a compactor's call; non-null
+   * @param usage the usage the attempt added to the run's totals; non-null
+   * @param cost the cost of {@code usage}; non-null
+   * @param duration from the attempt's request to its stream's end, or across the compactor's call,
+   *     on the session's clock; non-null, non-negative
+   * @param error the attempt's error, redacted against the session's secret registry; null when the
+   *     attempt succeeded
+   */
+  record ModelCallEnded(
+      String sessionId,
+      String runId,
+      long turnIndex,
+      Instant timestamp,
+      String modelId,
+      int attempt,
+      FinishReason finishReason,
+      Usage usage,
+      CostEstimate cost,
+      Duration duration,
+      SerializedError error)
+      implements QueryEvent {
+
+    public ModelCallEnded {
+      validateCommon(sessionId, runId, turnIndex, timestamp);
+      Objects.requireNonNull(modelId, "modelId must not be null");
+      if (attempt < 1) {
+        throw new IllegalArgumentException("attempt must be >= 1, got " + attempt);
+      }
+      Objects.requireNonNull(finishReason, "finishReason must not be null");
+      Objects.requireNonNull(usage, "usage must not be null");
+      Objects.requireNonNull(cost, "cost must not be null");
+      Objects.requireNonNull(duration, "duration must not be null");
+      if (duration.isNegative()) {
+        throw new IllegalArgumentException("duration must not be negative, got " + duration);
+      }
     }
   }
 

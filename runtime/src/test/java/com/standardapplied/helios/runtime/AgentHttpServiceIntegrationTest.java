@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -192,6 +193,43 @@ final class AgentHttpServiceIntegrationTest {
           result.body().contains("\"result\":{\"sessionId\":\"" + sessionId + "\",\"runId\":"),
           result.body());
       assertTrue(result.body().contains("\"usage\":{\"inputTokens\":"), result.body());
+    }
+  }
+
+  @Test
+  void eachModelCallStreamsAsAnEventCarryingItsUsageCostAndDuration() throws Exception {
+    var costs =
+        CostCalculator.staticTable(Map.of("scripted", new CostCalculator.Pricing(1_000_000, 0)));
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(
+                request ->
+                    SessionOptions.newBuilder()
+                        .withModel(
+                            ScriptedModel.newBuilder().withTextTurn("hi", Usage.of(3, 2)).build())
+                        .withCostCalculator(costs)
+                        .withSessionId(request.sessionId())
+                        .build())
+            .withPort(0)
+            .withoutAuthentication()
+            .withHost("127.0.0.1")
+            .build();
+    try (server) {
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      var events = startEventReader(http, base, sessionId);
+      sendMessage(http, base, sessionId, "go");
+
+      var call =
+          events.awaitRunEnded().stream()
+              .filter(e -> e.event.equals("ModelCallEnded"))
+              .findFirst()
+              .orElseThrow();
+      assertTrue(call.data.contains("\"usage\":{\"inputTokens\":3,\"outputTokens\":2"), call.data);
+      assertTrue(call.data.contains("\"cost\":{\"microUsd\":3}"), call.data);
+      assertTrue(call.data.contains("\"duration\":\"PT"), call.data);
+      assertTrue(call.data.contains("\"modelId\":\"scripted\""), call.data);
     }
   }
 

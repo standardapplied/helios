@@ -30,7 +30,8 @@ import java.util.UUID;
  * @param inputText the user's input message
  * @param outputText the agent's final response text
  * @param userId who triggered this trace
- * @param sessionId session this trace belongs to
+ * @param sessionId the session this trace belongs to, such as an agent session's id; null when the
+ *     trace belongs to none
  * @param modelId model identifier (e.g., "gemini-2.0-flash")
  * @param promptName prompt registry name
  * @param promptVersion prompt registry version
@@ -54,7 +55,7 @@ public record Trace(
     String inputText,
     String outputText,
     String userId,
-    UUID sessionId,
+    String sessionId,
     String modelId,
     String promptName,
     Integer promptVersion,
@@ -93,7 +94,7 @@ public record Trace(
     private String inputText;
     private String outputText;
     private String userId;
-    private UUID sessionId;
+    private String sessionId;
     private String modelId;
     private String promptName;
     private Integer promptVersion;
@@ -197,7 +198,7 @@ public record Trace(
       return this;
     }
 
-    public Builder withSessionId(UUID sessionId) {
+    public Builder withSessionId(String sessionId) {
       this.sessionId = sessionId;
       return this;
     }

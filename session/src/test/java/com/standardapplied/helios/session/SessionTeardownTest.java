@@ -88,12 +88,10 @@ final class SessionTeardownTest {
               throw sentinel;
             });
 
+    var teardown = newTeardown(SHORT_GRACE);
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(
-          sentinel,
-          newTeardown(SHORT_GRACE)
-              .endAndSeal(tools(), BoundedTask.deadlineAfter(SHORT_GRACE))
-              .orElseThrow());
+      teardown.end(tools(), BoundedTask.deadlineAfter(SHORT_GRACE));
+      assertSame(sentinel, teardown.seal().orElseThrow());
     }
   }
 
@@ -109,12 +107,10 @@ final class SessionTeardownTest {
           throw sentinel;
         };
 
+    var teardown = newTeardown(provider, SHORT_GRACE);
     try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
-      assertSame(
-          sentinel,
-          newTeardown(provider, SHORT_GRACE)
-              .endAndSeal(tools(), BoundedTask.deadlineAfter(SHORT_GRACE))
-              .orElseThrow());
+      teardown.end(tools(), BoundedTask.deadlineAfter(SHORT_GRACE));
+      assertSame(sentinel, teardown.seal().orElseThrow());
     }
   }
 
@@ -143,9 +139,8 @@ final class SessionTeardownTest {
 
     state.ending().fail(primary);
 
-    assertSame(
-        primary,
-        teardown.endAndSeal(tools(), BoundedTask.deadlineAfter(NOT_REACHED)).orElseThrow());
+    teardown.end(tools(), BoundedTask.deadlineAfter(NOT_REACHED));
+    assertSame(primary, teardown.seal().orElseThrow());
     assertEquals(List.of(sentinel), List.of(primary.getSuppressed()));
   }
 

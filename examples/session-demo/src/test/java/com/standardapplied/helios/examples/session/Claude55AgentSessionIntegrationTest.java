@@ -21,6 +21,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
@@ -224,6 +225,62 @@ final class Claude55AgentSessionIntegrationTest {
           stored.stream().anyMatch(message -> message.metadata().containsKey(THINKING_BLOCKS)),
           "claude-opus-5-5 signed no thinking in the first run; SessionStoreContract"
               + "#aRichHistoryRoundTripsExactly covers a thinking turn's metadata");
+    }
+  }
+
+  /**
+   * Two runs of one traced Sonnet 5.5 tool-loop session priced by {@link AnthropicPricing}: each
+   * run hands over one trace, every model call in it carries the usage the API reported and its
+   * computed cost, and each trace's totals equal its run's result. Cache reads are not asserted
+   * live; {@code RecordedSessionTest#claudeProgressLoopTracesTheCacheReadOfEachModelCall} covers
+   * them.
+   */
+  @Test
+  void sonnet55TracesEachRunOfASession() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withMaxOutputTokens(4_000)
+            .build();
+    var traces = new CopyOnWriteArrayList<Trace>();
+    try (var model =
+            new AnthropicProvider()
+                .create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config, CachePolicy.shortLived());
+        var session =
+            AgentSession.open(
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withTools(List.of(searchProfiles(), getProfile()))
+                    .withSystemPrompt(SYSTEM_PROMPT)
+                    .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
+                    .withTraceListener(traces::add)
+                    .withLimits(SessionLimits.newBuilder().withMaxTurns(4).build())
+                    .build())) {
+      var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
+      events.read(session.events());
+
+      var runs =
+          List.of(
+              session.send(VIEWER).join(), session.send("Who is the better of the two?").join());
+      session.close();
+      events.awaitDone();
+
+      assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
+      assertEquals(2, traces.size());
+      for (var i = 0; i < runs.size(); i++) {
+        var terminal = runs.get(i);
+        var trace = traces.get(i);
+        assertEquals(terminal.runId(), trace.attributes().get("run.id"));
+        assertEquals(terminal.usage(), trace.usage());
+        assertEquals(terminal.cost(), trace.cost());
+        var calls =
+            trace.spans().stream().filter(span -> span.name().equals("model.call")).toList();
+        assertTrue(!calls.isEmpty(), "run " + i + " made no model call");
+        for (var call : calls) {
+          assertTrue(call.usage().outputTokens() > 0, () -> "usage " + call.usage());
+          assertTrue(call.cost().microUsd() > 0, () -> "cost " + call.cost());
+        }
+      }
     }
   }
 

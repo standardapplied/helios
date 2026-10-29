@@ -23,6 +23,8 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -44,6 +46,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -88,25 +91,7 @@ final class RecordedSessionTest {
 
   @Test
   void claudeProgressLoopSurfacesItsNotesAndRunsEveryToolCall() {
-    var replay =
-        replay(
-            "anthropic/sessions/progress-loop.sse",
-            uri ->
-                new AnthropicProvider()
-                    .create(
-                        AnthropicModelId.CLAUDE_OPUS_5_5.id(),
-                        anthropicConfig(uri)
-                            .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS))
-                            .build(),
-                        CachePolicy.shortLived()),
-            model ->
-                SessionOptions.newBuilder()
-                    .withModel(model)
-                    .withTools(
-                        List.of(
-                            search("search_profiles", "query", "location"),
-                            search("get_profile", "id")))
-                    .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived())));
+    var replay = progressLoop(trace -> {});
 
     var success = assertInstanceOf(ResultMessage.Success.class, replay.terminal());
     assertTrue(success.cost().microUsd() > 0);
@@ -121,6 +106,44 @@ final class RecordedSessionTest {
                     Collectors.mapping(QueryEvent.AssistantThinking::text, Collectors.joining())));
     assertEquals(2, notesByTurn.size());
     notesByTurn.values().forEach(notes -> assertFalse(notes.isBlank()));
+  }
+
+  @Test
+  void claudeProgressLoopTracesTheCacheReadOfEachModelCall() {
+    var traces = new ArrayList<Trace>();
+
+    var replay = progressLoop(traces::add);
+
+    assertEquals(1, traces.size());
+    var trace = traces.getFirst();
+    var calls = trace.spans().stream().filter(span -> span.name().equals("model.call")).toList();
+    assertEquals(0, calls.get(0).usage().cacheReadInputTokens());
+    assertEquals(904, calls.get(1).usage().cacheReadInputTokens());
+    assertEquals(replay.terminal().usage(), trace.usage());
+    assertEquals(replay.terminal().cost(), trace.cost());
+  }
+
+  /** The recorded claude-opus-5-5 progress loop, its runs' traces handed to {@code listener}. */
+  private static Replay progressLoop(TraceListener listener) {
+    return replay(
+        "anthropic/sessions/progress-loop.sse",
+        uri ->
+            new AnthropicProvider()
+                .create(
+                    AnthropicModelId.CLAUDE_OPUS_5_5.id(),
+                    anthropicConfig(uri)
+                        .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS))
+                        .build(),
+                    CachePolicy.shortLived()),
+        model ->
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withTools(
+                    List.of(
+                        search("search_profiles", "query", "location"),
+                        search("get_profile", "id")))
+                .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
+                .withTraceListener(listener));
   }
 
   @Test
