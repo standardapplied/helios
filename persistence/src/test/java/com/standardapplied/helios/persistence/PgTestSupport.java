@@ -8,7 +8,9 @@ package com.standardapplied.helios.persistence;
 import io.helidon.config.Config;
 import io.helidon.config.ConfigSources;
 import io.helidon.dbclient.DbClient;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -51,11 +53,8 @@ final class PgTestSupport {
     dbClient().execute().dml("TRUNCATE TABLE helios_annotations");
   }
 
-  static void truncateMemory() {
-    // CASCADE required because helios_messages.session_id REFERENCES helios_sessions(id).
-    dbClient().execute().dml("TRUNCATE TABLE helios_sessions CASCADE");
-    dbClient().execute().dml("TRUNCATE TABLE helios_archive");
-    dbClient().execute().dml("TRUNCATE TABLE helios_core_blocks");
+  static void truncateSessions() {
+    dbClient().execute().dml("TRUNCATE TABLE helios_session_entries");
   }
 
   static void truncateRuntime() {
@@ -96,35 +95,32 @@ final class PgTestSupport {
     try {
       // Drop existing helios_* tables CASCADE so each test JVM gets a fresh schema. Required
       // because schema.sql uses CREATE TABLE IF NOT EXISTS — it would skip existing tables that
-      // carry old shapes (e.g. pre-1.4 helios_core_blocks.block_id NOT NULL, pre-1.4
-      // helios_messages without ON DELETE CASCADE to helios_sessions). DROP CASCADE is safe in
-      // the test database; production migrations are documented in AGENTS.md.
+      // carry old shapes. DROP CASCADE is safe in the test database; production migrations are
+      // documented in CHANGELOG.md.
       for (var table :
           List.of(
               "helios_tool_calls",
               "helios_agent_runs",
-              "helios_messages",
-              "helios_sessions",
-              "helios_archive",
-              "helios_core_blocks",
+              "helios_session_entries",
               "helios_spans",
               "helios_traces",
               "helios_annotations",
               "helios_prompts")) {
         DB_CLIENT.execute().dml("DROP TABLE IF EXISTS " + table + " CASCADE");
       }
-      var schema =
-          new String(
-              PgTestSupport.class.getResourceAsStream("schema.sql").readAllBytes(),
-              StandardCharsets.UTF_8);
-      for (var statement : schema.split(";")) {
-        var trimmed = statement.strip();
-        if (!trimmed.isEmpty()) {
-          DB_CLIENT.execute().dml(trimmed);
-        }
-      }
+      schemaStatements().forEach(DB_CLIENT.execute()::dml);
     } catch (Exception e) {
       throw new RuntimeException("Failed to initialize schema", e);
+    }
+  }
+
+  /** The statements of {@code schema.sql}, in order. */
+  static List<String> schemaStatements() throws IOException {
+    try (var schema = PgTestSupport.class.getResourceAsStream("schema.sql")) {
+      return Arrays.stream(new String(schema.readAllBytes(), StandardCharsets.UTF_8).split(";"))
+          .map(String::strip)
+          .filter(statement -> !statement.isEmpty())
+          .toList();
     }
   }
 

@@ -12,7 +12,7 @@
 
     <artifactId>helios-persistence</artifactId>
     <name>helios-persistence</name>
-    <description>PostgreSQL persistence for prompts and traces via Helidon DbClient</description>
+    <description>PostgreSQL persistence for prompts, traces, runs and sessions via Helidon DbClient</description>
 
     <dependencyManagement>
         <dependencies>
@@ -35,6 +35,11 @@
         <dependency>
             <groupId>com.standardapplied</groupId>
             <artifactId>helios-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-session</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -78,6 +83,19 @@
             <artifactId>helios-core</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-session</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-testing</artifactId>
+            <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

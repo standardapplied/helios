@@ -908,6 +908,22 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 | `RuleMatcher`, `HookDecision`, `HookRegistry` (with `countOf`) | internal; `countOf` is removed |
 | Automated approval through a hand-built evaluator's approver | answer the `QuestionAsked` event with `AgentSession.answer`, or decide the call in a `PreToolUseHook` |
 
+**The v1 conversation tables are gone from `schema.sql`.** Nothing has written
+`helios_sessions`, `helios_messages`, `helios_archive` or `helios_core_blocks` since 2.0.0's
+removal of `PgMemory`; `schema.sql` no longer creates them. Existing tables are not dropped, since
+`schema.sql` only creates what is missing. A deployment that never used them may drop them:
+
+```sql
+DROP TABLE IF EXISTS helios_messages CASCADE;
+DROP TABLE IF EXISTS helios_sessions CASCADE;
+DROP TABLE IF EXISTS helios_archive CASCADE;
+DROP TABLE IF EXISTS helios_core_blocks CASCADE;
+```
+
+| Before | 3.0 |
+|---|---|
+| `persistence.sql.MessageSql`, `persistence.sql.SessionSql`, `persistence.mapper.MessageMapper`, `JsonbMapper.toolCallsFromJsonb` | removed; a deployment that stored conversations in its own copies of these tables moves to `PgSessionStore` |
+
 ### Added
 
 - **Sessions can be stored and reopened.** `SessionOptions.Builder.withStore(store)` makes a
@@ -924,6 +940,14 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
   `SessionStore` SPI, `SessionEntryJson` (an entry reads back as the same JSON value, a number
   exact in value but not always in Java type) and the `SessionStoreContract` test case in the
   session test jar.
+- **`PgSessionStore`** keeps sessions in PostgreSQL, one row per entry in
+  `helios_session_entries` (primary key `(session_id, seq)`, the entry as `SessionEntryJson`
+  text, so a message holding U+0000 is stored verbatim), and passes `SessionStoreContract`. An
+  append is one transaction whose first row is inserted only when the session's highest sequence
+  number is the one the writer expects; a load reads from the last `replaced` row in one statement.
+  `delete` locks the table against writers (`SHARE ROW EXCLUSIVE`), so an append in progress is
+  removed whole or conflicts afterwards. It applies no redactor: the session already redacted what
+  it stores.
 - **A session is a conversation that runs many times.** `send` steers the run in progress or
   starts the next one and returns that run's result future; a session runs again after any ending
   until it is closed; `interrupt()` stops the current run and keeps the session; events carry
@@ -1060,6 +1084,8 @@ no longer exported; `Permission.evaluate` dry-runs a policy, and a compactor get
 
 ### Changed
 
+- **`helios-persistence` now depends on `helios-session`**, for `PgSessionStore`; its module
+  requires `com.standardapplied.helios.session`.
 - **A session no longer holds a platform thread.** Its wall-clock deadline was a
   `ScheduledThreadPoolExecutor` with one platform thread per session (`helios-deadline-<id>`); it
   is now a virtual thread, `helios-wall-clock-<id>`, that waits on the session's token for
