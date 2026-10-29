@@ -106,53 +106,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_annotations_subject_facet_label_aut
     ON helios_annotations(subject_id, COALESCE(facet, ''), label, author_id)
     WHERE author_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS helios_archive (
-    id          UUID            PRIMARY KEY,
-    agent_id    VARCHAR(255)    NOT NULL,
-    content     TEXT            NOT NULL,
-    metadata    JSONB           NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ     NOT NULL
+CREATE TABLE IF NOT EXISTS helios_session_entries (
+    session_id  VARCHAR(128)  NOT NULL,
+    seq         BIGINT        NOT NULL,
+    type        VARCHAR(16)   NOT NULL,
+    run_id      VARCHAR(64)   NOT NULL,
+    entry       TEXT          NOT NULL,
+    created_at  TIMESTAMPTZ   NOT NULL,
+    PRIMARY KEY (session_id, seq)
 );
 
-CREATE INDEX IF NOT EXISTS idx_helios_archive_agent_created
-    ON helios_archive (agent_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS helios_sessions (
-    id              UUID            PRIMARY KEY,
-    agent_id        VARCHAR(255)    NOT NULL,
-    user_id         VARCHAR(255),
-    created_at      TIMESTAMPTZ     NOT NULL,
-    last_active_at  TIMESTAMPTZ     NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS helios_messages (
-    id          UUID            PRIMARY KEY,
-    session_id  UUID            NOT NULL REFERENCES helios_sessions(id) ON DELETE CASCADE,
-    role        VARCHAR(20)     NOT NULL,
-    content     TEXT,
-    tool_calls  JSONB,
-    tool_call_id VARCHAR(255),
-    tool_name   VARCHAR(255),
-    metadata    JSONB           NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ     NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_helios_messages_session_id
-    ON helios_messages (session_id);
-
-CREATE INDEX IF NOT EXISTS idx_helios_sessions_agent_user
-    ON helios_sessions (agent_id, user_id, last_active_at DESC);
-
-CREATE TABLE IF NOT EXISTS helios_core_blocks (
-    agent_id     VARCHAR(255)    NOT NULL,
-    block_name   VARCHAR(255)    NOT NULL,
-    description  TEXT,
-    data         JSONB           NOT NULL DEFAULT '{}',
-    max_size     INT             NOT NULL,
-    created_at   TIMESTAMPTZ     NOT NULL,
-    updated_at   TIMESTAMPTZ     NOT NULL,
-    PRIMARY KEY (agent_id, block_name)
-);
+CREATE INDEX IF NOT EXISTS idx_helios_session_entries_replaced
+    ON helios_session_entries (session_id, seq) WHERE type = 'replaced';
 
 CREATE TABLE IF NOT EXISTS helios_agent_runs (
     run_id              UUID            PRIMARY KEY,

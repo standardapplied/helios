@@ -6,7 +6,6 @@
 package com.standardapplied.helios.persistence.mapper;
 
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.model.ToolCall;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -140,23 +139,6 @@ public final class JsonbMapper {
       return MAPPER.readValue(json, STRING_LIST_TYPE);
     } catch (Exception e) {
       throw new IllegalArgumentException("Failed to deserialize labels from JSON: " + json, e);
-    }
-  }
-
-  private static final TypeReference<List<ToolCall>> TOOL_CALLS_TYPE = new TypeReference<>() {};
-
-  /**
-   * Deserializes a JSONB string to a list of tool calls, their arguments read as {@link
-   * #argumentsFromJsonb(String)} reads them.
-   */
-  public static List<ToolCall> toolCallsFromJsonb(String json) {
-    if (Strings.isBlank(json) || "[]".equals(json)) {
-      return List.of();
-    }
-    try {
-      return ARGUMENTS_MAPPER.readValue(json, TOOL_CALLS_TYPE);
-    } catch (Exception e) {
-      throw new IllegalArgumentException("Failed to deserialize tool calls from JSON: " + json, e);
     }
   }
 }

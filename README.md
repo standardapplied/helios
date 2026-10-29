@@ -307,7 +307,7 @@ try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build
 
 `maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run. A run that ends with tool calls unanswered (a hook's `Stop`, an interrupt, an error) answers each with a "not run" tool message, so the next run's history is one a provider accepts. An execution provider that refuses at `open` makes it throw `SessionUnavailableException`.
 
-**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore` and `FileSessionStore` (one JSON-lines file per session); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
+**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore`, `FileSessionStore` (one JSON-lines file per session) and, in `helios-persistence`, `PgSessionStore` (one Postgres row per entry); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
 
 <!-- snippet: QuickStarts#storedChat -->
 ```java
@@ -627,7 +627,7 @@ DurableResumeScanner.builder(durability)
 
 ## Persistence (`helios-persistence`)
 
-PostgreSQL-backed `PromptRegistry`, `TraceStore`, and durability impls. All share a `PgConfig` carrying the `DbClient`, schema name, and optional agent ID.
+PostgreSQL-backed `PromptRegistry`, `TraceStore`, `SessionStore` and durability impls. All share a `PgConfig` carrying the `DbClient`, schema name, and optional agent ID.
 
 ```java
 var pgConfig = PgConfig.newBuilder()
@@ -639,13 +639,14 @@ var traceStore = new PgTraceStore(pgConfig);
 var annotationStore = new PgAnnotationStore(pgConfig);
 var promptRegistry = new PgPromptRegistry(pgConfig);
 var durability = PgDurability.of(pgConfig);   // RunStore + ToolCallJournal
+var sessionStore = new PgSessionStore(pgConfig);
 ```
 
 Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
 
 **Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
-**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. The session's redaction pass does not reach persistence: the session does not feed these stores today, so whatever you record into them yourself is stored as you give it.
+**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. The session's redaction pass does not reach persistence: the session does not feed these stores today, so whatever you record into them yourself is stored as you give it. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
 
 ## Security
 

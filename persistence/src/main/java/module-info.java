@@ -11,6 +11,7 @@
  */
 module com.standardapplied.helios.persistence {
   requires com.standardapplied.helios.core;
+  requires com.standardapplied.helios.session;
   requires ai.singlr.scimsql;
   requires io.helidon.dbclient;
   requires io.helidon.common.mapper;
