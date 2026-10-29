@@ -52,7 +52,7 @@ Helios is used in production but has documented limitations that you should unde
 
 These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
 
-- **Persistence layer stores trace/journal payloads verbatim unless you set a redactor.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. The session does not feed persistence today, so its redaction pass does not reach these tables; to redact at the persistence boundary, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
+- **Persistence layer stores trace/journal payloads verbatim unless you set a redactor.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever you store yourself, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
 - **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
 - **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
 - **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
@@ -545,9 +545,14 @@ try (var events = session.events()) {
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
-`com.standardapplied.helios.core.trace` holds the `Trace` / `Span` model and its builders
-(`TraceBuilder`, `SpanBuilder`). A finished trace goes to a `TraceListener`, whose one method
-`onTrace(Trace)` receives it; `PgTraceStore` in `helios-persistence` is one.
+**Tracing.** A session given a `TraceListener` hands it one `Trace` per run, on every ending, linked to its runs by the session id: a `model.call` span per model attempt (tokens, cost, duration), a `tool.<name>` span per tool call and a `hook.<name>` span per hook decision, with totals equal to the run's result. `TraceDetail.STANDARD` (the default) stores no content; `VERBOSE` adds the prompt, answer, tool arguments and results, redacted by the session. The listener runs before the run's result completes. A trace is not the conversation; that is the session store's.
+
+```java
+var options = SessionOptions.newBuilder()
+    .withModel(model)
+    .withTraceListener(new PgTraceStore(pgConfig))
+    .build();
+```
 
 ## Sandboxed Code Execution (`helios-repl`)
 
@@ -638,7 +643,7 @@ Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.
 
 **Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
-**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. The session's redaction pass does not reach persistence: the session does not feed these stores today, so whatever you record into them yourself is stored as you give it. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
+**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to whatever you record into these stores yourself. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
 
 ## Security
 
@@ -668,7 +673,7 @@ Not covered:
 - Text that does not come from tools: user messages, the system prompt, hook `Inject` messages (deployer code), and the model's own output.
 - `Read` attachments: images and PDFs pass through unredacted.
 - Runtime HTTP error bodies.
-- Persistence: verbatim unless `PgConfig.Builder.withRedactor(...)` is set; the session does not feed persistence.
+- Persistence: a session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; what you store yourself is verbatim unless `PgConfig.Builder.withRedactor(...)` is set.
 - Telemetry content capture.
 - Secrets the model rebuilds from pieces (encoded, or split across calls): redaction matches exact bytes.
 

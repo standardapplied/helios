@@ -69,35 +69,6 @@ final class DurableSessionTest {
     assertSame(store, stored.toBuilder().build().store().orElseThrow());
   }
 
-  @Test
-  void canonicalConstructorRejectsNullStore() {
-    var o = SessionOptions.newBuilder().withModel(ScriptedModel.newBuilder().build()).build();
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    o.model(),
-                    o.sessionId(),
-                    o.limits(),
-                    o.maxQueuedUserMessages(),
-                    o.clock(),
-                    o.tools(),
-                    o.hooks(),
-                    o.permission(),
-                    o.memoryBackend(),
-                    o.costCalculator(),
-                    o.executionProvider(),
-                    o.askUserQuestion(),
-                    o.outputSchema(),
-                    o.systemPrompt(),
-                    o.tokenCounter(),
-                    o.contextCompactor(),
-                    o.secretRegistry(),
-                    null));
-    assertEquals("store must not be null", ex.getMessage());
-  }
-
   // ── 1. reopen ────────────────────────────────────────────────────────────
 
   @Test

@@ -639,17 +639,23 @@ final class SessionRunsTest {
       var types = events.events().stream().map(e -> e.getClass().getSimpleName()).toList();
       var runOfEach = events.events().stream().map(QueryEvent::runId).toList();
       var runOne =
-          List.of("RunStarted", "UserMessageReceived", "AssistantText", "TurnEnded", "RunEnded");
+          List.of(
+              "RunStarted",
+              "UserMessageReceived",
+              "AssistantText",
+              "ModelCallEnded",
+              "TurnEnded",
+              "RunEnded");
       var both = new ArrayList<>(runOne);
       both.addAll(runOne);
       assertEquals(both, types);
       assertEquals(
           Stream.concat(
-                  Collections.nCopies(5, first).stream(), Collections.nCopies(5, second).stream())
+                  Collections.nCopies(6, first).stream(), Collections.nCopies(6, second).stream())
               .toList(),
           runOfEach);
       assertEquals(
-          Collections.nCopies(5, second), late.events().stream().map(QueryEvent::runId).toList());
+          Collections.nCopies(6, second), late.events().stream().map(QueryEvent::runId).toList());
     }
   }
 

@@ -47,7 +47,7 @@ public final class TraceMapper {
         .withInputText(row.column("input_text").getString())
         .withOutputText(row.column("output_text").getString())
         .withUserId(row.column("user_id").getString())
-        .withSessionId(row.column("session_id").get(UUID.class))
+        .withSessionId(row.column("session_id").get(String.class))
         .withModelId(row.column("model_id").getString())
         .withPromptName(row.column("prompt_name").getString())
         .withPromptVersion(promptVersion)

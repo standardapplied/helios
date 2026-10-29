@@ -6,6 +6,16 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Every run records a trace; a trace's session id is a string.** A session given a trace
+listener hands it one trace per run, and each model attempt is an event.
+
+| Before | 3.0 |
+|---|---|
+| an exhaustive `switch` over `QueryEvent` | handles the new subtype `QueryEvent.ModelCallEnded`, or has a `default` |
+| `SessionOptions`' 18-component canonical constructor | 20 components: `Optional<TraceListener> traceListener` and `TraceDetail traceDetail` last; build through `SessionOptions.newBuilder()` |
+| `UUID Trace.sessionId()`, `Trace.Builder.withSessionId(UUID)`, `TraceBuilder.withSessionId(UUID)` | `String`, so an agent session's id (`sess-<id>`, `member:42`) fits |
+| `helios_traces.session_id UUID` | `VARCHAR(128)`; on an existing database run `ALTER TABLE helios_traces ALTER COLUMN session_id TYPE VARCHAR(128) USING session_id::text` |
+
 **Session ids follow one rule.** `SessionOptions` accepts only ids of 1 to 128 characters of
 `[A-Za-z0-9._:-]` that do not start with `.`, so an id works with every session store and can
 never name a path outside a file store's directory.
@@ -936,6 +946,19 @@ events go. `core.trace.TraceListener.onTrace(Trace)` receives a finished trace.
 
 ### Added
 
+- **Every run records a trace.** `SessionOptions.Builder.withTraceListener(listener)` hands the
+  listener one `Trace` per run, on every ending (a terminal, a host `Error`, a crash, a close or
+  an interrupt), before the run's result completes: a `model.call` span per model attempt with its
+  usage, cost and duration, a `tool.<name>` span per tool call and a `hook.<name>` span per hook
+  decision, totals equal to the run's result and `sessionId` the session's id, so a
+  conversation's runs are found together. `withTraceDetail(TraceDetail.VERBOSE)` also stores the
+  prompt, answer, tool arguments and results, redacted by the session; the default `STANDARD`
+  stores no content. A listener's `Exception` is logged; its `Error` fails the run's result.
+  `.withTraceListener(pgTraceStore)` stores them in Postgres.
+- **`QueryEvent.ModelCallEnded` reports each model attempt**, a compactor's summary call
+  included: the model id it was priced at, its attempt number, finish reason, usage, cost,
+  duration and redacted error. An accounted call's event carries exactly the usage it added to
+  the run, so the events' usage sums to the result's; a retried attempt reports zero usage.
 - **Sessions can be stored and reopened.** `SessionOptions.Builder.withStore(store)` makes a
   session durable: `AgentSession.open` loads the conversation stored under the session id, or
   starts it when there is none, after the options' system prompt, which is never stored. Each

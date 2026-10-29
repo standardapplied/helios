@@ -11,6 +11,9 @@ import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.core.trace.TraceDetail;
+import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
@@ -95,6 +98,15 @@ import java.util.Optional;
  * @param store optional store that makes the session durable: {@link AgentSession#open} loads the
  *     conversation stored under {@code sessionId}, or starts it when there is none, and every turn
  *     appends what it added. Absent by default: the conversation lives only in the session
+ * @param traceListener optional listener handed one {@link Trace} per run, however the run ends,
+ *     before the run's result completes: a {@code model.call} span per model attempt, a {@code
+ *     tool.<name>} span per tool call and a {@code hook.<name>} span per hook decision, its usage
+ *     and cost the run's result's, and its {@code sessionId} this session's id. An {@code
+ *     Exception} it throws is logged and changes nothing; an {@code Error} fails the run's result.
+ *     Absent by default: the session does no tracing work
+ * @param traceDetail how much content the session's traces store; {@link TraceDetail#STANDARD}
+ *     stores none, {@link TraceDetail#VERBOSE} the redacted input, output, tool arguments and
+ *     results. Non-null, defaults to {@code STANDARD}
  */
 public record SessionOptions(
     Model model,
@@ -114,7 +126,9 @@ public record SessionOptions(
     TokenCounter tokenCounter,
     ContextCompactor contextCompactor,
     SecretRegistry secretRegistry,
-    Optional<SessionStore> store) {
+    Optional<SessionStore> store,
+    Optional<TraceListener> traceListener,
+    TraceDetail traceDetail) {
 
   /**
    * Canonical constructor.
@@ -143,6 +157,8 @@ public record SessionOptions(
     Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
     Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
     Objects.requireNonNull(store, "store must not be null");
+    Objects.requireNonNull(traceListener, "traceListener must not be null");
+    Objects.requireNonNull(traceDetail, "traceDetail must not be null");
   }
 
   private static int requirePositiveQueue(int maxQueuedUserMessages) {
@@ -172,6 +188,7 @@ public record SessionOptions(
     var builder = new Builder();
     executionProvider.ifPresent(builder::withExecutionProvider);
     store.ifPresent(builder::withStore);
+    traceListener.ifPresent(builder::withTraceListener);
     if (askUserQuestion) {
       builder.withAskUserQuestion();
     }
@@ -190,7 +207,8 @@ public record SessionOptions(
         .withSystemPrompt(systemPrompt.orElse(null))
         .withTokenCounter(tokenCounter)
         .withContextCompactor(contextCompactor)
-        .withSecretRegistry(secretRegistry);
+        .withSecretRegistry(secretRegistry)
+        .withTraceDetail(traceDetail);
   }
 
   /**
@@ -205,11 +223,13 @@ public record SessionOptions(
     private SessionLimits limits = SessionLimits.defaults();
     private int maxQueuedUserMessages = 256;
     private InstantSource clock = Clock.systemUTC();
-    private final ArrayList<ToolBinding> tools = new ArrayList<>();
-    private final ArrayList<Hook> hooks = new ArrayList<>();
+    private final List<ToolBinding> tools = new ArrayList<>();
+    private final List<Hook> hooks = new ArrayList<>();
     private Permission permission = Permission.empty(PermissionMode.DEFAULT);
     private CostCalculator costCalculator = CostCalculator.ZERO;
     private final BuiltInTools builtInTools = new BuiltInTools();
+    private TraceListener traceListener;
+    private TraceDetail traceDetail = TraceDetail.STANDARD;
     private OutputSchema<?> outputSchema;
     private String systemPrompt;
     private TokenCounter tokenCounter = TokenCounter.charBased();
@@ -520,6 +540,36 @@ public record SessionOptions(
     }
 
     /**
+     * Hand {@code traceListener} one {@link Trace} per run, however the run ends, before the run's
+     * result completes. One listener per session: a caller with two stores composes them, {@code
+     * trace -> { pg.onTrace(trace); otel.onTrace(trace); }}, and one that wants a trace name, user
+     * id, group id or labels wraps it, {@code trace ->
+     * pg.onTrace(Trace.newBuilder(trace).withName("matchmaking").build())}. Unset by default: the
+     * session does no tracing work.
+     *
+     * @param traceListener non-null listener
+     * @return this builder
+     * @throws NullPointerException if {@code traceListener} is null
+     */
+    public Builder withTraceListener(TraceListener traceListener) {
+      this.traceListener = Objects.requireNonNull(traceListener, "traceListener must not be null");
+      return this;
+    }
+
+    /**
+     * Set how much content the session's traces store. Defaults to {@link TraceDetail#STANDARD},
+     * which stores none.
+     *
+     * @param traceDetail non-null detail
+     * @return this builder
+     * @throws NullPointerException if {@code traceDetail} is null
+     */
+    public Builder withTraceDetail(TraceDetail traceDetail) {
+      this.traceDetail = Objects.requireNonNull(traceDetail, "traceDetail must not be null");
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the options
@@ -552,7 +602,9 @@ public record SessionOptions(
           tokenCounter,
           compactor,
           secretRegistry != null ? secretRegistry : new SecretRegistry(),
-          Optional.ofNullable(store));
+          Optional.ofNullable(store),
+          Optional.ofNullable(traceListener),
+          traceDetail);
     }
 
     /**
