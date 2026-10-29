@@ -311,7 +311,8 @@ var session3 =
 
 For ad-hoc, hook-driven rewrites (no `ContextCompactor` subclass), register a
 `PreModelTurnHook` that returns `HookOutcome.mutateHistory(rewrittenHistory)`.
-The loop swaps the history and emits `HookFired` with `outcomeKind=MutateHistory`.
+The loop swaps the history and emits `HookFired` with phase `PRE_MODEL_TURN` and that
+`MutateHistory` as its outcome.
 To see the history on both sides of a compaction, wrap the default compactor and delegate to it,
 as the [root README](../README.md#context-compaction) shows.
 

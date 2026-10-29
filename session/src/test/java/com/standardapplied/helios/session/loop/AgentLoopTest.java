@@ -26,6 +26,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
@@ -572,8 +573,8 @@ final class AgentLoopTest {
             .map(e -> (QueryEvent.HookFired) e)
             .anyMatch(
                 h ->
-                    h.phase().equals("PreModelTurnHook")
-                        && h.outcomeKind().equals("MutateHistory"));
+                    h.phase() == HookPhase.PRE_MODEL_TURN
+                        && h.outcome().equals(HookOutcome.mutateHistory(replacement)));
     assertTrue(fired, "HookFired with MutateHistory must be emitted");
   }
 

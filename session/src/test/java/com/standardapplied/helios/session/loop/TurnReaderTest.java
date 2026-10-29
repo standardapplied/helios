@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
@@ -299,7 +300,8 @@ final class TurnReaderTest {
             s ->
                 new DefaultHookContext(
                     s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), model),
-            CLOCK);
+            CLOCK,
+            new SecretRegistry());
     return new TurnReader(state, emitter, CLOCK);
   }
 
