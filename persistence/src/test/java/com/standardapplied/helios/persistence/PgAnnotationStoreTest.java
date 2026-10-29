@@ -460,7 +460,7 @@ class PgAnnotationStoreTest {
             .withName("feedback-test")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     store.storeAnnotation(
         Annotation.newBuilder()
@@ -482,7 +482,7 @@ class PgAnnotationStoreTest {
             .withName("feedback-test")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     store.storeAnnotation(
         Annotation.newBuilder()
@@ -504,7 +504,7 @@ class PgAnnotationStoreTest {
             .withName("feedback-test")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     store.storeAnnotation(
         Annotation.newBuilder()
@@ -526,7 +526,7 @@ class PgAnnotationStoreTest {
             .withName("feedback-test")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     store.storeAnnotation(
         Annotation.newBuilder()
@@ -557,7 +557,7 @@ class PgAnnotationStoreTest {
             .withEndTime(now.plusSeconds(2))
             .withSpan(span)
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     // Annotate the span, not the trace
     store.storeAnnotation(
@@ -581,7 +581,7 @@ class PgAnnotationStoreTest {
             .withName("multi-feedback")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
-    traces.store(trace);
+    traces.onTrace(trace);
 
     store.storeAnnotation(
         Annotation.newBuilder()

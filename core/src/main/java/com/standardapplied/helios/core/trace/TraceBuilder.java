@@ -7,7 +7,6 @@ package com.standardapplied.helios.core.trace;
 
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.Ids;
-import com.standardapplied.helios.core.events.EventSink;
 import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -22,16 +21,9 @@ import java.util.function.Function;
 /**
  * Mutable builder for constructing traces during agent execution.
  *
- * <p>Create with {@link #start(String)} or {@link #start(String, UUID, List)}. Add spans with
- * {@link #withChildSpan(String, SpanKind)}, then call {@link #end()} or {@link #fail(String)} to
- * produce an immutable {@link Trace}.
- *
- * <p>The terminal {@link Trace} is returned from {@link #end()} / {@link #fail(String)} so callers
- * can attach it to a {@link com.standardapplied.helios.core.events.HeliosEvent.RunCompleted} or
- * {@link com.standardapplied.helios.core.events.HeliosEvent.RunFailed} event. Per-span {@link
- * com.standardapplied.helios.core.events.HeliosEvent.SpanOpened} / {@link
- * com.standardapplied.helios.core.events.HeliosEvent.SpanClosed} events are emitted directly by
- * {@link SpanBuilder} to the supplied {@code eventSinks}.
+ * <p>Create with {@link #start(String)}. Add spans with {@link #withChildSpan(String, SpanKind)},
+ * then call {@link #end()} or {@link #fail(String)} to produce an immutable {@link Trace}, which
+ * the caller may hand to a {@link TraceListener}.
  *
  * <p>Not thread-safe. Designed for sequential use within an agent loop.
  */
@@ -40,8 +32,6 @@ public final class TraceBuilder implements SpanContainer {
   private final UUID id;
   private final String name;
   private final OffsetDateTime startTime;
-  private final UUID runId;
-  private final List<EventSink> eventSinks;
   private final Map<String, String> attributes = new LinkedHashMap<>();
   private final List<SpanBuilder> openSpans = new ArrayList<>();
   private final List<Span> completedSpans = new ArrayList<>();
@@ -57,38 +47,20 @@ public final class TraceBuilder implements SpanContainer {
   private String groupId;
   private List<String> labels = List.of();
 
-  private TraceBuilder(String name, UUID runId, List<EventSink> eventSinks) {
+  private TraceBuilder(String name) {
     this.id = Ids.newId();
     this.name = name;
     this.startTime = Ids.now();
-    this.runId = runId;
-    this.eventSinks = eventSinks == null ? List.of() : List.copyOf(eventSinks);
   }
 
   /**
-   * Starts a new trace with no event sinks. Spans within this trace will not emit any per-span
-   * events. Useful for callers that only want the terminal {@link Trace} artifact.
+   * Starts a new trace.
    *
    * @param name the trace name
    * @return a new TraceBuilder
    */
   public static TraceBuilder start(String name) {
-    return new TraceBuilder(name, null, List.of());
-  }
-
-  /**
-   * Starts a new trace whose spans emit {@code SpanOpened} / {@code SpanClosed} events to every
-   * supplied {@link EventSink}. The {@code runId} threads through every event so consumers can
-   * correlate spans with the agent run that produced them.
-   *
-   * @param name the trace name
-   * @param runId per-run identifier carried on every emitted event; may be {@code null} only when
-   *     {@code eventSinks} is empty
-   * @param eventSinks sinks notified for every span open/close within this trace
-   * @return a new TraceBuilder
-   */
-  public static TraceBuilder start(String name, UUID runId, List<EventSink> eventSinks) {
-    return new TraceBuilder(name, runId, eventSinks);
+    return new TraceBuilder(name);
   }
 
   /**
@@ -102,7 +74,7 @@ public final class TraceBuilder implements SpanContainer {
   @Override
   public SpanBuilder withChildSpan(String name, SpanKind kind) {
     requireOpen();
-    var span = new SpanBuilder(name, kind, this.id, null, new SpanEvents(eventSinks, runId));
+    var span = new SpanBuilder(name, kind);
     openSpans.add(span);
     return span;
   }
@@ -167,9 +139,7 @@ public final class TraceBuilder implements SpanContainer {
   }
 
   /**
-   * Completes this trace successfully and returns the built {@link Trace}. The caller is
-   * responsible for surfacing it via {@link
-   * com.standardapplied.helios.core.events.HeliosEvent.RunCompleted}.
+   * Completes this trace successfully and returns the built {@link Trace}.
    *
    * @return the immutable Trace
    * @throws IllegalStateException if this trace has already ended
@@ -187,8 +157,7 @@ public final class TraceBuilder implements SpanContainer {
 
   /**
    * Completes this trace with an error. Auto-fails any open spans and returns the built {@link
-   * Trace}. The caller is responsible for surfacing it via {@link
-   * com.standardapplied.helios.core.events.HeliosEvent.RunFailed}.
+   * Trace}.
    *
    * @param error the error message
    * @return the immutable Trace
