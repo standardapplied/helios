@@ -242,6 +242,44 @@ final class SessionTracingTest {
     assertTotalsEqual(result, trace);
   }
 
+  @Test
+  void aSummaryCallReportingNoUsageIsStillAModelCallOfTheSummaryModel() {
+    var summaryModel =
+        ScriptedModel.newBuilder()
+            .withId("summary")
+            .withTextTurn("the gist", Usage.of(0, 0))
+            .build();
+    var compactor = SummarizingCompactor.newBuilder(summaryModel).build();
+    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();
+    var events = new EventCollector();
+    ResultMessage result;
+    try (var session =
+        AgentSession.open(
+            traced(model).withContextCompactor(compactor).withLimits(limits).build())) {
+      events.read(session.events());
+      result = Await.value("the result", session.send("go"));
+      events.awaitRunEnded();
+    }
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals(1, summaryModel.calls().size());
+    var summaries =
+        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
+            .filter(e -> e.modelId().equals("summary"))
+            .toList();
+    assertEquals(1, summaries.size());
+    assertEquals(Usage.of(0, 0), summaries.getFirst().usage());
+    assertEquals(FinishReason.STOP, summaries.getFirst().finishReason());
+    var summarySpans =
+        spans(onlyTrace(), "model.call").stream()
+            .filter(span -> "summary".equals(span.attributes().get("model")))
+            .toList();
+    assertEquals(1, summarySpans.size());
+    assertTrue(summarySpans.getFirst().success());
+    assertTotalsEqual(result, onlyTrace());
+  }
+
   @ParameterizedTest
   @CsvSource({"true, true", "false, true", "true, false", "false, false"})
   void aModelAttemptAHostErrorEndsIsAFailedModelCallWithNoUsage(boolean atOpen, boolean readable) {

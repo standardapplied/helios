@@ -70,7 +70,8 @@ final class UsageAccounting {
 
   /**
    * Account a compactor's summary call at {@code modelId}'s rate and report it; a {@link
-   * com.standardapplied.helios.session.CompactionResult} that reports tokens names its model.
+   * com.standardapplied.helios.session.CompactionResult} names a model exactly when the compactor
+   * called one.
    */
   void accountCompaction(
       SessionState state, String modelId, Usage usage, Instant started, Instant ended) {
