@@ -79,9 +79,7 @@ final class ModelCall {
    * is retried: the final attempt is accounted, a retried one is reported with zero usage once its
    * back-off elapsed, so an attempt whose back-off the run's cancellation cuts short is the final
    * one and is accounted, while one whose event delivery the run's cancellation follows stays
-   * reported as retried; an attempt a host {@link Error} ended, or whose {@code TurnRetried}
-   * delivery threw, is reported with zero usage, an {@code Error} recorded on the session's ending
-   * first.
+   * reported as retried.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -98,13 +96,7 @@ final class ModelCall {
     while (true) {
       attempt++;
       var started = clock.instant();
-      TurnOutcome turn;
-      try {
-        turn = streamOnce(state, limits, visibleTools);
-      } catch (Error failure) {
-        accounting.reportUnaccounted(state, attempt, failure, started, clock.instant());
-        throw failure;
-      }
+      var turn = streamOnce(state, limits, visibleTools);
       var ended = clock.instant();
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
@@ -113,28 +105,22 @@ final class ModelCall {
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
-      try {
-        emitter.emit(
-            state,
-            new QueryEvent.TurnRetried(
-                state.sessionId(),
-                state.runId(),
-                state.currentTurnIndex(),
-                collaborators.clock().instant(),
-                attempt,
-                backoff,
-                transientErr.providerName(),
-                SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
-      } catch (RuntimeException | Error failure) {
-        state.ending().failWith(failure);
-        accounting.reportUnaccounted(state, attempt, transientErr, started, ended);
-        throw failure;
-      }
+      emitter.emit(
+          state,
+          new QueryEvent.TurnRetried(
+              state.sessionId(),
+              state.runId(),
+              state.currentTurnIndex(),
+              collaborators.clock().instant(),
+              attempt,
+              backoff,
+              transientErr.providerName(),
+              SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
       if (!sleepHonouringCancellation(backoff, state.cancellation())) {
         accounting.accountTurn(state, turn, attempt, started, ended);
         return turn.withStreamAttempts(attempt);
       }
-      accounting.reportUnaccounted(state, attempt, transientErr, started, ended);
+      accounting.reportRetried(state, attempt, transientErr, started, ended);
       if (stopped(state)) {
         return turn.withStreamAttempts(attempt);
       }

@@ -7,7 +7,6 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,7 +38,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -298,20 +296,17 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void summarizerThrowingReturnsOriginalHistoryAndReportsTheFailedCall() {
-    var boom = new RuntimeException("boom");
+  void summarizerThrowingReturnsOriginalHistory() {
     var compactor =
         compactorSummarizingWith(
             () -> {
-              throw boom;
+              throw new RuntimeException("boom");
             });
 
     var out = compactor.compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
-    assertEquals("summary", out.modelId());
-    assertSame(boom, out.error());
   }
 
   @Test
@@ -325,7 +320,6 @@ final class SummarizingCompactorTest {
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(40, 1), out.usage());
     assertEquals("summary", out.modelId());
-    assertNull(out.error());
   }
 
   @Test
@@ -338,7 +332,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void summaryTimeoutLeavesHistoryUnchangedAndReportsTheCallAsTimedOut() {
+  void summaryTimeoutLeavesHistoryUnchanged() {
     var interrupted = new CountDownLatch(1);
     var slow = blockingUntilInterrupted(interrupted);
     var compactor =
@@ -348,10 +342,6 @@ final class SummarizingCompactorTest {
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
-    assertEquals("summary", out.modelId());
-    assertEquals(
-        "summary timed out after PT0.05S",
-        assertInstanceOf(TimeoutException.class, out.error()).getMessage());
     Await.latch("the timed-out summary call to be interrupted", interrupted);
   }
 
@@ -374,7 +364,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void anErrorTheSummarizerThrewIsTheResultsErrorAsItself() {
+  void anErrorTheSummarizerThrewLeavesTheCompactionAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(
@@ -382,16 +372,22 @@ final class SummarizingCompactorTest {
               throw sentinel;
             });
 
-    assertFailedWith(sentinel, compactor.compact(CONVERSATION, freshContext()));
+    var thrown =
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, freshContext()));
+
+    assertSame(sentinel, thrown);
   }
 
   @Test
-  void anErrorTheSummarizerJoinsFromAFailedFutureIsTheResultsErrorAsItself() {
+  void anErrorTheSummarizerJoinsFromAFailedFutureLeavesTheCompactionAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor = compactorSummarizingWith(() -> CompletableFuture.failedFuture(sentinel).join());
     var state = freshState();
 
-    assertFailedWith(sentinel, compactor.compact(CONVERSATION, contextOf(state)));
+    var thrown =
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
+
+    assertSame(sentinel, thrown);
     assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
@@ -471,7 +467,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void anErrorTheSummarizerThrowsUnderAnotherContextIsOnlyTheResultsError() {
+  void anErrorTheSummarizerThrowsUnderAnotherContextIsOnlyRethrown() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(
@@ -487,13 +483,15 @@ final class SummarizingCompactorTest {
             state.cancellation(),
             summaryModel("x"));
 
-    assertFailedWith(sentinel, compactor.compact(CONVERSATION, context));
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
+
+    assertSame(sentinel, thrown);
     assertFalse(state.cancellation().isCancelled());
     assertEquals(Optional.empty(), state.ending().seal());
   }
 
   @Test
-  void anErrorAnExecutionExceptionCarriesUnderAnotherContextIsTheResultsErrorAsItself() {
+  void anErrorAnExecutionExceptionCarriesUnderAnotherContextIsRethrownAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
@@ -506,18 +504,23 @@ final class SummarizingCompactorTest {
             state.cancellation(),
             summaryModel("x"));
 
-    assertFailedWith(sentinel, compactor.compact(CONVERSATION, context));
+    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
+
+    assertSame(sentinel, thrown);
     assertEquals(Optional.empty(), state.ending().seal());
   }
 
   @Test
-  void anErrorAnExecutionExceptionCarriesUnderTheSessionsContextIsRecordedAndTheResultsError() {
+  void anErrorAnExecutionExceptionCarriesUnderTheSessionsContextIsRecordedAndRethrown() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
     var state = freshState();
 
-    assertFailedWith(sentinel, compactor.compact(CONVERSATION, contextOf(state)));
+    var thrown =
+        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
+
+    assertSame(sentinel, thrown);
     assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
@@ -545,12 +548,10 @@ final class SummarizingCompactorTest {
 
   @Test
   void compactionResultRejectsNullArgs() {
+    assertThrows(NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0), ""));
+    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null, ""));
     assertThrows(
-        NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0), "", null));
-    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null, "", null));
-    assertThrows(
-        NullPointerException.class,
-        () -> new CompactionResult(List.of(), Usage.of(0, 0), null, null));
+        NullPointerException.class, () -> new CompactionResult(List.of(), Usage.of(0, 0), null));
   }
 
   @ParameterizedTest
@@ -560,21 +561,9 @@ final class SummarizingCompactorTest {
     var usage = Usage.of(input, output, cacheWrites, cacheReads);
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new CompactionResult(List.of(), usage, " ", null));
+            IllegalArgumentException.class, () -> new CompactionResult(List.of(), usage, " "));
     assertEquals(
         "modelId must be non-blank when usage reports any tokens; got " + usage, ex.getMessage());
-  }
-
-  @Test
-  void compactionResultRejectsAnErrorWithoutModelId() {
-    var failure = new IllegalStateException("summary failed");
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new CompactionResult(List.of(), Usage.of(0, 0), " ", failure));
-    assertEquals("modelId must be non-blank when error is set", ex.getMessage());
-    assertSame(failure, ex.getCause());
   }
 
   @Test
@@ -630,13 +619,6 @@ final class SummarizingCompactorTest {
   @SuppressWarnings("unchecked")
   private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
     throw (E) t;
-  }
-
-  private static void assertFailedWith(AssertionError sentinel, CompactionResult out) {
-    assertSame(sentinel, out.error());
-    assertSame(CONVERSATION, out.history());
-    assertEquals(Usage.of(0, 0), out.usage());
-    assertEquals("summary", out.modelId());
   }
 
   private static void fail(AssertionError sentinel) {

@@ -613,8 +613,7 @@ final class AgentLoopTest {
             new CompactionResult(
                 history.subList(history.size() - 1, history.size()),
                 Usage.of(200, 40),
-                "summary-model",
-                null);
+                "summary-model");
     var state = freshState();
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, reporting)
         .run(state, limits, natural -> true);
@@ -783,8 +782,7 @@ final class AgentLoopTest {
             new CompactionResult(
                 history.subList(history.size() - 1, history.size()),
                 Usage.of(1_000_000, 100_000),
-                "summary-model",
-                null);
+                "summary-model");
     var model =
         ScriptedModel.newBuilder()
             .withId("test")
@@ -818,8 +816,7 @@ final class AgentLoopTest {
     // Different list reference but same size — must still be treated as no-op so the loop
     // doesn't fire ContextEdited.
     ContextCompactor sameSize =
-        (history, state) ->
-            new CompactionResult(new ArrayList<>(history), Usage.of(0, 0), "", null);
+        (history, state) -> new CompactionResult(new ArrayList<>(history), Usage.of(0, 0), "");
     var result =
         buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, sameSize)
             .run(freshState(), limits, natural -> true);

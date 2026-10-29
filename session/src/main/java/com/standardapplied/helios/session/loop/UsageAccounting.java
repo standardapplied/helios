@@ -7,7 +7,6 @@ import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import java.time.Duration;
@@ -19,10 +18,9 @@ import java.time.Instant;
  * CostCalculator} — the main model's turns at its own rate, and a {@link
  * com.standardapplied.helios.session.ContextCompactor}'s summary call at the compactor's model
  * rate, so a cheap Haiku compactor wired against an Opus main loop is not priced at Opus rates —
- * and its event carries exactly that usage and cost. A retried attempt, or one that ended with a
- * host {@link Error}, is reported with zero usage and is not accounted. A clock that stepped back
- * during an attempt reports it with a zero duration. No call is accounted without its event, and no
- * event adds usage without it.
+ * and its event carries exactly that usage and cost. A retried attempt is reported with zero usage
+ * and is not accounted. A clock that stepped back during an attempt reports it with a zero
+ * duration. No call is accounted without its event, and no event adds usage without it.
  */
 final class UsageAccounting {
 
@@ -60,28 +58,22 @@ final class UsageAccounting {
   }
 
   /**
-   * Report an attempt that is not accounted, with zero usage: one that failed transiently and is
-   * retried, or one that ended with a host {@link Error}.
+   * Report an attempt that failed transiently and is retried, with zero usage; it is not accounted.
    */
-  void reportUnaccounted(
+  void reportRetried(
       SessionState state, int attempt, Throwable error, Instant started, Instant ended) {
     var call = new Call(model.id(), attempt, FinishReason.ERROR, Usage.of(0, 0), error);
     emit(state, call, CostEstimate.zero(), started, ended);
   }
 
   /**
-   * Account a compactor's summary call at its result's model rate and report it, as failed when the
-   * result carries an error; a {@link CompactionResult} names a model exactly when the compactor
+   * Account a compactor's summary call at {@code modelId}'s rate and report it; a {@link
+   * com.standardapplied.helios.session.CompactionResult} names a model exactly when the compactor
    * called one.
    */
   void accountCompaction(
-      SessionState state, CompactionResult result, Instant started, Instant ended) {
-    var finishReason = result.error() == null ? FinishReason.STOP : FinishReason.ERROR;
-    account(
-        state,
-        new Call(result.modelId(), 1, finishReason, result.usage(), result.error()),
-        started,
-        ended);
+      SessionState state, String modelId, Usage usage, Instant started, Instant ended) {
+    account(state, new Call(modelId, 1, FinishReason.STOP, usage, null), started, ended);
   }
 
   /** Add the call's usage, then its cost; a pricing failure leaves the usage added at zero cost. */

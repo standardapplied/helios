@@ -3,15 +3,11 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -80,81 +76,6 @@ class DefaultCompactionSessionTest {
         List.of("model.call", "tool.echo", "model.call", "model.call"),
         spans.stream().map(Span::name).toList());
     assertEquals(summary.duration(), spans.get(2).duration());
-  }
-
-  @Test
-  void aSummaryCallThatThrowsIsAFailedModelCallWithItsSpanAndTheRunGoesOn() {
-    var model =
-        ScriptedModel.newBuilder()
-            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
-            .withTextTurn("done")
-            .build();
-    var summarizer = ScriptedModel.newBuilder().withId("summary").build();
-    List<Trace> traces = new CopyOnWriteArrayList<>();
-
-    var events =
-        runToSuccess(
-            compactingAfterTheFirstToolResult(model)
-                .withContextCompactor(SummarizingCompactor.newBuilder(summarizer).build())
-                .withTraceListener(traces::add));
-
-    var summaries =
-        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
-            .filter(ended -> ended.modelId().equals("summary"))
-            .toList();
-    assertFalse(summaries.isEmpty());
-    assertEquals(summarizer.calls().size(), summaries.size());
-    for (var summary : summaries) {
-      assertEquals(FinishReason.ERROR, summary.finishReason());
-      assertEquals(Usage.of(0, 0), summary.usage());
-      assertEquals(IllegalStateException.class.getName(), summary.error().kind());
-    }
-    assertEquals(0, events.eventsOf(QueryEvent.ContextEdited.class).size());
-    var failedCalls =
-        traces.getFirst().spans().stream()
-            .filter(span -> span.name().equals("model.call") && !span.success())
-            .toList();
-    assertEquals(summaries.size(), failedCalls.size());
-    for (var span : failedCalls) {
-      assertEquals(IllegalStateException.class.getName(), span.attributes().get("error.type"));
-    }
-  }
-
-  @Test
-  void aSummaryCallThatEndsWithAnErrorIsAFailedModelCallAndTheRunFailsWithIt() {
-    var failure = new AssertionError("summary host failure");
-    var model =
-        ScriptedModel.newBuilder()
-            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
-            .withTextTurn("done")
-            .build();
-    List<Trace> traces = new CopyOnWriteArrayList<>();
-    var options =
-        compactingAfterTheFirstToolResult(model)
-            .withContextCompactor(SummarizingCompactor.newBuilder(failingWith(failure)).build())
-            .withTraceListener(traces::add)
-            .build();
-    var events = new EventCollector();
-    try (var session = AgentSession.open(options)) {
-      events.read(session.events());
-      assertSame(failure, Await.failure("the session's result", session.send("go")));
-    }
-    events.awaitDone();
-
-    var summary =
-        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
-            .filter(ended -> ended.modelId().equals("summary"))
-            .toList();
-    assertEquals(1, summary.size());
-    assertEquals(FinishReason.ERROR, summary.getFirst().finishReason());
-    assertEquals(AssertionError.class.getName(), summary.getFirst().error().kind());
-    var summarySpan =
-        traces.getFirst().spans().stream()
-            .filter(span -> "summary".equals(span.attributes().get("model")))
-            .toList();
-    assertEquals(1, summarySpan.size());
-    assertFalse(summarySpan.getFirst().success());
-    assertEquals(1, traces.size());
   }
 
   @Test
@@ -260,25 +181,6 @@ class DefaultCompactionSessionTest {
     }
     events.awaitDone();
     return events;
-  }
-
-  private static Model failingWith(Error failure) {
-    return new Model() {
-      @Override
-      public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
-        throw failure;
-      }
-
-      @Override
-      public String id() {
-        return "summary";
-      }
-
-      @Override
-      public String provider() {
-        return "test";
-      }
-    };
   }
 
   private static ToolBinding echo() {

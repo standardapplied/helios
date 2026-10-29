@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.MockModel;
-import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import java.time.Duration;
@@ -77,7 +76,7 @@ final class UsageAccountingTest {
   @Test
   void aRetriedAttemptIsReportedWithZeroUsageAndItsRedactedErrorAndIsNotAccounted() {
     accounting()
-        .reportUnaccounted(state, 1, new IllegalStateException("reset " + SECRET), STARTED, ENDED);
+        .reportRetried(state, 1, new IllegalStateException("reset " + SECRET), STARTED, ENDED);
 
     var event = onlyEvent();
     assertEquals(Usage.of(0, 0), event.usage());
@@ -92,12 +91,7 @@ final class UsageAccountingTest {
 
   @Test
   void aCompactionIsAccountedAtItsOwnModelAsAStoppedFirstAttempt() {
-    accounting()
-        .accountCompaction(
-            state,
-            new CompactionResult(List.of(), Usage.of(0, 0, 0, 900), "summary-model", null),
-            STARTED,
-            ENDED);
+    accounting().accountCompaction(state, "summary-model", Usage.of(0, 0, 0, 900), STARTED, ENDED);
 
     var event = onlyEvent();
     assertEquals(List.of("summary-model"), pricedIds);
@@ -105,27 +99,5 @@ final class UsageAccountingTest {
     assertEquals(1, event.attempt());
     assertEquals(FinishReason.STOP, event.finishReason());
     assertEquals(CostEstimate.ofMicroUsd(900), state.totals().cost());
-  }
-
-  @Test
-  void aFailedCompactionIsReportedAtItsOwnModelAsAFailedFirstAttemptWithItsRedactedError() {
-    var failure = new IllegalStateException("summary reset " + SECRET);
-
-    accounting()
-        .accountCompaction(
-            state,
-            new CompactionResult(List.of(), Usage.of(0, 0), "summary-model", failure),
-            STARTED,
-            ENDED);
-
-    var event = onlyEvent();
-    assertEquals("summary-model", event.modelId());
-    assertEquals(1, event.attempt());
-    assertEquals(FinishReason.ERROR, event.finishReason());
-    assertEquals(Usage.of(0, 0), event.usage());
-    assertEquals(CostEstimate.zero(), event.cost());
-    assertEquals(IllegalStateException.class.getName(), event.error().kind());
-    assertFalse(event.error().message().contains(SECRET));
-    assertEquals(Duration.ofMillis(1500), event.duration());
   }
 }
