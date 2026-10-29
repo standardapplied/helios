@@ -141,7 +141,8 @@ final class SessionStartTest {
     var lifecycle = lifecycle(provider, SessionLimits.defaults());
     var events = lifecycle.events().open();
 
-    assertThrows(Throwable.class, () -> lifecycle.open(loop(lifecycle, provider)));
+    assertThrows(
+        Throwable.class, () -> lifecycle.open(loop(lifecycle, provider), Optional.empty()));
 
     assertFalse(Await.value("the stream to end", reading(events)), kind + " ends the events");
     assertFalse(lifecycle.runs().isRunning(), kind + " starts no run");
@@ -505,14 +506,15 @@ final class SessionStartTest {
     var token = new CancellationToken();
     var context = new SessionContext(SID, token, Clock.systemUTC(), new SecretRegistry());
     var state = new SessionState(SID, token, Clock.systemUTC());
-    return SessionWiring.agentLoop(
-        options,
-        context,
-        new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
-        new SteeringQueue(4),
-        lifecycle.events(),
-        state.ending(),
-        StoredHistory.none());
+    return new SessionWiring(
+            options,
+            context,
+            new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
+            new SteeringQueue(4),
+            lifecycle.events(),
+            state.ending(),
+            StoredHistory.none())
+        .loop();
   }
 
   /** Whether {@code events} holds an event, read on a thread of its own. */

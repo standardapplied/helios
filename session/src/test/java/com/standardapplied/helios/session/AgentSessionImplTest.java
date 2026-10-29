@@ -374,6 +374,7 @@ final class AgentSessionImplTest {
               QueryEvent.RunStarted.class,
               QueryEvent.UserMessageReceived.class,
               QueryEvent.AssistantText.class,
+              QueryEvent.ModelCallEnded.class,
               QueryEvent.TurnEnded.class,
               QueryEvent.RunEnded.class),
           eventTypes(sub1));

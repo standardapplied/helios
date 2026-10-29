@@ -25,6 +25,8 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.trace.TraceDetail;
+import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
@@ -32,6 +34,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import java.lang.reflect.InvocationTargetException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -93,148 +96,41 @@ final class SessionOptionsTest {
     assertEquals("secretRegistry must not be null", ex.getMessage());
   }
 
-  @Test
-  void canonicalConstructorRejectsNullSecretRegistry() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    null,
-                    Optional.empty()));
-    assertEquals("secretRegistry must not be null", ex.getMessage());
-  }
-
   // ── canonical constructor validation ──────────────────────────────────────
 
-  @Test
-  void canonicalConstructorRejectsNullModel() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    null,
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("model must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullSessionId() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    null,
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("sessionId must not be null", ex.getMessage());
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "model",
+        "sessionId",
+        "limits",
+        "clock",
+        "tools",
+        "hooks",
+        "permission",
+        "memoryBackend",
+        "costCalculator",
+        "executionProvider",
+        "outputSchema",
+        "systemPrompt",
+        "tokenCounter",
+        "contextCompactor",
+        "secretRegistry",
+        "store",
+        "traceListener",
+        "traceDetail"
+      })
+  void canonicalConstructorRejectsANullComponent(String component) {
+    var ex = assertThrows(NullPointerException.class, () -> canonical(component, null));
+    assertEquals(component + " must not be null", ex.getMessage());
   }
 
   @Test
   void canonicalConstructorRejectsAnIdOutsideTheRule() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "../x",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
+    var ex = assertThrows(IllegalArgumentException.class, () -> canonical("sessionId", "../x"));
     assertEquals(
         "sessionId must be 1 to 128 characters of [A-Za-z0-9._:-] not starting with '.'",
         ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullLimits() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    null,
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("limits must not be null", ex.getMessage());
   }
 
   @ParameterizedTest
@@ -242,336 +138,31 @@ final class SessionOptionsTest {
   void canonicalConstructorRejectsANonPositiveQueueCapacity(int capacity) {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    capacity,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
+            IllegalArgumentException.class, () -> canonical("maxQueuedUserMessages", capacity));
     assertEquals("maxQueuedUserMessages must be positive, got " + capacity, ex.getMessage());
   }
 
-  @Test
-  void canonicalConstructorRejectsNullClock() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    null,
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("clock must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullTools() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    null,
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("tools must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullHooks() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    null,
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("hooks must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullPermission() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    null,
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("permission must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullMemoryBackend() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    null,
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("memoryBackend must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullCostCalculator() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    null,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("costCalculator must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullExecutionProvider() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    null,
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("executionProvider must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullOutputSchema() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    null,
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("outputSchema must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullSystemPrompt() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    null,
-                    TokenCounter.charBased(),
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("systemPrompt must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullTokenCounter() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    null,
-                    ContextCompactor.disabled(),
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("tokenCounter must not be null", ex.getMessage());
-  }
-
-  @Test
-  void canonicalConstructorRejectsNullContextCompactor() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () ->
-                new SessionOptions(
-                    stubModel(),
-                    "sess",
-                    SessionLimits.defaults(),
-                    256,
-                    Clock.systemUTC(),
-                    List.of(),
-                    List.of(),
-                    Permission.empty(PermissionMode.DEFAULT),
-                    Optional.empty(),
-                    CostCalculator.ZERO,
-                    Optional.empty(),
-                    false,
-                    Optional.empty(),
-                    Optional.empty(),
-                    TokenCounter.charBased(),
-                    null,
-                    new SecretRegistry(),
-                    Optional.empty()));
-    assertEquals("contextCompactor must not be null", ex.getMessage());
+  /**
+   * The canonical constructor called with the components of a valid options, {@code component}
+   * replaced by {@code value}; what it throws is rethrown as itself.
+   */
+  private static SessionOptions canonical(String component, Object value) throws Exception {
+    var valid = SessionOptions.newBuilder().withModel(stubModel()).withSessionId("sess").build();
+    var components = SessionOptions.class.getRecordComponents();
+    var types = new Class<?>[components.length];
+    var arguments = new Object[components.length];
+    for (var i = 0; i < components.length; i++) {
+      types[i] = components[i].getType();
+      arguments[i] =
+          components[i].getName().equals(component)
+              ? value
+              : components[i].getAccessor().invoke(valid);
+    }
+    try {
+      return SessionOptions.class.getConstructor(types).newInstance(arguments);
+    } catch (InvocationTargetException e) {
+      throw (Exception) e.getCause();
+    }
   }
 
   @Test
@@ -1028,5 +619,40 @@ final class SessionOptionsTest {
     var variant = original.toBuilder().withSessionId("variant").build();
     assertEquals("variant", variant.sessionId());
     assertSame(original.model(), variant.model());
+  }
+
+  // ── tracing ───────────────────────────────────────────────────────────────
+
+  @Test
+  void tracingDefaultsToNoListenerAndStandardDetail() {
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
+    assertTrue(opts.traceListener().isEmpty());
+    assertEquals(TraceDetail.STANDARD, opts.traceDetail());
+  }
+
+  @Test
+  void tracingIsThreadedThroughBuildAndToBuilder() {
+    TraceListener listener = trace -> {};
+    var opts =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withTraceListener(listener)
+            .withTraceDetail(TraceDetail.VERBOSE)
+            .build();
+    var copy = opts.toBuilder().build();
+    assertSame(listener, copy.traceListener().orElseThrow());
+    assertEquals(TraceDetail.VERBOSE, copy.traceDetail());
+  }
+
+  @Test
+  void withTraceListenerAndWithTraceDetailRejectNull() {
+    var builder = SessionOptions.newBuilder();
+    assertEquals(
+        "traceListener must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withTraceListener(null))
+            .getMessage());
+    assertEquals(
+        "traceDetail must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withTraceDetail(null)).getMessage());
   }
 }

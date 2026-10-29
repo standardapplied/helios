@@ -6,12 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.core.trace.Span;
+import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -47,6 +51,31 @@ class DefaultCompactionSessionTest {
         model.calls().getLast());
     assertEquals(3, model.calls().size());
     assertEquals(1, events.eventsOf(QueryEvent.ContextEdited.class).size());
+  }
+
+  @Test
+  void aSummaryCallReportingNoUsageIsStillAModelCallWithItsSpan() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withTextTurn("the gist", Usage.of(0, 0))
+            .withTextTurn("done")
+            .build();
+    List<Trace> traces = new CopyOnWriteArrayList<>();
+
+    var events =
+        runToSuccess(compactingAfterTheFirstToolResult(model).withTraceListener(traces::add));
+
+    var summary = events.eventsOf(QueryEvent.ModelCallEnded.class).get(1);
+    assertEquals(3, model.calls().size());
+    assertEquals(3, events.eventsOf(QueryEvent.ModelCallEnded.class).size());
+    assertEquals(Usage.of(0, 0), summary.usage());
+    assertEquals(FinishReason.STOP, summary.finishReason());
+    var spans = traces.getFirst().spans();
+    assertEquals(
+        List.of("model.call", "tool.echo", "model.call", "model.call"),
+        spans.stream().map(Span::name).toList());
+    assertEquals(summary.duration(), spans.get(2).duration());
   }
 
   @Test

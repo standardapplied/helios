@@ -54,16 +54,13 @@ final class SessionTeardown {
   }
 
   /**
-   * End the runtime by {@code deadlineNanos}, a {@link System#nanoTime()} instant, then seal the
-   * session's ending.
+   * Seal the session's ending, once the runtime ended and no run is left to fail with what it
+   * recorded.
    *
-   * @param tools the session's tool dispatch, whose live calls are ended first
-   * @param deadlineNanos when every wait of the teardown ends
    * @return the first {@link Error} recorded, carrying every later one and an exception of {@code
    *     onSessionEnd} as suppressed, or empty when none was recorded
    */
-  Optional<Error> endAndSeal(ToolDispatch tools, long deadlineNanos) {
-    end(tools, deadlineNanos);
+  Optional<Error> seal() {
     var settling = state.ending().seal();
     var failure = sessionEndFailure;
     if (failure != null) {
@@ -84,7 +81,7 @@ final class SessionTeardown {
   /**
    * End the runtime by {@code deadlineNanos}, a {@link System#nanoTime()} instant. An exception
    * {@code onSessionEnd} throws that the session's ending does not record is kept for {@link
-   * #endAndSeal}.
+   * #seal}.
    */
   void end(ToolDispatch tools, long deadlineNanos) {
     if (!BoundedTask.settlesBy(state.ending().cancel("session ended"), deadlineNanos)) {

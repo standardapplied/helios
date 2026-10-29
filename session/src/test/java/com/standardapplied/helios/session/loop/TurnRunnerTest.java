@@ -91,13 +91,16 @@ final class TurnRunnerTest {
     assertEquals("hello world", outcome.assistantContent());
     assertEquals(Usage.of(5, 3), outcome.usage());
 
-    assertEquals(2, events.size());
+    assertEquals(3, events.size());
     var text = assertInstanceOf(QueryEvent.AssistantText.class, events.get(0));
     assertEquals("hello world", text.text());
     assertEquals(state.sessionId(), text.sessionId());
     assertEquals(state.currentTurnIndex(), text.turnIndex());
 
-    var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(1));
+    var call = assertInstanceOf(QueryEvent.ModelCallEnded.class, events.get(1));
+    assertEquals(Usage.of(5, 3), call.usage());
+
+    var ended = assertInstanceOf(QueryEvent.TurnEnded.class, events.get(2));
     assertEquals(FinishReason.STOP, ended.reason());
   }
 

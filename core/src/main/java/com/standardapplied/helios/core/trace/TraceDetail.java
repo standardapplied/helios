@@ -6,18 +6,20 @@
 package com.standardapplied.helios.core.trace;
 
 /**
- * Controls the verbosity of span attributes captured during tracing.
+ * How much content a session's trace stores.
  *
- * <p>{@link #STANDARD} captures lightweight metadata: model id, token counts, tool name, tool call
- * id, and finish reason. These are always small strings.
+ * <p>{@link #STANDARD} stores no content: no prompt, answer, tool argument or tool result text,
+ * only metadata such as model ids, token counts, costs, durations, tool names and outcomes.
  *
- * <p>{@link #VERBOSE} additionally captures potentially large text payloads: tool call arguments,
- * tool execution results, and model thinking/reasoning content. Use for debugging and evaluation.
+ * <p>{@link #VERBOSE} also stores the trace's {@code inputText} (the run's first user message), its
+ * {@code outputText} (a successful run's result), and on each tool span {@code tool.arguments} (the
+ * call's arguments as JSON) and {@code tool.result} (the result's output). Every content string is
+ * redacted with the session's secret registry before it is stored.
  */
 public enum TraceDetail {
-  /** Lightweight span attributes only (model, tokens, tool name, finish reason). */
+  /** Metadata only: no prompt, answer, tool argument or tool result text. */
   STANDARD,
 
-  /** All attributes including tool arguments, tool results, and thinking content. */
+  /** Metadata plus the redacted input, output, tool arguments and tool results. */
   VERBOSE
 }

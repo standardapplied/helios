@@ -18,7 +18,7 @@ public final class TraceSql {
           input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_micro_usd,
           group_id, labels)
       VALUES (CAST(? AS UUID), ?, ?, ?, ?, CAST(? AS JSONB),
-          ?, ?, ?, CAST(? AS UUID), ?,
+          ?, ?, ?, ?, ?,
           ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, CAST(? AS JSONB))

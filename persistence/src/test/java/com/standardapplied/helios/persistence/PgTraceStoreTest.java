@@ -472,7 +472,7 @@ class PgTraceStoreTest {
   void storeAndFindTraceWithAllNewFields() {
     var start = OffsetDateTime.of(2026, 6, 1, 12, 0, 0, 0, ZoneOffset.UTC);
     var end = start.plusSeconds(10);
-    var sessionId = UUID.randomUUID();
+    var sessionId = "member:42";
     var trace =
         Trace.newBuilder()
             .withName("full-trace")
@@ -506,6 +506,8 @@ class PgTraceStoreTest {
     assertEquals(0, found.thumbsDownCount());
     assertEquals("eval-batch-1", found.groupId());
     assertEquals(List.of("production", "v2"), found.labels());
+    var filtered = store.list(Paginate.of(), "sessionId eq \"member:42\"").items();
+    assertEquals(List.of(trace.id()), filtered.stream().map(Trace::id).toList());
   }
 
   @Test

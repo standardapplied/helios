@@ -18,7 +18,9 @@ import java.util.function.Consumer;
  * soon as that one has ended. Each {@link Run} runs on a virtual thread of its own. Once the
  * session is closed, its store refused a write, or a host {@link Error} failed it, no run starts;
  * the thread of the run that was in progress tears the session down once that run ended, and a host
- * {@code Error} that fails an idle session tears it down on a thread of its own.
+ * {@code Error} that fails an idle session tears it down on a thread of its own. A session with a
+ * trace listener hands each run's trace over on the run's thread once the run ended, before its
+ * future completes ({@link SessionTraceRecorder#finish}).
  */
 final class SessionRuns implements RunBoundary {
 
@@ -32,6 +34,7 @@ final class SessionRuns implements RunBoundary {
   final Object lock = new Object();
 
   private AgentLoop loop;
+  private Optional<SessionTraceRecorder> recorder = Optional.empty();
   private Run active;
   private CompletableFuture<ResultMessage> next;
   private boolean ending;
@@ -57,8 +60,10 @@ final class SessionRuns implements RunBoundary {
     this.teardown = teardown;
   }
 
-  void bind(AgentLoop loop) {
+  /** Bind the loop that runs each run and the recorder, if any, that traces it. */
+  void bind(AgentLoop loop, Optional<SessionTraceRecorder> recorder) {
     this.loop = loop;
+    this.recorder = recorder;
   }
 
   /**
@@ -176,7 +181,9 @@ final class SessionRuns implements RunBoundary {
    * only an {@link Error} escapes it, which goes to the session's ending; the run fails with the
    * {@code Error} that failed the session, and this thread ends by throwing it to its
    * uncaught-exception handler once the session is torn down. A {@link RuntimeException} that
-   * escapes anyway fails the run as itself, so its future never stays pending.
+   * escapes anyway fails the run as itself, so its future never stays pending. The run's trace, if
+   * the session has a recorder, is handed over before the run is left, so an {@link Error} its
+   * listener throws fails the run and the session.
    */
   private void execute(Run run) {
     ResultMessage terminal = null;
@@ -190,6 +197,9 @@ final class SessionRuns implements RunBoundary {
     }
     // An interrupt host code left on this thread is no request to cut the teardown's waits short.
     Thread.interrupted();
+    if (recorder.isPresent()) {
+      recorder.get().finish(run.state(), terminal, crash);
+    }
     run.unlink();
     var left = leave();
     var error = left.error();

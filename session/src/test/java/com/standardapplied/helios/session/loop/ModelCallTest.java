@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -101,8 +102,13 @@ final class ModelCallTest {
             CLOCK);
     state.history().append(Message.user("hello"));
     state.beginTurn();
+    var emitter = collaborators.emitter();
     return new ModelCall(
-        collaborators, collaborators.emitter(), model, OutputSchema.of(Answer.class));
+        collaborators,
+        emitter,
+        new UsageAccounting(collaborators, emitter, model, CostCalculator.ZERO),
+        model,
+        OutputSchema.of(Answer.class));
   }
 
   private ModelCall modelCall(StreamModel model) {
@@ -153,6 +159,27 @@ final class ModelCallTest {
 
     assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
+  }
+
+  @Test
+  void cancellationWhileARetriedAttemptIsReportedStartsNoFurtherAttempt() {
+    var model = failing(cancellation -> transientFailure());
+    Consumer<QueryEvent> cancelOnReport =
+        event -> {
+          events.add(event);
+          if (event instanceof QueryEvent.ModelCallEnded) {
+            state.cancellation().cancel("cancelled while the attempt was reported");
+          }
+        };
+    var call = modelCall(model, cancelOnReport);
+
+    var attempts =
+        Await.value(
+            "the call", run(() -> call.stream(state, retrying(2, Duration.ZERO), List.of())));
+
+    assertEquals(1, attempts.streamAttempts());
+    assertEquals(1, model.calls.get());
+    assertEquals(1, events.stream().filter(e -> e instanceof QueryEvent.ModelCallEnded).count());
   }
 
   @Test

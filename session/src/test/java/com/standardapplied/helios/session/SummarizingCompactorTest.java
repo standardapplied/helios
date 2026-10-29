@@ -310,14 +310,16 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void summarizerReturningBlankReturnsOriginalHistory() {
+  void summarizerReturningBlankReturnsOriginalHistoryAndReportsTheCallsUsage() {
+    var summarizer =
+        ScriptedModel.newBuilder().withId("summary").withTextTurn(" ", Usage.of(40, 1)).build();
+
     var out =
-        SummarizingCompactor.newBuilder(summaryModel(" "))
-            .build()
-            .compact(CONVERSATION, freshContext());
+        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
-    assertEquals(Usage.of(0, 0), out.usage());
+    assertEquals(Usage.of(40, 1), out.usage());
+    assertEquals("summary", out.modelId());
   }
 
   @Test

@@ -40,7 +40,7 @@ public final class TraceBuilder implements SpanContainer {
   private String inputText;
   private String outputText;
   private String userId;
-  private UUID sessionId;
+  private String sessionId;
   private String modelId;
   private String promptName;
   private Integer promptVersion;
@@ -108,7 +108,7 @@ public final class TraceBuilder implements SpanContainer {
     return this;
   }
 
-  public TraceBuilder withSessionId(UUID sessionId) {
+  public TraceBuilder withSessionId(String sessionId) {
     this.sessionId = sessionId;
     return this;
   }

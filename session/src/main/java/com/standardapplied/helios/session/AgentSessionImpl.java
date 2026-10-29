@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredContentParser;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
-import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionJson;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;
@@ -97,10 +96,10 @@ public final class AgentSessionImpl implements AgentSession {
     this.events = lifecycle.events();
     this.runs = lifecycle.runs();
     this.pendingQuestions = new PendingQuestions(Run::stateOfThisThread, events, clock);
-    AgentLoop loop;
+    SessionWiring wiring;
     try {
-      loop =
-          SessionWiring.agentLoop(
+      wiring =
+          new SessionWiring(
               options,
               sessionContext,
               pendingQuestions,
@@ -112,7 +111,7 @@ public final class AgentSessionImpl implements AgentSession {
       lifecycle.abandon();
       throw e;
     }
-    lifecycle.open(loop);
+    lifecycle.open(wiring.loop(), wiring.recorder());
   }
 
   @Override

@@ -164,4 +164,12 @@ final class EndingSessions {
         .withHook(holding)
         .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build());
   }
+
+  /** An exception whose message cannot be read: {@link #getMessage()} throws it. */
+  static final class Unprintable extends RuntimeException {
+    @Override
+    public String getMessage() {
+      throw this;
+    }
+  }
 }

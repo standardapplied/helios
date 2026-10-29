@@ -45,16 +45,19 @@ final class ModelCall {
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
+  private final UsageAccounting accounting;
   private final Model model;
   private final OutputSchema<?> outputSchema;
 
   ModelCall(
       LoopCollaborators collaborators,
       EventEmitter emitter,
+      UsageAccounting accounting,
       Model model,
       OutputSchema<?> outputSchema) {
     this.collaborators = collaborators;
     this.emitter = emitter;
+    this.accounting = accounting;
     this.model = model;
     this.outputSchema = outputSchema;
   }
@@ -66,10 +69,17 @@ final class ModelCall {
    * com.standardapplied.helios.core.fault.Backoff#maxDelay()}, or else the policy's {@link
    * StreamRetryPolicy#nextDelay(int)}; the back-off sleep honours the session's {@link
    * CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly without burning
-   * the full delay. A cancelled session or an interrupted thread starts no further attempt. The
-   * caller maps a still-failing transient error to {@link
+   * the full delay. A cancelled session or an interrupted thread starts no further attempt, even
+   * one cancelled while a retried attempt's event was delivered. The caller maps a still-failing
+   * transient error to {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
+   *
+   * <p>Every attempt is reported once through {@link UsageAccounting}, when it is known whether it
+   * is retried: the final attempt is accounted, a retried one is reported with zero usage once its
+   * back-off elapsed, so an attempt whose back-off the run's cancellation cuts short is the final
+   * one and is accounted, while one whose event delivery the run's cancellation follows stays
+   * reported as retried.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -81,14 +91,17 @@ final class ModelCall {
    */
   TurnOutcome stream(SessionState state, SessionLimits limits, List<Tool> visibleTools) {
     var policy = limits.streamRetryPolicy();
+    var clock = collaborators.clock();
     var attempt = 0;
     while (true) {
       attempt++;
+      var started = clock.instant();
       var turn = streamOnce(state, limits, visibleTools);
+      var ended = clock.instant();
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
-          || state.cancellation().isCancelled()
-          || Thread.currentThread().isInterrupted()) {
+          || stopped(state)) {
+        accounting.accountTurn(state, turn, attempt, started, ended);
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
@@ -104,9 +117,18 @@ final class ModelCall {
               transientErr.providerName(),
               SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
       if (!sleepHonouringCancellation(backoff, state.cancellation())) {
+        accounting.accountTurn(state, turn, attempt, started, ended);
+        return turn.withStreamAttempts(attempt);
+      }
+      accounting.reportRetried(state, attempt, transientErr, started, ended);
+      if (stopped(state)) {
         return turn.withStreamAttempts(attempt);
       }
     }
+  }
+
+  private static boolean stopped(SessionState state) {
+    return state.cancellation().isCancelled() || Thread.currentThread().isInterrupted();
   }
 
   private static Duration delay(
