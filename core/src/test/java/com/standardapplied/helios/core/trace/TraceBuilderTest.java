@@ -114,53 +114,6 @@ class TraceBuilderTest {
   }
 
   @Test
-  void eventSinksReceiveSpanOpenedAndClosed() {
-    var events = new ArrayList<com.standardapplied.helios.core.events.HeliosEvent>();
-    var runId = com.standardapplied.helios.core.common.Ids.newId();
-    com.standardapplied.helios.core.events.EventSink sink = events::add;
-    var builder = TraceBuilder.start("agent-run", runId, List.of(sink));
-
-    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
-    builder.end();
-
-    assertTrue(
-        events.stream()
-            .anyMatch(
-                com.standardapplied.helios.core.events.HeliosEvent.SpanOpened.class::isInstance),
-        "expected SpanOpened");
-    assertTrue(
-        events.stream()
-            .anyMatch(
-                com.standardapplied.helios.core.events.HeliosEvent.SpanClosed.class::isInstance),
-        "expected SpanClosed");
-  }
-
-  @Test
-  void eventSinksHearNothingWithoutARunId() {
-    var events = new ArrayList<com.standardapplied.helios.core.events.HeliosEvent>();
-    com.standardapplied.helios.core.events.EventSink sink = events::add;
-    var builder = TraceBuilder.start("agent-run", null, List.of(sink));
-
-    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
-    builder.end();
-
-    assertEquals(List.of(), events);
-  }
-
-  @Test
-  void sinkExceptionDoesNotPreventSpanCompletion() {
-    var runId = com.standardapplied.helios.core.common.Ids.newId();
-    com.standardapplied.helios.core.events.EventSink failing =
-        event -> {
-          throw new RuntimeException("sink failed");
-        };
-    var builder = TraceBuilder.start("agent-run", runId, List.of(failing));
-    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).end();
-    var trace = builder.end();
-    assertEquals(1, trace.spans().size());
-  }
-
-  @Test
   void failWithMixOfOpenAndClosedSpans() {
     var builder = TraceBuilder.start("agent-run");
     var span1 = builder.withChildSpan("model.chat", SpanKind.MODEL_CALL);
@@ -267,6 +220,21 @@ class TraceBuilderTest {
     assertEquals(Usage.of(30, 20, 0, 0), trace.usage());
     assertEquals(CostEstimate.ofMicroUsd(7L), trace.cost());
     assertEquals(50, trace.totalTokens());
+  }
+
+  @Test
+  void traceListenerLambdaReceivesTheRolledUpTraceThatEndReturns() {
+    var received = new ArrayList<Trace>();
+    TraceListener listener = received::add;
+    var builder = TraceBuilder.start("agent-run");
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).withUsage(Usage.of(10, 5)).end();
+    builder.withChildSpan("model.chat", SpanKind.MODEL_CALL).withUsage(Usage.of(20, 15)).end();
+
+    var trace = builder.end();
+    listener.onTrace(trace);
+
+    assertEquals(List.of(trace), received);
+    assertEquals(Usage.of(30, 20), received.getFirst().usage());
   }
 
   @Test

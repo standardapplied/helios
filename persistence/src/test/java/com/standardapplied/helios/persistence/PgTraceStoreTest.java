@@ -44,7 +44,7 @@ class PgTraceStoreTest {
     var trace =
         Trace.newBuilder().withName("agent-run").withStartTime(start).withEndTime(end).build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNotNull(found);
@@ -81,7 +81,7 @@ class PgTraceStoreTest {
             .withCost(CostEstimate.ofMicroUsd(1_250L))
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(Usage.of(100, 50, 20, 10), found.usage());
@@ -110,7 +110,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNull(found.usage());
@@ -130,7 +130,7 @@ class PgTraceStoreTest {
             .withAttribute("model", "gemini")
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(Map.of("agent", "test-agent", "model", "gemini"), found.attributes());
@@ -145,7 +145,7 @@ class PgTraceStoreTest {
             .withError("model unavailable")
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertFalse(found.success());
@@ -170,7 +170,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(1, found.spans().size());
@@ -206,7 +206,7 @@ class PgTraceStoreTest {
             .withSpan(span2)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(2, found.spans().size());
@@ -241,7 +241,7 @@ class PgTraceStoreTest {
             .withSpan(parentSpan)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(1, found.spans().size());
@@ -274,7 +274,7 @@ class PgTraceStoreTest {
     }
 
     var traceWithSpans = traceBuilder.build();
-    store.store(traceWithSpans);
+    store.onTrace(traceWithSpans);
     var found = store.findById(traceWithSpans.id());
 
     assertEquals(SpanKind.values().length, found.spans().size());
@@ -304,7 +304,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(Map.of("model", "gemini", "tokens", "150"), found.spans().getFirst().attributes());
@@ -330,7 +330,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertFalse(found.spans().getFirst().success());
@@ -361,12 +361,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    store.onEvent(
-        new com.standardapplied.helios.core.events.HeliosEvent.RunCompleted(
-            java.time.Instant.now(),
-            com.standardapplied.helios.core.common.Ids.newId(),
-            java.util.Optional.empty(),
-            trace));
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNotNull(found);
@@ -409,7 +404,7 @@ class PgTraceStoreTest {
             .withSpan(parent)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(1, found.spans().size());
@@ -450,7 +445,7 @@ class PgTraceStoreTest {
             .withSpan(failedSpan)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(2, found.spans().size());
@@ -465,7 +460,7 @@ class PgTraceStoreTest {
     var end = start.plusSeconds(7);
     var trace = Trace.newBuilder().withName("timed").withStartTime(start).withEndTime(end).build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNotNull(found.duration());
@@ -495,7 +490,7 @@ class PgTraceStoreTest {
             .withLabels(List.of("production", "v2"))
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNotNull(found);
@@ -522,7 +517,7 @@ class PgTraceStoreTest {
             .withEndTime(OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(1))
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertNull(found.inputText());
@@ -548,7 +543,7 @@ class PgTraceStoreTest {
             .withLabels(List.of("alpha", "beta", "gamma"))
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(List.of("alpha", "beta", "gamma"), found.labels());
@@ -562,7 +557,7 @@ class PgTraceStoreTest {
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertTrue(found.labels().isEmpty());
@@ -573,7 +568,7 @@ class PgTraceStoreTest {
   void listWithoutFilterReturnsPaginatedResults() {
     var base = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
     for (int i = 0; i < 5; i++) {
-      store.store(
+      store.onTrace(
           Trace.newBuilder()
               .withName("trace-" + i)
               .withStartTime(base.plusMinutes(i))
@@ -595,7 +590,7 @@ class PgTraceStoreTest {
   void listSecondPageReturnsTail() {
     var base = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
     for (int i = 0; i < 5; i++) {
-      store.store(
+      store.onTrace(
           Trace.newBuilder()
               .withName("trace-" + i)
               .withStartTime(base.plusMinutes(i))
@@ -613,7 +608,7 @@ class PgTraceStoreTest {
 
   @Test
   void listWithNullPaginateUsesDefaults() {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("single")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
@@ -636,13 +631,13 @@ class PgTraceStoreTest {
   @Test
   void listWithScimFilterByName() {
     var base = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("my-agent")
             .withStartTime(base)
             .withEndTime(base.plusSeconds(1))
             .build());
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("other-agent")
             .withStartTime(base.plusMinutes(1))
@@ -658,9 +653,9 @@ class PgTraceStoreTest {
   @Test
   void listWithScimFilterByUserId() {
     var base = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
-    store.store(
+    store.onTrace(
         Trace.newBuilder().withName("trace-u1").withStartTime(base).withUserId("u1").build());
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("trace-u2")
             .withStartTime(base.plusMinutes(1))
@@ -676,13 +671,13 @@ class PgTraceStoreTest {
   @Test
   void listWithScimFilterByModelId() {
     var base = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("gemini-trace")
             .withStartTime(base)
             .withModelId("gemini-2.0-flash")
             .build());
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("other-trace")
             .withStartTime(base.plusMinutes(1))
@@ -697,12 +692,12 @@ class PgTraceStoreTest {
 
   @Test
   void listWithBlankFilterReturnsAll() {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("trace-1")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
             .build());
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("trace-2")
             .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
@@ -734,7 +729,7 @@ class PgTraceStoreTest {
             .withAttribute("captured", raw)
             .build();
 
-    store.store(trace);
+    store.onTrace(trace);
     var found = store.findById(trace.id());
 
     assertEquals(raw, found.inputText(), "default: input verbatim");
@@ -764,7 +759,7 @@ class PgTraceStoreTest {
             .withAttribute("captured", raw)
             .build();
 
-    redactingStore.store(trace);
+    redactingStore.onTrace(trace);
     var found = redactingStore.findById(trace.id());
 
     var expected = "Authorization: Bearer <redacted:GH_TOKEN>";
@@ -802,7 +797,7 @@ class PgTraceStoreTest {
             .withSpan(span)
             .build();
 
-    redactingStore.store(trace);
+    redactingStore.onTrace(trace);
     var found = redactingStore.findById(trace.id());
 
     var foundSpan = found.spans().getFirst();

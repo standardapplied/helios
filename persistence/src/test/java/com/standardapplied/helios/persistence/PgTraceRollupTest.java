@@ -135,7 +135,7 @@ class PgTraceRollupTest {
       String error,
       Usage usage,
       long costMicroUsd) {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("agent-run")
             .withStartTime(BASE)
@@ -153,7 +153,7 @@ class PgTraceRollupTest {
 
   private void seedAt(
       String groupId, OffsetDateTime start, long durationMillis, Usage usage, long costMicroUsd) {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("agent-run")
             .withStartTime(start)
@@ -166,7 +166,7 @@ class PgTraceRollupTest {
   }
 
   private void seedWithoutGroup() {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("agent-run")
             .withStartTime(BASE)
@@ -175,7 +175,7 @@ class PgTraceRollupTest {
   }
 
   private void seedWithoutUsage(String groupId) {
-    store.store(
+    store.onTrace(
         Trace.newBuilder()
             .withName("agent-run")
             .withStartTime(BASE)
