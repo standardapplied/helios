@@ -7,6 +7,7 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,6 +39,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -296,28 +298,34 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void summarizerThrowingReturnsOriginalHistory() {
+  void summarizerThrowingReturnsOriginalHistoryAndReportsTheFailedCall() {
+    var boom = new RuntimeException("boom");
     var compactor =
         compactorSummarizingWith(
             () -> {
-              throw new RuntimeException("boom");
+              throw boom;
             });
 
     var out = compactor.compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
+    assertEquals("summary", out.modelId());
+    assertSame(boom, out.error());
   }
 
   @Test
-  void summarizerReturningBlankReturnsOriginalHistory() {
+  void summarizerReturningBlankReturnsOriginalHistoryAndReportsTheCallsUsage() {
+    var summarizer =
+        ScriptedModel.newBuilder().withId("summary").withTextTurn(" ", Usage.of(40, 1)).build();
+
     var out =
-        SummarizingCompactor.newBuilder(summaryModel(" "))
-            .build()
-            .compact(CONVERSATION, freshContext());
+        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, freshContext());
 
     assertSame(CONVERSATION, out.history());
-    assertEquals(Usage.of(0, 0), out.usage());
+    assertEquals(Usage.of(40, 1), out.usage());
+    assertEquals("summary", out.modelId());
+    assertNull(out.error());
   }
 
   @Test
@@ -330,7 +338,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void summaryTimeoutLeavesHistoryUnchanged() {
+  void summaryTimeoutLeavesHistoryUnchangedAndReportsTheCallAsTimedOut() {
     var interrupted = new CountDownLatch(1);
     var slow = blockingUntilInterrupted(interrupted);
     var compactor =
@@ -340,6 +348,10 @@ final class SummarizingCompactorTest {
 
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
+    assertEquals("summary", out.modelId());
+    assertEquals(
+        "summary timed out after PT0.05S",
+        assertInstanceOf(TimeoutException.class, out.error()).getMessage());
     Await.latch("the timed-out summary call to be interrupted", interrupted);
   }
 
@@ -546,10 +558,12 @@ final class SummarizingCompactorTest {
 
   @Test
   void compactionResultRejectsNullArgs() {
-    assertThrows(NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0), ""));
-    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null, ""));
     assertThrows(
-        NullPointerException.class, () -> new CompactionResult(List.of(), Usage.of(0, 0), null));
+        NullPointerException.class, () -> new CompactionResult(null, Usage.of(0, 0), "", null));
+    assertThrows(NullPointerException.class, () -> new CompactionResult(List.of(), null, "", null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new CompactionResult(List.of(), Usage.of(0, 0), null, null));
   }
 
   @ParameterizedTest
@@ -559,9 +573,21 @@ final class SummarizingCompactorTest {
     var usage = Usage.of(input, output, cacheWrites, cacheReads);
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> new CompactionResult(List.of(), usage, " "));
+            IllegalArgumentException.class,
+            () -> new CompactionResult(List.of(), usage, " ", null));
     assertEquals(
         "modelId must be non-blank when usage reports any tokens; got " + usage, ex.getMessage());
+  }
+
+  @Test
+  void compactionResultRejectsAnErrorWithoutModelId() {
+    var failure = new IllegalStateException("summary failed");
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new CompactionResult(List.of(), Usage.of(0, 0), " ", failure));
+    assertEquals("modelId must be non-blank when error is set", ex.getMessage());
+    assertSame(failure, ex.getCause());
   }
 
   @Test

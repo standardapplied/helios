@@ -262,7 +262,8 @@ class SessionRunCharacterizationTest {
             return new CompactionResult(
                 List.of(history.getFirst(), Message.user("compacted")),
                 Usage.of(3, 4),
-                "compactor-model");
+                "compactor-model",
+                null);
           };
       InstantSource clock = now::get;
       var script = ScriptedModel.newBuilder();

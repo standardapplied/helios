@@ -7,6 +7,7 @@ import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.session.CompactionResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import java.time.Duration;
@@ -69,13 +70,18 @@ final class UsageAccounting {
   }
 
   /**
-   * Account a compactor's summary call at {@code modelId}'s rate and report it; a {@link
-   * com.standardapplied.helios.session.CompactionResult} names a model exactly when the compactor
+   * Account a compactor's summary call at its result's model rate and report it, as failed when the
+   * result carries an error; a {@link CompactionResult} names a model exactly when the compactor
    * called one.
    */
   void accountCompaction(
-      SessionState state, String modelId, Usage usage, Instant started, Instant ended) {
-    account(state, new Call(modelId, 1, FinishReason.STOP, usage, null), started, ended);
+      SessionState state, CompactionResult result, Instant started, Instant ended) {
+    var finishReason = result.error() == null ? FinishReason.STOP : FinishReason.ERROR;
+    account(
+        state,
+        new Call(result.modelId(), 1, finishReason, result.usage(), result.error()),
+        started,
+        ended);
   }
 
   /** Add the call's usage, then its cost; a pricing failure leaves the usage added at zero cost. */

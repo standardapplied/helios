@@ -108,7 +108,7 @@ class TurnUsageAccountingTest {
             .build();
     ContextCompactor cacheOnly =
         (history, state) ->
-            new CompactionResult(List.of(Message.user("the gist")), usage, SUMMARIZER);
+            new CompactionResult(List.of(Message.user("the gist")), usage, SUMMARIZER, null);
 
     var success =
         runToSuccess(
