@@ -945,7 +945,9 @@ DROP TABLE IF EXISTS helios_core_blocks CASCADE;
   text, so a message holding U+0000 is stored verbatim), and passes `SessionStoreContract`. An
   append is one transaction whose first row is inserted only when the session's highest sequence
   number is the one the writer expects; a load reads from the last `replaced` row in one statement.
-  It applies no redactor: the session already redacted what it stores.
+  `delete` locks the table against writers (`SHARE ROW EXCLUSIVE`), so an append in progress is
+  removed whole or conflicts afterwards. It applies no redactor: the session already redacted what
+  it stores.
 - **A session is a conversation that runs many times.** `send` steers the run in progress or
   starts the next one and returns that run's result future; a session runs again after any ending
   until it is closed; `interrupt()` stops the current run and keeps the session; events carry

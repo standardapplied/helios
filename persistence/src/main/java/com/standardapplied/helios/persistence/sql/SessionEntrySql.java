@@ -55,6 +55,13 @@ public final class SessionEntrySql {
       WHERE session_id = ?
       """;
 
+  /**
+   * Conflicts with every insert and delete, so a deletion neither interleaves with an append nor
+   * with another deletion.
+   */
+  public static final String LOCK_WRITERS =
+      "LOCK TABLE %s.helios_session_entries IN SHARE ROW EXCLUSIVE MODE";
+
   public static final String DELETE =
       """
       DELETE FROM %s.helios_session_entries
