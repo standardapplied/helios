@@ -209,52 +209,12 @@ final class SessionTracingTest {
   }
 
   @Test
-  void aHookErrorOnARetryIsAFailedModelCallAndTheRunFailsWithItWithoutRetrying() {
-    var failure = new HostFailure();
-    var model =
-        ScriptedModel.newBuilder()
-            .withStreamTurn(
-                ModelStreams.failing(new TransientStreamException("reset", null, "test")))
-            .withTextTurn("ok", Usage.of(50, 5))
-            .build();
-    var options =
-        traced(model)
-            .withLimits(
-                SessionLimits.newBuilder()
-                    .withStreamRetryPolicy(
-                        new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
-                    .build())
-            .withHook(
-                (OnStreamEventHook)
-                    (event, ctx) -> {
-                      if (event instanceof QueryEvent.TurnRetried) {
-                        throw failure;
-                      }
-                    })
-            .build();
-    var events = new EventCollector();
-    try (var session = AgentSession.open(options)) {
-      events.read(session.events());
-      assertSame(failure, Await.failure("the result to fail", session.send("go")));
-    }
-    events.awaitDone();
-
-    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
-    assertEquals(1, ended.size());
-    assertEquals(TransientStreamException.class.getName(), ended.getFirst().error().kind());
-    var call = onlySpan(onlyTrace(), "model.call");
-    assertFalse(call.success());
-    assertEquals(Usage.of(0, 0), call.usage());
-    assertEquals(failure.getClass().getName(), onlyTrace().attributes().get("error.type"));
-  }
-
-  @Test
   void aCompactorsSummaryCallIsAModelCallPricedAtItsOwnModel() {
     var compactions = new AtomicInteger();
     ContextCompactor compactor =
         (history, context) ->
             compactions.getAndIncrement() == 0
-                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary", null)
+                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
                 : CompactionResult.noOp(history);
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
     var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();
@@ -284,7 +244,8 @@ final class SessionTracingTest {
 
   @ParameterizedTest
   @CsvSource({"true, true", "false, true", "true, false", "false, false"})
-  void aModelAttemptAHostErrorEndsIsAFailedModelCallWithNoUsage(boolean atOpen, boolean readable) {
+  void aModelAttemptAHostErrorEndsFailsTheRunAndTheTraceNamesTheError(
+      boolean atOpen, boolean readable) {
     Error failure = readable ? new HostFailure() : new UnreadableHostFailure();
     var model =
         EndingSessions.model(
@@ -302,15 +263,12 @@ final class SessionTracingTest {
     }
     events.awaitDone();
 
-    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
-    assertEquals(1, ended.size());
-    assertEquals(failure.getClass().getName(), ended.getFirst().error().kind());
-    var call = onlySpan(onlyTrace(), "model.call");
-    assertFalse(call.success());
-    assertEquals(failure.getClass().getName(), call.attributes().get("error.type"));
-    assertEquals("1", call.attributes().get("attempt"));
-    assertEquals(Usage.of(0, 0), call.usage());
-    assertEquals(Usage.of(0, 0), onlyTrace().usage());
+    assertEquals(List.of(), events.eventsOf(QueryEvent.ModelCallEnded.class));
+    var trace = onlyTrace();
+    assertFalse(trace.success());
+    assertEquals(failure.getClass().getName(), trace.attributes().get("error.type"));
+    assertEquals(List.of(), spans(trace, "model.call"));
+    assertEquals(Usage.of(0, 0), trace.usage());
   }
 
   @Test

@@ -22,7 +22,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -46,13 +45,12 @@ import java.util.logging.Logger;
  * <p>The summary call runs on a virtual thread under a timeout (default {@value
  * #DEFAULT_SUMMARY_TIMEOUT_SECONDS}s). A call that throws, times out or returns a blank summary is
  * logged as a WARNING and leaves the history unchanged; the watermark fires again on the next
- * check. An {@link Error} the call ends with is returned as the result's {@link
- * CompactionResult#error() error}, which ends the session; called by the session, the compactor
- * first records it in the session's {@code Error} sink, so one thrown after the timeout still ends
- * the session. Every summary call reports the summary model's id on the {@link CompactionResult},
- * so the loop reports it as a model call: an answered call its usage, which the loop prices and
- * gates through {@code SessionLimits.maxBudgetMicroUsd}, and a failed or timed-out call its {@link
- * CompactionResult#error()} at zero usage.
+ * check. An {@link Error} is rethrown as itself; called by the session, the compactor first records
+ * it in the session's {@code Error} sink, so one thrown after the timeout still ends the session.
+ * Called directly with any other {@link HookContext}, it only rethrows. An answered summary call, a
+ * blank one included, reports its usage and the summary model's id on the {@link CompactionResult},
+ * so the loop reports it as a model call, prices it and gates it through {@code
+ * SessionLimits.maxBudgetMicroUsd}.
  */
 public final class SummarizingCompactor implements ContextCompactor {
 
@@ -112,27 +110,21 @@ public final class SummarizingCompactor implements ContextCompactor {
               context, List.of(Message.system(summaryPrompt), Message.user(render(summarised))));
     } catch (RuntimeException e) {
       LOG.log(Level.WARNING, e, () -> unchanged("summary call failed", context));
-      return failed(history, e);
-    } catch (Error e) {
-      return failed(history, e);
+      return CompactionResult.noOp(history);
     }
     if (answer.isEmpty()) {
-      return failed(history, new TimeoutException("summary timed out after " + summaryTimeout));
+      return CompactionResult.noOp(history);
     }
     var response = answer.get();
     var usage = response.usage() != null ? response.usage() : Usage.of(0, 0);
     if (Strings.isBlank(response.content())) {
       LOG.warning(() -> unchanged("summary returned blank", context));
-      return new CompactionResult(history, usage, summaryModel.id(), null);
+      return new CompactionResult(history, usage, summaryModel.id());
     }
     var compacted = new ArrayList<>(history.subList(0, summarisedFrom));
     compacted.add(Message.user(SUMMARY_PREFIX + response.content()));
     compacted.addAll(history.subList(summarisedTo, history.size()));
-    return new CompactionResult(List.copyOf(compacted), usage, summaryModel.id(), null);
-  }
-
-  private CompactionResult failed(List<Message> history, Throwable error) {
-    return new CompactionResult(history, Usage.of(0, 0), summaryModel.id(), error);
+    return new CompactionResult(List.copyOf(compacted), usage, summaryModel.id());
   }
 
   /**

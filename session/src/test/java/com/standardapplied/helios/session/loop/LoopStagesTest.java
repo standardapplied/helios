@@ -124,7 +124,7 @@ final class LoopStagesTest {
     ContextCompactor summarise =
         (history, s) ->
             compacted.compareAndSet(false, true)
-                ? new CompactionResult(List.of(history.getLast()), Usage.of(0, 5), "summary", null)
+                ? new CompactionResult(List.of(history.getLast()), Usage.of(0, 5), "summary")
                 : CompactionResult.noOp(history);
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(2, 3)).build();
 
