@@ -216,17 +216,8 @@ final class SessionTracingTest {
             compactions.getAndIncrement() == 0
                 ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
                 : CompactionResult.noOp(history);
-    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();
     var events = new EventCollector();
-    ResultMessage result;
-    try (var session =
-        AgentSession.open(
-            traced(model).withContextCompactor(compactor).withLimits(limits).build())) {
-      events.read(session.events());
-      result = Await.value("the result", session.send("go"));
-      events.awaitRunEnded();
-    }
+    var result = runCompactingEveryTurn(compactor, events);
 
     var summaries =
         events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
@@ -249,18 +240,9 @@ final class SessionTracingTest {
             .withId("summary")
             .withTextTurn("the gist", Usage.of(0, 0))
             .build();
-    var compactor = SummarizingCompactor.newBuilder(summaryModel).build();
-    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();
     var events = new EventCollector();
-    ResultMessage result;
-    try (var session =
-        AgentSession.open(
-            traced(model).withContextCompactor(compactor).withLimits(limits).build())) {
-      events.read(session.events());
-      result = Await.value("the result", session.send("go"));
-      events.awaitRunEnded();
-    }
+    var result =
+        runCompactingEveryTurn(SummarizingCompactor.newBuilder(summaryModel).build(), events);
 
     assertInstanceOf(ResultMessage.Success.class, result);
     assertEquals(1, summaryModel.calls().size());
@@ -278,6 +260,20 @@ final class SessionTracingTest {
     assertEquals(1, summarySpans.size());
     assertTrue(summarySpans.getFirst().success());
     assertTotalsEqual(result, onlyTrace());
+  }
+
+  /** One run of a one-turn session whose context is always over its limit. */
+  private ResultMessage runCompactingEveryTurn(ContextCompactor compactor, EventCollector events) {
+    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();
+    try (var session =
+        AgentSession.open(
+            traced(model).withContextCompactor(compactor).withLimits(limits).build())) {
+      events.read(session.events());
+      var result = Await.value("the result", session.send("go"));
+      events.awaitRunEnded();
+      return result;
+    }
   }
 
   @ParameterizedTest
