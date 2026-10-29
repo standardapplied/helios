@@ -9,10 +9,9 @@ import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.events.EventSink;
-import com.standardapplied.helios.core.events.HeliosEvent;
 import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.core.trace.TraceFilter;
+import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.core.trace.TraceRollup;
 import com.standardapplied.helios.core.trace.TraceRollupKey;
 import com.standardapplied.helios.persistence.mapper.JsonbMapper;
@@ -33,11 +32,9 @@ import java.util.UUID;
  * PostgreSQL-backed store for traces and their spans. Annotations on a trace or span are stored by
  * {@link PgAnnotationStore}.
  *
- * <p>Implements {@link EventSink} so callers can wire it directly into any producer of {@link
- * HeliosEvent.RunCompleted} / {@link HeliosEvent.RunFailed} events; the store persists the carried
- * {@link Trace}.
+ * <p>A {@link TraceListener}: every finished trace it receives is stored.
  */
-public class PgTraceStore implements EventSink {
+public class PgTraceStore implements TraceListener {
 
   private final PgConfig config;
   private final DbClient dbClient;
@@ -49,24 +46,14 @@ public class PgTraceStore implements EventSink {
     this.spanTree = new PgSpanTree(config);
   }
 
-  @Override
-  public void onEvent(HeliosEvent event) {
-    switch (event) {
-      case HeliosEvent.RunCompleted rc -> store(rc.trace());
-      case HeliosEvent.RunFailed rf -> store(rf.trace());
-      default -> {
-        /* not interested */
-      }
-    }
-  }
-
   /**
    * Stores a trace and all its spans in a single transaction.
    *
    * <p>Spans are inserted in BFS order (top-level first, then children) to satisfy the parent_id
    * foreign key constraint.
    */
-  public void store(Trace trace) {
+  @Override
+  public void onTrace(Trace trace) {
     var tx = dbClient.transaction();
     try {
       var params = new ArrayList<Object>();

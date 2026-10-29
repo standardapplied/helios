@@ -23,22 +23,14 @@ import java.util.UUID;
  * #withChildSpan(String, SpanKind)} for nesting. Call {@link #end()} to complete successfully or
  * {@link #fail(String)} to complete with an error. Both produce an immutable {@link Span}.
  *
- * <p>Span lifecycle ({@code SpanOpened} / {@code SpanClosed}) is emitted directly to every
- * configured {@link com.standardapplied.helios.core.events.EventSink} — no separate listener
- * interface in between. The unified event stream carries everything observers need; the {@code
- * runId} on each event allows multiplexing concurrent runs through the same sink.
- *
  * <p>Not thread-safe. Designed for sequential use within an agent loop.
  */
 public final class SpanBuilder implements SpanContainer {
 
   private final UUID id;
-  private final UUID traceId;
-  private final UUID parentSpanId;
   private final String name;
   private final SpanKind kind;
   private final OffsetDateTime startTime;
-  private final SpanEvents events;
   private final Map<String, String> attributes = new LinkedHashMap<>();
   private final List<SpanBuilder> openChildren = new ArrayList<>();
   private final List<Span> completedChildren = new ArrayList<>();
@@ -46,15 +38,11 @@ public final class SpanBuilder implements SpanContainer {
   private CostEstimate cost;
   private Span result;
 
-  SpanBuilder(String name, SpanKind kind, UUID traceId, UUID parentSpanId, SpanEvents events) {
+  SpanBuilder(String name, SpanKind kind) {
     this.id = Ids.newId();
-    this.traceId = traceId;
-    this.parentSpanId = parentSpanId;
     this.name = name;
     this.kind = kind;
     this.startTime = Ids.now();
-    this.events = events;
-    events.opened(id, parentSpanId, name);
   }
 
   /**
@@ -68,7 +56,7 @@ public final class SpanBuilder implements SpanContainer {
   @Override
   public SpanBuilder withChildSpan(String name, SpanKind kind) {
     requireOpen();
-    var child = new SpanBuilder(name, kind, traceId, this.id, events);
+    var child = new SpanBuilder(name, kind);
     openChildren.add(child);
     return child;
   }
@@ -179,7 +167,6 @@ public final class SpanBuilder implements SpanContainer {
             Map.copyOf(attributes),
             usage,
             cost);
-    events.closed(result);
     return result;
   }
 

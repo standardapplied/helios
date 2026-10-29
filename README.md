@@ -21,7 +21,7 @@ Pick what you need — each jar is published independently:
 
 | Artifact | What it gives you | External deps |
 |----------|-------------------|---------------|
-| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `TraceListener` / `SpanListener`, durability primitives (`RunStore`, `ToolCallJournal`), `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
+| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `Trace` / `TraceListener`, durability primitives (`RunStore`, `ToolCallJournal`), `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
 | `helios-session` | v2 SDK — long-lived `AgentSession` running an agent loop on a virtual thread. `SessionPresets`, hooks, declarative `Permission`, file tools, `MemoryBackend`, `ExecutionProvider`, `ContextCompactor` | Jackson 3.x |
 | `helios-runtime` | Helidon HTTP/SSE surface for `helios-session` — `POST /sessions`, SSE `/events`, long-poll `/result` | Helidon SE, Jackson 3.x |
 | `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3.x |
@@ -29,7 +29,7 @@ Pick what you need — each jar is published independently:
 | `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
 | `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
 | `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
-| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `TraceStore`, and durability (`PgRunStore` + `PgToolCallJournal`) | Helidon DbClient |
+| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgTraceStore`, and durability (`PgRunStore` + `PgToolCallJournal`) | Helidon DbClient |
 
 Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
 
@@ -157,8 +157,8 @@ uploads without loading video bytes into heap.
 
 ### Gemini privacy controls
 
-For privacy-sensitive calls, combine managed deletion, stateless interactions, metadata-only event
-persistence, and disabled raw-output capture:
+For privacy-sensitive calls, combine managed deletion, stateless interactions and disabled
+raw-output capture:
 
 ```java
 var config = ModelConfig.newBuilder()
@@ -168,8 +168,7 @@ var config = ModelConfig.newBuilder()
     .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
     .build();
 
-try (var events = JsonlEventSink.openMetadataOnly(Path.of("events.jsonl"));
-    var files = new GeminiFilesClient(config);
+try (var files = new GeminiFilesClient(config);
     var media = files.uploadManaged(Path.of("private-video.mp4"), "video/mp4");
     var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
   var input = Message.newBuilder()
@@ -546,16 +545,9 @@ try (var events = session.events()) {
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
-`helios-core` also ships generic event-sink primitives (`EventSink`, `JsonlEventSink`,
-`CollectingEventSink` in `com.standardapplied.helios.core.events`) plus a `Trace` / `Span` value-type hierarchy in
-`com.standardapplied.helios.core.trace` for custom collectors. These are currently inert for `AgentSession` runs —
-wire them via your own hook or stream reader.
-
-`JsonlEventSink.openMetadataOnly(path)` persists run/span IDs, event types, timing, model and token
-counts, API version, tool names, outcomes, and redacted error categories. It omits message history,
-assistant text, thinking and signatures, tool arguments and results, file URIs, arbitrary
-attributes, and custom-data values. `JsonlEventSink.openFull(path)` is the explicit replay/debugging
-mode and persists sensitive content verbatim; it is unsuitable for customer-media workflows.
+`com.standardapplied.helios.core.trace` holds the `Trace` / `Span` model and its builders
+(`TraceBuilder`, `SpanBuilder`). A finished trace goes to a `TraceListener`, whose one method
+`onTrace(Trace)` receives it; `PgTraceStore` in `helios-persistence` is one.
 
 ## Sandboxed Code Execution (`helios-repl`)
 
@@ -627,7 +619,7 @@ DurableResumeScanner.builder(durability)
 
 ## Persistence (`helios-persistence`)
 
-PostgreSQL-backed `PromptRegistry`, `TraceStore`, `SessionStore` and durability impls. All share a `PgConfig` carrying the `DbClient`, schema name, and optional agent ID.
+PostgreSQL-backed `PromptRegistry`, `PgTraceStore`, `SessionStore` and durability impls. All share a `PgConfig` carrying the `DbClient`, schema name, and optional agent ID.
 
 ```java
 var pgConfig = PgConfig.newBuilder()
