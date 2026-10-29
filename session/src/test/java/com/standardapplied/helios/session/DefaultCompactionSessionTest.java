@@ -7,8 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -118,6 +121,43 @@ class DefaultCompactionSessionTest {
   }
 
   @Test
+  void aSummaryCallThatEndsWithAnErrorIsAFailedModelCallAndTheRunFailsWithIt() {
+    var failure = new AssertionError("summary host failure");
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withTextTurn("done")
+            .build();
+    List<Trace> traces = new CopyOnWriteArrayList<>();
+    var options =
+        compactingAfterTheFirstToolResult(model)
+            .withContextCompactor(SummarizingCompactor.newBuilder(failingWith(failure)).build())
+            .withTraceListener(traces::add)
+            .build();
+    var events = new EventCollector();
+    try (var session = AgentSession.open(options)) {
+      events.read(session.events());
+      assertSame(failure, Await.failure("the session's result", session.send("go")));
+    }
+    events.awaitDone();
+
+    var summary =
+        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
+            .filter(ended -> ended.modelId().equals("summary"))
+            .toList();
+    assertEquals(1, summary.size());
+    assertEquals(FinishReason.ERROR, summary.getFirst().finishReason());
+    assertEquals(AssertionError.class.getName(), summary.getFirst().error().kind());
+    var summarySpan =
+        traces.getFirst().spans().stream()
+            .filter(span -> "summary".equals(span.attributes().get("model")))
+            .toList();
+    assertEquals(1, summarySpan.size());
+    assertFalse(summarySpan.getFirst().success());
+    assertEquals(1, traces.size());
+  }
+
+  @Test
   void aCompactorWrappingTheDefaultSeesTheHistoryBeforeAndTheResultAfter() {
     var model =
         ScriptedModel.newBuilder()
@@ -220,6 +260,25 @@ class DefaultCompactionSessionTest {
     }
     events.awaitDone();
     return events;
+  }
+
+  private static Model failingWith(Error failure) {
+    return new Model() {
+      @Override
+      public CloseableIterator<ModelChunk> chatStream(List<Message> messages, List<Tool> tools) {
+        throw failure;
+      }
+
+      @Override
+      public String id() {
+        return "summary";
+      }
+
+      @Override
+      public String provider() {
+        return "test";
+      }
+    };
   }
 
   private static ToolBinding echo() {

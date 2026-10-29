@@ -209,6 +209,46 @@ final class SessionTracingTest {
   }
 
   @Test
+  void aHookErrorOnARetryIsAFailedModelCallAndTheRunFailsWithItWithoutRetrying() {
+    var failure = new HostFailure();
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(new TransientStreamException("reset", null, "test")))
+            .withTextTurn("ok", Usage.of(50, 5))
+            .build();
+    var options =
+        traced(model)
+            .withLimits(
+                SessionLimits.newBuilder()
+                    .withStreamRetryPolicy(
+                        new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
+                    .build())
+            .withHook(
+                (OnStreamEventHook)
+                    (event, ctx) -> {
+                      if (event instanceof QueryEvent.TurnRetried) {
+                        throw failure;
+                      }
+                    })
+            .build();
+    var events = new EventCollector();
+    try (var session = AgentSession.open(options)) {
+      events.read(session.events());
+      assertSame(failure, Await.failure("the result to fail", session.send("go")));
+    }
+    events.awaitDone();
+
+    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
+    assertEquals(1, ended.size());
+    assertEquals(TransientStreamException.class.getName(), ended.getFirst().error().kind());
+    var call = onlySpan(onlyTrace(), "model.call");
+    assertFalse(call.success());
+    assertEquals(Usage.of(0, 0), call.usage());
+    assertEquals(failure.getClass().getName(), onlyTrace().attributes().get("error.type"));
+  }
+
+  @Test
   void aCompactorsSummaryCallIsAModelCallPricedAtItsOwnModel() {
     var compactions = new AtomicInteger();
     ContextCompactor compactor =
