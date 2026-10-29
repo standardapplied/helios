@@ -33,7 +33,8 @@ import java.util.Objects;
  *     Usage.of(0, 0)} for compactors that don't invoke a model
  * @param modelId identifier of the model the compactor spent {@code usage} on; non-null. Must be
  *     non-blank when {@code usage} {@linkplain Usage#reportsTokens() reports tokens} — otherwise
- *     the loop has no correct rate to price the spend against. Pure-trim / no-op results use the
+ *     the loop has no correct rate to price the spend against. The loop reports a non-blank id as
+ *     one model call, even with zero usage. Pure-trim / no-op results, which call no model, use the
  *     empty string
  */
 public record CompactionResult(List<Message> history, Usage usage, String modelId) {
