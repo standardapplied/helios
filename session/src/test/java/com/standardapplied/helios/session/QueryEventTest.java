@@ -5,6 +5,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -311,6 +312,107 @@ final class QueryEventTest {
     assertEquals("reason must not be null", ex.getMessage());
   }
 
+  // ── ModelCallEnded ────────────────────────────────────────────────────────
+
+  private static QueryEvent.ModelCallEnded modelCall(
+      String modelId, int attempt, FinishReason reason, Usage usage, Duration duration) {
+    return new QueryEvent.ModelCallEnded(
+        SID,
+        "run-1",
+        TURN,
+        TS,
+        modelId,
+        attempt,
+        reason,
+        usage,
+        CostEstimate.zero(),
+        duration,
+        null);
+  }
+
+  @Test
+  void modelCallEndedConstructsAndExposesFields() {
+    var err = SerializedError.of("kind", "msg");
+    var e =
+        new QueryEvent.ModelCallEnded(
+            SID,
+            "run-1",
+            TURN,
+            TS,
+            "m",
+            2,
+            FinishReason.ERROR,
+            Usage.of(3, 4),
+            CostEstimate.ofMicroUsd(7),
+            Duration.ofMillis(5),
+            err);
+    assertEquals("m", e.modelId());
+    assertEquals(2, e.attempt());
+    assertEquals(Usage.of(3, 4), e.usage());
+    assertEquals(CostEstimate.ofMicroUsd(7), e.cost());
+    assertEquals(Duration.ofMillis(5), e.duration());
+    assertSame(err, e.error());
+    assertNull(modelCall("m", 1, FinishReason.STOP, Usage.of(0, 0), Duration.ZERO).error());
+  }
+
+  @Test
+  void modelCallEndedRejectsNullFieldsANonPositiveAttemptAndANegativeDuration() {
+    var usage = Usage.of(0, 0);
+    var stop = FinishReason.STOP;
+    assertEquals(
+        "modelId must not be null",
+        assertThrows(
+                NullPointerException.class, () -> modelCall(null, 1, stop, usage, Duration.ZERO))
+            .getMessage());
+    assertEquals(
+        "attempt must be >= 1, got 0",
+        assertThrows(
+                IllegalArgumentException.class, () -> modelCall("m", 0, stop, usage, Duration.ZERO))
+            .getMessage());
+    assertEquals(
+        "finishReason must not be null",
+        assertThrows(
+                NullPointerException.class, () -> modelCall("m", 1, null, usage, Duration.ZERO))
+            .getMessage());
+    assertEquals(
+        "usage must not be null",
+        assertThrows(NullPointerException.class, () -> modelCall("m", 1, stop, null, Duration.ZERO))
+            .getMessage());
+    assertEquals(
+        "duration must not be null",
+        assertThrows(NullPointerException.class, () -> modelCall("m", 1, stop, usage, null))
+            .getMessage());
+    assertTrue(
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> modelCall("m", 1, stop, usage, Duration.ofMillis(-1)))
+            .getMessage()
+            .startsWith("duration must not be negative"));
+    assertEquals(
+        "cost must not be null",
+        assertThrows(
+                NullPointerException.class,
+                () ->
+                    new QueryEvent.ModelCallEnded(
+                        SID, "run-1", TURN, TS, "m", 1, stop, usage, null, Duration.ZERO, null))
+            .getMessage());
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new QueryEvent.ModelCallEnded(
+                SID,
+                null,
+                TURN,
+                TS,
+                "m",
+                1,
+                stop,
+                usage,
+                CostEstimate.zero(),
+                Duration.ZERO,
+                null));
+  }
+
   // ── TurnRetried ───────────────────────────────────────────────────────────
 
   @Test
@@ -441,9 +543,9 @@ final class QueryEventTest {
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasEighteenPermittedSubclasses() {
+  void sealedInterfaceHasNineteenPermittedSubclasses() {
     var permits = QueryEvent.class.getPermittedSubclasses();
-    assertEquals(18, permits.length);
+    assertEquals(19, permits.length);
   }
 
   @Test
@@ -501,6 +603,7 @@ final class QueryEventTest {
                 Duration.ofMillis(100),
                 "anthropic",
                 SerializedError.of("k", "m")),
+            modelCall("m", 1, FinishReason.STOP, Usage.of(0, 0), Duration.ZERO),
             new QueryEvent.RunStarted(SID, "run-1", TS),
             new QueryEvent.RunEnded(SID, "run-1", TURN, TS, result),
             new QueryEvent.Error(SID, "run-1", TURN, TS, SerializedError.of("k", "m")));
@@ -522,6 +625,7 @@ final class QueryEventTest {
             case QueryEvent.QuestionAsked q -> "question-asked";
             case QueryEvent.TurnEnded te -> "turn-end";
             case QueryEvent.TurnRetried tr -> "turn-retried";
+            case QueryEvent.ModelCallEnded mc -> "model-call";
             case QueryEvent.RunStarted rs -> "run-start";
             case QueryEvent.RunEnded re -> "run-end";
             case QueryEvent.Error err -> "error";

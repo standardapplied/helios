@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -101,8 +102,13 @@ final class ModelCallTest {
             CLOCK);
     state.history().append(Message.user("hello"));
     state.beginTurn();
+    var emitter = collaborators.emitter();
     return new ModelCall(
-        collaborators, collaborators.emitter(), model, OutputSchema.of(Answer.class));
+        collaborators,
+        emitter,
+        new UsageAccounting(collaborators, emitter, model, CostCalculator.ZERO),
+        model,
+        OutputSchema.of(Answer.class));
   }
 
   private ModelCall modelCall(StreamModel model) {

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     input_text        TEXT,
     output_text       TEXT,
     user_id           VARCHAR(255),
-    session_id        UUID,
+    session_id        VARCHAR(128),
     model_id          VARCHAR(255),
     prompt_name       VARCHAR(255),
     prompt_version    INT,

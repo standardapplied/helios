@@ -17,7 +17,6 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class TraceBuilderTest {
@@ -149,7 +148,7 @@ class TraceBuilderTest {
 
   @Test
   void propagatesContextFields() {
-    var sessionId = UUID.randomUUID();
+    var sessionId = "sess-1";
     var builder = TraceBuilder.start("agent-run");
     builder
         .withInputText("What is 2+2?")

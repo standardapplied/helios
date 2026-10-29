@@ -336,6 +336,7 @@ final class SessionEventPublisherTest {
               QueryEvent.RunStarted.class,
               QueryEvent.UserMessageReceived.class,
               QueryEvent.AssistantText.class,
+              QueryEvent.ModelCallEnded.class,
               QueryEvent.TurnEnded.class,
               QueryEvent.RunEnded.class),
           read.stream().map(Object::getClass).toList());

@@ -84,9 +84,9 @@ final class SessionLifecycle {
    * @throws SessionUnavailableException if the provider did not accept the session
    * @throws Error the {@link Error} {@code onSessionStart} threw, as itself
    */
-  void open(AgentLoop loop) {
+  void open(AgentLoop loop, Optional<SessionTraceRecorder> recorder) {
     this.loop = loop;
-    runs.bind(loop);
+    runs.bind(loop, recorder);
     try {
       start
           .flatMap(provider -> provider.await(limits.startTimeout()))

@@ -148,17 +148,18 @@ final class ContextCompaction {
   }
 
   /**
-   * Invoke the configured {@link ContextCompactor}, swap in the returned history, accumulate any
-   * usage reported by the compactor (e.g. summary call spend) — priced against the compactor's own
-   * {@link CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's
-   * rate — and emit {@link QueryEvent.ContextEdited} after a successful shrink. A returned identity
-   * (same instance) or no-shrink result is treated as a no-op — the compactor opted out for this
-   * turn and the warning flag stays set. A throwing compactor is swallowed; the loop continues,
-   * unless what it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the
-   * session.
+   * Invoke the configured {@link ContextCompactor}, swap in the returned history, account any usage
+   * reported by the compactor (e.g. summary call spend) as one model call timed across the
+   * compactor's call — priced against the compactor's own {@link CompactionResult#modelId()} so a
+   * cheap summary model isn't billed at the main loop's rate — and emit {@link
+   * QueryEvent.ContextEdited} after a successful shrink. A returned identity (same instance) or
+   * no-shrink result is treated as a no-op — the compactor opted out for this turn and the warning
+   * flag stays set. A throwing compactor is swallowed; the loop continues, unless what it threw
+   * carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session.
    */
   private void compact(SessionState state, long tokensBefore) {
     var historyBefore = state.history().snapshot();
+    var started = collaborators.clock().instant();
     CompactionResult result;
     try {
       result = contextCompactor.compact(historyBefore, collaborators.hookContext(state));
@@ -176,7 +177,10 @@ final class ContextCompaction {
     }
     var compactionUsage = result.usage();
     if (compactionUsage.reportsTokens()) {
-      turnRunner.accounting().add(state, result.modelId(), compactionUsage);
+      turnRunner
+          .accounting()
+          .accountCompaction(
+              state, result.modelId(), compactionUsage, started, collaborators.clock().instant());
     }
     var historyAfter = result.history();
     if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {
