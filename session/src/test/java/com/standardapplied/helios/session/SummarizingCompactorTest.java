@@ -374,7 +374,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void anErrorTheSummarizerThrewLeavesTheCompactionAsItself() {
+  void anErrorTheSummarizerThrewIsTheResultsErrorAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(
@@ -382,22 +382,16 @@ final class SummarizingCompactorTest {
               throw sentinel;
             });
 
-    var thrown =
-        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, freshContext()));
-
-    assertSame(sentinel, thrown);
+    assertFailedWith(sentinel, compactor.compact(CONVERSATION, freshContext()));
   }
 
   @Test
-  void anErrorTheSummarizerJoinsFromAFailedFutureLeavesTheCompactionAsItself() {
+  void anErrorTheSummarizerJoinsFromAFailedFutureIsTheResultsErrorAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor = compactorSummarizingWith(() -> CompletableFuture.failedFuture(sentinel).join());
     var state = freshState();
 
-    var thrown =
-        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
-
-    assertSame(sentinel, thrown);
+    assertFailedWith(sentinel, compactor.compact(CONVERSATION, contextOf(state)));
     assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
@@ -477,7 +471,7 @@ final class SummarizingCompactorTest {
   }
 
   @Test
-  void anErrorTheSummarizerThrowsUnderAnotherContextIsOnlyRethrown() {
+  void anErrorTheSummarizerThrowsUnderAnotherContextIsOnlyTheResultsError() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(
@@ -493,15 +487,13 @@ final class SummarizingCompactorTest {
             state.cancellation(),
             summaryModel("x"));
 
-    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
-
-    assertSame(sentinel, thrown);
+    assertFailedWith(sentinel, compactor.compact(CONVERSATION, context));
     assertFalse(state.cancellation().isCancelled());
     assertEquals(Optional.empty(), state.ending().seal());
   }
 
   @Test
-  void anErrorAnExecutionExceptionCarriesUnderAnotherContextIsRethrownAsItself() {
+  void anErrorAnExecutionExceptionCarriesUnderAnotherContextIsTheResultsErrorAsItself() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
@@ -514,23 +506,18 @@ final class SummarizingCompactorTest {
             state.cancellation(),
             summaryModel("x"));
 
-    var thrown = assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, context));
-
-    assertSame(sentinel, thrown);
+    assertFailedWith(sentinel, compactor.compact(CONVERSATION, context));
     assertEquals(Optional.empty(), state.ending().seal());
   }
 
   @Test
-  void anErrorAnExecutionExceptionCarriesUnderTheSessionsContextIsRecordedAndRethrown() {
+  void anErrorAnExecutionExceptionCarriesUnderTheSessionsContextIsRecordedAndTheResultsError() {
     var sentinel = new AssertionError("host failure");
     var compactor =
         compactorSummarizingWith(() -> throwUndeclared(new ExecutionException(sentinel)));
     var state = freshState();
 
-    var thrown =
-        assertThrows(AssertionError.class, () -> compactor.compact(CONVERSATION, contextOf(state)));
-
-    assertSame(sentinel, thrown);
+    assertFailedWith(sentinel, compactor.compact(CONVERSATION, contextOf(state)));
     assertSame(sentinel, state.ending().seal().orElseThrow());
   }
 
@@ -643,6 +630,13 @@ final class SummarizingCompactorTest {
   @SuppressWarnings("unchecked")
   private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
     throw (E) t;
+  }
+
+  private static void assertFailedWith(AssertionError sentinel, CompactionResult out) {
+    assertSame(sentinel, out.error());
+    assertSame(CONVERSATION, out.history());
+    assertEquals(Usage.of(0, 0), out.usage());
+    assertEquals("summary", out.modelId());
   }
 
   private static void fail(AssertionError sentinel) {

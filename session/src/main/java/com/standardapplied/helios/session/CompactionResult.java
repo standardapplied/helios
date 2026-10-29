@@ -38,7 +38,8 @@ import java.util.Objects;
  *     empty string
  * @param error what the compactor's model call failed with, which the loop reports as a failed
  *     model call; null when the call succeeded or no model was called. Non-null requires a
- *     non-blank {@code modelId}
+ *     non-blank {@code modelId}. An {@link Error} then ends the session as if the compactor had
+ *     thrown it
  */
 public record CompactionResult(
     List<Message> history, Usage usage, String modelId, Throwable error) {

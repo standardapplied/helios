@@ -14,7 +14,7 @@ listener hands it one trace per run, and each model attempt is an event.
 | an exhaustive `switch` over `QueryEvent` | handles the new subtype `QueryEvent.ModelCallEnded`, or has a `default` |
 | `SessionOptions`' 18-component canonical constructor | 20 components: `Optional<TraceListener> traceListener` and `TraceDetail traceDetail` last; build through `SessionOptions.newBuilder()` |
 | `UUID Trace.sessionId()`, `Trace.Builder.withSessionId(UUID)`, `TraceBuilder.withSessionId(UUID)` | `String`, so an agent session's id (`sess-<id>`, `member:42`) fits |
-| `new CompactionResult(history, usage, modelId)` | `new CompactionResult(history, usage, modelId, error)`: `error` is what the compactor's model call failed with, reported as a failed model call, or null; `SummarizingCompactor` reports a failed or timed-out summary call this way, and a blank summary as a call with its usage |
+| `new CompactionResult(history, usage, modelId)` | `new CompactionResult(history, usage, modelId, error)`: `error` is what the compactor's model call failed with, reported as a failed model call, or null; an `Error` there then ends the session as if thrown; `SummarizingCompactor` reports a failed or timed-out summary call this way, an `Error` its summary call ends with included (it no longer throws it), and a blank summary as a call with its usage |
 | `helios_traces.session_id UUID` | `VARCHAR(128)`; on an existing database run `ALTER TABLE helios_traces ALTER COLUMN session_id TYPE VARCHAR(128) USING session_id::text` |
 
 **Session ids follow one rule.** `SessionOptions` accepts only ids of 1 to 128 characters of

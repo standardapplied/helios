@@ -51,6 +51,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The model call at its edges: a parse failure with nothing to echo, a transient failure once the
@@ -180,6 +182,38 @@ final class ModelCallTest {
     assertEquals(1, attempts.streamAttempts());
     assertEquals(1, model.calls.get());
     assertEquals(1, events.stream().filter(e -> e instanceof QueryEvent.ModelCallEnded).count());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void whatDeliveringTheRetryThrowsReportsTheAttemptOnceAndStartsNoOther(boolean hostError) {
+    var model = failing(cancellation -> transientFailure());
+    Throwable failure =
+        hostError ? new AssertionError("hook failure") : new IllegalStateException("sink failure");
+    Consumer<QueryEvent> failingOnRetry =
+        event -> {
+          events.add(event);
+          if (event instanceof QueryEvent.TurnRetried) {
+            rethrow(failure);
+          }
+        };
+    var call = modelCall(model, failingOnRetry);
+
+    var thrown =
+        Await.failure(
+            "the call", run(() -> call.stream(state, retrying(2, Duration.ZERO), List.of())));
+
+    assertSame(failure, thrown);
+    assertEquals(1, model.calls.get());
+    var ended =
+        events.stream()
+            .filter(e -> e instanceof QueryEvent.ModelCallEnded)
+            .map(QueryEvent.ModelCallEnded.class::cast)
+            .toList();
+    assertEquals(1, ended.size());
+    assertEquals(FinishReason.ERROR, ended.getFirst().finishReason());
+    assertEquals(TransientStreamException.class.getName(), ended.getFirst().error().kind());
+    assertEquals(hostError ? Optional.of(failure) : Optional.empty(), state.ending().first());
   }
 
   @Test
@@ -689,6 +723,13 @@ final class ModelCallTest {
     var task = new FutureTask<>(body);
     Thread.ofVirtual().start(task);
     return task;
+  }
+
+  private static void rethrow(Throwable failure) {
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw (RuntimeException) failure;
   }
 
   private static TransientStreamException transientFailure() {

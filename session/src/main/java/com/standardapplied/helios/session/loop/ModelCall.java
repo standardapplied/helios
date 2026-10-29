@@ -79,7 +79,9 @@ final class ModelCall {
    * is retried: the final attempt is accounted, a retried one is reported with zero usage once its
    * back-off elapsed, so an attempt whose back-off the run's cancellation cuts short is the final
    * one and is accounted, while one whose event delivery the run's cancellation follows stays
-   * reported as retried; an attempt a host {@link Error} ended is reported with zero usage.
+   * reported as retried; an attempt a host {@link Error} ended, or whose {@code TurnRetried}
+   * delivery threw, is reported with zero usage, an {@code Error} recorded on the session's ending
+   * first.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -111,17 +113,13 @@ final class ModelCall {
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
-      emitter.emit(
-          state,
-          new QueryEvent.TurnRetried(
-              state.sessionId(),
-              state.runId(),
-              state.currentTurnIndex(),
-              collaborators.clock().instant(),
-              attempt,
-              backoff,
-              transientErr.providerName(),
-              SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
+      try {
+        emitRetried(state, attempt, backoff, transientErr);
+      } catch (RuntimeException | Error failure) {
+        state.ending().failWith(failure);
+        accounting.reportUnaccounted(state, attempt, transientErr, started, ended);
+        throw failure;
+      }
       if (!sleepHonouringCancellation(backoff, state.cancellation())) {
         accounting.accountTurn(state, turn, attempt, started, ended);
         return turn.withStreamAttempts(attempt);
@@ -131,6 +129,21 @@ final class ModelCall {
         return turn.withStreamAttempts(attempt);
       }
     }
+  }
+
+  private void emitRetried(
+      SessionState state, int attempt, Duration backoff, TransientStreamException transientErr) {
+    emitter.emit(
+        state,
+        new QueryEvent.TurnRetried(
+            state.sessionId(),
+            state.runId(),
+            state.currentTurnIndex(),
+            collaborators.clock().instant(),
+            attempt,
+            backoff,
+            transientErr.providerName(),
+            SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
   }
 
   private static boolean stopped(SessionState state) {

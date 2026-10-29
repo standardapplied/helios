@@ -8,6 +8,7 @@ import com.standardapplied.helios.session.ContextCompactor;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
+import java.time.Instant;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -155,7 +156,8 @@ final class ContextCompaction {
    * emit {@link QueryEvent.ContextEdited} after a successful shrink. A returned identity (same
    * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
    * the warning flag stays set. A throwing compactor is swallowed; the loop continues, unless what
-   * it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session.
+   * it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session, as
+   * does a result whose error is an {@code Error}.
    */
   private void compact(SessionState state, long tokensBefore) {
     var historyBefore = state.history().snapshot();
@@ -176,9 +178,7 @@ final class ContextCompaction {
       return;
     }
     if (!result.modelId().isBlank()) {
-      turnRunner
-          .accounting()
-          .accountCompaction(state, result, started, collaborators.clock().instant());
+      report(state, result, started);
     }
     var historyAfter = result.history();
     if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {
@@ -197,5 +197,22 @@ final class ContextCompaction {
             removedBlocks,
             tokensBefore,
             tokensAfter));
+  }
+
+  /**
+   * Account the compactor's model call; a call that failed with an {@link Error} is recorded on the
+   * session's ending before it is reported, then thrown as itself.
+   */
+  private void report(SessionState state, CompactionResult result, Instant started) {
+    var hostError = result.error() instanceof Error error ? error : null;
+    if (hostError != null) {
+      state.ending().fail(hostError);
+    }
+    turnRunner
+        .accounting()
+        .accountCompaction(state, result, started, collaborators.clock().instant());
+    if (hostError != null) {
+      throw hostError;
+    }
   }
 }
