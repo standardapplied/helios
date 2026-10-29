@@ -38,6 +38,9 @@ import org.junit.jupiter.api.Test;
 
 final class PgSessionStoreTest extends SessionStoreContract {
 
+  private static final String LOCK_FIRST_ROW =
+      "SELECT seq FROM %s.helios_session_entries WHERE session_id = ? AND seq = 1 FOR UPDATE";
+
   @BeforeEach
   void setUp() {
     PgTestSupport.truncateSessions();
@@ -134,9 +137,9 @@ final class PgSessionStoreTest extends SessionStoreContract {
   void aSecondWriterThatReadTheSameSequenceNumberIsRefusedByThePrimaryKey() {
     var store = new PgSessionStore(PgTestSupport.pgConfig());
     var holder = PgTestSupport.dbClient().transaction();
-    holder.dml(PgTestSupport.pgConfig().qualify(SessionEntrySql.INSERT), firstRow());
-    var append = appendInBackground(store);
-    awaitBlockedAppend();
+    holder.dml(PgTestSupport.pgConfig().qualify(SessionEntrySql.INSERT), row(1));
+    var append = appendInBackground(store, 0, 1);
+    awaitLockWaiters(1, append);
 
     holder.commit();
 
@@ -145,6 +148,45 @@ final class PgSessionStoreTest extends SessionStoreContract {
     assertTrue(
         conflict.getMessage().endsWith("expected last sequence number 0, the store holds 1"));
     assertEquals(1, rowCount());
+  }
+
+  @Test
+  void aDeletionWaitsForAnAppendInProgressAndRemovesItsRowsToo() {
+    var store = new PgSessionStore(PgTestSupport.pgConfig());
+    store.append(SID, 0, messages(3));
+    var holder = PgTestSupport.dbClient().transaction();
+    holder.dml(PgTestSupport.pgConfig().qualify(SessionEntrySql.INSERT), row(5));
+    var append = appendInBackground(store, 3, 2);
+    awaitLockWaiters(1, append);
+    var delete = deleteInBackground(store);
+    awaitLockWaiters(2, delete);
+
+    holder.rollback();
+
+    Await.value("the append", append);
+    assertTrue(Await.value("the deletion", delete));
+    assertEquals(0, rowCount());
+  }
+
+  @Test
+  void anAppendWaitsForADeletionInProgressAndThenConflicts() {
+    var store = new PgSessionStore(PgTestSupport.pgConfig());
+    store.append(SID, 0, messages(3));
+    var holder = PgTestSupport.dbClient().transaction();
+    holder.get(PgTestSupport.pgConfig().qualify(LOCK_FIRST_ROW), SID);
+    var delete = deleteInBackground(store);
+    awaitLockWaiters(1, delete);
+    var append = appendInBackground(store, 3, 1);
+    awaitLockWaiters(2, append);
+
+    holder.commit();
+
+    assertTrue(Await.value("the deletion", delete));
+    var conflict = Await.failure("the append", append);
+    assertEquals(SessionConflictException.class, conflict.getClass());
+    assertTrue(
+        conflict.getMessage().endsWith("expected last sequence number 3, the store holds 0"));
+    assertEquals(0, rowCount());
   }
 
   @Test
@@ -233,11 +275,11 @@ final class PgSessionStoreTest extends SessionStoreContract {
     return IntStream.range(0, count).mapToObj(i -> added(Message.user("m" + i))).toList();
   }
 
-  private static Object[] firstRow() {
+  private static Object[] row(long seq) {
     var entry = added(Message.user("held"));
     return new Object[] {
       SID,
-      1L,
+      seq,
       "message",
       entry.runId(),
       SessionEntryJson.write(entry),
@@ -245,23 +287,36 @@ final class PgSessionStoreTest extends SessionStoreContract {
     };
   }
 
-  private static CompletableFuture<Void> appendInBackground(PgSessionStore store) {
+  private static CompletableFuture<Void> appendInBackground(
+      PgSessionStore store, long expectedLastSeq, int count) {
     return CompletableFuture.runAsync(
-        () -> store.append(SID, 0, messages(1)), task -> Thread.ofVirtual().start(task));
+        () -> store.append(SID, expectedLastSeq, messages(count)),
+        task -> Thread.ofVirtual().start(task));
   }
 
-  /** Wait for the append to block behind the holder's uncommitted row. */
-  private static void awaitBlockedAppend() {
+  private static CompletableFuture<Boolean> deleteInBackground(PgSessionStore store) {
+    return CompletableFuture.supplyAsync(
+        () -> store.delete(SID), task -> Thread.ofVirtual().start(task));
+  }
+
+  /**
+   * Wait until {@code count} backends wait on a lock, the last of them {@code task}'s; a task that
+   * finished instead never blocked, which the test's assertions then report.
+   */
+  private static void awaitLockWaiters(long count, CompletableFuture<?> task) {
     Await.until(
-        "an append waiting on the held row",
+        count + " backends waiting on a lock, or the task done",
         () ->
-            PgTestSupport.dbClient()
-                .execute()
-                .query(
-                    "SELECT pid FROM pg_stat_activity"
-                        + " WHERE wait_event_type = 'Lock' AND datname = current_database()")
-                .findFirst()
-                .isPresent());
+            task.isDone()
+                || PgTestSupport.dbClient()
+                        .execute()
+                        .get(
+                            "SELECT COUNT(*) AS n FROM pg_stat_activity"
+                                + " WHERE wait_event_type = 'Lock'"
+                                + " AND datname = current_database()")
+                        .map(row -> row.column("n").getLong())
+                        .orElseThrow()
+                    == count);
   }
 
   private static long rowCount() {

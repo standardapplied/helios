@@ -98,7 +98,8 @@ public final class PgSessionStore implements SessionStore {
   }
 
   /**
-   * Remove a session's rows.
+   * Remove a session's rows. The deletion locks the table against writers, so it waits for appends
+   * in progress and appends wait for it: an append is removed whole, or conflicts afterwards.
    *
    * @param sessionId the session id; valid per {@link SessionStore#requireValidId}
    * @return whether the table held any
@@ -109,7 +110,18 @@ public final class PgSessionStore implements SessionStore {
     return inStore(
         "delete",
         sessionId,
-        () -> dbClient.execute().dml(config.qualify(SessionEntrySql.DELETE), sessionId) > 0);
+        () -> {
+          var tx = dbClient.transaction();
+          try {
+            tx.dml(config.qualify(SessionEntrySql.LOCK_WRITERS));
+            var deleted = tx.dml(config.qualify(SessionEntrySql.DELETE), sessionId) > 0;
+            tx.commit();
+            return deleted;
+          } catch (RuntimeException e) {
+            rollback(tx, e);
+            throw e;
+          }
+        });
   }
 
   /** Whether the batch was written; {@code false} when the table refused it as a conflict. */
