@@ -77,7 +77,7 @@ final class ModelCall {
    * <p>Every attempt is reported once through {@link UsageAccounting}, when it is known whether it
    * is retried: the final attempt is accounted, a retried one is reported with zero usage once its
    * back-off elapsed, so an attempt whose back-off the run's cancellation cuts short is the final
-   * one and is accounted.
+   * one and is accounted; an attempt a host {@link Error} ended is reported with zero usage.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -94,7 +94,13 @@ final class ModelCall {
     while (true) {
       attempt++;
       var started = clock.instant();
-      var turn = streamOnce(state, limits, visibleTools);
+      TurnOutcome turn;
+      try {
+        turn = streamOnce(state, limits, visibleTools);
+      } catch (Error failure) {
+        accounting.reportUnaccounted(state, attempt, failure, started, clock.instant());
+        throw failure;
+      }
       var ended = clock.instant();
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
@@ -119,7 +125,7 @@ final class ModelCall {
         accounting.accountTurn(state, turn, attempt, started, ended);
         return turn.withStreamAttempts(attempt);
       }
-      accounting.reportRetried(state, attempt, transientErr, started, ended);
+      accounting.reportUnaccounted(state, attempt, transientErr, started, ended);
     }
   }
 

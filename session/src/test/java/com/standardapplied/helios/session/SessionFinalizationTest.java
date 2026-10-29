@@ -29,6 +29,7 @@ import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.session.EndingSessions.Unprintable;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreStopHook;
@@ -661,13 +662,6 @@ final class SessionFinalizationTest {
   }
 
   /** An exception whose message cannot be read, so the loop cannot serialise it. */
-  private static final class Unprintable extends RuntimeException {
-    @Override
-    public String getMessage() {
-      throw this;
-    }
-  }
-
   @SuppressWarnings("unchecked")
   private static <E extends Throwable> void throwUndeclared(Throwable t) throws E {
     throw (E) t;

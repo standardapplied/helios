@@ -18,8 +18,10 @@ import java.time.Instant;
  * CostCalculator} — the main model's turns at its own rate, and a {@link
  * com.standardapplied.helios.session.ContextCompactor}'s summary call at the compactor's model
  * rate, so a cheap Haiku compactor wired against an Opus main loop is not priced at Opus rates —
- * and its event carries exactly that usage and cost. A retried attempt is reported with zero usage
- * and is not accounted. No call is accounted without its event, and no event adds usage without it.
+ * and its event carries exactly that usage and cost. A retried attempt, or one that ended with a
+ * host {@link Error}, is reported with zero usage and is not accounted. A clock that stepped back
+ * during an attempt reports it with a zero duration. No call is accounted without its event, and no
+ * event adds usage without it.
  */
 final class UsageAccounting {
 
@@ -57,9 +59,10 @@ final class UsageAccounting {
   }
 
   /**
-   * Report an attempt that failed transiently and is retried, with zero usage; it is not accounted.
+   * Report an attempt that is not accounted, with zero usage: one that failed transiently and is
+   * retried, or one that ended with a host {@link Error}.
    */
-  void reportRetried(
+  void reportUnaccounted(
       SessionState state, int attempt, Throwable error, Instant started, Instant ended) {
     var call = new Call(model.id(), attempt, FinishReason.ERROR, Usage.of(0, 0), error);
     emit(state, call, CostEstimate.zero(), started, ended);
@@ -74,11 +77,17 @@ final class UsageAccounting {
     account(state, new Call(modelId, 1, FinishReason.STOP, usage, null), started, ended);
   }
 
+  /** Add the call's usage, then its cost; a pricing failure leaves the usage added at zero cost. */
   private void account(SessionState state, Call call, Instant started, Instant ended) {
-    var cost = costCalculator.cost(call.modelId(), call.usage());
     state.totals().accumulateUsage(call.usage());
-    state.totals().accumulateCost(cost);
-    emit(state, call, cost, started, ended);
+    var accounted = CostEstimate.zero();
+    try {
+      var cost = costCalculator.cost(call.modelId(), call.usage());
+      state.totals().accumulateCost(cost);
+      accounted = cost;
+    } finally {
+      emit(state, call, accounted, started, ended);
+    }
   }
 
   private void emit(
@@ -99,7 +108,7 @@ final class UsageAccounting {
             call.finishReason(),
             call.usage(),
             cost,
-            Duration.between(started, ended),
+            ended.isBefore(started) ? Duration.ZERO : Duration.between(started, ended),
             error));
   }
 

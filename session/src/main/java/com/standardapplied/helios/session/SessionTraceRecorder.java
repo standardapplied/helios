@@ -78,18 +78,29 @@ final class SessionTraceRecorder {
    */
   void finish(SessionState run, ResultMessage terminal, RuntimeException crash) {
     try {
-      listener.onTrace(trace(run, terminal, crash));
-    } catch (Exception e) {
-      LOGGER.log(
-          Level.WARNING,
-          "the trace of run "
-              + run.runId()
-              + " of session "
-              + sessionId
-              + " failed; the run's result is unchanged",
-          SerializedError.redactedForLog(e, secrets.redactor()));
+      try {
+        listener.onTrace(trace(run, terminal, crash));
+      } catch (Exception e) {
+        LOGGER.log(
+            Level.WARNING,
+            "the trace of run "
+                + run.runId()
+                + " of session "
+                + sessionId
+                + " failed; the run's result is unchanged",
+            forLog(e));
+      }
     } catch (Error e) {
       ending.fail(e);
+    }
+  }
+
+  /** {@code failure}'s redacted copy, or its class name when it cannot be read. */
+  private Throwable forLog(Exception failure) {
+    try {
+      return SerializedError.redactedForLog(failure, secrets.redactor());
+    } catch (RuntimeException unreadable) {
+      return new Throwable(failure.getClass().getName());
     }
   }
 

@@ -391,8 +391,9 @@ public sealed interface QueryEvent
    * compactor's call that reports tokens) carries exactly the usage it added to the run's totals
    * and the cost computed for that usage, so the events' usage sums to the run's; an attempt that
    * failed transiently and is retried carries zero usage and cost, and follows its {@link
-   * TurnRetried} once the back-off elapsed. An attempt a host {@link java.lang.Error} ended has
-   * none.
+   * TurnRetried} once the back-off elapsed; an attempt a host {@link java.lang.Error} ended carries
+   * zero usage and cost and that error. A cost calculator that fails leaves the call's usage
+   * accounted at zero cost.
    *
    * @param sessionId the session id
    * @param runId the run id
