@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.permissions.Permission;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,9 +56,6 @@ import java.util.function.Predicate;
  */
 final class ToolRound {
 
-  private static final String PRE_TOOL_USE = "PreToolUseHook";
-  private static final String POST_TOOL_USE = "PostToolUseHook";
-
   /**
    * The call to run after {@code PreToolUse}, the result standing in for its dispatch, and what was
    * redacted from that result's reason.
@@ -99,15 +97,15 @@ final class ToolRound {
     var hookName = chain.decision().firingHookName();
     return switch (chain.decision().outcome()) {
       case HookOutcome.Stop stop -> {
-        effects.stop(state, hookName, PRE_TOOL_USE, stop);
+        effects.stop(state, hookName, HookPhase.PRE_TOOL_USE, stop);
         yield true;
       }
       case HookOutcome.Block block -> {
-        emitter.emitHookFired(state, hookName, PRE_TOOL_USE, "Block");
+        emitter.emitHookFired(state, hookName, HookPhase.PRE_TOOL_USE, block);
         yield complete(state, block(state, finalCall, hookName, block.reason()), limits);
       }
       case HookOutcome.Inject inject -> {
-        effects.inject(state, hookName, PRE_TOOL_USE, inject);
+        effects.inject(state, hookName, HookPhase.PRE_TOOL_USE, inject);
         yield complete(
             state,
             new PlannedCall(
@@ -156,7 +154,8 @@ final class ToolRound {
     var before = call;
     for (var mutation : mutations) {
       var args = mutation.outcome().args();
-      emitter.emitHookFired(state, mutation.firingHookName(), PRE_TOOL_USE, "MutateArgs");
+      emitter.emitHookFired(
+          state, mutation.firingHookName(), HookPhase.PRE_TOOL_USE, mutation.outcome());
       var shownBefore = RedactedArguments.of(before, collaborators.secrets());
       emitter.emit(
           state,
@@ -254,9 +253,10 @@ final class ToolRound {
     switch (decision.outcome()) {
       case HookOutcome.MutateResult mutate ->
           kept = mutateResult(state, call, result, hookName, mutate);
-      case HookOutcome.Inject inject -> effects.inject(state, hookName, POST_TOOL_USE, inject);
+      case HookOutcome.Inject inject ->
+          effects.inject(state, hookName, HookPhase.POST_TOOL_USE, inject);
       case HookOutcome.Stop stop -> {
-        emitter.emitHookFired(state, hookName, POST_TOOL_USE, "Stop");
+        emitter.emitHookFired(state, hookName, HookPhase.POST_TOOL_USE, stop);
         append(state, call, result);
         state.setTerminal(StopClassifier.success(state, stop.result()));
         return true;
@@ -273,7 +273,7 @@ final class ToolRound {
       ToolResult result,
       String hookName,
       HookOutcome.MutateResult mutate) {
-    emitter.emitHookFired(state, hookName, POST_TOOL_USE, "MutateResult");
+    emitter.emitHookFired(state, hookName, HookPhase.POST_TOOL_USE, mutate);
     return emitRedacted(state, call, result.withOutput(mutate.output()), Map.of());
   }
 

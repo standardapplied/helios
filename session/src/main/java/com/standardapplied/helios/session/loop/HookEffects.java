@@ -5,6 +5,7 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,8 +27,8 @@ final class HookEffects {
   }
 
   /** Announce the {@code Stop} and record its {@link ResultMessage.Success} as the terminal. */
-  void stop(SessionState state, String hookName, String phase, HookOutcome.Stop stop) {
-    emitter.emitHookFired(state, hookName, phase, "Stop");
+  void stop(SessionState state, String hookName, HookPhase phase, HookOutcome.Stop stop) {
+    emitter.emitHookFired(state, hookName, phase, stop);
     state.setTerminal(StopClassifier.success(state, stop.result()));
   }
 
@@ -37,8 +38,8 @@ final class HookEffects {
    * Inject} took effect but the loop never sees the message, producing impossible-to-debug
    * cascading bugs.
    */
-  void inject(SessionState state, String hookName, String phase, HookOutcome.Inject inject) {
-    emitter.emitHookFired(state, hookName, phase, "Inject");
+  void inject(SessionState state, String hookName, HookPhase phase, HookOutcome.Inject inject) {
+    emitter.emitHookFired(state, hookName, phase, inject);
     if (!steeringQueue.offer(UserMessage.text(inject.userMessage()))) {
       LOGGER.log(
           Level.WARNING,

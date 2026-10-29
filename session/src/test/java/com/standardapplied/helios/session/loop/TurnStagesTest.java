@@ -22,6 +22,7 @@ import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -116,6 +117,6 @@ final class TurnStagesTest {
         "{0} hook ''{1}'' Inject was dropped: steering queue full; session continues without"
             + " the injected message",
         warning.getMessage());
-    assertEquals(List.of("PreModelTurnHook", "injector"), List.of(warning.getParameters()));
+    assertEquals(List.of(HookPhase.PRE_MODEL_TURN, "injector"), List.of(warning.getParameters()));
   }
 }

@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Optional;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
 
 /**
  * The runtime's one JSON place: the one fixed {@link #MAPPER} every route writes with, so the wire
@@ -26,8 +27,14 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class JsonBody {
 
-  /** Writes every body the runtime sends, tool outcomes included, in camelCase. */
-  static final ObjectMapper MAPPER = ToolOutcomeSerializer.addTo(JsonMapper.builder().build());
+  /** Writes every body the runtime sends, tool and hook outcomes included, in camelCase. */
+  static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .addModule(
+              new SimpleModule("helios-outcomes")
+                  .addSerializer(new ToolOutcomeSerializer())
+                  .addSerializer(new HookOutcomeSerializer()))
+          .build();
 
   private static final Map<String, String> TOO_LARGE = Map.of("error", "request body too large");
 

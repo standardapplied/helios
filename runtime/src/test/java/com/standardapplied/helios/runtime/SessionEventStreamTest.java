@@ -50,7 +50,7 @@ final class SessionEventStreamTest {
 
     forward(
         sink,
-        ToolOutcomeSerializer.addTo(new ObjectMapper()),
+        JsonBody.MAPPER,
         new QueryEvent.ToolResult(
             "sess-1",
             "run-1",

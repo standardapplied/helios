@@ -53,6 +53,6 @@ public record LoopCollaborators(
   }
 
   EventEmitter emitter() {
-    return new EventEmitter(eventSink, hooks, hookContextFactory, clock);
+    return new EventEmitter(eventSink, hooks, hookContextFactory, clock, secrets());
   }
 }

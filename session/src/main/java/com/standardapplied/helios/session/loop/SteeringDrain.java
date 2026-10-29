@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,8 +21,6 @@ import java.util.List;
  * attachments and file references, into a single user-role message.
  */
 final class SteeringDrain {
-
-  private static final String PHASE = "OnUserMessageHook";
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -53,7 +52,7 @@ final class SteeringDrain {
             accepted.add(mutateText(state, message, hookName, mutate));
         case HookOutcome.Block block -> block(state, message, hookName, block);
         case HookOutcome.Stop stop -> {
-          effects.stop(state, hookName, PHASE, stop);
+          effects.stop(state, hookName, HookPhase.ON_USER_MESSAGE, stop);
           return false;
         }
         case HookOutcome.Continue _ -> accepted.add(receive(state, message));
@@ -90,13 +89,13 @@ final class SteeringDrain {
       SessionState state, UserMessage message, String hookName, HookOutcome.MutateText mutate) {
     var replacement =
         new UserMessage(mutate.text(), message.attachments(), message.fileReferences());
-    emitter.emitHookFired(state, hookName, PHASE, "MutateText");
+    emitter.emitHookFired(state, hookName, HookPhase.ON_USER_MESSAGE, mutate);
     return receive(state, replacement);
   }
 
   private void block(
       SessionState state, UserMessage message, String hookName, HookOutcome.Block block) {
-    emitter.emitHookFired(state, hookName, PHASE, "Block");
+    emitter.emitHookFired(state, hookName, HookPhase.ON_USER_MESSAGE, block);
     emitter.emit(
         state,
         new QueryEvent.MessageBlocked(

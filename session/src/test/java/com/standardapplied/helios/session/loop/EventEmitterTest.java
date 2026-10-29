@@ -19,6 +19,8 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +34,7 @@ final class EventEmitterTest {
 
   private static final Instant FIXED = Instant.parse("2026-05-15T10:00:00Z");
   private static final Clock CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
+  private static final SecretRegistry SECRETS = new SecretRegistry();
 
   private static Model stubModel() {
     return new BlockingModel() {
@@ -70,33 +73,45 @@ final class EventEmitterTest {
   void rejectsNullEventSink() {
     assertThrows(
         NullPointerException.class,
-        () -> new EventEmitter(null, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK));
+        () ->
+            new EventEmitter(null, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK, SECRETS));
   }
 
   @Test
   void rejectsNullHooks() {
     assertThrows(
         NullPointerException.class,
-        () -> new EventEmitter(e -> {}, null, ctxFactory(stubModel()), CLOCK));
+        () -> new EventEmitter(e -> {}, null, ctxFactory(stubModel()), CLOCK, SECRETS));
   }
 
   @Test
   void rejectsNullCtxFactory() {
     assertThrows(
         NullPointerException.class,
-        () -> new EventEmitter(e -> {}, HookRegistry.empty(), null, CLOCK));
+        () -> new EventEmitter(e -> {}, HookRegistry.empty(), null, CLOCK, SECRETS));
   }
 
   @Test
   void rejectsNullClock() {
     assertThrows(
         NullPointerException.class,
-        () -> new EventEmitter(e -> {}, HookRegistry.empty(), ctxFactory(stubModel()), null));
+        () ->
+            new EventEmitter(
+                e -> {}, HookRegistry.empty(), ctxFactory(stubModel()), null, SECRETS));
+  }
+
+  @Test
+  void rejectsNullSecrets() {
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new EventEmitter(e -> {}, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK, null));
   }
 
   @Test
   void clockAccessorReturnsConfiguredClock() {
-    var emitter = new EventEmitter(e -> {}, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK);
+    var emitter =
+        new EventEmitter(e -> {}, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK, SECRETS);
     assertEquals(CLOCK, emitter.clock());
   }
 
@@ -110,7 +125,8 @@ final class EventEmitterTest {
             sinkEvents::add,
             new HookRegistry(List.of(hook), new SecretRegistry()),
             ctxFactory(stubModel()),
-            CLOCK);
+            CLOCK,
+            SECRETS);
     var state = newState();
     var event = new QueryEvent.AssistantText("sess-emit", "run-1", 0L, FIXED, "hi");
     emitter.emit(state, event);
@@ -124,20 +140,22 @@ final class EventEmitterTest {
   void emitHookFiredUsesProvidedHookName() {
     var sinkEvents = new ArrayList<QueryEvent>();
     var emitter =
-        new EventEmitter(sinkEvents::add, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK);
-    emitter.emitHookFired(newState(), "MyGuard", "PreToolUseHook", "Stop");
+        new EventEmitter(
+            sinkEvents::add, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK, SECRETS);
+    emitter.emitHookFired(newState(), "MyGuard", HookPhase.PRE_TOOL_USE, HookOutcome.stop("done"));
     var fired = (QueryEvent.HookFired) sinkEvents.get(0);
     assertEquals("MyGuard", fired.hookName(), "hookName wins when non-null");
-    assertEquals("PreToolUseHook", fired.phase());
-    assertEquals("Stop", fired.outcomeKind());
+    assertEquals(HookPhase.PRE_TOOL_USE, fired.phase());
+    assertEquals(HookOutcome.stop("done"), fired.outcome());
   }
 
   @Test
   void emittedEventCarriesClockTimestamp() {
     var sinkEvents = new ArrayList<QueryEvent>();
     var emitter =
-        new EventEmitter(sinkEvents::add, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK);
-    emitter.emitHookFired(newState(), "X", "P", "K");
+        new EventEmitter(
+            sinkEvents::add, HookRegistry.empty(), ctxFactory(stubModel()), CLOCK, SECRETS);
+    emitter.emitHookFired(newState(), "X", HookPhase.PRE_STOP, HookOutcome.inject("go on"));
     assertEquals(FIXED, sinkEvents.get(0).timestamp());
     assertNotNull(sinkEvents.get(0).sessionId());
     assertTrue(sinkEvents.get(0).sessionId().startsWith("sess-"));

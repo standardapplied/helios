@@ -4,32 +4,19 @@ package com.standardapplied.helios.runtime;
 
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import tools.jackson.core.JsonGenerator;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationContext;
-import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.StdSerializer;
 
 /**
  * Writes a {@link ToolOutcome} as an object holding its {@code kind}, the record's simple name, and
  * the record's components, e.g. {@code {"kind":"TimedOut","limit":"PT1M"}}. Core stays free of
- * Jackson, so the runtime adds this serializer to its one fixed mapper, {@link JsonBody#MAPPER}.
+ * Jackson, so the runtime registers this serializer on its one fixed mapper, {@link
+ * JsonBody#MAPPER}.
  */
 final class ToolOutcomeSerializer extends StdSerializer<ToolOutcome> {
 
-  private ToolOutcomeSerializer() {
+  ToolOutcomeSerializer() {
     super(ToolOutcome.class);
-  }
-
-  /**
-   * A copy of {@code mapper} that writes tool outcomes; {@code mapper} itself is left as it was.
-   *
-   * @param mapper the mapper to extend; non-null
-   * @return the extended mapper
-   */
-  static ObjectMapper addTo(ObjectMapper mapper) {
-    var module = new SimpleModule("helios-tool-outcome");
-    module.addSerializer(ToolOutcome.class, new ToolOutcomeSerializer());
-    return mapper.rebuild().addModule(module).build();
   }
 
   @Override
