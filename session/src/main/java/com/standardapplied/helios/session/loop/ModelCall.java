@@ -114,7 +114,17 @@ final class ModelCall {
       }
       var backoff = delay(policy, attempt, transientErr);
       try {
-        emitRetried(state, attempt, backoff, transientErr);
+        emitter.emit(
+            state,
+            new QueryEvent.TurnRetried(
+                state.sessionId(),
+                state.runId(),
+                state.currentTurnIndex(),
+                collaborators.clock().instant(),
+                attempt,
+                backoff,
+                transientErr.providerName(),
+                SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
       } catch (RuntimeException | Error failure) {
         state.ending().failWith(failure);
         accounting.reportUnaccounted(state, attempt, transientErr, started, ended);
@@ -129,21 +139,6 @@ final class ModelCall {
         return turn.withStreamAttempts(attempt);
       }
     }
-  }
-
-  private void emitRetried(
-      SessionState state, int attempt, Duration backoff, TransientStreamException transientErr) {
-    emitter.emit(
-        state,
-        new QueryEvent.TurnRetried(
-            state.sessionId(),
-            state.runId(),
-            state.currentTurnIndex(),
-            collaborators.clock().instant(),
-            attempt,
-            backoff,
-            transientErr.providerName(),
-            SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
   }
 
   private static boolean stopped(SessionState state) {
