@@ -214,7 +214,7 @@ final class SessionTracingTest {
     ContextCompactor compactor =
         (history, context) ->
             compactions.getAndIncrement() == 0
-                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
+                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary", null)
                 : CompactionResult.noOp(history);
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
     var limits = SessionLimits.newBuilder().withMaxContextTokens(1).build();

@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -76,6 +77,44 @@ class DefaultCompactionSessionTest {
         List.of("model.call", "tool.echo", "model.call", "model.call"),
         spans.stream().map(Span::name).toList());
     assertEquals(summary.duration(), spans.get(2).duration());
+  }
+
+  @Test
+  void aSummaryCallThatThrowsIsAFailedModelCallWithItsSpanAndTheRunGoesOn() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "echo", Map.of()))
+            .withTextTurn("done")
+            .build();
+    var summarizer = ScriptedModel.newBuilder().withId("summary").build();
+    List<Trace> traces = new CopyOnWriteArrayList<>();
+
+    var events =
+        runToSuccess(
+            compactingAfterTheFirstToolResult(model)
+                .withContextCompactor(SummarizingCompactor.newBuilder(summarizer).build())
+                .withTraceListener(traces::add));
+
+    var summaries =
+        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
+            .filter(ended -> ended.modelId().equals("summary"))
+            .toList();
+    assertFalse(summaries.isEmpty());
+    assertEquals(summarizer.calls().size(), summaries.size());
+    for (var summary : summaries) {
+      assertEquals(FinishReason.ERROR, summary.finishReason());
+      assertEquals(Usage.of(0, 0), summary.usage());
+      assertEquals(IllegalStateException.class.getName(), summary.error().kind());
+    }
+    assertEquals(0, events.eventsOf(QueryEvent.ContextEdited.class).size());
+    var failedCalls =
+        traces.getFirst().spans().stream()
+            .filter(span -> span.name().equals("model.call") && !span.success())
+            .toList();
+    assertEquals(summaries.size(), failedCalls.size());
+    for (var span : failedCalls) {
+      assertEquals(IllegalStateException.class.getName(), span.attributes().get("error.type"));
+    }
   }
 
   @Test

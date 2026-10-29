@@ -53,8 +53,8 @@ public interface ContextCompactor {
    * Produce a shorter history from the given one. Implementations that invoke a model for
    * summarisation report the model call's {@code Usage} on the returned {@link CompactionResult} so
    * the agent loop can accumulate it into the session totals and apply the configured cost
-   * calculator. Pure-trim implementations return {@link CompactionResult#noOp(List)} or {@code new
-   * CompactionResult(history, Usage.of(0, 0))}.
+   * calculator, and report a failed model call as the result's {@link CompactionResult#error()}.
+   * Pure-trim implementations return {@link CompactionResult#noOp(List)}.
    *
    * @param history the current conversation history; non-null, may be empty
    * @param context the session's id, current turn index, cancellation token and model, as hooks get

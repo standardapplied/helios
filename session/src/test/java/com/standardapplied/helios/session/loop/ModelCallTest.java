@@ -162,6 +162,27 @@ final class ModelCallTest {
   }
 
   @Test
+  void cancellationWhileARetriedAttemptIsReportedStartsNoFurtherAttempt() {
+    var model = failing(cancellation -> transientFailure());
+    Consumer<QueryEvent> cancelOnReport =
+        event -> {
+          events.add(event);
+          if (event instanceof QueryEvent.ModelCallEnded) {
+            state.cancellation().cancel("cancelled while the attempt was reported");
+          }
+        };
+    var call = modelCall(model, cancelOnReport);
+
+    var attempts =
+        Await.value(
+            "the call", run(() -> call.stream(state, retrying(2, Duration.ZERO), List.of())));
+
+    assertEquals(1, attempts.streamAttempts());
+    assertEquals(1, model.calls.get());
+    assertEquals(1, events.stream().filter(e -> e instanceof QueryEvent.ModelCallEnded).count());
+  }
+
+  @Test
   void cancellationDuringTheBackOffEndsIt() {
     var model = failing(cancellation -> transientFailure());
 

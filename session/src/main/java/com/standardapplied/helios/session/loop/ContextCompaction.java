@@ -149,8 +149,8 @@ final class ContextCompaction {
 
   /**
    * Invoke the configured {@link ContextCompactor}, swap in the returned history, account a result
-   * that names a model (e.g. a summary call, even one reporting zero usage) as one model call timed
-   * across the compactor's call — priced against the compactor's own {@link
+   * that names a model (e.g. a summary call, even one reporting zero usage or one that failed) as
+   * one model call timed across the compactor's call — priced against the compactor's own {@link
    * CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's rate — and
    * emit {@link QueryEvent.ContextEdited} after a successful shrink. A returned identity (same
    * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
@@ -175,12 +175,10 @@ final class ContextCompaction {
     if (result == null) {
       return;
     }
-    var compactionUsage = result.usage();
     if (!result.modelId().isBlank()) {
       turnRunner
           .accounting()
-          .accountCompaction(
-              state, result.modelId(), compactionUsage, started, collaborators.clock().instant());
+          .accountCompaction(state, result, started, collaborators.clock().instant());
     }
     var historyAfter = result.history();
     if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {

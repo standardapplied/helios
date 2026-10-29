@@ -36,8 +36,12 @@ import java.util.Objects;
  *     the loop has no correct rate to price the spend against. The loop reports a non-blank id as
  *     one model call, even with zero usage. Pure-trim / no-op results, which call no model, use the
  *     empty string
+ * @param error what the compactor's model call failed with, which the loop reports as a failed
+ *     model call; null when the call succeeded or no model was called. Non-null requires a
+ *     non-blank {@code modelId}
  */
-public record CompactionResult(List<Message> history, Usage usage, String modelId) {
+public record CompactionResult(
+    List<Message> history, Usage usage, String modelId, Throwable error) {
 
   /**
    * Canonical constructor.
@@ -48,9 +52,9 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
    * Implementations that build a fresh history should return an immutable list (e.g. via {@link
    * List#copyOf(java.util.Collection)}).
    *
-   * @throws NullPointerException if any argument is null
-   * @throws IllegalArgumentException if {@code usage} reports non-zero tokens but {@code modelId}
-   *     is blank — usage without a model id cannot be priced correctly
+   * @throws NullPointerException if {@code history}, {@code usage} or {@code modelId} is null
+   * @throws IllegalArgumentException if {@code usage} reports non-zero tokens or {@code error} is
+   *     non-null but {@code modelId} is blank — a call without a model id cannot be reported
    */
   public CompactionResult {
     Objects.requireNonNull(history, "history must not be null");
@@ -59,6 +63,9 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
     if (usage.reportsTokens() && Strings.isBlank(modelId)) {
       throw new IllegalArgumentException(
           "modelId must be non-blank when usage reports any tokens; got " + usage);
+    }
+    if (error != null && Strings.isBlank(modelId)) {
+      throw new IllegalArgumentException("modelId must be non-blank when error is set", error);
     }
   }
 
@@ -72,6 +79,6 @@ public record CompactionResult(List<Message> history, Usage usage, String modelI
    * @throws NullPointerException if {@code history} is null
    */
   public static CompactionResult noOp(List<Message> history) {
-    return new CompactionResult(history, Usage.of(0, 0), "");
+    return new CompactionResult(history, Usage.of(0, 0), "", null);
   }
 }

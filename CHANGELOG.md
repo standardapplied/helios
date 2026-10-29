@@ -14,6 +14,7 @@ listener hands it one trace per run, and each model attempt is an event.
 | an exhaustive `switch` over `QueryEvent` | handles the new subtype `QueryEvent.ModelCallEnded`, or has a `default` |
 | `SessionOptions`' 18-component canonical constructor | 20 components: `Optional<TraceListener> traceListener` and `TraceDetail traceDetail` last; build through `SessionOptions.newBuilder()` |
 | `UUID Trace.sessionId()`, `Trace.Builder.withSessionId(UUID)`, `TraceBuilder.withSessionId(UUID)` | `String`, so an agent session's id (`sess-<id>`, `member:42`) fits |
+| `new CompactionResult(history, usage, modelId)` | `new CompactionResult(history, usage, modelId, error)`: `error` is what the compactor's model call failed with, reported as a failed model call, or null; `SummarizingCompactor` reports a failed or timed-out summary call this way, and a blank summary as a call with its usage |
 | `helios_traces.session_id UUID` | `VARCHAR(128)`; on an existing database run `ALTER TABLE helios_traces ALTER COLUMN session_id TYPE VARCHAR(128) USING session_id::text` |
 
 **Session ids follow one rule.** `SessionOptions` accepts only ids of 1 to 128 characters of
@@ -958,7 +959,8 @@ events go. `core.trace.TraceListener.onTrace(Trace)` receives a finished trace.
 - **`QueryEvent.ModelCallEnded` reports each model attempt**, a compactor's summary call
   included: the model id it was priced at, its attempt number, finish reason, usage, cost,
   duration and redacted error. An accounted call's event carries exactly the usage it added to
-  the run, so the events' usage sums to the result's; a retried attempt reports zero usage.
+  the run, so the events' usage sums to the result's; a retried attempt and a failed summary
+  call report zero usage.
 - **Sessions can be stored and reopened.** `SessionOptions.Builder.withStore(store)` makes a
   session durable: `AgentSession.open` loads the conversation stored under the session id, or
   starts it when there is none, after the options' system prompt, which is never stored. Each
