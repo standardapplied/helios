@@ -27,10 +27,12 @@ import com.standardapplied.helios.core.trace.Span;
 import com.standardapplied.helios.core.trace.SpanKind;
 import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.core.trace.TraceDetail;
+import com.standardapplied.helios.session.EndingSessions.Unprintable;
 import com.standardapplied.helios.session.files.LsTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.EventCollector;
@@ -52,6 +54,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A session given a trace listener hands it one trace per run, however the run ends: a span per
@@ -235,6 +239,89 @@ final class SessionTracingTest {
     assertEquals(900, trace.usage().cacheReadInputTokens());
     assertEquals(2, spans(trace, "model.call").size());
     assertTotalsEqual(result, trace);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void aModelAttemptAHostErrorEndsIsAFailedModelCallWithNoUsage(boolean atOpen) {
+    var failure = new HostFailure();
+    var model =
+        EndingSessions.model(
+            () -> {
+              if (atOpen) {
+                throw failure;
+              }
+              return ModelStreams.failing(failure);
+            });
+
+    try (var session = AgentSession.open(traced(model).build())) {
+      assertSame(failure, Await.failure("the result to fail", session.send("go")));
+    }
+
+    var call = onlySpan(onlyTrace(), "model.call");
+    assertFalse(call.success());
+    assertEquals(HostFailure.class.getName(), call.attributes().get("error.type"));
+    assertEquals("1", call.attributes().get("attempt"));
+    assertEquals(Usage.of(0, 0), call.usage());
+    assertEquals(Usage.of(0, 0), onlyTrace().usage());
+  }
+
+  @Test
+  void aPricingFailureKeepsTheCallsUsageAtZeroCostInTheEventTheTraceAndTheResult() {
+    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(100, 10)).build();
+    CostCalculator unpriced =
+        (modelId, usage) -> {
+          throw new IllegalStateException("no price for " + modelId);
+        };
+    var events = new EventCollector();
+    ResultMessage result;
+    try (var session = AgentSession.open(traced(model).withCostCalculator(unpriced).build())) {
+      events.read(session.events());
+      result = Await.value("the result", session.send("go"));
+      events.awaitRunEnded();
+    }
+
+    assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
+    assertEquals(Usage.of(100, 10), result.usage());
+    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
+    assertEquals(1, ended.size());
+    assertEquals(Usage.of(100, 10), ended.getFirst().usage());
+    assertEquals(0, ended.getFirst().cost().microUsd());
+    assertEquals(Usage.of(100, 10), onlySpan(onlyTrace(), "model.call").usage());
+    assertTotalsEqual(result, onlyTrace());
+  }
+
+  @Test
+  void aClockThatStepsBackDuringAModelCallLeavesTheResultAndReportsAZeroDuration() {
+    var now = new AtomicReference<>(Instant.parse("2026-10-29T10:00:00Z"));
+    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(100, 10)).build();
+    var events = new EventCollector();
+    ResultMessage result;
+    var options =
+        traced(model)
+            .withClock(now::get)
+            .withHook(
+                (OnStreamEventHook)
+                    (event, ctx) -> {
+                      if (event instanceof QueryEvent.RunStarted) {
+                        now.set(now.get().plusSeconds(10));
+                      } else if (event instanceof QueryEvent.AssistantText) {
+                        now.set(now.get().minusSeconds(1));
+                      }
+                    })
+            .build();
+    try (var session = AgentSession.open(options)) {
+      events.read(session.events());
+      result = Await.value("the result", session.send("go"));
+      events.awaitRunEnded();
+    }
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    var ended = events.eventsOf(QueryEvent.ModelCallEnded.class);
+    assertEquals(1, ended.size());
+    assertEquals(Duration.ZERO, ended.getFirst().duration());
+    assertEquals(result.usage(), ended.getFirst().usage());
+    assertEquals(Duration.ZERO, onlySpan(onlyTrace(), "model.call").duration());
   }
 
   @Test
@@ -569,6 +656,30 @@ final class SessionTracingTest {
             .orElseThrow();
     assertTrue(warning.getMessage().contains(SID));
     assertFalse(warning.getThrown().getMessage().contains(SECRET));
+  }
+
+  @Test
+  void aListenerExceptionThatCannotBeReadIsLoggedByItsClassAndLeavesTheResult() {
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+    var options =
+        traced(ScriptedModel.newBuilder().withTextTurn("done").build())
+            .withTraceListener(
+                trace -> {
+                  throw new Unprintable();
+                })
+            .build();
+
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged)) {
+      assertInstanceOf(ResultMessage.Success.class, run(options, "go"));
+    }
+
+    var warning =
+        logged.stream()
+            .filter(record -> record.getLevel() == Level.WARNING)
+            .filter(record -> record.getMessage().contains("trace"))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(Unprintable.class.getName(), warning.getThrown().getMessage());
   }
 
   @Test

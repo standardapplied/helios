@@ -76,7 +76,7 @@ final class UsageAccountingTest {
   @Test
   void aRetriedAttemptIsReportedWithZeroUsageAndItsRedactedErrorAndIsNotAccounted() {
     accounting()
-        .reportRetried(state, 1, new IllegalStateException("reset " + SECRET), STARTED, ENDED);
+        .reportUnaccounted(state, 1, new IllegalStateException("reset " + SECRET), STARTED, ENDED);
 
     var event = onlyEvent();
     assertEquals(Usage.of(0, 0), event.usage());
