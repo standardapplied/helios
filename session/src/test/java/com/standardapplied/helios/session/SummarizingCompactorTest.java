@@ -12,13 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;

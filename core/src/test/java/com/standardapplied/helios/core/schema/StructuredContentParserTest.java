@@ -26,41 +26,33 @@ import org.junit.jupiter.api.Test;
 class StructuredContentParserTest {
 
   /** A minimal adapter that parses JSON via a hand-rolled map shape — no Jackson in core tests. */
-  private static final class MockAdapter implements StructuredContentParser.JsonAdapter {
-    private final Map<String, Map<String, Object>> jsonFixtures;
-
-    MockAdapter(Map<String, Map<String, Object>> fixtures) {
-      this.jsonFixtures = fixtures;
-    }
-
-    @Override
-    public Map<String, Object> toMap(String json) throws Exception {
-      var fixture = jsonFixtures.get(json);
-      if (fixture == null) {
-        throw new RuntimeException("simulated JSON syntax error: " + json);
-      }
-      return fixture;
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public <T> T fromMap(Map<String, Object> map, Class<T> type) throws Exception {
-      if (type == Bag.class) {
-        return (T) new Bag((String) map.get("name"), (Integer) map.get("count"));
-      }
-      throw new IllegalArgumentException("unsupported type: " + type);
-    }
+  private static StructuredContentParser.JsonAdapter mockAdapter(
+      Map<String, Map<String, Object>> fixtures) {
+    return new StructuredContentParser.JsonAdapter(
+        json -> {
+          var fixture = fixtures.get(json);
+          if (fixture == null) {
+            throw new RuntimeException("simulated JSON syntax error: " + json);
+          }
+          return fixture;
+        },
+        (map, type) -> {
+          if (type == Bag.class) {
+            return new Bag((String) map.get("name"), (Integer) map.get("count"));
+          }
+          throw new IllegalArgumentException("unsupported type: " + type);
+        });
   }
 
   public record Bag(String name, int count) {}
 
   private static StructuredContentParser.JsonAdapter adapterFor(
       String json, Map<String, Object> map) {
-    return new MockAdapter(Map.of(json, map));
+    return mockAdapter(Map.of(json, map));
   }
 
   private static StructuredContentParser.JsonAdapter throwingAdapter() {
-    return new MockAdapter(Map.of());
+    return mockAdapter(Map.of());
   }
 
   // --- Null / blank passthrough ----------------------------------------------------------------
@@ -309,7 +301,7 @@ class StructuredContentParserTest {
         Map.<String, Map<String, Object>>of(
             // After strip we get the trimmed inner — that's what the adapter must accept.
             rawInner, new LinkedHashMap<>(Map.of("name", "beta", "count", 42)));
-    var adapter = new MockAdapter(fixtures);
+    var adapter = mockAdapter(fixtures);
 
     var result = StructuredContentParser.parse(wrapped, OutputSchema.of(Bag.class), adapter);
 
@@ -367,7 +359,7 @@ class StructuredContentParserTest {
     // the inner — adapter returns valid map but schema validation rejects missing count.
     var fixtures =
         Map.<String, Map<String, Object>>of(inner, new LinkedHashMap<>(Map.of("name", "y")));
-    var adapter = new MockAdapter(fixtures);
+    var adapter = mockAdapter(fixtures);
 
     assertThrows(
         StructuredOutputParseException.class,
@@ -436,7 +428,7 @@ class StructuredContentParserTest {
     var fixtures = new HashMap<String, Map<String, Object>>();
     fixtures.put(content, raw);
 
-    var adapter = new MockAdapter(fixtures);
+    var adapter = mockAdapter(fixtures);
     var schema = OutputSchema.provenancedOf(Bag.class);
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -464,21 +456,15 @@ class StructuredContentParserTest {
 
     var content = "{\"output\":...}";
     var adapter =
-        new StructuredContentParser.JsonAdapter() {
-          @Override
-          public Map<String, Object> toMap(String json) {
-            return raw;
-          }
-
-          @Override
-          public <T> T fromMap(Map<String, Object> map, Class<T> type) throws Exception {
-            // The provenanced path lambda calls fromMap on the inner type (Bag.class). Failing
-            // there must surface as a wrapped RuntimeException so the outer parse() throws the
-            // provider's exception factory rather than dying silently.
-            throw new IllegalStateException(
-                "simulated coercion failure for " + type.getSimpleName());
-          }
-        };
+        new StructuredContentParser.JsonAdapter(
+            json -> raw,
+            (map, type) -> {
+              // The provenanced path lambda calls fromMap on the inner type (Bag.class). Failing
+              // there must surface as a wrapped RuntimeException so the outer parse() throws the
+              // provider's exception factory rather than dying silently.
+              throw new IllegalStateException(
+                  "simulated coercion failure for " + type.getSimpleName());
+            });
     var schema = OutputSchema.provenancedOf(Bag.class);
 
     var ex =
@@ -567,7 +553,7 @@ class StructuredContentParserTest {
     var fixture = new LinkedHashMap<String, Object>();
     fixture.put("name", "x");
     fixture.put("count", 1);
-    var adapter = new MockAdapter(Map.of(bagJson, fixture));
+    var adapter = mockAdapter(Map.of(bagJson, fixture));
     var schema = OutputSchema.of(Bag.class);
     var bag = StructuredContentParser.parse(content, schema, adapter);
     assertNotNull(bag);

@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.core.runtime;
+package com.standardapplied.helios.core.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.CancellationToken;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
 

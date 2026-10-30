@@ -7,7 +7,7 @@ package com.standardapplied.helios.session.files;
 import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;

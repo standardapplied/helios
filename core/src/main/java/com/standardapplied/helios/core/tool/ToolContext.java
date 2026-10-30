@@ -4,8 +4,7 @@
  */
 package com.standardapplied.helios.core.tool;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Predicate;

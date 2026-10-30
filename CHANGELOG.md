@@ -6,6 +6,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Core cleanup: one Anthropic price rule, one JSON adapter type, no `core.runtime`.**
+`AnthropicPricing` is the one Anthropic price rule; core's helpers assumed a 0.10× cache read that
+Fable 5.1 and Opus 5.5 do not use. `core.runtime` shared its name with the `helios-runtime`
+module, so its two types moved and the package is gone.
+
+| 2.x | 3.0 |
+|---|---|
+| `CostCalculator.Pricing.anthropicCaching5m(in, out)`, `anthropicCaching1h(in, out)`, `ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER`, `ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER`, `ANTHROPIC_CACHE_READ_MULTIPLIER` | `AnthropicPricing.pricing(model, cachePolicy)`, or `Pricing.ofUsdPerMillion(in, out, cacheWrite, cacheRead)` for custom rates |
+| `StructuredContentParser.JsonAdapter` (an interface) | a record `JsonAdapter(Reader reader, Converter converter)`; an implementing class becomes `new JsonAdapter(json -> …, (map, type) -> …)` |
+| `com.standardapplied.helios.core.runtime.CancellationToken` | `com.standardapplied.helios.core.model.CancellationToken` |
+| `com.standardapplied.helios.core.runtime.SessionContext` | `com.standardapplied.helios.core.tool.SessionContext` |
+
 **`HookFired` carries the hook's phase and its outcome.** A reader of `events()` or a trace sees
 which guardrail fired and why: the `Block` reason, the injected text, the rewritten arguments,
 each with the session's secrets redacted; the loop still acts on the hook's own outcome.
@@ -126,8 +138,8 @@ in main code.
 | `ModelConfig(...)` 17-argument constructor | `ModelConfig.newBuilder()`, or the canonical constructor with `providerContinuation`, `apiVersion` and `rawOutputCapturePolicy` |
 | `ModelConfig.googleSearch()`, `ModelConfig.Builder.withGoogleSearch(boolean)` | `webSearch()`, `withWebSearch(boolean)` |
 | `ModelConfig.urlContext()`, `ModelConfig.Builder.withUrlContext(boolean)` | `webFetch()`, `withWebFetch(boolean)` |
-| `CostCalculator.Pricing.ANTHROPIC_CACHE_WRITE_MULTIPLIER` | `Pricing.ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER` |
-| `CostCalculator.Pricing.anthropicCaching(input, output)` | `Pricing.anthropicCaching5m(input, output)` |
+| `CostCalculator.Pricing.ANTHROPIC_CACHE_WRITE_MULTIPLIER` | `AnthropicPricing.pricing(model, cachePolicy)`, or `Pricing.ofUsdPerMillion(in, out, cacheWrite, cacheRead)` for custom rates |
+| `CostCalculator.Pricing.anthropicCaching(input, output)` | `AnthropicPricing.pricing(model, cachePolicy)`, or `Pricing.ofUsdPerMillion(in, out, cacheWrite, cacheRead)` for custom rates |
 | `JsonlEventSink.open(Path)` | `JsonlEventSink.openFull(Path)` (same behaviour) or `openMetadataOnly(Path)` |
 | `Trace.totalTokens` summed from the `inputTokens` / `outputTokens` span attributes when a span had no typed usage | record `SpanBuilder.withUsage(Usage)`; a span without typed usage contributes 0 and its token attributes are plain attributes |
 | `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
@@ -1096,9 +1108,8 @@ DROP TABLE IF EXISTS helios_agent_runs;
   `TransientStreamException`). A provider's exchange opens a lazy `SseReader`, which sends its
   request on the first `hasNext()`, makes a failure to open it the stream's one error event and
   reads server-sent events with a per-line idle timeout, `JsonPost` builds the JSON `POST` with default
-  and configured headers, `ProviderFailure` creates a provider's exception, and `JsonBinding`
-  adapts a JSON library to structured output from two functions. Architecture rules keep provider
-  modules on them: no class in a provider implements `Model`, reads a stream with a
+  and configured headers, and `ProviderFailure` creates a provider's exception. Architecture rules
+  keep provider modules on them: no class in a provider implements `Model`, reads a stream with a
   `BufferedReader`, or builds a Jackson mapper outside its `api` holder.
 - **`StreamEvent.KeepAlive` and `ModelChunk.KeepAlive`** mark a part of a provider's stream that
   carries nothing for the turn. `SseReader` yields a `StreamEvent.KeepAlive` for every event

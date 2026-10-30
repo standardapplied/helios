@@ -5,9 +5,9 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Validate;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;

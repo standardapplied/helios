@@ -10,14 +10,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.CommandGrant;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;

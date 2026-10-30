@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolContext;

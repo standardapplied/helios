@@ -2,9 +2,9 @@
 
 package com.standardapplied.helios.session.test;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;

@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.session;
 
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;

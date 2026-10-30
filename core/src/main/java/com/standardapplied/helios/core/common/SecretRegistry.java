@@ -7,7 +7,6 @@ package com.standardapplied.helios.core.common;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -179,20 +178,6 @@ public final class SecretRegistry {
     lock.readLock().lock();
     try {
       return Set.copyOf(secretsByName.keySet());
-    } finally {
-      lock.readLock().unlock();
-    }
-  }
-
-  /** Snapshot of (name, bytes) pairs. Defensive copies returned. */
-  Map<String, byte[]> snapshot() {
-    lock.readLock().lock();
-    try {
-      var copy = new LinkedHashMap<String, byte[]>(secretsByName.size());
-      for (var entry : secretsByName.entrySet()) {
-        copy.put(entry.getKey(), entry.getValue().clone());
-      }
-      return copy;
     } finally {
       lock.readLock().unlock();
     }

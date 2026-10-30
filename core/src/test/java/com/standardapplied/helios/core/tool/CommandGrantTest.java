@@ -12,8 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.PidFile;
 import java.io.IOException;

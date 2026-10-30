@@ -50,7 +50,7 @@ class StreamingModelTest {
   record Request(List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {}
 
   private static final StructuredContentParser.JsonAdapter ANSWERS =
-      new JsonBinding(
+      new StructuredContentParser.JsonAdapter(
           json -> {
             if (!json.startsWith("{")) {
               throw new IllegalArgumentException("not a JSON object");

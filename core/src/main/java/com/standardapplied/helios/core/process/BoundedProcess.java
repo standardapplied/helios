@@ -3,7 +3,7 @@
 package com.standardapplied.helios.core.process;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;

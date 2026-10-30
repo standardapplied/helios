@@ -7,12 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.MockModel;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;

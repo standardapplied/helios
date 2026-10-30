@@ -4,8 +4,8 @@
  */
 package com.standardapplied.helios.repl.execution;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplSession;
 import com.standardapplied.helios.session.execution.ExecutionProvider;

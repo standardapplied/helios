@@ -2,8 +2,8 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.hooks.HookContext;
 
 /**

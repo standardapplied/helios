@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Functional interface for tool execution. Arguments come from the model as a {@code Map} (parsed
  * from JSON); the {@link ToolContext} carries the call's {@link
- * com.standardapplied.helios.core.runtime.CancellationToken CancellationToken} and the per-call
+ * com.standardapplied.helios.core.model.CancellationToken CancellationToken} and the per-call
  * deadline.
  *
  * <p>Tools that perform long-running I/O should poll {@code ctx.cancellation()} at safe points, or
