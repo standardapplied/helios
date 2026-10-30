@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.gemini.api;
 
-import com.standardapplied.helios.core.provider.JsonBinding;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.util.Map;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.MapperFeature;
@@ -32,8 +32,9 @@ public final class GeminiJson {
           .build();
 
   /** Structured output read through {@link #LENIENT}. */
-  public static final JsonBinding STRUCTURED =
-      new JsonBinding(LENIENT.readerFor(Map.class)::readValue, LENIENT::convertValue);
+  public static final StructuredContentParser.JsonAdapter STRUCTURED =
+      new StructuredContentParser.JsonAdapter(
+          LENIENT.readerFor(Map.class)::readValue, LENIENT::convertValue);
 
   private GeminiJson() {}
 }

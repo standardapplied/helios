@@ -6,7 +6,7 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.session.ResultMessage;
 import java.time.InstantSource;
 import java.util.Objects;

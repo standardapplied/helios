@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.repl.execution;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.repl.ReplException;
 import com.standardapplied.helios.repl.ReplSession;
 import com.standardapplied.helios.session.execution.ExecutionRequest;

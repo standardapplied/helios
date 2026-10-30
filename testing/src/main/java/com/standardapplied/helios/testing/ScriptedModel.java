@@ -48,18 +48,8 @@ public final class ScriptedModel implements Model {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private static final StructuredContentParser.JsonAdapter JSON_ADAPTER =
-      new StructuredContentParser.JsonAdapter() {
-        @Override
-        @SuppressWarnings("unchecked")
-        public Map<String, Object> toMap(String json) {
-          return MAPPER.readValue(json, Map.class);
-        }
-
-        @Override
-        public <T> T fromMap(Map<String, Object> map, Class<T> type) {
-          return MAPPER.convertValue(map, type);
-        }
-      };
+      new StructuredContentParser.JsonAdapter(
+          MAPPER.readerFor(Map.class)::readValue, MAPPER::convertValue);
 
   private ScriptedModel(String id, List<Turn> turns) {
     this.id = id;

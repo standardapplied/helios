@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.session;
 
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.ask.QuestionGateway;
 import com.standardapplied.helios.session.execution.ExecuteTool;

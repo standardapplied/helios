@@ -4,7 +4,7 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;

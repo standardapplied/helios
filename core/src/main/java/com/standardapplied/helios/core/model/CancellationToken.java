@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.core.runtime;
+package com.standardapplied.helios.core.model;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,8 +19,8 @@ import java.util.logging.Logger;
  * Cooperative cancellation signal.
  *
  * <p>One writer (typically the caller that creates the token), many readers (agent loops, tool
- * implementations, model stream readers, durable-resume scanners). State is set once; subsequent
- * {@link #cancel(String)} calls are no-ops and the first reason is preserved.
+ * implementations, model stream readers). State is set once; subsequent {@link #cancel(String)}
+ * calls are no-ops and the first reason is preserved.
  *
  * <p>Cancellation is cooperative: code performing long-running work is responsible for polling
  * {@link #isCancelled()} or calling {@link #throwIfCancelled()} at safe points. The token itself

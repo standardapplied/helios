@@ -137,7 +137,7 @@ public final class SessionEntryJson {
   }
 
   private static Message message(Object fields) {
-    return SessionJson.ENTRIES.fromMap(object(fields), Message.class);
+    return parsed(() -> SessionJson.ENTRIES.fromMap(object(fields), Message.class));
   }
 
   @SuppressWarnings("unchecked")

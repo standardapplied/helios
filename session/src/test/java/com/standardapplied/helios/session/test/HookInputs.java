@@ -2,9 +2,9 @@
 
 package com.standardapplied.helios.session.test;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.test.MockModel;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;

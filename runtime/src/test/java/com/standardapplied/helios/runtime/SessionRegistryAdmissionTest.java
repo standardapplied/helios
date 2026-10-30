@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.runtime.SessionCapacityException.Scope;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.UserMessage;

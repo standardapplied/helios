@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplException;
 import com.standardapplied.helios.repl.sandbox.ExecutionRequest;

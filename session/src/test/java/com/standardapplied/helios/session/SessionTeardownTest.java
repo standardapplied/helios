@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.ToolDispatch;

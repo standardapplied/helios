@@ -7,10 +7,10 @@ package com.standardapplied.helios.core.tool;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.process.BoundedProcess;
 import com.standardapplied.helios.core.process.ProcessOutcome;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;

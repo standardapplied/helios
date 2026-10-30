@@ -6,9 +6,9 @@ import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.provider.Exchange;
-import com.standardapplied.helios.core.provider.JsonBinding;
 import com.standardapplied.helios.core.provider.ProviderFailure;
 import com.standardapplied.helios.core.provider.StreamingModel;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.util.List;
 
 /**
@@ -18,8 +18,8 @@ import java.util.List;
  */
 public final class ExchangeTurns {
 
-  private static final JsonBinding NO_STRUCTURED_OUTPUT =
-      new JsonBinding(
+  private static final StructuredContentParser.JsonAdapter NO_STRUCTURED_OUTPUT =
+      new StructuredContentParser.JsonAdapter(
           json -> {
             throw new UnsupportedOperationException("no structured output");
           },

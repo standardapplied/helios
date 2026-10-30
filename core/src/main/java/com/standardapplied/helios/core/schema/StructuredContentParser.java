@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.common.Strings;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Shared structured-output parser. Three providers (Anthropic, Gemini, OpenAI) used to duplicate
@@ -41,27 +42,69 @@ public final class StructuredContentParser {
   private StructuredContentParser() {}
 
   /**
-   * JSON operations the parser needs. Providers wrap their {@code ObjectMapper} (Jackson 3.x in all
-   * three current providers) so core stays free of the dependency.
+   * JSON operations the parser needs, given as two functions. Providers pass their {@code
+   * ObjectMapper}'s (Jackson 3.x in all three current providers) so core stays free of the
+   * dependency.
+   *
+   * @param reader parses a JSON object into a string-keyed map
+   * @param converter coerces a deserialized map into a typed record/POJO
    */
-  public interface JsonAdapter {
+  public record JsonAdapter(Reader reader, Converter converter) {
+
+    /** Parses a JSON object into a string-keyed map. */
+    @FunctionalInterface
+    public interface Reader {
+
+      /**
+       * {@code json} as a map. Implementations should propagate library-specific exceptions; {@link
+       * StructuredContentParser#parse} catches and falls back to the markdown-strip retry.
+       *
+       * @throws Exception when the JSON is syntactically invalid
+       */
+      Map<String, Object> read(String json) throws Exception;
+    }
+
+    /** Coerces a deserialized map into a type. */
+    @FunctionalInterface
+    public interface Converter {
+
+      /**
+       * {@code map} as an instance of {@code type}. For Jackson this is {@code
+       * objectMapper.convertValue(map, type)}.
+       *
+       * @throws Exception when coercion fails (e.g., type mismatch on a record component)
+       */
+      Object convert(Map<String, Object> map, Class<?> type) throws Exception;
+    }
 
     /**
-     * Parse a JSON object into a string-keyed map. Implementations should propagate
-     * library-specific exceptions; {@link StructuredContentParser#parse} catches and falls back to
-     * the markdown-strip retry.
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if {@code reader} or {@code converter} is null
+     */
+    public JsonAdapter {
+      Objects.requireNonNull(reader, "reader must not be null");
+      Objects.requireNonNull(converter, "converter must not be null");
+    }
+
+    /**
+     * {@code json} as a map, through the {@link #reader}.
      *
      * @throws Exception when the JSON is syntactically invalid
      */
-    Map<String, Object> toMap(String json) throws Exception;
+    public Map<String, Object> toMap(String json) throws Exception {
+      return reader.read(json);
+    }
 
     /**
-     * Coerce a deserialized map into a typed record/POJO. For Jackson this is {@code
-     * objectMapper.convertValue(map, type)}.
+     * {@code map} as an instance of {@code type}, through the {@link #converter}.
      *
-     * @throws Exception when coercion fails (e.g., type mismatch on a record component)
+     * @throws Exception when coercion fails
+     * @throws ClassCastException when the converter returns another type
      */
-    <T> T fromMap(Map<String, Object> map, Class<T> type) throws Exception;
+    public <T> T fromMap(Map<String, Object> map, Class<T> type) throws Exception {
+      return type.cast(converter.convert(map, type));
+    }
   }
 
   /**
@@ -91,7 +134,7 @@ public final class StructuredContentParser {
       OutputSchema<T> schema,
       JsonAdapter adapter,
       RawOutputCapturePolicy capturePolicy) {
-    java.util.Objects.requireNonNull(capturePolicy, "capturePolicy must not be null");
+    Objects.requireNonNull(capturePolicy, "capturePolicy must not be null");
     if (Strings.isBlank(content)) {
       return null;
     }

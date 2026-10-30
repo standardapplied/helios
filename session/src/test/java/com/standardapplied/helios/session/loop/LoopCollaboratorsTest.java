@@ -5,9 +5,9 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.MockModel;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;

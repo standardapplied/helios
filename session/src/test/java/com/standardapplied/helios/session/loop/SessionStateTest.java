@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.session.ResultMessage;
 import java.time.Clock;
 import java.time.Duration;

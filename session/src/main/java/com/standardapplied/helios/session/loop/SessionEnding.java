@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.session.AgentSessionImpl;
 import java.util.ArrayList;
 import java.util.List;
