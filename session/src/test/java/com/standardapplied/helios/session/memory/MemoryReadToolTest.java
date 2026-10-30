@@ -27,7 +27,7 @@ final class MemoryReadToolTest {
 
   private static FileSystemMemoryBackend seeded(Path tmp, String relPath, String content)
       throws IOException {
-    var target = tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve(relPath);
+    var target = tmp.resolve(WorkspaceRoot.MEMORY_STORE).resolve(relPath);
     Files.createDirectories(target.getParent());
     Files.writeString(target, content, StandardCharsets.UTF_8);
     return FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));

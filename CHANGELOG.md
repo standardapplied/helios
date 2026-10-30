@@ -6,6 +6,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**The memory store is reachable only through the memory tools.** `<workspace>/.agent/memory` is
+reserved for Helios in every workspace, with or without a memory backend.
+
+| Before | 3.0 |
+|---|---|
+| `Read`/`LS`/`Glob`/`Grep` could read `<workspace>/.agent/memory`, so `MemoryRead` rules did not protect it | those paths are refused with `path is in the memory store; use MemoryRead: <path>` and walks skip the store |
+| `FileSystemMemoryBackend.STORAGE_SUBDIR` | `WorkspaceRoot.MEMORY_STORE` |
+
 **Core cleanup: one Anthropic price rule, one JSON adapter type, no `core.runtime`.**
 `AnthropicPricing` is the one Anthropic price rule; core's helpers assumed a 0.10× cache read that
 Fable 5.1 and Opus 5.5 do not use. `core.runtime` shared its name with the `helios-runtime`

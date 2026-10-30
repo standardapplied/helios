@@ -33,7 +33,7 @@ final class MemoryWriteToolTest {
 
   private static FileSystemMemoryBackend seeded(Path tmp, String rel, String content)
       throws IOException {
-    var target = tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve(rel);
+    var target = tmp.resolve(WorkspaceRoot.MEMORY_STORE).resolve(rel);
     Files.createDirectories(target.getParent());
     Files.writeString(target, content, StandardCharsets.UTF_8);
     return backend(tmp);
@@ -211,7 +211,7 @@ final class MemoryWriteToolTest {
             .tool()
             .execute(Map.of("op", "delete", "path", "/memories/n.md"), ToolContext.noop());
     assertTrue(result.succeeded(), result.output());
-    assertFalse(Files.exists(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR + "/n.md")));
+    assertFalse(Files.exists(tmp.resolve(WorkspaceRoot.MEMORY_STORE + "/n.md")));
   }
 
   @Test
@@ -349,7 +349,7 @@ final class MemoryWriteToolTest {
       Map<String, Object> args, boolean success, String output, @TempDir Path tmp)
       throws IOException {
     var backend = seeded(tmp, "a.md", "one\ntwo\n");
-    Files.createDirectories(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("dir"));
+    Files.createDirectories(tmp.resolve(WorkspaceRoot.MEMORY_STORE).resolve("dir"));
     var result = MemoryWriteTool.binding(backend).tool().execute(args, ToolContext.noop());
     assertEquals(success, result.succeeded(), result.output());
     assertEquals(output, result.output());
