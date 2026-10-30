@@ -45,6 +45,28 @@ final class OnUserMessageHookIntegrationTest {
   }
 
   @Test
+  void aBlockReasonIsRedactedInBothEventsWhileTheMessageIsStillDropped() {
+    loop.secrets().register("TOKEN", "tok-0123456789");
+    OnUserMessageHook blocker = (msg, ctx) -> HookOutcome.block("leaked tok-0123456789");
+    var result = loop.run(ScriptedModel.newBuilder().build(), UserMessage.text("hi"), blocker);
+    assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
+    assertTrue(loop.history().isEmpty());
+    var reason = "leaked <redacted:TOKEN>";
+    assertEquals(reason, loop.first(QueryEvent.MessageBlocked.class).reason());
+    assertEquals(HookOutcome.block(reason), loop.first(QueryEvent.HookFired.class).outcome());
+  }
+
+  @Test
+  void aLongBlockReasonIsCutAsAToolBlockedReasonIs() {
+    var reason = "r".repeat(RedactedReason.MAX_REASON_CHARS + 5);
+    OnUserMessageHook blocker = (msg, ctx) -> HookOutcome.block(reason);
+    loop.run(ScriptedModel.newBuilder().build(), UserMessage.text("hi"), blocker);
+    assertEquals(
+        "r".repeat(RedactedReason.MAX_REASON_CHARS) + "… [5 more chars]",
+        loop.first(QueryEvent.MessageBlocked.class).reason());
+  }
+
+  @Test
   void onUserMessageMutateRewritesText() {
     OnUserMessageHook rewriter = (msg, ctx) -> HookOutcome.mutateText("REDACTED");
     var reference = FileReference.of("https://example.com/video.mp4", "video/mp4");
