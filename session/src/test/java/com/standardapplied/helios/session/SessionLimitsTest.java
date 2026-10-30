@@ -23,6 +23,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 final class SessionLimitsTest {
 
+  private static final int MAX_TOOL_RESULT_CHARS = 65_536;
+
   @Test
   void canonicalConstructorAcceptsValidValues() {
     var l =
@@ -34,7 +36,8 @@ final class SessionLimitsTest {
             Duration.ofSeconds(3),
             32_000L,
             StreamRetryPolicy.defaults(),
-            Duration.ofSeconds(7));
+            Duration.ofSeconds(7),
+            2_048);
     assertEquals(50, l.maxTurns());
     assertEquals(OptionalLong.of(12_500_000L), l.maxBudgetMicroUsd());
     assertEquals(Duration.ofMinutes(30), l.maxWallClock());
@@ -43,6 +46,7 @@ final class SessionLimitsTest {
     assertEquals(32_000L, l.maxContextTokens());
     assertEquals(StreamRetryPolicy.defaults(), l.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(7), l.startTimeout());
+    assertEquals(2_048, l.maxToolResultChars());
   }
 
   @Test
@@ -56,6 +60,7 @@ final class SessionLimitsTest {
     assertEquals(0L, d.maxContextTokens());
     assertEquals(StreamRetryPolicy.defaults(), d.streamRetryPolicy());
     assertEquals(Duration.ofSeconds(60), d.startTimeout());
+    assertEquals(65_536, d.maxToolResultChars());
   }
 
   @Test
@@ -232,6 +237,7 @@ final class SessionLimitsTest {
             .withToolTimeoutDefault(Duration.ofSeconds(30))
             .withStopGrace(Duration.ofSeconds(9))
             .withMaxContextTokens(50_000L)
+            .withMaxToolResultChars(1_024)
             .build();
     assertEquals(10, l.maxTurns());
     assertEquals(OptionalLong.of(5_000_000L), l.maxBudgetMicroUsd());
@@ -239,6 +245,7 @@ final class SessionLimitsTest {
     assertEquals(Duration.ofSeconds(30), l.toolTimeoutDefault());
     assertEquals(Duration.ofSeconds(9), l.stopGrace());
     assertEquals(50_000L, l.maxContextTokens());
+    assertEquals(1_024, l.maxToolResultChars());
   }
 
   @Test
@@ -265,6 +272,7 @@ final class SessionLimitsTest {
             .withStopGrace(Duration.ofSeconds(1))
             .withStartTimeout(Duration.ofSeconds(4))
             .withMaxContextTokens(75_000L)
+            .withMaxToolResultChars(4_096)
             .build();
     assertEquals(original, original.toBuilder().build());
   }
@@ -285,7 +293,8 @@ final class SessionLimitsTest {
         fiveSec(),
         maxContextTokens,
         StreamRetryPolicy.defaults(),
-        fiveSec());
+        fiveSec(),
+        MAX_TOOL_RESULT_CHARS);
   }
 
   private static Duration oneHour() {
@@ -316,7 +325,8 @@ final class SessionLimitsTest {
                     fiveSec(),
                     1_000L,
                     null,
-                    fiveSec()));
+                    fiveSec(),
+                    MAX_TOOL_RESULT_CHARS));
     assertEquals("streamRetryPolicy must not be null", ex.getMessage());
   }
 
@@ -348,6 +358,40 @@ final class SessionLimitsTest {
     var b = SessionLimits.newBuilder().withStartTimeout(null);
     var ex = assertThrows(NullPointerException.class, b::build);
     assertEquals("startTimeout must not be null", ex.getMessage());
+  }
+
+  // ── maxToolResultChars ───────────────────────────────────────────────────
+
+  @Test
+  void maxToolResultCharsBelowTheFloorRejectedByTheConstructor() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new SessionLimits(
+                    100,
+                    OptionalLong.empty(),
+                    oneHour(),
+                    twoMin(),
+                    fiveSec(),
+                    1_000L,
+                    StreamRetryPolicy.defaults(),
+                    fiveSec(),
+                    1_023));
+    assertEquals("maxToolResultChars must be at least 1024, got 1023", ex.getMessage());
+  }
+
+  @Test
+  void maxToolResultCharsBelowTheFloorRejectedByBuild() {
+    var b = SessionLimits.newBuilder().withMaxToolResultChars(1_023);
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+    assertEquals("maxToolResultChars must be at least 1024, got 1023", ex.getMessage());
+  }
+
+  @Test
+  void toBuilderCarriesMaxToolResultChars() {
+    var original = SessionLimits.newBuilder().withMaxToolResultChars(1_024).build();
+    assertEquals(1_024, original.toBuilder().build().maxToolResultChars());
   }
 
   // ── duration bound ────────────────────────────────────────────────────────
