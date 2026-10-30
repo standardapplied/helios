@@ -528,7 +528,8 @@ public sealed interface QueryEvent
    * A tool call completed. Carries the originating {@link ToolCall} so subscribers can correlate
    * dispatch and result without joining across events, plus the {@link
    * com.standardapplied.helios.core.tool.ToolResult ToolResult} the tool produced (success or
-   * failure), its output already redacted against the session's secret registry.
+   * failure), its output already redacted against the session's secret registry and whole: history
+   * may hold a shorter copy, cut to {@link SessionLimits#maxToolResultChars()}.
    *
    * @param sessionId the session id
    * @param runId the run id
