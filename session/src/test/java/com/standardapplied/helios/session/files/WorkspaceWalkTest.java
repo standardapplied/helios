@@ -24,6 +24,36 @@ import org.junit.jupiter.api.io.TempDir;
 
 final class WorkspaceWalkTest {
 
+  private static List<String> filesWalkedFrom(String start, Path tmp) throws IOException {
+    var store = Files.createDirectories(tmp.resolve(WorkspaceRoot.MEMORY_STORE));
+    Files.writeString(store.resolve("note.md"), "note", StandardCharsets.UTF_8);
+    Files.writeString(store.resolveSibling("other.md"), "other", StandardCharsets.UTF_8);
+    var workspace = WorkspaceRoot.of(tmp);
+    var visited = new ArrayList<String>();
+    WorkspaceWalk.run(
+        workspace,
+        workspace.root().resolve(start),
+        new CancellationToken(),
+        Withholding.of(ToolContext.noop()),
+        10,
+        Long.MAX_VALUE,
+        (file, attrs, remaining) -> {
+          visited.add(workspace.relativize(file));
+          return 1;
+        });
+    return visited;
+  }
+
+  @Test
+  void aWalkFromTheParentOfTheMemoryStoreSkipsIt(@TempDir Path tmp) throws IOException {
+    assertEquals(List.of(".agent/other.md"), filesWalkedFrom(".agent", tmp));
+  }
+
+  @Test
+  void aWalkStartedAtTheMemoryStoreFindsNothing(@TempDir Path tmp) throws IOException {
+    assertEquals(List.of(), filesWalkedFrom(WorkspaceRoot.MEMORY_STORE, tmp));
+  }
+
   @Test
   void cancellationDuringTheWalkStopsBeforeTheNextFile(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("a.txt"), "a", StandardCharsets.UTF_8);

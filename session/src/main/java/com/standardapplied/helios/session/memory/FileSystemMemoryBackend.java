@@ -34,21 +34,23 @@ import java.util.Objects;
  * deletion and listing use strict descriptor-relative workspace operations, including when the
  * supplied workspace is in trusted mode. The strict platform and native-access requirements apply.
  *
+ * <p>The store is reachable only through {@code MemoryRead} and {@code MemoryWrite}: the workspace
+ * tools refuse a path in it and their walks skip it, so {@code MemoryRead} rules protect it. {@code
+ * Execute} is not covered: a shell in the workspace can read the store, and the sandbox is the
+ * boundary for it.
+ *
  * <p>Content is strict UTF-8: a file that is not valid UTF-8 fails to read rather than being
  * silently rewritten with replacement characters, and content that cannot be encoded (unpaired
  * surrogates) is rejected before the target is opened, so an existing entry is never truncated.
  */
 public final class FileSystemMemoryBackend implements MemoryBackend {
 
-  /** The on-disk subdirectory under the workspace where memory lives. */
-  public static final String STORAGE_SUBDIR = ".agent/memory";
-
   private final WorkspaceRoot workspace;
   private final MemoryFiles files;
 
   private FileSystemMemoryBackend(WorkspaceRoot workspace) {
     this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
-    this.files = new MemoryFiles(workspace, STORAGE_SUBDIR);
+    this.files = new MemoryFiles(workspace, WorkspaceRoot.MEMORY_STORE);
   }
 
   /**

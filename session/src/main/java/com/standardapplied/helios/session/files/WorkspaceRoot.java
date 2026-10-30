@@ -70,6 +70,11 @@ import java.util.Objects;
  * that spelling, and the tool resolves it again with {@link #resolveCanonical(String)}, which fails
  * if it no longer names the target that was authorised.
  *
+ * <p>{@link #MEMORY_STORE} is reserved for Helios, whether or not a session has a memory backend:
+ * {@link #canonical(String)} refuses a target at or below it, and the search tools' walks skip it,
+ * so the store is reachable only through {@code MemoryRead} and {@code MemoryWrite}. {@link
+ * #resolveSafe(String)} does not refuse it; the memory backend resolves its files through it.
+ *
  * <p>{@code root} is canonicalised at construction time, so {@link #root()} can be compared safely;
  * a root reached through a symlinked ancestor (e.g. {@code /tmp} on macOS) is accepted and reported
  * by its real path.
@@ -79,6 +84,9 @@ import java.util.Objects;
  *     root; when {@code false}, only the lexical check bounds the request
  */
 public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathSpace {
+
+  /** Where the filesystem memory store lives, relative to the root. */
+  public static final String MEMORY_STORE = ".agent/memory";
 
   /**
    * Canonical constructor; canonicalises {@code root}.
@@ -149,17 +157,26 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
    *
    * @param requested the path as the model spelled it; non-null
    * @return the canonical spelling
-   * @throws WorkspaceEscapeException if {@link #resolveSafe(String)} refuses {@code requested}, or
-   *     its parent directory does not exist
+   * @throws WorkspaceEscapeException if {@link #resolveSafe(String)} refuses {@code requested}, the
+   *     target is in the {@link #MEMORY_STORE}, or its parent directory does not exist
    */
   @Override
   public String canonical(String requested) {
     var resolved = resolveSafe(requested);
+    if (inMemoryStore(resolved)) {
+      throw new WorkspaceEscapeException(
+          "path is in the memory store; use MemoryRead: " + spell(resolved));
+    }
     var parent = resolved.getParent();
     if (parent != null && !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
       throw new WorkspaceEscapeException("parent directory does not exist: " + spell(resolved));
     }
     return spell(resolved);
+  }
+
+  /** Whether the resolved {@code path} is the {@link #MEMORY_STORE} or lies below it. */
+  boolean inMemoryStore(Path path) {
+    return path.startsWith(root.resolve(MEMORY_STORE));
   }
 
   /**

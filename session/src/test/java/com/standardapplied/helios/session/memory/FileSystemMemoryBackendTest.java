@@ -31,7 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 final class FileSystemMemoryBackendTest {
 
   private static Path seed(Path workspace, String relPath, String content) throws IOException {
-    var target = workspace.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve(relPath);
+    var target = workspace.resolve(WorkspaceRoot.MEMORY_STORE).resolve(relPath);
     Files.createDirectories(target.getParent());
     Files.writeString(target, content, StandardCharsets.UTF_8);
     return target;
@@ -64,7 +64,7 @@ final class FileSystemMemoryBackendTest {
 
   @Test
   void viewRejectsDirectory(@TempDir Path tmp) throws IOException {
-    var dir = tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("subdir");
+    var dir = tmp.resolve(WorkspaceRoot.MEMORY_STORE).resolve("subdir");
     Files.createDirectories(dir);
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var ex = assertThrows(IOException.class, () -> backend.view("/memories/subdir"));
@@ -163,7 +163,7 @@ final class FileSystemMemoryBackendTest {
     var backend = FileSystemMemoryBackend.of(ws);
     assertEquals(ws, backend.workspace());
     assertNotNull(backend.memoryRoot());
-    assertTrue(backend.memoryRoot().toString().endsWith(FileSystemMemoryBackend.STORAGE_SUBDIR));
+    assertTrue(backend.memoryRoot().toString().endsWith(WorkspaceRoot.MEMORY_STORE));
   }
 
   // ── write operations ──────────────────────────────────────────────────────
@@ -322,7 +322,7 @@ final class FileSystemMemoryBackendTest {
 
   @Test
   void deleteRefusesDirectory(@TempDir Path tmp) throws IOException {
-    Files.createDirectories(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR + "/subdir"));
+    Files.createDirectories(tmp.resolve(WorkspaceRoot.MEMORY_STORE + "/subdir"));
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
     var ex = assertThrows(IOException.class, () -> backend.delete("/memories/subdir"));
     assertTrue(ex.getMessage().contains("directory"), ex.getMessage());
@@ -331,7 +331,7 @@ final class FileSystemMemoryBackendTest {
   // ── symlink confinement ───────────────────────────────────────────────────
 
   private static Path memoryDir(Path workspace) throws IOException {
-    return Files.createDirectories(workspace.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR));
+    return Files.createDirectories(workspace.resolve(WorkspaceRoot.MEMORY_STORE));
   }
 
   @Test
@@ -355,7 +355,7 @@ final class FileSystemMemoryBackendTest {
     var root = Files.createDirectory(tmp.resolve("ws"));
     var outside = Files.createDirectory(tmp.resolve("outside"));
     Files.createDirectories(root.resolve(".agent"));
-    Files.createSymbolicLink(root.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR), outside);
+    Files.createSymbolicLink(root.resolve(WorkspaceRoot.MEMORY_STORE), outside);
     Files.writeString(outside.resolve("secret.md"), "s", StandardCharsets.UTF_8);
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(root));
     assertThrows(RuntimeException.class, () -> backend.create("/memories/new.md", "leak"));
