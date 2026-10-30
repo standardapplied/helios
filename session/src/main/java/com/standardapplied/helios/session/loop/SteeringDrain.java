@@ -105,7 +105,7 @@ final class SteeringDrain {
             collaborators.clock().instant(),
             message,
             hookName,
-            block.reason()));
+            RedactedReason.of(block.reason(), collaborators.secrets()).text()));
   }
 
   private static List<InlineFile> collectAttachments(List<UserMessage> messages) {

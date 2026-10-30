@@ -47,8 +47,7 @@ import java.util.function.Predicate;
  *       the canonical call, which is dispatched with what its policy withholds and which {@code
  *       PostToolUse} hooks and the {@link QueryEvent.ToolResult} see. A call naming no registered
  *       tool skips the stage, and dispatch answers it {@code NotFound}. A refusal's reason and a
- *       hook's {@code Block} reason are redacted and bounded by {@link
- *       ToolAuthorization#diagnostic}.
+ *       hook's {@code Block} reason go through {@link RedactedReason}.
  *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result's output and keeps its
  *       outcome, since a hook changes what the model reads, not what happened; {@code Inject}
  *       queues a synthetic user message; {@code Stop} appends the result and terminates.
@@ -203,8 +202,8 @@ final class ToolRound {
   }
 
   private PlannedCall block(SessionState state, ToolCall call, String by, String reason) {
-    var diagnostic = ToolAuthorization.diagnostic(collaborators.secrets(), reason);
-    var text = diagnostic.text();
+    var redacted = RedactedReason.of(reason, collaborators.secrets());
+    var text = redacted.text();
     emitter.emit(
         state,
         new QueryEvent.ToolBlocked(
@@ -216,10 +215,7 @@ final class ToolRound {
             by,
             text));
     return new PlannedCall(
-        call,
-        ToolResult.rejected(by, text),
-        diagnostic.counts(),
-        ToolAuthorization.NOTHING_WITHHELD);
+        call, ToolResult.rejected(by, text), redacted.counts(), ToolAuthorization.NOTHING_WITHHELD);
   }
 
   private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {
