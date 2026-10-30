@@ -10,7 +10,6 @@ import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import tools.jackson.databind.ObjectMapper;
 
 /** Each {@link ToolOutcome} as the runtime writes it: its kind and its record components. */
 final class ToolOutcomeSerializerTest {
@@ -37,6 +36,6 @@ final class ToolOutcomeSerializerTest {
   @ParameterizedTest
   @MethodSource("outcomes")
   void writesTheKindAndTheComponents(ToolOutcome outcome, String json) {
-    assertEquals(json, ToolOutcomeSerializer.addTo(new ObjectMapper()).writeValueAsString(outcome));
+    assertEquals(json, JsonBody.MAPPER.writeValueAsString(outcome));
   }
 }

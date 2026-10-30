@@ -12,6 +12,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -33,7 +34,8 @@ final class OnUserMessageHookIntegrationTest {
     assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     assertTrue(loop.eventsOf(QueryEvent.UserMessageReceived.class).isEmpty());
     var fired = loop.first(QueryEvent.HookFired.class);
-    assertEquals("Block", fired.outcomeKind());
+    assertEquals(HookOutcome.block("PII"), fired.outcome());
+    assertEquals(HookPhase.ON_USER_MESSAGE, fired.phase());
     assertEquals(blocker.name(), fired.hookName());
     // The dropped message surfaces as MessageBlocked so UIs/audit can render the drop.
     var blocked = loop.first(QueryEvent.MessageBlocked.class);

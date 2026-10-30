@@ -15,6 +15,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.ArrayList;
@@ -122,11 +123,12 @@ final class PreToolUseHookIntegrationTest {
 
   @Test
   void hookFiredCarriesActualHookName() {
-    var named = named("MySecurityGuard", (call, ctx) -> HookOutcome.block("nope"));
+    var named = named("MySecurityGuard", (call, ctx) -> HookOutcome.block("no writes to /etc"));
     callEchoThenAnswer(Map.of("v", "x"), "done", named);
     var hookFired = loop.first(QueryEvent.HookFired.class);
     assertEquals("MySecurityGuard", hookFired.hookName(), "hookName must carry the hook's name");
-    assertEquals("PreToolUseHook", hookFired.phase(), "phase must carry the lifecycle phase");
+    assertEquals(HookPhase.PRE_TOOL_USE, hookFired.phase(), "phase must carry the lifecycle phase");
+    assertEquals(HookOutcome.block("no writes to /etc"), hookFired.outcome());
     var blocked = loop.first(QueryEvent.ToolBlocked.class);
     assertEquals(
         "MySecurityGuard", blocked.hookName(), "ToolBlocked.hookName must carry the hook's name");

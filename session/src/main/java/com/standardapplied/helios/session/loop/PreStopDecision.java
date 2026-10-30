@@ -5,6 +5,7 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import java.util.Optional;
 
 /**
@@ -15,8 +16,6 @@ import java.util.Optional;
  * the stop unchanged.
  */
 final class PreStopDecision {
-
-  private static final String PHASE = "PreStopHook";
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -48,11 +47,11 @@ final class PreStopDecision {
     var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
       case HookOutcome.Stop stop -> {
-        emitter.emitHookFired(state, hookName, PHASE, "Stop");
+        emitter.emitHookFired(state, hookName, HookPhase.PRE_STOP, stop);
         yield Optional.of(StopClassifier.success(state, stop.result()));
       }
       case HookOutcome.Inject inject -> {
-        effects.inject(state, hookName, PHASE, inject);
+        effects.inject(state, hookName, HookPhase.PRE_STOP, inject);
         yield Optional.empty();
       }
       case HookOutcome.Continue _ -> Optional.of(classifierVerdict);

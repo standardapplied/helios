@@ -588,7 +588,7 @@ final class SessionTracingTest {
     var trace = onlyTrace();
     var hook = onlySpan(trace, "hook.blocking");
     assertEquals(SpanKind.CUSTOM, hook.kind());
-    assertEquals("PreToolUseHook", hook.attributes().get("hook.phase"));
+    assertEquals("PRE_TOOL_USE", hook.attributes().get("hook.phase"));
     assertEquals("Block", hook.attributes().get("hook.outcome"));
     assertEquals(Duration.ZERO, hook.duration());
     var noop = onlySpan(trace, "tool.noop");
