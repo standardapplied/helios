@@ -76,7 +76,6 @@ public final class LsTool {
                             "Workspace-relative or absolute directory path. Defaults to '.'.")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)

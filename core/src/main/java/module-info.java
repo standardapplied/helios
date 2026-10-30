@@ -25,8 +25,7 @@
  *   <li>{@code provider} — the mechanics every streaming model provider shares: the SSE reader, the
  *       chat exchange and the JSON request assembly.
  *   <li>{@code trace} — the trace model and {@code TraceListener}.
- *   <li>{@code runtime} — durable-run primitives (RunStore, ToolCallJournal, DurableResumeScanner)
- *       the v2 session SDK can plug into.
+ *   <li>{@code runtime} — {@code CancellationToken} and {@code SessionContext}.
  * </ul>
  *
  * <p>The v1 {@code agent} / {@code workflow} / {@code memory} / {@code eval} surface was removed in

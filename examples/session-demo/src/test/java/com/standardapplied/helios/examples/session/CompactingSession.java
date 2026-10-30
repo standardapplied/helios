@@ -115,7 +115,6 @@ final class CompactingSession {
                     .withDescription("the member id")
                     .withRequired(true)
                     .build())
-            .withIdempotent(true)
             .withExecutor(
                 (args, ctx) ->
                     ToolResult.success(

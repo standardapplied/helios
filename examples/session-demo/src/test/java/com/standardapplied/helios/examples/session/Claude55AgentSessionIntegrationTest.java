@@ -377,7 +377,6 @@ final class Claude55AgentSessionIntegrationTest {
                     .withDescription(parameter)
                     .withRequired(true)
                     .build())
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> ToolResult.success(output))
             .build();
     return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();

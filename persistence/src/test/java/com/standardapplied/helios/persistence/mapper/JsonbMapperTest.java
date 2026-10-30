@@ -9,22 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class JsonbMapperTest {
-
-  @Test
-  void argumentsReadFractionsBackAsExactDecimals() {
-    var beyondDouble = "2" + "0".repeat(308) + ".5";
-
-    assertEquals(
-        Map.of("x", new BigDecimal(beyondDouble), "y", new BigDecimal("0.10"), "n", 1),
-        JsonbMapper.argumentsFromJsonb("{\"x\":" + beyondDouble + ",\"y\":0.10,\"n\":1}"));
-    assertEquals(Map.of(), JsonbMapper.argumentsFromJsonb(" "));
-  }
 
   @Test
   void toJsonbWithNullMap() {
@@ -70,6 +59,29 @@ class JsonbMapperTest {
   @Test
   void fromJsonbWithInvalidJsonThrows() {
     assertThrows(IllegalArgumentException.class, () -> JsonbMapper.fromJsonb("not json"));
+  }
+
+  // --- fromJsonbObject tests ---
+
+  @Test
+  void fromJsonbObjectWithBlankOrEmptyObjectIsEmpty() {
+    assertEquals(Map.of(), JsonbMapper.fromJsonbObject("  "));
+    assertEquals(Map.of(), JsonbMapper.fromJsonbObject("{}"));
+  }
+
+  @Test
+  void fromJsonbObjectRoundTripsANestedObject() {
+    var original = Map.of("outer", Map.of("inner", List.of("a", "b"), "count", 2), "flag", true);
+
+    assertEquals(original, JsonbMapper.fromJsonbObject(JsonbMapper.objectToJsonb(original)));
+  }
+
+  @Test
+  void fromJsonbObjectWithInvalidJsonNamesTheInput() {
+    var error =
+        assertThrows(IllegalArgumentException.class, () -> JsonbMapper.fromJsonbObject("not json"));
+
+    assertTrue(error.getMessage().contains("not json"));
   }
 
   // --- listToJsonb / listFromJsonb tests ---

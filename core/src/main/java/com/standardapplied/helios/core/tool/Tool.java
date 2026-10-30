@@ -20,21 +20,9 @@ import java.util.Objects;
  * @param description description of what the tool does (for the model)
  * @param parameters the parameters the tool accepts
  * @param executor the function to execute when the tool is called
- * @param idempotent whether invoking this tool more than once with the same arguments is safe.
- *     Drives two behaviors: in-process retry (a non-idempotent tool with retry configured will
- *     execute at most once instead of replaying through {@link
- *     com.standardapplied.helios.core.fault.FaultTolerance}'s retry policy) and durable resume (a
- *     non-idempotent tool that was in-flight at JVM crash blocks {@code Agent.resume(...)} under
- *     {@link com.standardapplied.helios.core.runtime.UnsafeResumePolicy#FAIL_LOUD}). Defaults to
- *     {@code false} via the builder so unannotated tools are conservatively treated as having side
- *     effects
  */
 public record Tool(
-    String name,
-    String description,
-    List<ToolParameter> parameters,
-    ToolExecutor executor,
-    boolean idempotent) {
+    String name, String description, List<ToolParameter> parameters, ToolExecutor executor) {
 
   public static Builder newBuilder() {
     return new Builder();
@@ -98,7 +86,6 @@ public record Tool(
     private String description;
     private final List<ToolParameter> parameters = new ArrayList<>();
     private ToolExecutor executor;
-    private boolean idempotent = false;
 
     private Builder() {}
 
@@ -127,16 +114,6 @@ public record Tool(
       return this;
     }
 
-    /**
-     * Mark the tool as idempotent — safe to invoke more than once with the same arguments. Off by
-     * default so tools with side effects are correctly treated as non-replayable in both retry and
-     * resume paths.
-     */
-    public Builder withIdempotent(boolean idempotent) {
-      this.idempotent = idempotent;
-      return this;
-    }
-
     public Tool build() {
       if (Strings.isBlank(name)) {
         throw new IllegalStateException("Tool name is required");
@@ -144,7 +121,7 @@ public record Tool(
       if (executor == null) {
         throw new IllegalStateException("Tool executor is required");
       }
-      return new Tool(name, description, List.copyOf(parameters), executor, idempotent);
+      return new Tool(name, description, List.copyOf(parameters), executor);
     }
   }
 }
