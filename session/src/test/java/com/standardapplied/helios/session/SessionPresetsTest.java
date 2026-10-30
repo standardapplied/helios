@@ -16,7 +16,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.execution.ExecuteTool;
-import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
@@ -48,7 +48,7 @@ final class SessionPresetsTest {
   @TempDir Path root;
 
   private Path note() {
-    return root.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR).resolve("note.md");
+    return root.resolve(WorkspaceRoot.MEMORY_STORE).resolve("note.md");
   }
 
   @Test

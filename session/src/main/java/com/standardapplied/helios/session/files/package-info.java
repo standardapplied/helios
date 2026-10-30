@@ -15,6 +15,8 @@
  * com.standardapplied.helios.session.files.LsTool} are the four read-side tools the session presets
  * register; each takes a {@link com.standardapplied.helios.session.files.WorkspaceRoot} at
  * construction and surfaces an appropriate {@link
- * com.standardapplied.helios.session.tools.ToolCategory} for the permission system.
+ * com.standardapplied.helios.session.tools.ToolCategory} for the permission system. None of them
+ * reaches the {@linkplain com.standardapplied.helios.session.files.WorkspaceRoot#MEMORY_STORE
+ * memory store}, which is reachable only through {@code MemoryRead} and {@code MemoryWrite}.
  */
 package com.standardapplied.helios.session.files;

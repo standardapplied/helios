@@ -19,8 +19,85 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class WorkspaceRootTest {
+
+  private static Path withMemoryStore(Path tmp) throws IOException {
+    var root = tmp.toRealPath();
+    Files.createDirectories(root.resolve(WorkspaceRoot.MEMORY_STORE));
+    Files.createDirectories(root.resolve("docs"));
+    Files.createSymbolicLink(root.resolve("link"), Path.of(WorkspaceRoot.MEMORY_STORE));
+    return root;
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        ".agent/memory",
+        ".agent/memory/a.md",
+        "./.agent/memory/x/y",
+        "<root>/.agent/memory/a.md",
+        "docs/../.agent/memory/a.md",
+        "link",
+        "link/a.md"
+      })
+  void canonicalRefusesEverySpellingOfTheMemoryStore(String spelled, @TempDir Path tmp)
+      throws IOException {
+    var root = withMemoryStore(tmp);
+    var workspace = WorkspaceRoot.of(root);
+    var requested = spelled.replace("<root>", root.toString());
+
+    var refused =
+        assertThrows(
+            WorkspaceRoot.WorkspaceEscapeException.class, () -> workspace.canonical(requested));
+
+    assertTrue(
+        refused.getMessage().startsWith("path is in the memory store; use MemoryRead: ./.agent/"),
+        refused.getMessage());
+  }
+
+  @Test
+  void canonicalRefusesTheMemoryStoreBeforeItExists(@TempDir Path tmp) {
+    var workspace = WorkspaceRoot.of(tmp);
+
+    var refused =
+        assertThrows(
+            WorkspaceRoot.WorkspaceEscapeException.class,
+            () -> workspace.canonical(".agent/memory/x/y"));
+
+    assertEquals(
+        "path is in the memory store; use MemoryRead: ./.agent/memory/x/y", refused.getMessage());
+  }
+
+  @Test
+  void canonicalRefusesTheMemoryStoreInATrustedWorkspace(@TempDir Path tmp) throws IOException {
+    var workspace = new WorkspaceRoot(withMemoryStore(tmp), false);
+
+    assertThrows(
+        WorkspaceRoot.WorkspaceEscapeException.class, () -> workspace.canonical("link/a.md"));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {".agent", ".agent/other.md", "./.agent-memory/a.md"})
+  void canonicalKeepsThePathsBesideTheMemoryStore(String requested, @TempDir Path tmp)
+      throws IOException {
+    var root = withMemoryStore(tmp);
+    Files.createDirectory(root.resolve(".agent-memory"));
+
+    assertEquals(
+        "./" + Path.of(requested).normalize(), WorkspaceRoot.of(root).canonical(requested));
+  }
+
+  @Test
+  void resolveSafeKeepsTheMemoryStoreForTheBackend(@TempDir Path tmp) throws IOException {
+    var root = withMemoryStore(tmp);
+
+    assertEquals(
+        root.resolve(".agent/memory/a.md"),
+        WorkspaceRoot.of(root).resolveSafe(".agent/memory/a.md"));
+  }
 
   @Test
   void ofProducesCanonicalRoot(@TempDir Path tmp) throws IOException {
