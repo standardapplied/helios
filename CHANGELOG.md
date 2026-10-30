@@ -6,6 +6,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**History holds at most `SessionLimits.maxToolResultChars` of each tool result.** A tool result of
+any size used to enter history; now its redacted text enters history with only its first and last
+32,768 characters by default and the marker between them. The model, the compactor and the session
+store see that copy. Events, hooks and traces still see the whole redacted output, and attachments
+are not cut. `SessionLimits` gains a last component `int maxToolResultChars` (at least 1,024).
+
 **The memory store is reachable only through the memory tools.** `<workspace>/.agent/memory` is
 reserved for Helios in every workspace, with or without a memory backend.
 
@@ -994,6 +1000,8 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Added
 
+- **`SessionLimits.maxToolResultChars()`**, set with `Builder.withMaxToolResultChars(int)`, and
+  `Strings.truncatedMiddle(text, maxChars, note)`, which keeps a text's start and end.
 - **Every run records a trace.** `SessionOptions.Builder.withTraceListener(listener)` hands the
   listener one `Trace` per run, on every ending (a terminal, a host `Error`, a crash, a close or
   an interrupt), before the run's result completes: a `model.call` span per model attempt with its
@@ -1188,6 +1196,8 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Fixed
 
+- **One large tool result could make every later model call fail.** The compactor keeps the latest
+  messages, so the result stayed in every request. History now holds a bounded copy of it.
 - **A blocked first message still called the model.** When an `OnUserMessageHook` blocked the only
   queued message, a session with a system prompt called the model with the system prompt alone.
   A run now calls the model only after a user message of its own reached the history, and ends in

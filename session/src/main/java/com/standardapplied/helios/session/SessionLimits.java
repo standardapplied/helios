@@ -18,10 +18,11 @@ import java.util.OptionalLong;
  * applies per call, per turn or per session, and {@code stopGrace} bounds both a run's end and the
  * session's close.
  *
- * <p>Eight orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
- * tokens, stream-retry policy, start timeout — each mapping to a distinct termination path,
- * recovery or shutdown behaviour. Limits are immutable for the lifetime of a session; runtime
- * mutation would let a long-running session escape the contract its caller saw at construction.
+ * <p>Nine orthogonal knobs — turns, dollars, wall-clock, per-tool timeout, stop grace, context
+ * tokens, stream-retry policy, start timeout, tool result size — each mapping to a distinct
+ * termination path, recovery, shutdown or history behaviour. Limits are immutable for the lifetime
+ * of a session; runtime mutation would let a long-running session escape the contract its caller
+ * saw at construction.
  *
  * <p>Defaults track Helios production values:
  *
@@ -71,6 +72,10 @@ import java.util.OptionalLong;
  *       returned by then, like one the provider refuses, makes {@code open} throw {@link
  *       SessionUnavailableException}; an acceptance that comes later is ended with {@code
  *       onSessionEnd}.
+ *   <li>{@code maxToolResultChars}: 65,536 — about 16k tokens at four characters per token, and
+ *       above the 50,000-byte stream cap of a bounded process, so one full stream is never cut. A
+ *       longer result enters history as its start, a marker stating how much was cut, and its end;
+ *       events, hooks and traces keep the whole redacted output.
  * </ul>
  *
  * <p>Currency is integer micro-USD (Stripe-style fixed-precision). See {@link CostEstimate} for the
@@ -97,6 +102,8 @@ import java.util.OptionalLong;
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  * @param startTimeout how long {@code onSessionStart} is waited for; must be non-null and strictly
  *     positive
+ * @param maxToolResultChars the most characters of one tool result's text that enter history; at
+ *     least 1,024
  */
 public record SessionLimits(
     int maxTurns,
@@ -106,9 +113,11 @@ public record SessionLimits(
     Duration stopGrace,
     long maxContextTokens,
     StreamRetryPolicy streamRetryPolicy,
-    Duration startTimeout) {
+    Duration startTimeout,
+    int maxToolResultChars) {
 
   private static final Duration MAX_DURATION = Duration.ofNanos(Long.MAX_VALUE);
+  private static final int MIN_TOOL_RESULT_CHARS = 1_024;
 
   private static final SessionLimits DEFAULTS =
       new SessionLimits(
@@ -119,7 +128,8 @@ public record SessionLimits(
           Duration.ofSeconds(5),
           0L,
           StreamRetryPolicy.defaults(),
-          Duration.ofSeconds(60));
+          Duration.ofSeconds(60),
+          65_536);
 
   /**
    * Canonical constructor.
@@ -146,6 +156,13 @@ public record SessionLimits(
     }
     Objects.requireNonNull(streamRetryPolicy, "streamRetryPolicy must not be null");
     requirePositiveNanos("startTimeout", startTimeout);
+    if (maxToolResultChars < MIN_TOOL_RESULT_CHARS) {
+      throw new IllegalArgumentException(
+          "maxToolResultChars must be at least "
+              + MIN_TOOL_RESULT_CHARS
+              + ", got "
+              + maxToolResultChars);
+    }
   }
 
   private static void requirePositiveNanos(String name, Duration value) {
@@ -189,7 +206,8 @@ public record SessionLimits(
         .withStopGrace(stopGrace)
         .withMaxContextTokens(maxContextTokens)
         .withStreamRetryPolicy(streamRetryPolicy)
-        .withStartTimeout(startTimeout);
+        .withStartTimeout(startTimeout)
+        .withMaxToolResultChars(maxToolResultChars);
   }
 
   /** Mutable builder for {@link SessionLimits}. */
@@ -203,6 +221,7 @@ public record SessionLimits(
     private long maxContextTokens = DEFAULTS.maxContextTokens;
     private StreamRetryPolicy streamRetryPolicy = DEFAULTS.streamRetryPolicy;
     private Duration startTimeout = DEFAULTS.startTimeout;
+    private int maxToolResultChars = DEFAULTS.maxToolResultChars;
 
     private Builder() {}
 
@@ -310,6 +329,18 @@ public record SessionLimits(
     }
 
     /**
+     * Set the most characters of one tool result's text that enter history. A longer result enters
+     * history as its start, a marker stating how much was cut, and its end.
+     *
+     * @param maxToolResultChars at least 1,024
+     * @return this builder
+     */
+    public Builder withMaxToolResultChars(int maxToolResultChars) {
+      this.maxToolResultChars = maxToolResultChars;
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the limits
@@ -323,7 +354,8 @@ public record SessionLimits(
           stopGrace,
           maxContextTokens,
           streamRetryPolicy,
-          startTimeout);
+          startTimeout,
+          maxToolResultChars);
     }
   }
 }

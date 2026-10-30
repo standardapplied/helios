@@ -83,17 +83,50 @@ public final class Strings {
    * @throws NullPointerException if {@code text} or {@code note} is null
    */
   public static String truncated(String text, int maxChars, String note) {
+    requireBound(maxChars, note);
+    if (text.length() <= maxChars) {
+      return text;
+    }
+    var end = splitsSurrogatePair(text, maxChars) ? maxChars - 1 : maxChars;
+    return text.substring(0, end) + note.formatted(text.length() - end);
+  }
+
+  /**
+   * {@code text} with its middle cut: the first {@code maxChars / 2} characters, then {@code note}
+   * formatted with how many were cut, then the last {@code maxChars - maxChars / 2}; {@code text}
+   * itself when it is no longer than {@code maxChars}. A seam that would split a surrogate pair
+   * keeps one character fewer on its side. Redact a text before cutting it, so a secret the cut
+   * falls across is never partly shown.
+   *
+   * @param text the text; non-null
+   * @param maxChars the characters kept at most; positive
+   * @param note the note's format, its one {@code %d} the number of characters cut; non-null
+   * @return the bounded text
+   * @throws IllegalArgumentException if {@code maxChars} is not positive
+   * @throws NullPointerException if {@code text} or {@code note} is null
+   */
+  public static String truncatedMiddle(String text, int maxChars, String note) {
+    requireBound(maxChars, note);
+    if (text.length() <= maxChars) {
+      return text;
+    }
+    var head = maxChars / 2;
+    var headEnd = splitsSurrogatePair(text, head) ? head - 1 : head;
+    var tail = text.length() - (maxChars - head);
+    var tailStart = splitsSurrogatePair(text, tail) ? tail + 1 : tail;
+    return text.substring(0, headEnd)
+        + note.formatted(tailStart - headEnd)
+        + text.substring(tailStart);
+  }
+
+  private static void requireBound(int maxChars, String note) {
     if (maxChars <= 0) {
       throw new IllegalArgumentException("maxChars must be positive: " + maxChars);
     }
     Objects.requireNonNull(note, "note must not be null");
-    if (text.length() <= maxChars) {
-      return text;
-    }
-    var end =
-        Character.isSurrogatePair(text.charAt(maxChars - 1), text.charAt(maxChars))
-            ? maxChars - 1
-            : maxChars;
-    return text.substring(0, end) + note.formatted(text.length() - end);
+  }
+
+  private static boolean splitsSurrogatePair(String text, int index) {
+    return index > 0 && Character.isSurrogatePair(text.charAt(index - 1), text.charAt(index));
   }
 }

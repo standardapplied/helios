@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session.loop;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
@@ -25,7 +26,9 @@ import java.util.function.Predicate;
  * against the session's secret registry before its {@link QueryEvent.ToolResult} is emitted, so the
  * event, {@code PostToolUse} hooks and the history all see the redacted text. A substituted
  * result's event also counts what was redacted from its reason. A {@code MutateResult} output is
- * new text and is redacted the same way.
+ * new text and is redacted the same way. The event and the hooks see the whole redacted output; the
+ * copy that enters history is cut to {@link SessionLimits#maxToolResultChars()}, after redaction,
+ * so a secret the cut falls across is never partly shown.
  *
  * <p>The call each {@link QueryEvent.ToolUse}, {@link QueryEvent.ToolMutated}, {@link
  * QueryEvent.ToolBlocked} and {@link QueryEvent.ToolResult} carries, and a {@code ToolMutated}'s
@@ -253,13 +256,13 @@ final class ToolRound {
           effects.inject(state, hookName, HookPhase.POST_TOOL_USE, inject);
       case HookOutcome.Stop stop -> {
         emitter.emitHookFired(state, hookName, HookPhase.POST_TOOL_USE, stop);
-        append(state, call, result);
+        append(state, call, result, limits);
         state.setTerminal(StopClassifier.success(state, stop.result()));
         return true;
       }
       case HookOutcome.Continue _ -> {}
     }
-    append(state, call, kept);
+    append(state, call, kept, limits);
     return false;
   }
 
@@ -275,17 +278,23 @@ final class ToolRound {
 
   /**
    * Append a tool result to history, plus any multimodal attachments the tool returned. The text
-   * goes on the standard tool-result message; attachments ride a follow-up user message so every
-   * provider's existing {@code Message.user(text, inlineFiles)} plumbing handles wire encoding
-   * uniformly — no per-provider {@code tool_result} multimodal wiring required.
+   * goes on the standard tool-result message, its middle cut to the session's limit: the end of a
+   * result is often what says why it failed, as {@code Execute} writes stderr after stdout.
+   * Attachments are not cut; they ride a follow-up user message so every provider's existing {@code
+   * Message.user(text, inlineFiles)} plumbing handles wire encoding uniformly — no per-provider
+   * {@code tool_result} multimodal wiring required.
    *
    * <p>The follow-up text names what was attached so the model has a textual handle in conversation
    * history even without re-reading the binary content on every subsequent turn. Empty-attachments
    * results emit only the tool-result message — the synthetic user message is skipped to keep the
    * conversation shape unchanged when no multimodal payload exists.
    */
-  private static void append(SessionState state, ToolCall call, ToolResult result) {
-    state.history().append(Message.tool(call.id(), call.name(), result.output()));
+  private static void append(
+      SessionState state, ToolCall call, ToolResult result, SessionLimits limits) {
+    var max = limits.maxToolResultChars();
+    var note = "\n[output truncated: %d chars cut; the tool result limit is " + max + " chars]\n";
+    var output = Strings.truncatedMiddle(result.output(), max, note);
+    state.history().append(Message.tool(call.id(), call.name(), output));
     if (result.hasAttachments()) {
       var text =
           "[tool '"

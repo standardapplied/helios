@@ -117,7 +117,8 @@ final class RunTrace {
 
   /**
    * End the call's span at its first result; a later result, a {@code PostToolUse} rewrite, only
-   * replaces what the span says the model read.
+   * replaces the output it records. The span records what the tool returned, not what the model
+   * read: history may hold a shorter copy.
    */
   private void toolResult(QueryEvent.ToolResult event) {
     var span = toolSpan(event.call(), event.timestamp());
