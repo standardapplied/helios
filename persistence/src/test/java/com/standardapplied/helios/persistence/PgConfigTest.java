@@ -58,24 +58,6 @@ class PgConfigTest {
   }
 
   @Test
-  void agentIdDefaultsToNull() {
-    var config = PgConfig.newBuilder().withDbClient(PgTestSupport.dbClient()).build();
-
-    assertNull(config.agentId());
-  }
-
-  @Test
-  void agentIdIsStored() {
-    var config =
-        PgConfig.newBuilder()
-            .withDbClient(PgTestSupport.dbClient())
-            .withAgentId("my-agent")
-            .build();
-
-    assertEquals("my-agent", config.agentId());
-  }
-
-  @Test
   void nullDbClientThrows() {
     assertThrows(NullPointerException.class, () -> PgConfig.newBuilder().build());
   }

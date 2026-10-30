@@ -73,8 +73,7 @@ final class PathToolSessions {
             (args, ctx) -> {
               readRuns.incrementAndGet();
               return tool.executor().execute(args, ctx);
-            },
-            tool.idempotent());
+            });
     return new ToolBinding(
         counted,
         read.category(),

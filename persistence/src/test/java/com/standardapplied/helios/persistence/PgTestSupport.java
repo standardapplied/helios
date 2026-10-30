@@ -40,10 +40,6 @@ final class PgTestSupport {
     return PgConfig.newBuilder().withDbClient(DB_CLIENT).build();
   }
 
-  static PgConfig pgConfig(String agentId) {
-    return PgConfig.newBuilder().withDbClient(DB_CLIENT).withAgentId(agentId).build();
-  }
-
   static void truncate() {
     dbClient().execute().dml("TRUNCATE TABLE helios_prompts");
   }
@@ -57,40 +53,6 @@ final class PgTestSupport {
     dbClient().execute().dml("TRUNCATE TABLE helios_session_entries");
   }
 
-  static void truncateRuntime() {
-    // CASCADE required because helios_tool_calls.run_id REFERENCES helios_agent_runs(run_id).
-    dbClient().execute().dml("TRUNCATE TABLE helios_agent_runs CASCADE");
-  }
-
-  /**
-   * Generate a fresh run id and seed a minimal helios_agent_runs row for it. Tests that exercise
-   * helios_tool_calls in isolation need this because the 1.4-era FK helios_tool_calls.run_id
-   * REFERENCES helios_agent_runs(run_id) ON DELETE CASCADE rejects orphan tool-call inserts.
-   */
-  static java.util.UUID newSeededRunId() {
-    var runId = com.standardapplied.helios.core.common.Ids.newId();
-    seedRun(runId);
-    return runId;
-  }
-
-  /** Insert a minimal RUNNING row into helios_agent_runs for {@code runId}. Idempotent. */
-  static void seedRun(java.util.UUID runId) {
-    var now = com.standardapplied.helios.core.common.Ids.now();
-    dbClient()
-        .execute()
-        .dml(
-            """
-            INSERT INTO helios_agent_runs (
-                run_id, agent_id, status, iteration,
-                started_at, last_checkpoint_at)
-            VALUES (CAST(? AS UUID), 'test-agent', 'RUNNING', 0, ?, ?)
-            ON CONFLICT (run_id) DO NOTHING
-            """,
-            runId.toString(),
-            now,
-            now);
-  }
-
   private static void initSchema() {
     try {
       // Drop existing helios_* tables CASCADE so each test JVM gets a fresh schema. Required
@@ -99,8 +61,6 @@ final class PgTestSupport {
       // documented in CHANGELOG.md.
       for (var table :
           List.of(
-              "helios_tool_calls",
-              "helios_agent_runs",
               "helios_session_entries",
               "helios_spans",
               "helios_traces",

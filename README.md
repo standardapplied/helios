@@ -1,6 +1,6 @@
 # Helios
 
-The Helios agentic framework for the JVM. A provider-agnostic `Model` interface, a streamable steerable session SDK, sandboxed code execution, structured output, durability primitives, and end-to-end tracing — for tool-using agents that run reliably in production.
+The Helios agentic framework for the JVM. A provider-agnostic `Model` interface, a streamable steerable session SDK, sandboxed code execution, structured output, durable sessions, and end-to-end tracing — for tool-using agents that run reliably in production.
 
 Simple, explicit, no magic. No annotation-driven DI, no reflective surprises.
 
@@ -21,7 +21,7 @@ Pick what you need — each jar is published independently:
 
 | Artifact | What it gives you | External deps |
 |----------|-------------------|---------------|
-| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `Trace` / `TraceListener`, durability primitives (`RunStore`, `ToolCallJournal`), `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
+| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `Trace` / `TraceListener`, `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
 | `helios-session` | v2 SDK — long-lived `AgentSession` running an agent loop on a virtual thread. `SessionPresets`, hooks, declarative `Permission`, file tools, `MemoryBackend`, `ExecutionProvider`, `ContextCompactor` | Jackson 3.x |
 | `helios-runtime` | Helidon HTTP/SSE surface for `helios-session` — `POST /sessions`, SSE `/events`, long-poll `/result` | Helidon SE, Jackson 3.x |
 | `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3.x |
@@ -29,7 +29,7 @@ Pick what you need — each jar is published independently:
 | `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
 | `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
 | `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
-| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgTraceStore`, and durability (`PgRunStore` + `PgToolCallJournal`) | Helidon DbClient |
+| `helios-persistence` | PostgreSQL-backed `PromptRegistry` and `PgTraceStore` | Helidon DbClient |
 
 Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
 
@@ -52,7 +52,7 @@ Helios is used in production but has documented limitations that you should unde
 
 These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
 
-- **Persistence layer stores trace/journal payloads verbatim unless you set a redactor.** `helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever you store yourself, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
+- **Persistence layer stores trace payloads verbatim unless you set a redactor.** `helios_traces.{input_text, output_text, attributes}` and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever you store yourself, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
 - **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
 - **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
 - **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
@@ -408,7 +408,7 @@ var weatherTool = Tool.newBuilder()
     .build();
 ```
 
-`Tool.newBuilder().withIdempotent(true)` records that a tool is safe to repeat; the session loop does not read it, because it never retries a tool: `ToolDispatch` runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
+The session runs each tool call once; it never retries one: `ToolDispatch` runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
 
 ### CommandGrant — give the agent a CLI without giving it the secrets
 
@@ -605,26 +605,9 @@ model.embedQuery(query, "Instruct: Given a brief professional summary, find the 
 model.embedDocument(doc, null);  // null = use the spec default
 ```
 
-## Durable Runs
-
-`core.runtime` ships the durability primitives — `RunStore`, `ToolCallJournal`, `UnsafeResumePolicy`, `Durability` — that crash-safe execution composes on. Production-grade impls in `helios-persistence` (`PgRunStore` + `PgToolCallJournal` via Helidon DbClient); in-process impls (`InMemoryRunStore`, `InMemoryToolCallJournal`) for tests.
-
-Operations:
-
-```java
-durability.runStore().purgeOlderThan(Duration.ofDays(30));   // cascade-deletes journal entries
-
-DurableResumeScanner.builder(durability)
-    .withResolver(...)
-    .build()
-    .scan();  // sweep stale runs and resume; wire into io.helidon.scheduling
-```
-
-**Session integration is on the v2 roadmap.** The primitives are stable and the schema is shaped so v2 distributed-lease columns (`worker_id`, `lease_until`) can be added additively. The first durable `AgentSession` example will land alongside the wiring.
-
 ## Persistence (`helios-persistence`)
 
-PostgreSQL-backed `PromptRegistry`, `PgTraceStore`, `SessionStore` and durability impls. All share a `PgConfig` carrying the `DbClient`, schema name, and optional agent ID.
+PostgreSQL-backed `PromptRegistry`, `PgTraceStore` and `SessionStore`. All share a `PgConfig` carrying the `DbClient` and schema name.
 
 ```java
 var pgConfig = PgConfig.newBuilder()
@@ -635,7 +618,6 @@ var pgConfig = PgConfig.newBuilder()
 var traceStore = new PgTraceStore(pgConfig);
 var annotationStore = new PgAnnotationStore(pgConfig);
 var promptRegistry = new PgPromptRegistry(pgConfig);
-var durability = PgDurability.of(pgConfig);   // RunStore + ToolCallJournal
 var sessionStore = new PgSessionStore(pgConfig);
 ```
 
@@ -643,7 +625,7 @@ Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.
 
 **Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
-**Trace fidelity by design.** Trace and journal payloads (`helios_tool_calls.{args, output, error}`, `helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace/journal text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to whatever you record into these stores yourself. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
+**Trace fidelity by design.** Trace payloads (`helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to whatever you record into these stores yourself. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
 
 ## Security
 

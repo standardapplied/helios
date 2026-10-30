@@ -106,7 +106,6 @@ public final class MemoryWriteTool {
                         .withDescription("1-based line position for insert.")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(false)
             .withExecutor((args, ctx) -> execute(ctx, backend, args))
             .build();
     return ToolBinding.newBuilder(tool)

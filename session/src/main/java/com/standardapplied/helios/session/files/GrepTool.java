@@ -122,7 +122,6 @@ public final class GrepTool {
                             "Optional filename glob filter, e.g. '*.java'. Defaults to all files.")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)

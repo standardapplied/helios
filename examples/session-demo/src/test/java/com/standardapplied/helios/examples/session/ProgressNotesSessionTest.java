@@ -137,7 +137,6 @@ final class ProgressNotesSessionTest {
                     .withDescription("query")
                     .withRequired(true)
                     .build())
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> ToolResult.success("ids: p7"))
             .build();
     return ToolBinding.newBuilder(tool).withCategory(ToolCategory.READ).build();

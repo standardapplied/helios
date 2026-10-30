@@ -428,7 +428,6 @@ final class StreamingSessionTest {
         Tool.newBuilder()
             .withName("weather")
             .withDescription("The weather in a city")
-            .withIdempotent(true)
             .withParameter(
                 ToolParameter.newBuilder()
                     .withName("city")

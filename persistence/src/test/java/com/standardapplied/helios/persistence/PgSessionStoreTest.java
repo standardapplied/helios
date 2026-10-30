@@ -254,9 +254,7 @@ final class PgSessionStoreTest extends SessionStoreContract {
               "helios_traces",
               "helios_spans",
               "helios_annotations",
-              "helios_session_entries",
-              "helios_agent_runs",
-              "helios_tool_calls"),
+              "helios_session_entries"),
           tables);
     } finally {
       tx.rollback();

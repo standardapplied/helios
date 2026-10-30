@@ -118,39 +118,3 @@ CREATE TABLE IF NOT EXISTS helios_session_entries (
 
 CREATE INDEX IF NOT EXISTS idx_helios_session_entries_replaced
     ON helios_session_entries (session_id, seq) WHERE type = 'replaced';
-
-CREATE TABLE IF NOT EXISTS helios_agent_runs (
-    run_id              UUID            PRIMARY KEY,
-    session_id          UUID,
-    agent_id            VARCHAR(255),
-    user_id             VARCHAR(255),
-    status              VARCHAR(20)     NOT NULL,
-    iteration           INT             NOT NULL DEFAULT 0,
-    started_at          TIMESTAMPTZ     NOT NULL,
-    last_checkpoint_at  TIMESTAMPTZ     NOT NULL,
-    ended_at            TIMESTAMPTZ,
-    error               TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_helios_agent_runs_status_checkpoint
-    ON helios_agent_runs (status, last_checkpoint_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_helios_agent_runs_session
-    ON helios_agent_runs (session_id);
-
-CREATE TABLE IF NOT EXISTS helios_tool_calls (
-    run_id        UUID            NOT NULL REFERENCES helios_agent_runs(run_id) ON DELETE CASCADE,
-    tool_call_id  VARCHAR(255)    NOT NULL,
-    iteration     INT             NOT NULL,
-    tool_name     VARCHAR(255)    NOT NULL,
-    args          JSONB,
-    status        VARCHAR(20)     NOT NULL,
-    output        TEXT,
-    error         TEXT,
-    started_at    TIMESTAMPTZ     NOT NULL,
-    ended_at      TIMESTAMPTZ,
-    PRIMARY KEY (run_id, tool_call_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_helios_tool_calls_status
-    ON helios_tool_calls (run_id, status);

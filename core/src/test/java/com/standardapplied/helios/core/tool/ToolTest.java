@@ -462,38 +462,6 @@ class ToolTest {
   }
 
   @Test
-  void idempotentDefaultsToFalse() {
-    var tool =
-        Tool.newBuilder()
-            .withName("send_email")
-            .withExecutor((args, ctx) -> ToolResult.success("ok"))
-            .build();
-    assertFalse(tool.idempotent());
-  }
-
-  @Test
-  void idempotentSetTrue() {
-    var tool =
-        Tool.newBuilder()
-            .withName("get_weather")
-            .withIdempotent(true)
-            .withExecutor((args, ctx) -> ToolResult.success("sunny"))
-            .build();
-    assertTrue(tool.idempotent());
-  }
-
-  @Test
-  void idempotentSetFalseExplicitly() {
-    var tool =
-        Tool.newBuilder()
-            .withName("transfer_funds")
-            .withIdempotent(false)
-            .withExecutor((args, ctx) -> ToolResult.success("ok"))
-            .build();
-    assertFalse(tool.idempotent());
-  }
-
-  @Test
   void parametersAsJsonSchemaListsKeysAndParametersInDeclaredOrder() {
     var report = DeclarationOrderFixture.tools().getFirst();
     var schema = report.parametersAsJsonSchema();

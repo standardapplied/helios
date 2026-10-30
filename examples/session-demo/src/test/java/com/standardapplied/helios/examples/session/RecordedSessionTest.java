@@ -286,7 +286,7 @@ final class RecordedSessionTest {
   }
 
   private static ToolBinding search(String name, String... parameters) {
-    var tool = Tool.newBuilder().withName(name).withDescription(name).withIdempotent(true);
+    var tool = Tool.newBuilder().withName(name).withDescription(name);
     for (var parameter : parameters) {
       tool.withParameter(
           ToolParameter.newBuilder()
