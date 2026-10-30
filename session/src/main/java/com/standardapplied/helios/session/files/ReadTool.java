@@ -163,7 +163,6 @@ public final class ReadTool {
                                 + ".")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)

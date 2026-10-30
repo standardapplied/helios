@@ -95,7 +95,6 @@ public final class AskUserQuestionTool {
                         .withDescription("Permit multiple selections. Defaults to false.")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(false)
             .withExecutor((args, ctx) -> execute(ctx, gateway, args))
             .build();
     return ToolBinding.newBuilder(tool).withCategory(ToolCategory.CONTROL).build();

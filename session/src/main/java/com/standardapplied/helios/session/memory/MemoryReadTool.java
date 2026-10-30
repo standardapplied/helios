@@ -77,7 +77,6 @@ public final class MemoryReadTool {
                             "Return an index of entries under 'path' rather than file content.")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> execute(ctx, backend, args))
             .build();
     return ToolBinding.newBuilder(tool)

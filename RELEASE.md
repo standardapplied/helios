@@ -13,21 +13,21 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 
 | Artifact | Description |
 |----------|-------------|
-| `com.standardapplied:helios-core` | Zero-dependency primitives: model, tool, fault tolerance, schema, trace, durability and cost interfaces |
+| `com.standardapplied:helios-core` | Zero-dependency primitives: model, tool, fault tolerance, schema, trace and cost interfaces |
 | `com.standardapplied:helios-session` | Session SDK: `AgentSession`, presets, hooks, permissions, workspace file tools, agent loop |
 | `com.standardapplied:helios-runtime` | Helidon SE HTTP/SSE surface for sessions |
 | `com.standardapplied:helios-gemini` | Google Gemini provider via the Interactions API |
 | `com.standardapplied:helios-anthropic` | Anthropic Claude provider via the Messages API |
 | `com.standardapplied:helios-openai` | OpenAI provider via the Responses API |
 | `com.standardapplied:helios-onnx` | Local ONNX Runtime embedding models |
-| `com.standardapplied:helios-persistence` | PostgreSQL persistence for traces, prompts and durable runs via Helidon DbClient |
+| `com.standardapplied:helios-persistence` | PostgreSQL persistence for traces, prompts and sessions via Helidon DbClient |
 | `com.standardapplied:helios-repl` | Sandboxed JShell execution substrate |
 | `com.standardapplied:helios-testing` | `ScriptedModel` test double for deterministic evals |
 
 `helios-core` and `helios-session` also publish their test fixtures as attached artifacts with
 the `tests` classifier: `helios-core-<version>-tests.jar` (`com.standardapplied.helios.core.test`:
 `Await`, `LineSink`, `FeedableInputStream`, the HTTP and SSE stubs, and the abstract contract tests
-every provider, prompt registry and tool-call journal test extends) and
+every provider and prompt registry test extends) and
 `helios-session-<version>-tests.jar` (`com.standardapplied.helios.session.test`:
 `EventCollector` and the fixtures session's, repl's and the examples' tests share). This is
 intended: other modules' tests depend on them as a `test-jar`, and `mvn deploy -Prelease` uploads
