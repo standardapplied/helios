@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 
 /**
  * Fires the turn-level hooks around the model call — {@code PreModelTurn} and {@code PostModelTurn}
@@ -19,9 +20,6 @@ final class TurnHooks {
     SKIP_MODEL,
     TERMINATE
   }
-
-  private static final String PRE_MODEL_TURN = "PreModelTurnHook";
-  private static final String POST_MODEL_TURN = "PostModelTurnHook";
 
   private final LoopCollaborators collaborators;
   private final EventEmitter emitter;
@@ -41,14 +39,14 @@ final class TurnHooks {
             .firePreModelTurn(state.history().snapshot(), collaborators.hookContext(state));
     var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
-      case HookOutcome.Stop stop -> stop(state, hookName, PRE_MODEL_TURN, stop);
+      case HookOutcome.Stop stop -> stop(state, hookName, HookPhase.PRE_MODEL_TURN, stop);
       case HookOutcome.Inject inject -> {
-        effects.inject(state, hookName, PRE_MODEL_TURN, inject);
+        effects.inject(state, hookName, HookPhase.PRE_MODEL_TURN, inject);
         yield Decision.SKIP_MODEL;
       }
       case HookOutcome.MutateHistory mutate -> {
         state.history().replace(mutate.history());
-        emitter.emitHookFired(state, hookName, PRE_MODEL_TURN, "MutateHistory");
+        emitter.emitHookFired(state, hookName, HookPhase.PRE_MODEL_TURN, mutate);
         yield Decision.CONTINUE;
       }
       case HookOutcome.Continue _ -> Decision.CONTINUE;
@@ -61,16 +59,17 @@ final class TurnHooks {
         collaborators.hooks().firePostModelTurn(response, collaborators.hookContext(state));
     var hookName = decision.firingHookName();
     return switch (decision.outcome()) {
-      case HookOutcome.Stop stop -> stop(state, hookName, POST_MODEL_TURN, stop);
+      case HookOutcome.Stop stop -> stop(state, hookName, HookPhase.POST_MODEL_TURN, stop);
       case HookOutcome.Inject inject -> {
-        effects.inject(state, hookName, POST_MODEL_TURN, inject);
+        effects.inject(state, hookName, HookPhase.POST_MODEL_TURN, inject);
         yield Decision.CONTINUE;
       }
       case HookOutcome.Continue _ -> Decision.CONTINUE;
     };
   }
 
-  private Decision stop(SessionState state, String hookName, String phase, HookOutcome.Stop stop) {
+  private Decision stop(
+      SessionState state, String hookName, HookPhase phase, HookOutcome.Stop stop) {
     effects.stop(state, hookName, phase, stop);
     return Decision.TERMINATE;
   }

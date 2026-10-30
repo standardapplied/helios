@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.trace.Span;
 import com.standardapplied.helios.core.trace.SpanKind;
 import com.standardapplied.helios.core.trace.Trace;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -24,10 +25,11 @@ import java.util.Set;
  * The trace of one run in progress, built from its events: a {@code model.call} span per {@link
  * QueryEvent.ModelCallEnded}, a {@code tool.<name>} span per tool call, from its {@link
  * QueryEvent.ToolUse}, or its first {@link QueryEvent.ToolResult} when it had none, to that first
- * result, and a zero-length {@code hook.<name>} span per {@link QueryEvent.HookFired}. Content (the
- * run's first user message, the tool arguments and results) is kept only when {@code verbose}, each
- * string redacted against the session's secrets. Not thread-safe: {@link SessionTraceRecorder}
- * holds its lock around every call.
+ * result, and a zero-length {@code hook.<name>} span per {@link QueryEvent.HookFired}, naming its
+ * phase and outcome. Content (the run's first user message, the tool arguments and results, a
+ * hook's reason or text) is kept only when {@code verbose}, each string redacted against the
+ * session's secrets. Not thread-safe: {@link SessionTraceRecorder} holds its lock around every
+ * call.
  */
 final class RunTrace {
 
@@ -135,10 +137,27 @@ final class RunTrace {
   }
 
   private void hook(QueryEvent.HookFired hook) {
-    span("hook." + hook.hookName(), SpanKind.CUSTOM, hook.timestamp())
-        .withEndTime(utc(hook.timestamp()))
-        .withAttribute("hook.phase", hook.phase())
-        .withAttribute("hook.outcome", hook.outcomeKind());
+    var span =
+        span("hook." + hook.hookName(), SpanKind.CUSTOM, hook.timestamp())
+            .withEndTime(utc(hook.timestamp()))
+            .withAttribute("hook.phase", hook.phase().name())
+            .withAttribute("hook.outcome", hook.outcome().getClass().getSimpleName());
+    if (verbose) {
+      text(hook.outcome()).ifPresent(text -> span.withAttribute("hook.text", text));
+    }
+  }
+
+  /** The reason or text an outcome carries, already redacted by the event. */
+  private static Optional<String> text(HookOutcome outcome) {
+    return switch (outcome) {
+      case HookOutcome.Block block -> Optional.of(block.reason());
+      case HookOutcome.Inject inject -> Optional.of(inject.userMessage());
+      case HookOutcome.Stop stop -> Optional.of(stop.result());
+      case HookOutcome.MutateText mutate -> Optional.of(mutate.text());
+      case HookOutcome.MutateResult mutate -> Optional.of(mutate.output());
+      case HookOutcome.Continue _, HookOutcome.MutateArgs _, HookOutcome.MutateHistory _ ->
+          Optional.empty();
+    };
   }
 
   private Span.Builder span(String name, SpanKind kind, Instant start) {

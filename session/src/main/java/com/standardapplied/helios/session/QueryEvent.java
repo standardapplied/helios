@@ -14,6 +14,8 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -37,7 +39,8 @@ import java.util.Objects;
  *
  * <p>The subtypes cover every observable lifecycle event the agent loop emits — run boundaries,
  * assistant output (text, thinking, grounding citations), user input, model calls ({@link
- * ModelCallEnded}), context lifecycle, tool dispatch, hook activity, and terminal results.
+ * ModelCallEnded}), context lifecycle, tool dispatch, hook activity ({@link HookFired} carries the
+ * deciding hook's phase and its redacted outcome), and terminal results.
  *
  * <p>Adding a subtype is a breaking change for {@code switch} consumers that lack a {@code default}
  * branch — by design, so the compiler flags consumers that need updating.
@@ -637,9 +640,9 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A hook fired and produced a non-{@link
-   * com.standardapplied.helios.session.hooks.HookOutcome.Continue Continue} outcome. Subscribers
-   * can drive UI/audit off this event without polling the registry.
+   * A hook fired and produced a non-{@link HookOutcome.Continue Continue} outcome: which hook, at
+   * which phase, and what it decided, with the reason or text redacted. Readers can drive UI/audit
+   * off this event without polling the registry.
    *
    * <p>Continue outcomes are suppressed by design — surfacing every no-op would drown the stream.
    * Observe-only {@link com.standardapplied.helios.session.hooks.OnStreamEventHook
@@ -651,11 +654,10 @@ public sealed interface QueryEvent
    * @param turnIndex the turn index in which the hook fired
    * @param timestamp the event timestamp
    * @param hookName the hook's name; non-null and non-blank
-   * @param phase the lifecycle phase the hook was bound to (e.g. {@code "PreToolUseHook"});
-   *     non-null and non-blank
-   * @param outcomeKind the simple class name of the {@link
-   *     com.standardapplied.helios.session.hooks.HookOutcome HookOutcome} subtype returned (e.g.
-   *     {@code "Block"}, {@code "Inject"}); non-null and non-blank
+   * @param phase the phase the hook was bound to; non-null
+   * @param outcome the outcome the hook returned, every string it carries redacted against the
+   *     session's secrets ({@link HookOutcome.MutateHistory} as returned); the loop acts on the
+   *     hook's own, unredacted outcome; non-null and never {@link HookOutcome.Continue}
    */
   record HookFired(
       String sessionId,
@@ -663,8 +665,8 @@ public sealed interface QueryEvent
       long turnIndex,
       Instant timestamp,
       String hookName,
-      String phase,
-      String outcomeKind)
+      HookPhase phase,
+      HookOutcome outcome)
       implements QueryEvent {
 
     public HookFired {
@@ -674,12 +676,9 @@ public sealed interface QueryEvent
         throw new IllegalArgumentException("hookName must not be blank");
       }
       Objects.requireNonNull(phase, "phase must not be null");
-      if (Strings.isBlank(phase)) {
-        throw new IllegalArgumentException("phase must not be blank");
-      }
-      Objects.requireNonNull(outcomeKind, "outcomeKind must not be null");
-      if (Strings.isBlank(outcomeKind)) {
-        throw new IllegalArgumentException("outcomeKind must not be blank");
+      Objects.requireNonNull(outcome, "outcome must not be null");
+      if (outcome instanceof HookOutcome.Continue) {
+        throw new IllegalArgumentException("a Continue outcome is never announced");
       }
     }
   }

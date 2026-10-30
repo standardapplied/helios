@@ -154,19 +154,19 @@ class SessionRunCharacterizationTest {
       List.of(
           "RunStarted turn=0 run",
           "UserMessageReceived turn=0 start files=1",
-          "HookFired turn=1 SessionRunCharacterizationTest$Run PreModelTurnHook Inject",
+          "HookFired turn=1 SessionRunCharacterizationTest$Run PRE_MODEL_TURN Inject",
           "TurnEnded turn=1 TOOL_CALLS",
           "UserMessageReceived turn=1 pre-model inject files=0",
           "TurnRetried turn=2 attempt=1 delay=PT0S test",
           "ModelCallEnded turn=2 attempt=1 ERROR tokens=0 error=true",
           "ModelCallEnded turn=2 attempt=2 TOOL_CALLS tokens=15 error=false",
-          "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook MutateArgs",
+          "HookFired turn=2 SessionRunCharacterizationTest$Run PRE_TOOL_USE MutateArgs",
           "ToolMutated turn=2 c1 SessionRunCharacterizationTest$Run {v=one}->{v=mutated}",
           "ToolUse turn=2 c1 {v=mutated}",
           "ToolResult turn=2 c1 Succeeded echoed: mutated",
-          "HookFired turn=2 SessionRunCharacterizationTest$Run PostToolUseHook MutateResult",
+          "HookFired turn=2 SessionRunCharacterizationTest$Run POST_TOOL_USE MutateResult",
           "ToolResult turn=2 c1 Succeeded post-mutated: echoed: mutated",
-          "HookFired turn=2 SessionRunCharacterizationTest$Run PreToolUseHook Block",
+          "HookFired turn=2 SessionRunCharacterizationTest$Run PRE_TOOL_USE Block",
           "ToolBlocked turn=2 c2 SessionRunCharacterizationTest$Run not allowed",
           "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
           "TurnEnded turn=2 TOOL_CALLS",
@@ -180,7 +180,7 @@ class SessionRunCharacterizationTest {
           "AssistantText turn=4 {\"answer\":\"draft\"}",
           "ModelCallEnded turn=4 attempt=1 STOP tokens=26 error=false",
           "TurnEnded turn=4 STOP",
-          "HookFired turn=4 SessionRunCharacterizationTest$Run PreStopHook Inject",
+          "HookFired turn=4 SessionRunCharacterizationTest$Run PRE_STOP Inject",
           "UserMessageReceived turn=4 pre-stop inject files=0",
           "AssistantText turn=5 {\"answer\":\"final\"}",
           "ModelCallEnded turn=5 attempt=1 STOP tokens=37 error=false",
@@ -344,7 +344,7 @@ class SessionRunCharacterizationTest {
           case QueryEvent.UserMessageReceived e ->
               oneLine(e.message().text()) + " files=" + e.message().attachments().size();
           case QueryEvent.HookFired e ->
-              hook(e.hookName()) + " " + e.phase() + " " + e.outcomeKind();
+              hook(e.hookName()) + " " + e.phase() + " " + e.outcome().getClass().getSimpleName();
           case QueryEvent.TurnEnded e -> String.valueOf(e.reason());
           case QueryEvent.TurnRetried e ->
               "attempt=" + e.attemptNumber() + " delay=" + e.backoff() + " " + e.providerName();

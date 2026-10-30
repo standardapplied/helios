@@ -6,6 +6,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**`HookFired` carries the hook's phase and its outcome.** A reader of `events()` or a trace sees
+which guardrail fired and why: the `Block` reason, the injected text, the rewritten arguments,
+each with the session's secrets redacted; the loop still acts on the hook's own outcome.
+
+| Before | 3.0 |
+|---|---|
+| `String HookFired.phase()` (`"PreToolUseHook"`) | `HookPhase HookFired.phase()`, the new `session.hooks.HookPhase` enum (`PRE_TOOL_USE`) |
+| `String HookFired.outcomeKind()` (`"Block"`) | `HookOutcome HookFired.outcome()`, redacted, never `Continue`; `outcome().getClass().getSimpleName()` gives the old string |
+| `new HookFired(..., hookName, String phase, String outcomeKind)` | `new HookFired(..., hookName, HookPhase phase, HookOutcome outcome)` |
+| runtime SSE `HookFired`: `"phase":"PreToolUseHook","outcomeKind":"Block"` | `"phase":"PRE_TOOL_USE","outcome":{"kind":"Block","reason":"..."}`, each outcome its `kind` and components, `MutateHistory` as `{"kind":"MutateHistory","messages":<count>}` |
+| trace `hook.<name>` span `hook.phase` = `PreToolUseHook` | `PRE_TOOL_USE`, so a trace query filtering on it changes; a `VERBOSE` trace adds `hook.text`, the outcome's redacted reason or text |
+
 **Every run records a trace; a trace's session id is a string.** A session given a trace
 listener hands it one trace per run, and each model attempt is an event.
 

@@ -12,6 +12,8 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
 import com.standardapplied.helios.session.hooks.HookContext;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.HookPhase;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
@@ -56,7 +58,9 @@ final class LoopCollaboratorsTest {
     var state = new SessionState("sess-collab", new CancellationToken(), CLOCK);
 
     assertEquals("sess-collab", collaborators.hookContext(state).sessionId());
-    collaborators.emitter().emitHookFired(state, "h", "PreToolUseHook", "Block");
+    collaborators
+        .emitter()
+        .emitHookFired(state, "h", HookPhase.PRE_TOOL_USE, HookOutcome.block("r"));
     assertTrue(events.getFirst() instanceof QueryEvent.HookFired);
   }
 }

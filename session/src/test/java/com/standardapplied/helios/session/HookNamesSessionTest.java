@@ -123,7 +123,7 @@ final class HookNamesSessionTest {
     assertInstanceOf(ResultMessage.Success.class, run.terminal());
     var fired = run.onlyHookFired();
     assertEquals(SECOND_ANONYMOUS, fired.hookName());
-    assertEquals("MutateResult", fired.outcomeKind());
+    assertEquals(HookOutcome.mutateResult("x"), fired.outcome());
   }
 
   @Test

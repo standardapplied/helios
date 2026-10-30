@@ -27,6 +27,9 @@ import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.ExecutionResult;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -230,6 +233,48 @@ final class AgentHttpServiceIntegrationTest {
       assertTrue(call.data.contains("\"cost\":{\"microUsd\":3}"), call.data);
       assertTrue(call.data.contains("\"duration\":\"PT"), call.data);
       assertTrue(call.data.contains("\"modelId\":\"scripted\""), call.data);
+    }
+  }
+
+  @Test
+  void aHookFiredStreamsItsPhaseAndOutcomeAndAHistoryRewriteAsItsMessageCount() throws Exception {
+    var write =
+        Tool.newBuilder()
+            .withName("write")
+            .withExecutor((args, ctx) -> ToolResult.success("wrote"))
+            .build();
+    PreModelTurnHook rewrite = (history, ctx) -> HookOutcome.mutateHistory(history);
+    PreToolUseHook guard = (call, ctx) -> HookOutcome.block("no writes to /etc");
+    var server =
+        serverWithFactory(
+            request ->
+                SessionOptions.newBuilder()
+                    .withModel(callingOnce(new ToolCall("c1", "write", Map.of())))
+                    .withTools(
+                        List.of(
+                            ToolBinding.newBuilder(write).withCategory(ToolCategory.READ).build()))
+                    .withHook(rewrite)
+                    .withHook(guard)
+                    .withSessionId(request.sessionId())
+                    .build());
+    try (server) {
+      var base = baseUrl(server);
+      var sessionId = createSession(http, base);
+      var events = startEventReader(http, base, sessionId);
+      sendMessage(http, base, sessionId, "go");
+
+      var fired =
+          events.awaitRunEnded().stream()
+              .filter(e -> e.event.equals("HookFired"))
+              .map(e -> mapper.readTree(e.data))
+              .map(e -> e.get("phase").asString() + " " + e.get("outcome"))
+              .toList();
+      assertEquals(
+          List.of(
+              "PRE_MODEL_TURN {\"kind\":\"MutateHistory\",\"messages\":1}",
+              "PRE_TOOL_USE {\"kind\":\"Block\",\"reason\":\"no writes to /etc\"}",
+              "PRE_MODEL_TURN {\"kind\":\"MutateHistory\",\"messages\":3}"),
+          fired);
     }
   }
 
