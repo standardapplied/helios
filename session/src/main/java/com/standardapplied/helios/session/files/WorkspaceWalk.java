@@ -15,11 +15,12 @@ import java.nio.file.attribute.BasicFileAttributes;
 /**
  * The search tools' one walk over a workspace subtree, through {@link
  * WorkspaceRoot#walkFileTree(Path, java.nio.file.FileVisitor)}. Hidden directories below the start
- * are pruned, only regular files within the size cap reach the per-file action, unreadable entries
- * are skipped, and the walk stops on cancellation or once the actions have produced the result cap.
- * A directory below the start or a regular file whose canonical key the call's {@link Withholding}
- * withholds is skipped, a directory without being read; links and special files are skipped before
- * that check, so they are never counted.
+ * and the {@linkplain WorkspaceRoot#MEMORY_STORE memory store} are pruned, only regular files
+ * within the size cap reach the per-file action, unreadable entries are skipped, and the walk stops
+ * on cancellation or once the actions have produced the result cap. A directory below the start or
+ * a regular file whose canonical key the call's {@link Withholding} withholds is skipped, a
+ * directory without being read; links and special files are skipped before that check, so they are
+ * never counted.
  */
 final class WorkspaceWalk extends SimpleFileVisitor<Path> {
 
@@ -97,6 +98,9 @@ final class WorkspaceWalk extends SimpleFileVisitor<Path> {
   public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
     if (cancellation.isCancelled()) {
       return FileVisitResult.TERMINATE;
+    }
+    if (workspace.inMemoryStore(dir)) {
+      return FileVisitResult.SKIP_SUBTREE;
     }
     if (dir.equals(start)) {
       return FileVisitResult.CONTINUE;

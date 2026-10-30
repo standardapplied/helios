@@ -218,7 +218,10 @@ without asking, in every mode), never descend into a withheld directory, and end
 except what those rules withhold; a mode or category default, such as `LOCKED_DOWN`'s deny, is not
 a rule and withholds nothing. Memory is its own namespace: a memory call is authorised by
 `MemoryRead`/`MemoryWrite` rules on its `/memories/...` key, and a `Read` rule over the directory
-backing a filesystem memory store does not apply to it.
+backing a filesystem memory store does not apply to it. That directory, `<workspace>/.agent/memory`,
+is reachable only through `MemoryRead`/`MemoryWrite`, in every workspace: `Read`, `LS`, `Glob` and
+`Grep` refuse a path in it, however spelled, before any rule is evaluated, and their walks skip it,
+so `MemoryRead` rules protect it. `Execute` is not covered; the sandbox is the boundary there.
 
 ## Hooks
 

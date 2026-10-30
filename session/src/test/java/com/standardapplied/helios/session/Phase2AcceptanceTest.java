@@ -57,9 +57,9 @@ final class Phase2AcceptanceTest {
     Files.writeString(tmp.resolve("sensitive.txt"), "secret stuff\n", StandardCharsets.UTF_8);
 
     // Memory backend with one seeded entry.
-    Files.createDirectories(tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR));
+    Files.createDirectories(tmp.resolve(WorkspaceRoot.MEMORY_STORE));
     Files.writeString(
-        tmp.resolve(FileSystemMemoryBackend.STORAGE_SUBDIR + "/INDEX.md"),
+        tmp.resolve(WorkspaceRoot.MEMORY_STORE + "/INDEX.md"),
         "remember the README",
         StandardCharsets.UTF_8);
 
