@@ -139,4 +139,67 @@ class StringsTest {
         assertThrows(IllegalArgumentException.class, () -> Strings.truncated("r", maxChars, "%d"));
     assertEquals("maxChars must be positive: " + maxChars, ex.getMessage());
   }
+
+  private static final String CUT = "[%d cut]";
+
+  @Test
+  void aTextAtTheBoundKeepsItsMiddle() {
+    var whole = "r".repeat(8);
+    assertSame(whole, Strings.truncatedMiddle(whole, 8, CUT));
+  }
+
+  @Test
+  void oneCharOverTheBoundIsCutFromTheMiddle() {
+    assertEquals("abcd[1 cut]fghi", Strings.truncatedMiddle("abcdefghi", 8, CUT));
+  }
+
+  @Test
+  void anEvenBoundKeepsHalfOnEachSide() {
+    assertEquals("ab[8 cut]yz", Strings.truncatedMiddle("ab" + "-".repeat(8) + "yz", 4, CUT));
+  }
+
+  @Test
+  void anOddBoundKeepsTheExtraCharAtTheEnd() {
+    assertEquals("ab[7 cut]xyz", Strings.truncatedMiddle("ab" + "-".repeat(7) + "xyz", 5, CUT));
+  }
+
+  @Test
+  void aHeadSeamOnTheFirstHalfOfAPairKeepsOneCharLessAtTheStart() {
+    assertEquals("ab[11 cut]xyz", Strings.truncatedMiddle("ab😀" + "-".repeat(8) + "wxyz", 6, CUT));
+  }
+
+  @Test
+  void aTailSeamOnTheSecondHalfOfAPairKeepsOneCharLessAtTheEnd() {
+    assertEquals("abc[10 cut]xy", Strings.truncatedMiddle("abc" + "-".repeat(8) + "😀xy", 6, CUT));
+  }
+
+  @Test
+  void aBoundOfOneKeepsOnlyTheLastChar() {
+    assertEquals("[2 cut]c", Strings.truncatedMiddle("abc", 1, CUT));
+  }
+
+  @Test
+  void aBoundOfOneOnAPairKeepsNothing() {
+    assertEquals("[2 cut]", Strings.truncatedMiddle("😀", 1, CUT));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1})
+  void aMiddleCutWithABoundThatKeepsNothingIsRejected(int maxChars) {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> Strings.truncatedMiddle("r", maxChars, "%d"));
+    assertEquals("maxChars must be positive: " + maxChars, ex.getMessage());
+  }
+
+  @Test
+  void aMiddleCutRejectsANullNote() {
+    var ex = assertThrows(NullPointerException.class, () -> Strings.truncatedMiddle("r", 1, null));
+    assertEquals("note must not be null", ex.getMessage());
+  }
+
+  @Test
+  void aMiddleCutRejectsANullText() {
+    assertThrows(NullPointerException.class, () -> Strings.truncatedMiddle(null, 1, "%d"));
+  }
 }
