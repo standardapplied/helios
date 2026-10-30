@@ -180,10 +180,8 @@ remove the per-call working directory before they release the concurrency permit
 | `SpanBuilder.attribute(k, v)`, `usage(u)`, `cost(c)` | `withAttribute(k, v)`, `withUsage(u)`, `withCost(c)` |
 | `TraceBuilder.attribute`, `inputText`, `outputText`, `userId`, `sessionId`, `modelId`, `promptName`, `promptVersion`, `groupId`, `labels` | `withAttribute`, `withInputText`, `withOutputText`, `withUserId`, `withSessionId`, `withModelId`, `withPromptName`, `withPromptVersion`, `withGroupId`, `withLabels` |
 | `TraceBuilder.span(name, kind)`, `SpanBuilder.span(name, kind)`, `SpanContainer.span(name, kind)` | `withChildSpan(name, kind)` |
-| `DurableResumeScanner.Builder.register(agentId, resolver)`, `registerAgent(...)`, `registerWorkflow(...)` | `withResolver(agentId, resolver)`, `withAgent(...)`, `withWorkflow(...)` |
 | `ScriptedModel.Builder.thenText(...)`, `thenToolCalls(...)`, `thenRefusal(text)` (each appends the next turn) | `withTextTurn(...)`, `withToolCallsTurn(...)`, `withRefusalTurn(text)` (each still appends the next turn) |
 | `SessionOptions.Builder.apply(preset)` | removed with `SessionPreset`; see "A preset takes the model and a path" below |
-| `DurabilityCoordinator.journalStart(...)`, `journalTerminal(...)`, `journalTerminalFailure(...)`, `inflightFor(runId)`, `markInflightFailed(...)` | `new ToolCallJournaling(durability)` with `start(...)`, `complete(...)`, `fail(...)`, `inflight(runId)`, `markInflightFailed(...)`; `DurabilityCoordinator` keeps the run lifecycle, and journal warnings log under `com.standardapplied.helios.core.runtime.ToolCallJournaling` |
 
 **A model stream is a closeable pull iterator.** `Model`'s default stream used to call the
 blocking `chat` and replay a chunk sequence made up from the finished response, so a session saw
@@ -403,7 +401,7 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
 | `sandbox.ExecutionResult.submitted()`, `hasSubmittedValue()`, `success(String, Object)`, `Builder.withSubmitted(Object)`, and the canonical constructor's `submitted` component | removed: no snippet can submit. The execute reply no longer carries `submitted` |
 | `ReplConfig.maxOutputCharsToModel`, `DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL`, `Builder.withMaxOutputCharsToModel(int)` and the canonical constructor's component | removed: only `CodeExecutionTool` read it |
 | `ReplSession.config()` | removed: only `CodeExecutionTool` read it |
-| `Tool.resultCompactor()`, `Tool.DEFAULT_RESULT_COMPACTOR`, `Tool.Builder.withResultCompactor(Function)` and the canonical constructor's `resultCompactor` component | removed: no Helios code read it, and context compaction summarises history without it. `Tool(name, description, parameters, executor, idempotent)` is the canonical constructor |
+| `Tool.resultCompactor()`, `Tool.DEFAULT_RESULT_COMPACTOR`, `Tool.Builder.withResultCompactor(Function)` and the canonical constructor's `resultCompactor` component | removed: no Helios code read it, and context compaction summarises history without it. `Tool(name, description, parameters, executor)` is the canonical constructor |
 | `examples/codeact-demo`, `examples/rlm-demo` | removed |
 
 **A typed `runBlocking` never returns `null`.** `AgentSession.runBlocking(message, schema)` on a
@@ -554,9 +552,9 @@ the stream produced before it failed.
 | `ToolCall.Builder.withArguments` rejected a `null` value | a JSON `null` argument stays a `null` value (`core.common.JsonSnapshot`); `HookOutcome.MutateArgs`, both `QueryEvent.ToolMutated` inputs and `HeliosEvent.ToolCallStarted.args` keep it too |
 
 **A tool call is a validated, deeply immutable snapshot of a JSON object.** The call a hook
-authorises is now the call the tool executes, the events record and a journal persists: its
+authorises is now the call the tool executes, the events record and a store persists: its
 arguments are copied once, all the way down, where they enter (`ToolCall`, `HookOutcome.MutateArgs`,
-both `QueryEvent.ToolMutated` inputs, `HeliosEvent.ToolCallStarted.args`, `ToolCallRecord.args`),
+both `QueryEvent.ToolMutated` inputs, `HeliosEvent.ToolCallStarted.args`),
 by the new `core.common.JsonSnapshot.ofObject(name, map)`. A JSON value is `null`, a `Boolean`, a
 `String`, a `Byte`, `Short`, `Integer`, `Long`, `BigInteger` or `BigDecimal` (not a subclass), a
 finite `Float` or `Double`, a `List`, or a `Map` with `String` keys; a number is kept as the same
@@ -572,7 +570,6 @@ rejected).
 | Provider-decoded arguments past a `JsonSnapshot` limit (nested deeper than 64, more than 100,000 values) reached the tool | the stream ends in an `Error` naming the tool, `Arguments of tool call '<name>' are rejected: <where> <why>`; the call is never dispatched |
 | A provider tool call without an id (Anthropic `tool_use` without `id`, OpenAI `function_call` without `call_id`, Gemini `function_call` step without `id`) came back from `chat` as a `ToolCall` with a `null` id, while `chatStream` ended in a bare `NullPointerException` | both end in the provider's exception, `Tool call '<name>' streamed without an id`, through the new `core.provider.ToolCallStarts`; a call without a name ends in `A tool call streamed without a tool name`, where a terminal event used to name it `'<unnamed>'` |
 | `OrderedMaps.copyOfKeepingNullValues(map)` | removed; `JsonSnapshot.ofObject(name, map)` |
-| `PgToolCallJournal` and `JsonbMapper.toolCallsFromJsonb` read a persisted fraction back as a rounded `Double`, and one beyond `Double`'s range as `Infinity` | exact in value, through the new `JsonbMapper.argumentsFromJsonb`: an integer as an `Integer`, `Long` or `BigInteger`, a fraction as a `BigDecimal`. Not as the original type: `jsonb` writes a number out in full, so a `Double` `1.0E300` reads back as a `BigInteger` and a `BigDecimal` `1E+3` as the `Integer` `1000` |
 
 **Every runtime route requires an authenticated identity and acts only on its caller's own
 sessions.** `RuntimeServer` and `AgentHttpService` authenticate every request through one
@@ -956,6 +953,25 @@ events go. `core.trace.TraceListener.onTrace(Trace)` receives a finished trace.
 | `TraceBuilder.start(String, UUID, List<EventSink>)` | `TraceBuilder.start(String)`; spans no longer emit open/close events |
 | `PgTraceStore implements EventSink`: `onEvent(HeliosEvent)` and `store(Trace)` | `PgTraceStore implements TraceListener`: `onTrace(Trace)`, one transaction as before |
 
+**The durable-run layer is gone.** The session never used the run store, the tool-call journal or
+the resume scanner, so the toolkit, its in-memory and Postgres implementations and its two tables
+are removed. Durable conversations are `SessionStore` / `PgSessionStore`. `schema.sql` no longer
+creates `helios_agent_runs` or `helios_tool_calls`; existing tables are not dropped, since
+`schema.sql` only creates what is missing. A deployment that never used them may drop them, child
+table first:
+
+```sql
+DROP TABLE IF EXISTS helios_tool_calls;
+DROP TABLE IF EXISTS helios_agent_runs;
+```
+
+| 2.x | 3.0 |
+|---|---|
+| `core.runtime`: `AgentRun`, `AgentRunStatus`, `Durability`, `DurabilityCoordinator`, `DurableResumeScanner`, `InMemoryRunStore`, `InMemoryToolCallJournal`, `RunStore`, `ToolCallJournal`, `ToolCallJournaling`, `ToolCallRecord`, `ToolCallStatus`, `UnsafeResumeException`, `UnsafeResumePolicy`; persistence: `PgDurability`, `PgRunStore`, `PgToolCallJournal`, `mapper.AgentRunMapper`, `mapper.ToolCallRecordMapper`, `sql.AgentRunSql`, `sql.ToolCallJournalSql` | removed, with no replacement; a host that checkpoints its own runs keeps its own table |
+| `Tool.idempotent()`, `Tool.Builder.withIdempotent(boolean)` and the canonical constructor's `idempotent` component | removed: nothing read it and the session never retries a tool call. `Tool(name, description, parameters, executor)` |
+| `PgConfig.agentId()`, `PgConfig.Builder.withAgentId(String)` and the canonical constructor's `agentId` component | removed: only `PgRunStore` read it. `PgConfig(dbClient, schema, redactor)` |
+| `JsonbMapper.argumentsFromJsonb(String)` | removed: only the journal read it |
+
 ### Added
 
 - **Every run records a trace.** `SessionOptions.Builder.withTraceListener(listener)` hands the
@@ -1039,7 +1055,7 @@ events go. `core.trace.TraceListener.onTrace(Trace)` receives a finished trace.
   `StreamingModel` does. Abstract contract tests run one set of cases against every implementation:
   `ModelIntegrationContract` (live provider parity, asserting only what holds for any model
   output), `ConversationRequestContract` (the system message and earlier turns a request carries,
-  offline), `BoundedErrorBodyContract`, `PromptRegistryContract` and `ToolCallJournalContract`.
+  offline), `BoundedErrorBodyContract` and `PromptRegistryContract`.
   Depend on it with
   `<type>test-jar</type>` and `<scope>test</scope>`.
 - **`core.common.OrderedMaps.copyOf(Map)`** is the one ordered copy of a map Helios sends to a

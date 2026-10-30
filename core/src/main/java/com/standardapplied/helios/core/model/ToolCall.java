@@ -13,7 +13,7 @@ import java.util.Objects;
 /**
  * Represents a tool call requested by the model. Its arguments are a deep, unmodifiable snapshot
  * taken at construction, so the call a hook authorises is the call the tool executes, the events
- * record and a journal persists. Constructing one with a {@code null} component throws {@link
+ * record and a store persists. Constructing one with a {@code null} component throws {@link
  * NullPointerException}; with a blank id or name, or arguments {@link JsonSnapshot} rejects, {@link
  * IllegalArgumentException}.
  *

@@ -88,7 +88,6 @@ public final class GlobTool {
                             "Optional root directory for the search (defaults to workspace root).")
                         .withRequired(false)
                         .build()))
-            .withIdempotent(true)
             .withExecutor((args, ctx) -> execute(ctx, workspace, args))
             .build();
     return ToolBinding.newBuilder(tool)

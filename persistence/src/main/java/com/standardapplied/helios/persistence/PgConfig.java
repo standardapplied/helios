@@ -22,16 +22,15 @@ import java.util.regex.Pattern;
  *     Helidon DbClient cannot parameterise identifiers, so the compact-constructor validator is the
  *     only line of defence against SQL injection if the schema name ever flows from configuration
  *     or external input
- * @param agentId the agent identifier for scoping data, or null when not needed
- * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} and {@link
- *     PgToolCallJournal} to trace/journal text fields before persisting. {@code null} (default)
- *     preserves verbatim capture, suitable for evals and debugging. The session's own redaction
- *     pass does not reach persistence, since the session does not feed these stores; to redact what
- *     is persisted, pass {@code registry.redactor()} from the {@link
+ * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} to trace and span text
+ *     fields and attribute maps before persisting. {@code null} (default) preserves verbatim
+ *     capture, suitable for evals and debugging. The session's own redaction pass does not reach
+ *     persistence, since the session does not feed these stores; to redact what is persisted, pass
+ *     {@code registry.redactor()} from the {@link
  *     com.standardapplied.helios.core.common.SecretRegistry} given to {@code
  *     SessionOptions.withSecretRegistry}
  */
-public record PgConfig(DbClient dbClient, String schema, String agentId, Redactor redactor) {
+public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
 
   private static final Pattern VALID_SCHEMA = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,62}");
 
@@ -108,7 +107,6 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
 
     private DbClient dbClient;
     private String schema;
-    private String agentId;
     private Redactor redactor;
 
     private Builder() {}
@@ -123,15 +121,10 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
       return this;
     }
 
-    public Builder withAgentId(String agentId) {
-      this.agentId = agentId;
-      return this;
-    }
-
     /**
-     * Set the {@link Redactor} applied to trace and journal text fields before persisting. Pass
-     * {@code null} to clear a previously-set redactor (default: unset / no-op). This is the only
-     * redaction persistence applies: the session's redaction pass does not reach these stores.
+     * Set the {@link Redactor} applied to trace and span text fields before persisting. Pass {@code
+     * null} to clear a previously-set redactor (default: unset / no-op). This is the only redaction
+     * persistence applies: the session's redaction pass does not reach these stores.
      */
     public Builder withRedactor(Redactor redactor) {
       this.redactor = redactor;
@@ -139,7 +132,7 @@ public record PgConfig(DbClient dbClient, String schema, String agentId, Redacto
     }
 
     public PgConfig build() {
-      return new PgConfig(dbClient, schema, agentId, redactor);
+      return new PgConfig(dbClient, schema, redactor);
     }
   }
 }

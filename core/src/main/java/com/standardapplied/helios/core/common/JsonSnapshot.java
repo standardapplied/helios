@@ -38,8 +38,8 @@ import java.util.stream.Collectors;
  * stream may carry (Jackson 100,000,000); {@value #MAX_KEY_LENGTH} characters in a key (Jackson
  * 50,000); {@value #MAX_NUMBER_DIGITS} digits in a {@link BigInteger} or {@link BigDecimal} written
  * out in full, as PostgreSQL's {@code jsonb} returns it, so every accepted number reads back from a
- * journal (Jackson 1,000). A finite {@link Double} or {@link Float} written out in full has at most
- * 326 digits, within the limit.
+ * {@code jsonb} column (Jackson 1,000). A finite {@link Double} or {@link Float} written out in
+ * full has at most 326 digits, within the limit.
  */
 public final class JsonSnapshot {
 
