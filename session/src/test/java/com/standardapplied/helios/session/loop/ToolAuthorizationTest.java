@@ -315,23 +315,4 @@ final class ToolAuthorizationTest {
     assertSame(call, admitted.call());
     assertFalse(admitted.withheld().test("./secrets"));
   }
-
-  // ── diagnostics ──────────────────────────────────────────────────────────
-
-  @Test
-  void aDiagnosticHasEverySecretRedacted() {
-    var secrets = new SecretRegistry();
-    secrets.register("TOKEN", "tok-0123456789");
-    var diagnostic = ToolAuthorization.diagnostic(secrets, "key Write(tok-0123456789) denied");
-    assertEquals("key Write(<redacted:TOKEN>) denied", diagnostic.text());
-    assertEquals(Map.of("TOKEN", 1), diagnostic.counts());
-  }
-
-  @Test
-  void aLongerDiagnosticIsCutAtTheBound() {
-    var reason = "r".repeat(ToolAuthorization.MAX_REASON_CHARS + 5);
-    assertEquals(
-        "r".repeat(ToolAuthorization.MAX_REASON_CHARS) + "… [5 more chars]",
-        ToolAuthorization.diagnostic(new SecretRegistry(), reason).text());
-  }
 }

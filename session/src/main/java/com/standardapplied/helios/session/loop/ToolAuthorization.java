@@ -2,16 +2,13 @@
 
 package com.standardapplied.helios.session.loop;
 
-import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -22,11 +19,9 @@ import java.util.function.Predicate;
  * it canonicalises the call's path argument, authorises the canonical call on its key, and decides
  * the exact call that runs, the canonical one. It fails closed, so only an {@link
  * PermissionEffect#ALLOW} decision admits the call. A refusal's reason, like every reason the round
- * refuses a call with, is a diagnostic: redacted through the session's secrets and bounded.
+ * refuses a call with, goes through {@link RedactedReason} before anything shows it.
  */
 final class ToolAuthorization {
-
-  static final int MAX_REASON_CHARS = 1024;
 
   /** The predicate of a call that withholds nothing. */
   static final Predicate<String> NOTHING_WITHHELD = key -> false;
@@ -141,16 +136,5 @@ final class ToolAuthorization {
       Set<PermissionEffect> effects) {
     var decision = permission.evaluate(new ToolPermissionKey(tool, key), walking.category());
     return decision.rule().isPresent() && effects.contains(decision.effect());
-  }
-
-  /**
-   * {@code reason} with every registered secret redacted, cut after {@link #MAX_REASON_CHARS}
-   * characters (never inside a surrogate pair) with a note of how much was cut, and the count of
-   * each secret redacted.
-   */
-  static RedactionResult diagnostic(SecretRegistry secrets, String reason) {
-    var redaction = secrets.redactor().redact(reason);
-    var cut = Strings.truncated(redaction.text(), MAX_REASON_CHARS, "… [%d more chars]");
-    return new RedactionResult(cut.getBytes(StandardCharsets.UTF_8), redaction.counts());
   }
 }

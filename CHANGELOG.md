@@ -1353,6 +1353,8 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Security
 
+- **`QueryEvent.MessageBlocked.reason` is redacted against the session's secrets and bounded**, as
+  `ToolBlocked.reason` is.
 - **A deny rule on a path can no longer be bypassed.** It was bypassed by spelling the path
   differently (`secrets/key`, `docs/../secrets/key`, an absolute path, a symlink), by swapping a
   symlink in after approval, or by searching or listing from a directory above it (`Grep .`,
