@@ -225,7 +225,8 @@ public sealed interface QueryEvent
    * @param timestamp the event timestamp
    * @param message the dropped message; non-null
    * @param hookName the name of the hook that blocked the message; non-null and non-blank
-   * @param reason the reason the hook supplied; non-null and non-blank
+   * @param reason the reason the hook supplied, redacted against the session's secrets and bounded
+   *     like {@link ToolBlocked#reason()}; non-null and non-blank
    */
   record MessageBlocked(
       String sessionId,

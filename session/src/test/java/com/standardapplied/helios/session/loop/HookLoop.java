@@ -35,6 +35,7 @@ final class HookLoop {
   private final LoopFixture fixture =
       new LoopFixture("sess-hook", Instant.parse("2026-05-15T09:00:00Z"));
   private final SessionState state = fixture.state();
+  private final SecretRegistry secrets = new SecretRegistry();
 
   /** A registry holding one READ tool, {@code echo}, that answers {@code "echoed: " + v}. */
   static ToolRegistry echoTool() {
@@ -52,6 +53,11 @@ final class HookLoop {
   /** A call of the {@code echo} tool with id {@code c1}. */
   static ToolCall echoCall(Map<String, Object> arguments) {
     return new ToolCall("c1", "echo", arguments);
+  }
+
+  /** The session's secret registry, whose secrets the run redacts. */
+  SecretRegistry secrets() {
+    return secrets;
   }
 
   /** Runs the loop over {@code message} with {@code hooks} and no tools. */
@@ -80,8 +86,8 @@ final class HookLoop {
     queue.offer(message);
     var collaborators =
         new LoopCollaborators(
-            new HookRegistry(List.of(hooks), new SecretRegistry()),
-            fixture.dispatch(tools),
+            new HookRegistry(List.of(hooks), secrets),
+            fixture.dispatch(tools, secrets),
             authorization,
             Authorizations.NO_RULE,
             queue,
