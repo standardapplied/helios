@@ -167,39 +167,9 @@ final class CostCalculatorTest {
   }
 
   @Test
-  void pricingAnthropicCachingFiveMinuteFactoryAppliesPublishedRatios() {
-    var p = Pricing.anthropicCaching5m(15.0, 75.0);
-    assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
-    assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
-    assertEquals(
-        18_750_000L,
-        p.cacheWriteMicroUsdPerMillion(),
-        "Anthropic 5-minute cache writes bill at 1.25x base input");
-    assertEquals(
-        1_500_000L,
-        p.cacheReadMicroUsdPerMillion(),
-        "Anthropic cache reads bill at 0.10x base input");
-  }
-
-  @Test
-  void pricingAnthropicCachingOneHourFactoryAppliesPublishedRatios() {
-    var p = Pricing.anthropicCaching1h(15.0, 75.0);
-    assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
-    assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
-    assertEquals(
-        30_000_000L,
-        p.cacheWriteMicroUsdPerMillion(),
-        "Anthropic 1-hour cache writes bill at 2x base input");
-    assertEquals(
-        1_500_000L,
-        p.cacheReadMicroUsdPerMillion(),
-        "Anthropic cache reads bill at 0.10x base input");
-  }
-
-  @Test
   void pricingCostIncludesEveryTokenClassWeighted() {
     // Mirror the matchmaking baseline shape: $15/M input, $75/M output, plus cache ratios.
-    var p = Pricing.anthropicCaching5m(15.0, 75.0);
+    var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
     var usage = Usage.of(1_000_000, 1_000_000, 1_000_000, 1_000_000);
     // input  $15.00 + output $75.00 + cache write $18.75 + cache read $1.50 = $110.25
     assertEquals(110_250_000L, p.cost(usage).microUsd());
@@ -211,7 +181,7 @@ final class CostCalculatorTest {
     // shifts a large share of input tokens from "input" (full price) to "cache_read" (0.10x).
     // The pre-fix calculation billed every input token at full price; the post-fix calculation
     // applies the discount to cache reads.
-    var p = Pricing.anthropicCaching5m(15.0, 75.0);
+    var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
 
     // No-caching baseline (pre-fix): 12_279_022 input tokens × $15/M + 684_700 × $75/M.
     var baseline = Usage.of(12_279_022, 684_700);

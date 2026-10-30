@@ -3,12 +3,12 @@
 package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.TransientStreamException;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.tool.Tool;

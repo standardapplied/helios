@@ -9,10 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.BlockingModel;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import com.standardapplied.helios.core.tool.Tool;
 import java.util.List;
 import org.junit.jupiter.api.Test;

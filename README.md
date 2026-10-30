@@ -29,7 +29,7 @@ Pick what you need — each jar is published independently:
 | `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
 | `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
 | `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
-| `helios-persistence` | PostgreSQL-backed `PromptRegistry` and `PgTraceStore` | Helidon DbClient |
+| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgTraceStore` and `PgSessionStore` | Helidon DbClient |
 
 Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
 
@@ -236,9 +236,8 @@ var options = SessionOptions.newBuilder()
 
 `AnthropicPricing.AS_OF` records when the rates were last checked against the pricing page. For
 negotiated or partner-platform rates, build a `CostCalculator.staticTable(...)` with
-`Pricing.anthropicCaching5m(input, output)` or `Pricing.anthropicCaching1h(input, output)`; both
-assume the standard 0.10× cache-read multiplier, which Fable 5.1 (0.025×) and Opus 5.5 (0.05×) do
-not use.
+`Pricing.ofUsdPerMillion(input, output, cacheWrite, cacheRead)`, taking all four rates from your
+rate card.
 
 ### 2) Streamable session
 

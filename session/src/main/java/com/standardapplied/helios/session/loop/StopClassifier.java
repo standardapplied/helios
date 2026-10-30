@@ -28,9 +28,9 @@ import java.util.Optional;
  *       ResultMessage.Cancelled} instead of the more informative {@link
  *       ResultMessage.ErrorMaxWallClock}.
  *   <li>Budget exhaustion — accumulated cost exceeds {@code limits.maxBudgetMicroUsd()}.
- *   <li>Cancellation — the session's {@link
- *       com.standardapplied.helios.core.runtime.CancellationToken CancellationToken} is signalled
- *       by a path other than wall-clock expiry (explicit {@code close()}, host-initiated cancel).
+ *   <li>Cancellation — the session's {@link com.standardapplied.helios.core.model.CancellationToken
+ *       CancellationToken} is signalled by a path other than wall-clock expiry (explicit {@code
+ *       close()}, host-initiated cancel).
  *   <li>Refusal — the provider reported {@link FinishReason#CONTENT_FILTER} or {@link
  *       FinishReason#REFUSAL}.
  *   <li>Provider error — the provider reported {@link FinishReason#ERROR}.

@@ -4,8 +4,8 @@
  */
 package com.standardapplied.helios.session.execution;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.tool.SessionContext;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;

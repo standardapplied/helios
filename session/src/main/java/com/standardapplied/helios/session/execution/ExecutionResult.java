@@ -10,10 +10,10 @@ import java.util.Objects;
 
 /**
  * Outcome of a single {@link
- * ExecutionProvider#execute(com.standardapplied.helios.core.runtime.SessionContext,
- * ExecutionRequest, com.standardapplied.helios.core.runtime.CancellationToken) execute} call. The
- * text is raw: the session redacts the {@code Execute} tool's output against its secret registry
- * before anything sees it.
+ * ExecutionProvider#execute(com.standardapplied.helios.core.tool.SessionContext, ExecutionRequest,
+ * com.standardapplied.helios.core.model.CancellationToken) execute} call. The text is raw: the
+ * session redacts the {@code Execute} tool's output against its secret registry before anything
+ * sees it.
  *
  * <p>Naming overlaps with {@code com.standardapplied.helios.repl.sandbox.ExecutionResult} — that
  * one is internal to the JShell sandbox subprocess protocol and stays scoped to its package. This

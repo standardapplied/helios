@@ -2,10 +2,11 @@
  * Copyright (c) 2026 Standard Applied Intelligence Labs
  * SPDX-License-Identifier: MIT
  */
-package com.standardapplied.helios.core.runtime;
+package com.standardapplied.helios.core.tool;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CancellationToken;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.Objects;
@@ -15,10 +16,9 @@ import java.util.Objects;
  * lifecycle hooks. Carries the stable session identifier, the session's cooperative cancellation
  * token, the clock the session uses for timestamps, and the session's secret registry.
  *
- * <p>Lives in {@code core.runtime} (alongside {@link CancellationToken}) because it's needed by
- * both the session module (lifecycle hooks, agent loop) and the core tool surface ({@link
- * com.standardapplied.helios.core.tool.ToolContext}) — neither layer should depend on the other in
- * either direction.
+ * <p>Lives in {@code core.tool} (alongside {@link ToolContext}) because it's needed by both the
+ * session module (lifecycle hooks, agent loop) and the core tool surface — the tool surface must
+ * not depend on the session module.
  *
  * <p>Implementations that pool per-session state (e.g. a JShell execution provider that maintains
  * one persistent REPL per session) key off {@link #sessionId()}. Implementations that need to
@@ -26,8 +26,7 @@ import java.util.Objects;
  * against {@link #cancellation()} or implement the lifecycle hook surface.
  *
  * @param sessionId stable, non-blank session identifier; the same value carried on every {@link
- *     com.standardapplied.helios.core.tool.ToolContext} and {@code ResultMessage} produced by the
- *     session
+ *     ToolContext} and {@code ResultMessage} produced by the session
  * @param cancellation the session-scoped cancellation token. Fires when the agent loop is asked to
  *     stop (user-initiated, timeout, budget) so per-session resources can clean up. Non-null
  * @param clock the time source the session uses for event timestamps and elapsed-time measurements.

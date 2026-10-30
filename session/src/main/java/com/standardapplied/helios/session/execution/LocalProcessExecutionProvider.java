@@ -5,12 +5,12 @@
 package com.standardapplied.helios.session.execution;
 
 import com.standardapplied.helios.core.common.Validate;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.process.BinaryResolver;
 import com.standardapplied.helios.core.process.BoundedProcess;
 import com.standardapplied.helios.core.process.ProcessOutcome;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
 import com.standardapplied.helios.core.tool.CommandGrant;
+import com.standardapplied.helios.core.tool.SessionContext;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;

@@ -4,8 +4,8 @@
  */
 package com.standardapplied.helios.session.hooks;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 
 /**
  * Per-invocation context passed to every {@link Hook} call. Carries the handles a hook may need to

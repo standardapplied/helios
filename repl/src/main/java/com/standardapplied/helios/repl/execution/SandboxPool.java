@@ -2,7 +2,7 @@
 package com.standardapplied.helios.repl.execution;
 
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplSession;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;

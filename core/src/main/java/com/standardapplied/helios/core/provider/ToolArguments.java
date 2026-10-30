@@ -4,6 +4,7 @@ package com.standardapplied.helios.core.provider;
 
 import com.standardapplied.helios.core.common.JsonSnapshot;
 import com.standardapplied.helios.core.model.ProviderException;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.util.Map;
 
 /**
@@ -29,7 +30,10 @@ public final class ToolArguments {
    *     rejects
    */
   public static Map<String, Object> read(
-      String toolName, String json, JsonBinding.Reader reader, ProviderFailure failure) {
+      String toolName,
+      String json,
+      StructuredContentParser.JsonAdapter.Reader reader,
+      ProviderFailure failure) {
     if (json.isEmpty()) {
       return Map.of();
     }

@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.PidFile;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.test.ExecutionCall;
 import java.nio.file.Files;
 import java.nio.file.Path;
