@@ -233,7 +233,8 @@ public final class StreamingModel<R> implements Model {
     }
 
     /**
-     * Reads structured output, e.g. a {@link JsonBinding} over the provider's JSON mapper.
+     * Reads structured output, e.g. a {@link StructuredContentParser.JsonAdapter} over the
+     * provider's JSON mapper.
      *
      * @param json the JSON adapter
      * @return this builder

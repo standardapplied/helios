@@ -5,8 +5,8 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.SecretRegistry;
-import com.standardapplied.helios.core.runtime.CancellationToken;
-import com.standardapplied.helios.core.runtime.SessionContext;
+import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;

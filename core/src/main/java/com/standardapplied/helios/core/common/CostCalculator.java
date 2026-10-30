@@ -93,15 +93,6 @@ public interface CostCalculator {
 
     private static final long TOKENS_PER_MILLION = 1_000_000L;
 
-    /** Anthropic's published premium ratio for five-minute prompt-cache writes. */
-    public static final double ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER = 1.25d;
-
-    /** Anthropic's published premium ratio for one-hour prompt-cache writes. */
-    public static final double ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2.00d;
-
-    /** Anthropic's published discount ratio for prompt-cache reads against base input. */
-    public static final double ANTHROPIC_CACHE_READ_MULTIPLIER = 0.10d;
-
     /**
      * Canonical constructor.
      *
@@ -179,38 +170,6 @@ public interface CostCalculator {
           Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
           Math.round(cacheWriteUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
           Math.round(cacheReadUsdPerMillion * CostEstimate.MICRO_USD_PER_USD));
-    }
-
-    /**
-     * Build pricing for Anthropic's five-minute prompt cache.
-     *
-     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
-     * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @return pricing with 1.25× cache writes and 0.10× cache reads
-     */
-    public static Pricing anthropicCaching5m(
-        double inputUsdPerMillion, double outputUsdPerMillion) {
-      return ofUsdPerMillion(
-          inputUsdPerMillion,
-          outputUsdPerMillion,
-          inputUsdPerMillion * ANTHROPIC_5M_CACHE_WRITE_MULTIPLIER,
-          inputUsdPerMillion * ANTHROPIC_CACHE_READ_MULTIPLIER);
-    }
-
-    /**
-     * Build pricing for Anthropic's one-hour prompt cache.
-     *
-     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
-     * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @return pricing with 2.00× cache writes and 0.10× cache reads
-     */
-    public static Pricing anthropicCaching1h(
-        double inputUsdPerMillion, double outputUsdPerMillion) {
-      return ofUsdPerMillion(
-          inputUsdPerMillion,
-          outputUsdPerMillion,
-          inputUsdPerMillion * ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER,
-          inputUsdPerMillion * ANTHROPIC_CACHE_READ_MULTIPLIER);
     }
 
     /**

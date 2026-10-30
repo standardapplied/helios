@@ -6,7 +6,7 @@ package com.standardapplied.helios.session.files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.session.tools.Withholding;
 import java.io.IOException;

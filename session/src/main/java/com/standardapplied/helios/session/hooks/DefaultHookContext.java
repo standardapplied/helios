@@ -5,8 +5,8 @@
 package com.standardapplied.helios.session.hooks;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Model;
-import com.standardapplied.helios.core.runtime.CancellationToken;
 import java.util.Objects;
 
 /**

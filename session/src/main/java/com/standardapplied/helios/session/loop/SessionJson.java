@@ -4,7 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import com.standardapplied.helios.core.provider.JsonBinding;
+import com.standardapplied.helios.core.schema.StructuredContentParser;
 import java.math.BigDecimal;
 import java.util.Map;
 import tools.jackson.core.JsonParser;
@@ -46,12 +46,14 @@ public final class SessionJson {
           .build();
 
   /** JSON read into maps, and maps converted into types, through Jackson's defaults. */
-  public static final JsonBinding BINDING =
-      new JsonBinding(MAPPER.readerFor(Map.class)::readValue, MAPPER::convertValue);
+  public static final StructuredContentParser.JsonAdapter BINDING =
+      new StructuredContentParser.JsonAdapter(
+          MAPPER.readerFor(Map.class)::readValue, MAPPER::convertValue);
 
   /** Stored entries' JSON read into maps, and maps converted into types, numbers kept exact. */
-  public static final JsonBinding ENTRIES =
-      new JsonBinding(ENTRY_MAPPER.readerFor(Map.class)::readValue, ENTRY_MAPPER::convertValue);
+  public static final StructuredContentParser.JsonAdapter ENTRIES =
+      new StructuredContentParser.JsonAdapter(
+          ENTRY_MAPPER.readerFor(Map.class)::readValue, ENTRY_MAPPER::convertValue);
 
   private SessionJson() {}
 

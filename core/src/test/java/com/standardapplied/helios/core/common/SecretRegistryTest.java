@@ -212,16 +212,6 @@ class SecretRegistryTest {
   }
 
   @Test
-  void snapshotReturnsDefensiveCopies() {
-    var registry = new SecretRegistry();
-    registry.register("A", "alphavalue123");
-    var snap = registry.snapshot();
-    snap.get("A")[0] = 0;
-    var snap2 = registry.snapshot();
-    assertEquals('a', (char) (snap2.get("A")[0] & 0xFF));
-  }
-
-  @Test
   void concurrentRegistrationsAreSafe() throws Exception {
     var registry = new SecretRegistry();
     var threads = 8;

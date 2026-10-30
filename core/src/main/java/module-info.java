@@ -19,13 +19,11 @@
  *   <li>{@code fault} — retry / circuit-breaker / timeout primitives.
  *   <li>{@code schema} — output-schema + provenance support for structured generation.
  *   <li>{@code embedding} — provider-agnostic embedding interface (impl in helios-onnx).
- *   <li>{@code knowledge} — sandboxed filesystem-knowledge tools.
  *   <li>{@code process} — bounded child-process execution and binary pinning.
  *   <li>{@code prompt} — versioned prompt registry + template rendering.
  *   <li>{@code provider} — the mechanics every streaming model provider shares: the SSE reader, the
  *       chat exchange and the JSON request assembly.
  *   <li>{@code trace} — the trace model and {@code TraceListener}.
- *   <li>{@code runtime} — {@code CancellationToken} and {@code SessionContext}.
  * </ul>
  *
  * <p>The v1 {@code agent} / {@code workflow} / {@code memory} / {@code eval} surface was removed in
@@ -43,7 +41,6 @@ module com.standardapplied.helios.core {
   exports com.standardapplied.helios.core.process;
   exports com.standardapplied.helios.core.prompt;
   exports com.standardapplied.helios.core.provider;
-  exports com.standardapplied.helios.core.runtime;
   exports com.standardapplied.helios.core.schema;
   exports com.standardapplied.helios.core.tool;
   exports com.standardapplied.helios.core.trace;

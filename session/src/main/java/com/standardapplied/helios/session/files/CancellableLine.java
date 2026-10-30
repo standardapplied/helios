@@ -4,7 +4,7 @@
  */
 package com.standardapplied.helios.session.files;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 
 /**
  * A line a regex matches through, which stops the match once the call's token is cancelled: every

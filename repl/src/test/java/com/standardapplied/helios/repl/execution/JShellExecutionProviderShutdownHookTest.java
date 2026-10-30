@@ -18,7 +18,7 @@ class JShellExecutionProviderShutdownHookTest {
 
   private static final String PROBE =
       """
-      import com.standardapplied.helios.core.runtime.SessionContext;
+      import com.standardapplied.helios.core.tool.SessionContext;
       import com.standardapplied.helios.repl.ReplConfig;
       import com.standardapplied.helios.repl.execution.JShellExecutionProvider;
       import com.standardapplied.helios.repl.sandbox.ExecutionRequest;

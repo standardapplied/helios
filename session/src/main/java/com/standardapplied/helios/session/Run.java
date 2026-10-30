@@ -2,7 +2,7 @@
 
 package com.standardapplied.helios.session;
 
-import com.standardapplied.helios.core.runtime.CancellationToken;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.session.loop.SessionState;
 import java.time.Duration;
 import java.util.Optional;
