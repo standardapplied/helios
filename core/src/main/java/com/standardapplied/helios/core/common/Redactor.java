@@ -12,14 +12,14 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Immutable redactor that replaces every occurrence of a registered secret value with the marker
  * {@code <redacted:NAME>}.
  *
- * <p>A plain scan of the text for each value. Registered values are ASCII, so a value matches the
- * same places in a {@link String} as in its UTF-8 bytes. Text with no occurrence is returned as the
- * same {@link String}.
+ * <p>A plain scan of the text for each value. Text with no occurrence is returned as the same
+ * {@link String}.
  *
  * <p>Overlapping occurrences, of one secret or of several, become one marker, so no character of
  * any secret survives. The marker names the first occurrence: the earliest start, the longest on an
@@ -55,6 +55,7 @@ public final class Redactor {
    * @param secrets the secrets by name, in registration order; null or empty gives a redactor that
    *     changes nothing
    * @throws IllegalArgumentException if a value is null, empty or not pure ASCII
+   * @throws NullPointerException if a name is null
    */
   public static Redactor of(Map<String, String> secrets) {
     if (secrets == null || secrets.isEmpty()) {
@@ -63,6 +64,7 @@ public final class Redactor {
     var namesByValue = new LinkedHashMap<String, String>();
     secrets.forEach(
         (name, value) -> {
+          Objects.requireNonNull(name, "secret name must not be null");
           requireNonEmptyAscii(name, value);
           namesByValue.putIfAbsent(value, name);
         });

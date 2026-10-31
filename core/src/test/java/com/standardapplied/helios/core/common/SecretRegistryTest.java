@@ -285,4 +285,13 @@ class SecretRegistryTest {
   private static String value(int threadId, int index) {
     return "value-%d-%08d".formatted(threadId, index);
   }
+
+  @Test
+  void aValueUnderTwoNamesIsAttributedToTheFirstRegistered() {
+    var registry = new SecretRegistry();
+    registry.register("B", "ghp_abc12345");
+    registry.register("A", "ghp_abc12345");
+
+    assertEquals("<redacted:B>", registry.redactor().redact("ghp_abc12345").text());
+  }
 }
