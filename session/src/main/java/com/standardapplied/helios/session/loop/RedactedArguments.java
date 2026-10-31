@@ -13,11 +13,10 @@ import java.util.Map;
 
 /**
  * A tool call's arguments as the session's events show them: every registered secret redacted, in
- * keys and in string values at any depth. Other values and the order are unchanged, and a key or
- * string with no secret in it is kept as it is, since redaction would turn an unpaired surrogate
- * into {@code ?}; where redacting makes two keys equal, the later entry's value wins. A key or
- * string that redaction lengthens past {@link JsonSnapshot}'s limit is cut to it and ends in {@code
- * …}, so a valid call always has a valid event copy.
+ * keys and in string values at any depth. Other values and the order are unchanged; where redacting
+ * makes two keys equal, the later entry's value wins. A key or string that redaction lengthens past
+ * {@link JsonSnapshot}'s limit is cut to it and ends in {@code …}, so a valid call always has a
+ * valid event copy.
  */
 final class RedactedArguments {
 
@@ -52,11 +51,7 @@ final class RedactedArguments {
   }
 
   private static String text(String text, Redactor redactor, int limit) {
-    var redaction = redactor.redact(text);
-    if (redaction.counts().isEmpty()) {
-      return text;
-    }
-    var shown = redaction.text();
+    var shown = redactor.redact(text).text();
     return shown.length() <= limit ? shown : Strings.truncated(shown, limit - CUT.length(), CUT);
   }
 }

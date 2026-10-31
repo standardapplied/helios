@@ -5,7 +5,6 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.RedactionResult;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
-import java.nio.charset.StandardCharsets;
 
 /**
  * A reason a hook or a policy refused something for, as the session shows it: every registered
@@ -25,6 +24,6 @@ final class RedactedReason {
   static RedactionResult of(String reason, SecretRegistry secrets) {
     var redaction = secrets.redactor().redact(reason);
     var cut = Strings.truncated(redaction.text(), MAX_REASON_CHARS, "… [%d more chars]");
-    return new RedactionResult(cut.getBytes(StandardCharsets.UTF_8), redaction.counts());
+    return new RedactionResult(cut, redaction.counts());
   }
 }

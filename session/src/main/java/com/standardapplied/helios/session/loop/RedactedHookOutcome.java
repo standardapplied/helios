@@ -10,9 +10,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
  * A hook's outcome as {@link com.standardapplied.helios.session.QueryEvent.HookFired HookFired}
  * shows it: every registered secret redacted in each string it carries, a {@link
  * HookOutcome.MutateArgs}'s arguments as {@link RedactedArguments} shows them, and a {@link
- * HookOutcome.MutateHistory} as returned, since its messages are the session's own. A string with
- * no secret in it is kept as it is, since redaction would turn an unpaired surrogate into {@code
- * ?}.
+ * HookOutcome.MutateHistory} as returned, since its messages are the session's own.
  */
 final class RedactedHookOutcome {
 
@@ -34,7 +32,6 @@ final class RedactedHookOutcome {
   }
 
   private static String text(String text, Redactor redactor) {
-    var redaction = redactor.redact(text);
-    return redaction.counts().isEmpty() ? text : redaction.text();
+    return redactor.redact(text).text();
   }
 }

@@ -538,8 +538,8 @@ public sealed interface QueryEvent
    * @param call the originating call, its arguments redacted against the session's secret registry,
    *     in keys and in string values; non-null
    * @param result the tool result, its output redacted; non-null
-   * @param redactions per secret name, how many occurrences the session's redaction of this result
-   *     replaced, in encounter order; empty when none. Non-null, with no null key or value; copied
+   * @param redactions per secret name, how many markers the session's redaction of this result
+   *     wrote, in encounter order; empty when none. Non-null, with no null key or value; copied
    */
   record ToolResult(
       String sessionId,
