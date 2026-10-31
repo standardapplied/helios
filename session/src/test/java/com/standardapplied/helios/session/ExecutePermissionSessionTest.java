@@ -14,6 +14,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.QuestionAnswers;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,14 +24,17 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@code Execute}'s permission key is its whole script, and the approval question shows the call's
- * arguments, redacted and bounded: a deny rule sees every command the script runs, and a user who
+ * {@code Execute}'s permission key is its whole script and the name of each extra the call sets,
+ * and the approval question shows the call's arguments, redacted and bounded: a deny rule sees
+ * every command the script runs, an allow rule admits only the extras it names, and a user who
  * allows a call has seen what runs.
  */
 final class ExecutePermissionSessionTest {
 
   private static final String SECRET = "key-0123456789";
   private static final String DANGEROUS = "ls; rm -rf ~/";
+  private static final Map<String, String> EXPORTED_LS =
+      Map.of("BASH_FUNC_ls%%", "() { rm -rf ~/; }");
 
   private final RecordingProvider provider = new RecordingProvider(new CopyOnWriteArrayList<>());
   private final SecretRegistry secrets = new SecretRegistry();
@@ -44,6 +48,22 @@ final class ExecutePermissionSessionTest {
         .withExecutionProvider(provider)
         .withSecretRegistry(secrets)
         .withPermission(permission);
+  }
+
+  private static Permission lockedDownAllowing(String glob) {
+    return new Permission(
+        PermissionMode.LOCKED_DOWN,
+        List.of(PermissionRule.of(ExecuteTool.NAME, glob)),
+        List.of(),
+        List.of());
+  }
+
+  private static ToolOutcome lockedDownRefusal(String key) {
+    return new ToolOutcome.Rejected(
+        "Permission",
+        "LOCKED_DOWN mode forbids EXECUTION by default (Execute("
+            + key
+            + ")) — add an explicit allow rule to open this tool");
   }
 
   /** An {@code Execute} call whose arguments keep the order of {@code namesAndValues}. */
@@ -81,6 +101,119 @@ final class ExecutePermissionSessionTest {
   }
 
   @Test
+  void anExactAllowRuleDoesNotAdmitACallThatSetsAnExtra() {
+    var run =
+        run(
+            options(lockedDownAllowing("BASH/ls")),
+            execute("runtime", "bash", "script", "ls", "environment", EXPORTED_LS));
+
+    assertEquals(lockedDownRefusal("BASH/ls\n+environment"), run.onlyResult().outcome());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void anExactAllowRuleStillAdmitsTheBareCall() {
+    var run =
+        run(options(lockedDownAllowing("BASH/ls")), execute("runtime", "bash", "script", "ls"));
+
+    assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
+    assertEquals(1, provider.executed.size());
+  }
+
+  @Test
+  void aRuleNamingAnExtraAdmitsACallThatSetsThatExtra() {
+    var run =
+        run(
+            options(lockedDownAllowing("BASH/make\n+workingDirectory")),
+            execute("runtime", "bash", "script", "make", "workingDirectory", "/tmp"));
+
+    assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
+    assertEquals(Path.of("/tmp"), provider.executed.getFirst().workingDirectory());
+  }
+
+  @Test
+  void aRuleNamingAnExtraRefusesACallThatSetsAnotherToo() {
+    var run =
+        run(
+            options(lockedDownAllowing("BASH/make\n+workingDirectory")),
+            execute("runtime", "bash", "script", "make", "workingDirectory", "/tmp", "stdin", "x"));
+
+    assertEquals(
+        lockedDownRefusal("BASH/make\n+stdin\n+workingDirectory"), run.onlyResult().outcome());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aCallThatSetsAnExtraAsksWithTheExtraInTheKeyAndTheValueInTheArguments() {
+    var run =
+        run(
+            options(Permission.empty(PermissionMode.DEFAULT)),
+            session -> QuestionAnswers.selecting(session, "Deny"),
+            execute("runtime", "bash", "script", "ls", "environment", EXPORTED_LS));
+
+    assertEquals(
+        "Allow Execute(BASH/ls\\n+environment)?\n\nArguments: {\"runtime\":\"bash\","
+            + "\"script\":\"ls\",\"environment\":{\"BASH_FUNC_ls%%\":\"() { rm -rf ~/; }\"}}",
+        onlyQuestion(run));
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aDenyGlobMatchesACallThatSetsAnExtra() {
+    var permission =
+        new Permission(
+            PermissionMode.BYPASS_PERMISSIONS,
+            List.of(),
+            List.of(),
+            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **")));
+
+    var run =
+        run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", "y"));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission", "deny rule Execute(BASH/**rm **) matched Execute(BASH/rm -rf ~\n+stdin)"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aDenyRuleEndingInADoubleStarHoldsWhateverACallSets() {
+    var permission =
+        new Permission(
+            PermissionMode.BYPASS_PERMISSIONS,
+            List.of(),
+            List.of(),
+            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~**")));
+
+    var run =
+        run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", ""));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission",
+            "deny rule Execute(BASH/rm -rf ~**) matched Execute(BASH/rm -rf ~\n+stdin)"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void anExactDenyRuleStopsAtTheBareCall() {
+    var permission =
+        new Permission(
+            PermissionMode.BYPASS_PERMISSIONS,
+            List.of(),
+            List.of(),
+            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~")));
+
+    var run =
+        run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", "y"));
+
+    assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
+    assertEquals(1, provider.executed.size());
+  }
+
+  @Test
   void aUsersAllowRuleAddedToTheWorkspacePresetRunsWithoutAQuestion() {
     var preset = Permission.defaultInWorkspace();
     var permission =
@@ -113,7 +246,7 @@ final class ExecutePermissionSessionTest {
             execute("runtime", "bash", "script", DANGEROUS, "stdin", "y"));
 
     assertEquals(
-        "Allow Execute(BASH/ls; rm -rf ~/)?\n\nArguments:"
+        "Allow Execute(BASH/ls; rm -rf ~/\\n+stdin)?\n\nArguments:"
             + " {\"runtime\":\"bash\",\"script\":\"ls; rm -rf ~/\",\"stdin\":\"y\"}",
         onlyQuestion(run));
     assertEquals(new ToolOutcome.Succeeded(), run.onlyResult().outcome());
@@ -138,7 +271,7 @@ final class ExecutePermissionSessionTest {
             execute("runtime", "bash", "script", "env", "environment", Map.of("TOKEN", SECRET)));
 
     assertEquals(
-        "Allow Execute(BASH/env)?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"env\","
+        "Allow Execute(BASH/env\\n+environment)?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"env\","
             + "\"environment\":{\"TOKEN\":\"<redacted:API_KEY>\"}}",
         onlyQuestion(run));
     assertEquals(Map.of("TOKEN", SECRET), provider.executed.getFirst().environment());
@@ -160,7 +293,7 @@ final class ExecutePermissionSessionTest {
     assertEquals(
         "Allow Execute(BASH/"
             + script
-            + ")?\n\nArguments: "
+            + "\\n+stdin)?\n\nArguments: "
             + opening
             + padding
             + closing

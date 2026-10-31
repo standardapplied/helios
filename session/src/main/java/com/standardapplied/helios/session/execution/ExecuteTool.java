@@ -19,6 +19,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.stream.Collectors;
 
 /**
  * Built-in {@code Execute} tool. Routes one execution request through the session's {@link
@@ -47,13 +48,20 @@ import java.util.concurrent.CancellationException;
  * <p>Classified under {@link ToolCategory#EXECUTION}. The permission key is {@code
  * <RUNTIME>/<script>}: the {@link Runtime} constant the {@code runtime} argument names ({@code
  * UNKNOWN} when it names none, a call refused when it runs) and the whole script, stripped, so a
- * rule's glob matches the script text, every line of it. A deny glob is a guard rail: {@code
- * BASH/**rm **} misses {@code rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm }. An
- * allow rule admits whatever {@code environment}, {@code args}, {@code stdin} and {@code
- * workingDirectory} come with a matching script (e.g. {@code BASH_FUNC_ls%%} in {@code
- * environment}), and {@code *} matches {@code ;}, so allow rules on {@code Execute} are not a
- * sandbox. Real control is {@code ASK}, whose prompt shows every argument. A script that carries a
- * registered secret's value is refused before any rule or approver sees its key.
+ * rule's glob matches the script text, every line of it. After it comes one line {@code +<name>}
+ * for each of {@code args}, {@code environment}, {@code stdin} and {@code workingDirectory} the
+ * call sets to anything but null, in that order, by name only: {@code ls} with {@code stdin} and
+ * {@code environment} is keyed {@code BASH/ls\n+environment\n+stdin}, so a value never enters the
+ * key, and an empty value is still named. An exact allow rule, such as {@code BASH/ls}, admits only
+ * the bare call; {@code BASH/make\n+workingDirectory}, its {@code \n} a real line break, allows
+ * that extra on purpose. An exact deny or ask rule stops at the bare call too, so one that must
+ * hold whatever a call sets ends in {@code **} with no {@code /} before it. A script may end in a
+ * line that reads like an extra; it then matches such a rule without that extra, which gives it
+ * less than the rule allows. A deny glob is a guard rail: {@code BASH/**rm **} misses {@code
+ * rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm x}. A wildcard allow rule on {@code
+ * Execute} is not a sandbox: {@code *} matches {@code ;} and the extras lines. Real control is
+ * {@code ASK}, whose prompt shows the arguments up to its limit and says when it cut them. A script
+ * that carries a registered secret's value is refused before any rule or approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
@@ -61,6 +69,9 @@ public final class ExecuteTool {
 
   /** The stable tool name advertised to the model. */
   public static final String NAME = "Execute";
+
+  private static final List<String> EXTRAS =
+      List.of("args", "environment", "stdin", "workingDirectory");
 
   private ExecuteTool() {}
 
@@ -149,8 +160,13 @@ public final class ExecuteTool {
 
   static ToolPermissionKey permissionKey(Map<String, Object> args) {
     var script = ToolArgs.stringArg(args, "script");
+    var extras =
+        EXTRAS.stream()
+            .filter(name -> args.get(name) != null)
+            .map(name -> "\n+" + name)
+            .collect(Collectors.joining());
     return new ToolPermissionKey(
-        NAME, runtime(ToolArgs.stringArg(args, "runtime")) + "/" + script.strip());
+        NAME, runtime(ToolArgs.stringArg(args, "runtime")) + "/" + script.strip() + extras);
   }
 
   private static String runtime(String argument) {
