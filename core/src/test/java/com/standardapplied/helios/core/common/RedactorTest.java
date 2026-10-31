@@ -537,4 +537,38 @@ class RedactorTest {
       }
     }
   }
+
+  @Test
+  void aLaterChangeToTheGivenMapDoesNotReachTheRedactor() {
+    var secrets = new LinkedHashMap<String, String>();
+    secrets.put("K", "abcdefgh");
+    var redactor = Redactor.of(secrets);
+
+    secrets.put("K", "ijklmnop");
+    secrets.put("L", "qrstuvwx");
+
+    assertEquals("<redacted:K> ijklmnop", redactor.redact("abcdefgh ijklmnop").text());
+  }
+
+  @Test
+  void theLastAsciiCharacterIsAccepted() {
+    var redactor = Redactor.of(Map.of("K", "abc\u007Fdefg"));
+
+    assertEquals("<redacted:K>", redactor.redact("abc\u007Fdefg").text());
+  }
+
+  @Test
+  void aNullNameIsRejected() {
+    var secrets = new LinkedHashMap<String, String>();
+    secrets.put(null, "abcdefgh");
+
+    var ex = assertThrows(NullPointerException.class, () -> Redactor.of(secrets));
+    assertEquals("secret name must not be null", ex.getMessage());
+  }
+
+  @Test
+  void aResultRequiresItsText() {
+    var ex = assertThrows(NullPointerException.class, () -> new RedactionResult(null, Map.of()));
+    assertEquals("text must not be null", ex.getMessage());
+  }
 }

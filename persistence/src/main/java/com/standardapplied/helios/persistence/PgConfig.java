@@ -58,11 +58,10 @@ public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
 
   /**
    * Apply the configured {@link #redactor()} to {@code value} if set; otherwise return {@code
-   * value} unchanged. Returns the same reference when no redactor is configured so callers cannot
-   * detect a per-call allocation when redaction is off (the no-redactor path is the documented
-   * default); when a redactor IS configured, returns a freshly-allocated string. Callers must treat
-   * the return value as read-only — never assume it's a distinct allocation from the input, and
-   * never assume the redactor was applied.
+   * value} unchanged. Returns the same reference when no redactor is configured or nothing matched,
+   * so callers cannot detect a per-call allocation when redaction is off (the no-redactor path is
+   * the documented default). Callers must treat the return value as read-only — never assume it's a
+   * distinct allocation from the input, and never assume the redactor was applied.
    *
    * @param value the text to redact; {@code null} returns {@code null}
    * @return redacted (or unchanged) text

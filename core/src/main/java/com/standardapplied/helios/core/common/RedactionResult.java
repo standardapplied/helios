@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.common;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Result of running text through a {@link Redactor}.
@@ -19,6 +20,7 @@ import java.util.Map;
 public record RedactionResult(String text, Map<String, Integer> counts) {
 
   public RedactionResult {
+    Objects.requireNonNull(text, "text must not be null");
     counts = Collections.unmodifiableMap(new LinkedHashMap<>(counts));
   }
 }
