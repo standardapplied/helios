@@ -5,17 +5,17 @@
 
 package com.standardapplied.helios.core.common;
 
-import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Thread-safe registry of secret values that must never appear in model-visible output.
  *
  * <p>Secrets registered here are scrubbed from any text passed through a {@link Redactor} obtained
- * via {@link #redactor()}. The redactor is a point-in-time snapshot; secrets registered after the
- * snapshot is taken require a fresh redactor to be observed.
+ * via {@link #redactor()}. The redactor is an immutable snapshot, cached until the next {@link
+ * #register}; secrets registered after it was obtained require a fresh call to be observed.
  *
  * <p>Validation rules applied at registration:
  *
@@ -23,14 +23,12 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *   <li>Names must be non-blank and unique. Re-registering the same name overwrites the value.
  *   <li>Values must be at least {@value #MIN_SECRET_LENGTH} characters. Shorter values are
  *       brute-forceable and would shred surrounding output if redacted blindly.
- *   <li>Values must be <em>JSON-safe printable ASCII</em>: every byte in {@code [0x20, 0x7E]}
+ *   <li>Values must be <em>JSON-safe printable ASCII</em>: every character in {@code [0x20, 0x7E]}
  *       except {@code 0x22} ({@code "}) and {@code 0x5C} ({@code \}). Control characters ({@code
- *       0x00–0x1F}, {@code 0x7F}) and non-ASCII characters are refused. The Redactor is a
- *       byte-level scanner, so a registered secret whose bytes change shape during JSON
- *       serialisation (Jackson escapes {@code "} as {@code \"}, {@code \n} as {@code \\n}, etc.)
- *       would survive verbatim in any downstream JSON column the redactor scrubs post-serialise.
- *       Refusing JSON-unsafe bytes at registration makes byte-level redaction provably safe in both
- *       pre-serialise and post-serialise call sites.
+ *       0x00–0x1F}, {@code 0x7F}) and non-ASCII characters are refused. A registered value must
+ *       keep its exact text through JSON serialisation: one that changes shape (Jackson escapes
+ *       {@code "} as {@code \"}, {@code \n} as {@code \\n}, etc.) would survive in any downstream
+ *       JSON column the redactor scrubs post-serialise.
  *   <li>Values must not start or end with a space. A key or text that is stripped, such as {@code
  *       Execute}'s permission key, would cut that space and no longer hold the whole secret.
  * </ul>
@@ -40,8 +38,8 @@ public final class SecretRegistry {
   /** Minimum allowed secret length in characters. */
   public static final int MIN_SECRET_LENGTH = 8;
 
-  private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
-  private final LinkedHashMap<String, byte[]> secretsByName = new LinkedHashMap<>();
+  private final Object lock = new Object();
+  private volatile Snapshot snapshot = new Snapshot(Map.of(), Redactor.of(Map.of()));
 
   public SecretRegistry() {}
 
@@ -58,12 +56,10 @@ public final class SecretRegistry {
    */
   public void register(String name, String value) {
     validate(name, value);
-    var bytes = value.getBytes(StandardCharsets.US_ASCII);
-    lock.writeLock().lock();
-    try {
-      secretsByName.put(name, bytes);
-    } finally {
-      lock.writeLock().unlock();
+    synchronized (lock) {
+      var secrets = new LinkedHashMap<>(snapshot.secrets());
+      secrets.put(name, value);
+      snapshot = new Snapshot(Collections.unmodifiableMap(secrets), Redactor.of(secrets));
     }
   }
 
@@ -92,8 +88,8 @@ public final class SecretRegistry {
     if (c < 0x20 || c == 0x7F) {
       throw new IllegalArgumentException(
           ("Secret '%s' contains control character 0x%02X at index %d; only printable ASCII"
-                  + " ([0x20, 0x7E] excluding \" and \\) is permitted so byte-level redaction"
-                  + " stays safe across JSON serialisation")
+                  + " ([0x20, 0x7E] excluding \" and \\) is permitted so a registered value"
+                  + " keeps its exact text through JSON serialisation")
               .formatted(name, (int) c, index));
     }
     if (c > 0x7E) {
@@ -104,82 +100,38 @@ public final class SecretRegistry {
     if (c == '"' || c == '\\') {
       throw new IllegalArgumentException(
           ("Secret '%s' contains JSON-special character '%c' at index %d; Jackson would escape"
-                  + " it during serialisation, leaving the raw bytes invisible to the"
-                  + " byte-level Redactor and the secret leakable through any JSON column the"
+                  + " it during serialisation, leaving the raw text invisible to the"
+                  + " Redactor and the secret leakable through any JSON column the"
                   + " redactor scrubs post-serialise")
               .formatted(name, c, index));
     }
   }
 
   /**
-   * Returns true if {@code candidate} contains, as a contiguous byte sequence, the value of any
-   * registered secret. Used to refuse argv that would otherwise carry a secret in clear into the
-   * process listing.
+   * Returns true if {@code candidate} contains the value of any registered secret. Used to refuse
+   * argv that would otherwise carry a secret in clear into the process listing.
    */
   public boolean leaks(String candidate) {
-    if (candidate == null || candidate.isEmpty()) {
-      return false;
-    }
-    var bytes = candidate.getBytes(StandardCharsets.UTF_8);
-    lock.readLock().lock();
-    try {
-      for (var stored : secretsByName.values()) {
-        if (containsBytes(bytes, stored)) {
-          return true;
-        }
-      }
-      return false;
-    } finally {
-      lock.readLock().unlock();
-    }
-  }
-
-  private static boolean containsBytes(byte[] haystack, byte[] needle) {
-    if (needle.length > haystack.length) {
-      return false;
-    }
-    outer:
-    for (var i = 0; i <= haystack.length - needle.length; i++) {
-      for (var j = 0; j < needle.length; j++) {
-        if (haystack[i + j] != needle[j]) {
-          continue outer;
-        }
-      }
-      return true;
-    }
-    return false;
+    return candidate != null && snapshot.secrets().values().stream().anyMatch(candidate::contains);
   }
 
   /**
-   * Returns an immutable snapshot of registered secrets as a {@link Redactor}. Subsequent mutations
-   * to this registry do not affect the returned redactor.
+   * Returns the {@link Redactor} of the registered secrets: the same instance until the next {@link
+   * #register}, which does not affect it.
    */
   public Redactor redactor() {
-    lock.readLock().lock();
-    try {
-      return Redactor.of(secretsByName);
-    } finally {
-      lock.readLock().unlock();
-    }
+    return snapshot.redactor();
   }
 
   /** Number of currently registered secrets. */
   public int size() {
-    lock.readLock().lock();
-    try {
-      return secretsByName.size();
-    } finally {
-      lock.readLock().unlock();
-    }
+    return snapshot.secrets().size();
   }
 
   /** Returns the registered secret names. */
   public Set<String> names() {
-    lock.readLock().lock();
-    try {
-      return Set.copyOf(secretsByName.keySet());
-    } finally {
-      lock.readLock().unlock();
-    }
+    return Set.copyOf(snapshot.secrets().keySet());
   }
+
+  private record Snapshot(Map<String, String> secrets, Redactor redactor) {}
 }

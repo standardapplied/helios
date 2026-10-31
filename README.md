@@ -632,9 +632,9 @@ Helios is designed for production but has known limitations — see [Production 
 
 ### Secret redaction (`SecretRegistry` + `Redactor`)
 
-`core.common.SecretRegistry` is a thread-safe registry of secret values; `Redactor` (built via `registry.redactor()`) is an immutable Aho-Corasick byte-level scrubber that replaces every contiguous occurrence of a registered secret with `<redacted:NAME>`. It operates on raw bytes before UTF-8 decode so encoding mangling cannot bypass it. Overlap policy: leftmost-longest.
+`core.common.SecretRegistry` is a thread-safe registry of secret values: register each one under a name (8+ printable ASCII characters, no `"` or `\`). `registry.redactor()`, cached until the next `register`, replaces every occurrence with `<redacted:NAME>`, and overlapping occurrences with one marker naming the first. `counts()` counts markers per name. Output cut at a size cap drops a trailing partial secret (`trimPartialSecret`).
 
-A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. `register` throws `IllegalArgumentException` otherwise: on a null value, a value shorter than 8 characters, a control character (`0x00`–`0x1F`, `0x7F`), `"` or `\` (Jackson escapes these, so the serialised bytes would no longer match), or any non-ASCII character (the redactor matches ASCII bytes).
+A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. `register` throws `IllegalArgumentException` otherwise: on a null value, a value shorter than 8 characters, a control character (`0x00`–`0x1F`, `0x7F`), `"` or `\` (Jackson escapes these, so the serialised text would no longer match), or any non-ASCII character (a registered value must keep its exact text through JSON serialisation).
 
 ```java
 var registry = new SecretRegistry();

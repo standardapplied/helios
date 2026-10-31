@@ -129,8 +129,7 @@ final class ToolRound {
   private ToolResult emitRedacted(
       SessionState state, ToolCall call, ToolResult raw, Map<String, Integer> earlier) {
     var redaction = collaborators.secrets().redactor().redact(raw.output());
-    var output = redaction.counts().isEmpty() ? raw.output() : redaction.text();
-    var result = raw.withOutput(output);
+    var result = raw.withOutput(redaction.text());
     var counts = new LinkedHashMap<>(earlier);
     redaction.counts().forEach((name, count) -> counts.merge(name, count, Integer::sum));
     emitter.emit(
