@@ -178,6 +178,26 @@ final class ExecutePermissionSessionTest {
   }
 
   @Test
+  void aDenyRuleEndingInADoubleStarHoldsWhateverACallSets() {
+    var permission =
+        new Permission(
+            PermissionMode.BYPASS_PERMISSIONS,
+            List.of(),
+            List.of(),
+            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~**")));
+
+    var run =
+        run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", ""));
+
+    assertEquals(
+        new ToolOutcome.Rejected(
+            "Permission",
+            "deny rule Execute(BASH/rm -rf ~**) matched Execute(BASH/rm -rf ~\n+stdin)"),
+        run.onlyResult().outcome());
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
   void anExactDenyRuleStopsAtTheBareCall() {
     var permission =
         new Permission(

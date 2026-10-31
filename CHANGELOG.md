@@ -738,16 +738,17 @@ first command. A rule now matches the whole script, stripped, every line include
 the `Runtime` constant the argument names, or `UNKNOWN` when it names none, a call `Execute` refuses
 to run. A script carrying a registered secret's value is refused as `permission key of Execute
 carries a secret` before any rule or approver sees it. A deny glob is a guard rail: `BASH/**rm **`
-misses `rm<TAB>-rf` and `r''m`, and matches `echo farm `. After the script the key names, by name
+misses `rm<TAB>-rf` and `r''m`, and matches `echo farm x`. After the script the key names, by name
 only, each of `args`, `environment`, `stdin` and `workingDirectory` the call sets, in that order, one
 line `+<name>` each; `timeoutSeconds` is not named. So an exact allow rule admits only the bare call,
 and a host allows an extra on purpose. A wildcard allow rule on `Execute` is not a sandbox: `*`
-matches `;` and the extras lines. Real control is `ASK`, whose prompt shows every argument.
+matches `;` and the extras lines. Real control is `ASK`, whose prompt shows the arguments up to its
+limit and says when it cut them.
 
 | Before | 3.0 |
 |---|---|
 | `Execute(BASH/rm)` matched the key `BASH/rm`, the first token alone | it matches only the script `rm`; the key of `ls; rm -rf ~/` is `BASH/ls; rm -rf ~/`, not `BASH/ls;`. A glob such as `Execute(BASH/**rm **)` catches more spellings, not every one (see above) |
-| The key of `ls` with `stdin` and `environment` was `BASH/ls`, and `Execute(BASH/ls)` matched it | the key is `BASH/ls\n+environment\n+stdin` and `Execute(BASH/ls)` matches only the bare call. Name the extras in the rule: `Execute(BASH/make\n+workingDirectory)`, its `\n` a real line break. An exact deny or ask rule stops at the bare call too: one that must hold whatever a call sets ends in `**`, as `Execute(BASH/rm -rf ~**)` |
+| The key of `ls` with `stdin` and `environment` was `BASH/ls`, and `Execute(BASH/ls)` matched it | the key is `BASH/ls\n+environment\n+stdin` and `Execute(BASH/ls)` matches only the bare call. Name the extras in the rule: `Execute(BASH/make\n+workingDirectory)`, its `\n` a real line break. An exact deny or ask rule stops at the bare call too: one that must hold whatever a call sets ends in `**` with no `/` before it, as `Execute(BASH/rm -rf ~**)` |
 | The human approver asks `Allow <tool>(<key>)?` | it asks `Allow <tool>(<key>)?`, a blank line, then `Arguments: <arguments>`; the key, and the reason describing `Allow`, show as JSON string text through `JsonSnapshot.escape` (`"`, `\`, controls, line separators and format characters such as bidi overrides and zero-width characters escaped), cut at 1024 characters, so a script cannot fake a line of the question |
 | `SecretRegistry.register` accepts a value that starts or ends with a space | refuses it as `Secret '<name>' must not start or end with a space`, since a stripped key would cut that space |
 
