@@ -17,6 +17,7 @@ import com.standardapplied.helios.session.tools.ToolCategory;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -124,6 +125,58 @@ final class ExecuteToolTest {
   void permissionKeyStripsLeadingAndTrailingWhitespaceOnly() {
     var key = ExecuteTool.permissionKey(Map.of("runtime", "BASH", "script", " \n\t echo  hi \n "));
     assertEquals("BASH/echo  hi", key.canonicalArgs());
+  }
+
+  static Stream<Arguments> extras() {
+    return Stream.of(
+        Arguments.of("args", List.of("a")),
+        Arguments.of("environment", Map.of("TOKEN", "value")),
+        Arguments.of("stdin", "input"),
+        Arguments.of("workingDirectory", "/tmp"),
+        Arguments.of("environment", Map.of()),
+        Arguments.of("stdin", ""));
+  }
+
+  @ParameterizedTest
+  @MethodSource("extras")
+  void permissionKeyNamesAnExtraTheCallSetsAndNeverItsValue(String name, Object value) {
+    var key = ExecuteTool.permissionKey(Map.of("runtime", "bash", "script", "ls", name, value));
+
+    assertEquals("BASH/ls\n+" + name, key.canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyNamesEveryExtraInItsFixedOrder() {
+    var key =
+        ExecuteTool.permissionKey(
+            Map.of(
+                "workingDirectory", "/tmp",
+                "stdin", "input",
+                "environment", Map.of("A", "b"),
+                "args", List.of("a"),
+                "runtime", "bash",
+                "script", " ls \n"));
+
+    assertEquals("BASH/ls\n+args\n+environment\n+stdin\n+workingDirectory", key.canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyDoesNotNameANullExtra() {
+    var arguments = new HashMap<String, Object>(Map.of("runtime", "bash", "script", "ls"));
+    arguments.put("args", null);
+    arguments.put("environment", null);
+    arguments.put("stdin", null);
+    arguments.put("workingDirectory", null);
+
+    assertEquals("BASH/ls", ExecuteTool.permissionKey(arguments).canonicalArgs());
+  }
+
+  @Test
+  void permissionKeyDoesNotNameTheTimeout() {
+    var key =
+        ExecuteTool.permissionKey(Map.of("runtime", "bash", "script", "ls", "timeoutSeconds", 5));
+
+    assertEquals("BASH/ls", key.canonicalArgs());
   }
 
   @Test
