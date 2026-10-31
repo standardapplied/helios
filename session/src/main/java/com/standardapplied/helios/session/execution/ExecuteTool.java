@@ -55,13 +55,13 @@ import java.util.stream.Collectors;
  * key, and an empty value is still named. An exact allow rule, such as {@code BASH/ls}, admits only
  * the bare call; {@code BASH/make\n+workingDirectory}, its {@code \n} a real line break, allows
  * that extra on purpose. An exact deny or ask rule stops at the bare call too, so one that must
- * hold whatever a call sets ends in {@code **}. A script may end in a line that reads like an
- * extra; it then matches such a rule but runs in the default directory, with that line as one more
- * command, which gives it less than the rule allows. A deny glob is a guard rail: {@code BASH/**rm
- * **} misses {@code rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm }. A wildcard allow
- * rule on {@code Execute} is not a sandbox: {@code *} matches {@code ;} and the extras lines. Real
- * control is {@code ASK}, whose prompt shows every argument. A script that carries a registered
- * secret's value is refused before any rule or approver sees its key.
+ * hold whatever a call sets ends in {@code **} with no {@code /} before it. A script may end in a
+ * line that reads like an extra; it then matches such a rule without that extra, which gives it
+ * less than the rule allows. A deny glob is a guard rail: {@code BASH/**rm **} misses {@code
+ * rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm x}. A wildcard allow rule on {@code
+ * Execute} is not a sandbox: {@code *} matches {@code ;} and the extras lines. Real control is
+ * {@code ASK}, whose prompt shows the arguments up to its limit and says when it cut them. A script
+ * that carries a registered secret's value is refused before any rule or approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
