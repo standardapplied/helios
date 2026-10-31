@@ -3,27 +3,27 @@
 package com.standardapplied.helios.core.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Pins the exact output and per-name counts, in encounter order, that {@link Redactor} produces for
- * overlapping and adjacent secrets, so a restructuring of the automaton cannot change either.
+ * overlapping and adjacent secrets: overlapping occurrences merge, adjacent ones stay separate.
  */
 class RedactorCharacterizationTest {
 
   private static Redactor redactor(List<String> namesAndValues) {
-    var secrets = new LinkedHashMap<String, byte[]>();
+    var secrets = new LinkedHashMap<String, String>();
     for (var i = 0; i < namesAndValues.size(); i += 2) {
-      secrets.put(
-          namesAndValues.get(i), namesAndValues.get(i + 1).getBytes(StandardCharsets.US_ASCII));
+      secrets.put(namesAndValues.get(i), namesAndValues.get(i + 1));
     }
     return Redactor.of(secrets);
   }
@@ -38,23 +38,23 @@ class RedactorCharacterizationTest {
         Arguments.of(
             List.of("A", "aaaaaaaa", "B", "bbbbbbbb"),
             "bbbbbbbbaaaaaaaaaaaaaaaa",
-            "<redacted:B><redacted:A><redacted:A>",
-            List.of(Map.entry("B", 1), Map.entry("A", 2))),
+            "<redacted:B><redacted:A>",
+            List.of(Map.entry("B", 1), Map.entry("A", 1))),
         Arguments.of(
             List.of("A", "aaaaaaaa"),
             "aaaaaaaaaaaaaaaaaaa",
-            "<redacted:A><redacted:A>aaa",
-            List.of(Map.entry("A", 2))),
+            "<redacted:A>",
+            List.of(Map.entry("A", 1))),
         Arguments.of(
             List.of("X", "abcdefgh", "Y", "efghijkl", "Z", "ijklmnop"),
             "abcdefghijklmnop",
-            "<redacted:X><redacted:Z>",
-            List.of(Map.entry("X", 1), Map.entry("Z", 1))),
+            "<redacted:X>",
+            List.of(Map.entry("X", 1))),
         Arguments.of(
             List.of("Y", "efghijkl", "X", "abcdefgh", "Z", "ijklmnop"),
             "-abcdefghijklmnop-",
-            "-<redacted:X><redacted:Z>-",
-            List.of(Map.entry("X", 1), Map.entry("Z", 1))),
+            "-<redacted:X>-",
+            List.of(Map.entry("X", 1))),
         Arguments.of(
             List.of("S", "abcdefgh", "L", "abcdefghijkl", "M", "defghijk"),
             "abcdefghijkl abcdefgh defghijk",
@@ -68,8 +68,8 @@ class RedactorCharacterizationTest {
         Arguments.of(
             List.of("P", "abababab"),
             "ababababababababab",
-            "<redacted:P><redacted:P>ab",
-            List.of(Map.entry("P", 2))),
+            "<redacted:P>",
+            List.of(Map.entry("P", 1))),
         Arguments.of(
             List.of("Q", "secret01", "R", "secret01"),
             "secret01secret01",
@@ -78,7 +78,7 @@ class RedactorCharacterizationTest {
         Arguments.of(
             List.of("T", "tokentok", "U", "kentoken"),
             "tokentokentoken",
-            "<redacted:T>entoken",
+            "<redacted:T>",
             List.of(Map.entry("T", 1))));
   }
 
@@ -91,21 +91,10 @@ class RedactorCharacterizationTest {
     assertEquals(counts, List.copyOf(result.counts().entrySet()));
   }
 
-  static Stream<Arguments> emptySecretCases() {
-    return Stream.of(
-        Arguments.of("a", "a", List.of()),
-        Arguments.of("ax", "ax<redacted:E>", List.of(Map.entry("E", 1))),
-        Arguments.of("xa", "x<redacted:E>a", List.of(Map.entry("E", 1))),
-        Arguments.of(
-            "ab", "<redacted:K><redacted:E>", List.of(Map.entry("K", 1), Map.entry("E", 1))));
-  }
-
-  @ParameterizedTest
-  @MethodSource("emptySecretCases")
-  void emptySecretIsNotReportedRightAfterTheFirstByteOfAnotherSecret(
-      String input, String text, List<Map.Entry<String, Integer>> counts) {
-    var result = redactor(List.of("E", "", "K", "ab")).redact(input);
-    assertEquals(text, result.text());
-    assertEquals(counts, List.copyOf(result.counts().entrySet()));
+  @Test
+  void anEmptyValueIsRefusedNamingTheSecret() {
+    var refused =
+        assertThrows(IllegalArgumentException.class, () -> redactor(List.of("E", "", "K", "ab")));
+    assertEquals("Secret 'E' must not be empty", refused.getMessage());
   }
 }

@@ -90,6 +90,13 @@ final class RedactedArgumentsTest {
   }
 
   @Test
+  void anUnpairedSurrogateBesideASecretIsKept() {
+    var arguments = ordered("a\uD800b " + SECRET, 1);
+
+    assertEquals(ordered("a\uD800b " + MARKER, 1), RedactedArguments.of(arguments, secrets()));
+  }
+
+  @Test
   void aKeyOrStringThatRedactionLengthensPastItsLimitIsCutToIt() {
     var secrets = new SecretRegistry();
     secrets.register("API_KEY", "12345678");

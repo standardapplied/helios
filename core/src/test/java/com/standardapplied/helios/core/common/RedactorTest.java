@@ -8,7 +8,7 @@ package com.standardapplied.helios.core.common;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -132,13 +132,13 @@ class RedactorTest {
   }
 
   @Test
-  void trimPartialSecretDropsACompleteSecretAtTheEndThatRedactionWouldNotReplace() {
+  void trimPartialSecretDropsACompleteSecretAtTheEndThatAnotherSecretOverlaps() {
     var redactor = build("A", "xyz-1234", "S", "1234-key", "T", "key-9999");
 
     var kept = redactor.trimPartialSecret("id xyz-1234-key");
 
     assertEquals("id ", kept);
-    assertEquals("id <redacted:A>-key", redactor.redact("id xyz-1234-key").text());
+    assertEquals("id <redacted:A>", redactor.redact("id xyz-1234-key").text());
   }
 
   @Test
@@ -162,23 +162,15 @@ class RedactorTest {
     var redactor = Redactor.of(Map.of());
     var result = redactor.redact("hello world");
     assertEquals("hello world", result.text());
-    assertEquals(0, result.totalRedactions());
     assertTrue(result.counts().isEmpty());
-  }
-
-  @Test
-  void nullInputBytesProducesEmptyResult() {
-    var redactor = build("T", "secrettoken123");
-    var result = redactor.redact((byte[]) null);
-    assertEquals("", result.text());
-    assertEquals(0, result.totalRedactions());
   }
 
   @Test
   void nullInputStringProducesEmptyResult() {
     var redactor = build("T", "secrettoken123");
-    var result = redactor.redact((String) null);
+    var result = redactor.redact(null);
     assertEquals("", result.text());
+    assertTrue(result.counts().isEmpty());
   }
 
   @Test
@@ -193,7 +185,6 @@ class RedactorTest {
     var redactor = build("T", "ghp_abc12345");
     var result = redactor.redact("token=ghp_abc12345 here");
     assertEquals("token=<redacted:T> here", result.text());
-    assertEquals(1, result.totalRedactions());
     assertEquals(Map.of("T", 1), result.counts());
   }
 
@@ -202,15 +193,15 @@ class RedactorTest {
     var redactor = build("T", "ghp_abc12345");
     var result = redactor.redact("ghp_abc12345 again ghp_abc12345");
     assertEquals("<redacted:T> again <redacted:T>", result.text());
-    assertEquals(2, result.totalRedactions());
+    assertEquals(Map.of("T", 2), result.counts());
   }
 
   @Test
   void unrelatedTextPassesThroughUnchanged() {
     var redactor = build("T", "ghp_abc12345");
-    var result = redactor.redact("nothing to see here");
-    assertEquals("nothing to see here", result.text());
-    assertEquals(0, result.totalRedactions());
+    var input = "nothing to see here";
+    var result = redactor.redact(input);
+    assertSame(input, result.text());
     assertTrue(result.counts().isEmpty());
   }
 
@@ -221,15 +212,41 @@ class RedactorTest {
     assertEquals("<redacted:T1> and <redacted:T2> and <redacted:T1>", result.text());
     assertEquals(2, (int) result.counts().get("T1"));
     assertEquals(1, (int) result.counts().get("T2"));
-    assertEquals(3, result.totalRedactions());
   }
 
   @Test
-  void overlappingSecretsResolveLeftmostLongest() {
+  void overlappingSecretsBecomeOneMarkerNamingTheFirst() {
     var redactor = build("LONG", "abcdefgh", "SHORT", "cdefghij");
     var result = redactor.redact("abcdefghij");
-    assertEquals("<redacted:LONG>ij", result.text());
-    assertEquals(1, result.totalRedactions());
+    assertEquals("<redacted:LONG>", result.text());
+    assertEquals(Map.of("LONG", 1), result.counts());
+  }
+
+  @Test
+  void noCharacterOfEitherOverlappingSecretSurvives() {
+    var input = "xxxxxxxxYYzzzzzzzz";
+    for (var redactor :
+        List.of(
+            build("A", "xxxxxxxxYY", "B", "YYzzzzzzzz"),
+            build("B", "YYzzzzzzzz", "A", "xxxxxxxxYY"))) {
+      var result = redactor.redact(input);
+      assertEquals("<redacted:A>", result.text());
+      assertEquals(Map.of("A", 1), result.counts());
+    }
+  }
+
+  @Test
+  void aMarkerAtAnEqualStartNamesTheLongerSecretAndHidesTheShorter() {
+    var result = build("SHORT", "abcdefgh", "LONG", "abcdefghij").redact("abcdefghij");
+    assertEquals(Map.of("LONG", 1), result.counts());
+  }
+
+  @Test
+  void aSecretInsideALongerOnesSpanDoesNotShortenIt() {
+    var redactor = build("OUTER", "abcdefghijklmnop", "INNER", "cdefghij", "TAIL", "lmnopqrs");
+    var result = redactor.redact("abcdefghijklmnopqrs rest");
+    assertEquals("<redacted:OUTER> rest", result.text());
+    assertEquals(Map.of("OUTER", 1), result.counts());
   }
 
   @Test
@@ -240,10 +257,10 @@ class RedactorTest {
   }
 
   @Test
-  void suffixSecretInsideLongerMatchSuppressed() {
+  void aSecretOverlappingTheEndOfAnotherIsHiddenByItsMarker() {
     var redactor = build("OUTER", "abcdefgh", "INNER", "cdefghij");
     var result = redactor.redact("abcdefghij");
-    assertEquals("<redacted:OUTER>ij", result.text());
+    assertEquals("<redacted:OUTER>", result.text());
   }
 
   @Test
@@ -264,26 +281,22 @@ class RedactorTest {
   @Test
   void nonAsciiBytesInInputDoNotMaskMatch() {
     var redactor = build("T", "abcdefgh");
-    var prefix = new byte[] {(byte) 0xC3, (byte) 0xA9};
-    var middle = "abcdefgh".getBytes(StandardCharsets.US_ASCII);
-    var suffix = new byte[] {(byte) 0xE2, (byte) 0x98, (byte) 0x83};
-    var input = new byte[prefix.length + middle.length + suffix.length];
-    System.arraycopy(prefix, 0, input, 0, prefix.length);
-    System.arraycopy(middle, 0, input, prefix.length, middle.length);
-    System.arraycopy(suffix, 0, input, prefix.length + middle.length, suffix.length);
-    var result = redactor.redact(input);
+    var result = redactor.redact("éabcdefgh☃");
     assertTrue(result.text().contains("<redacted:T>"));
     assertFalse(result.text().contains("abcdefgh"));
-    assertEquals(1, result.totalRedactions());
+    assertEquals(Map.of("T", 1), result.counts());
   }
 
   @Test
-  void nonAsciiByteBreaksPartialMatch() {
-    var redactor = build("T", "abcdefgh");
-    var input = new byte[] {'a', 'b', 'c', (byte) 0x80, 'd', 'e', 'f', 'g', 'h'};
-    var result = redactor.redact(input);
-    assertFalse(result.text().contains("<redacted:T>"));
-    assertEquals(0, result.totalRedactions());
+  void aNonAsciiNameAppearsInItsMarkerAsRegistered() {
+    assertEquals("<redacted:clé>", build("clé", "abcdefgh").redact("abcdefgh").text());
+  }
+
+  @Test
+  void anUnpairedSurrogateSurvivesRedaction() {
+    var redactor = build("K", "abcdefgh");
+    assertEquals("a\uD800b <redacted:K>", redactor.redact("a\uD800b abcdefgh").text());
+    assertEquals("a\uD800b", redactor.redact("a\uD800b").text());
   }
 
   @Test
@@ -312,40 +325,36 @@ class RedactorTest {
     var redactor = build("T", "abcdefgh");
     var result = redactor.redact("abcdefghabcdefgh");
     assertEquals("<redacted:T><redacted:T>", result.text());
-    assertEquals(2, result.totalRedactions());
+    assertEquals(Map.of("T", 2), result.counts());
   }
 
   @Test
-  void selfOverlappingPatternMatchesNonOverlappingOnly() {
+  void selfOverlappingOccurrencesBecomeOneMarker() {
     var redactor = build("T", "abcabcab");
     var result = redactor.redact("abcabcabcabcab");
-    assertEquals("<redacted:T>cabcab", result.text());
-    assertEquals(1, result.totalRedactions());
+    assertEquals("<redacted:T>", result.text());
+    assertEquals(Map.of("T", 1), result.counts());
   }
 
   @Test
-  void redactorOfRefusesNonAsciiBytes() {
-    var bad = new LinkedHashMap<String, byte[]>();
-    bad.put("T", new byte[] {'a', 'b', (byte) 0x80, 'd', 'e', 'f', 'g', 'h'});
+  void redactorOfRefusesANonAsciiValue() {
+    var bad = Map.of("T", "ab\u0080defgh");
     var ex = assertThrows(IllegalArgumentException.class, () -> Redactor.of(bad));
+    assertTrue(ex.getMessage().contains("'T'"));
     assertTrue(ex.getMessage().contains("ASCII"));
   }
 
   @Test
-  void redactorOfNullMapReturnsEmpty() {
-    var redactor = Redactor.of(null);
-    assertEquals(0, redactor.patternCount());
-    assertEquals("anything", redactor.redact("anything").text());
+  void redactorOfRefusesANullValue() {
+    var bad = new LinkedHashMap<String, String>();
+    bad.put("T", null);
+    var ex = assertThrows(IllegalArgumentException.class, () -> Redactor.of(bad));
+    assertEquals("Secret 'T' must not be empty", ex.getMessage());
   }
 
   @Test
-  void redactorReturnsFreshArrayPerCall() {
-    var redactor = build("T", "abcdefgh");
-    var result1 = redactor.redact("safe");
-    var result2 = redactor.redact("safe");
-    assertNotNull(result1.bytes());
-    assertNotNull(result2.bytes());
-    assertFalse(result1.bytes() == result2.bytes());
+  void redactorOfNullMapReturnsEmpty() {
+    assertEquals("anything", Redactor.of(null).redact("anything").text());
   }
 
   @Test
@@ -355,23 +364,15 @@ class RedactorTest {
   }
 
   @Test
-  void totalRedactionsHandlesEmptyCounts() {
-    var redactor = build("T", "abcdefgh");
-    var result = redactor.redact("nothing");
-    assertEquals(0, result.totalRedactions());
-  }
-
-  @Test
   void manySecretsAllMatched() {
     var registry = new SecretRegistry();
     for (var i = 0; i < 50; i++) {
       registry.register("T%02d".formatted(i), "secretvaluexx%02d".formatted(i));
     }
     var redactor = registry.redactor();
-    assertEquals(50, redactor.patternCount());
     var input = "secretvaluexx00 then secretvaluexx25 then secretvaluexx49 then unrelated";
     var result = redactor.redact(input);
-    assertEquals(3, result.totalRedactions());
+    assertEquals(3, result.counts().size());
     assertTrue(result.text().contains("<redacted:T00>"));
     assertTrue(result.text().contains("<redacted:T25>"));
     assertTrue(result.text().contains("<redacted:T49>"));
@@ -428,26 +429,21 @@ class RedactorTest {
         sb.insert(rng.nextInt(sb.length() + 1), secret);
       }
       var input = sb.toString();
-      var expected = countLeftmostLongest(input, secret);
+      var expected = countMergedSpans(input, secret);
       var result = registry.redactor().redact(input);
-      assertEquals(expected, result.totalRedactions(), "trial=" + trial);
+      assertEquals(expected == 0 ? Map.of() : Map.of("ONE", expected), result.counts());
       assertFalse(result.text().contains(secret));
-      if (expected > 0) {
-        assertEquals(expected, (int) result.counts().get("ONE"));
-      }
     }
   }
 
-  private static int countLeftmostLongest(String input, String pattern) {
+  private static int countMergedSpans(String input, String pattern) {
     var count = 0;
-    var i = 0;
-    while (i + pattern.length() <= input.length()) {
-      if (input.regionMatches(i, pattern, 0, pattern.length())) {
+    var spanEnd = 0;
+    for (var at = input.indexOf(pattern); at >= 0; at = input.indexOf(pattern, at + 1)) {
+      if (at >= spanEnd) {
         count++;
-        i += pattern.length();
-      } else {
-        i++;
       }
+      spanEnd = at + pattern.length();
     }
     return count;
   }
@@ -464,8 +460,18 @@ class RedactorTest {
   void redactionResultRecordExposesFields() {
     var redactor = build("T", "abcdefgh");
     var result = redactor.redact("abcdefgh");
-    assertNotNull(result.bytes());
+    assertEquals("<redacted:T>", result.text());
     assertEquals(Map.of("T", 1), result.counts());
+  }
+
+  @Test
+  void aResultKeepsTheCountsItWasBuiltWith() {
+    var counts = new LinkedHashMap<String, Integer>();
+    counts.put("B", 1);
+    counts.put("A", 2);
+    var result = new RedactionResult("text", counts);
+    counts.clear();
+    assertEquals(List.of("B", "A"), List.copyOf(result.counts().keySet()));
   }
 
   @Test
@@ -473,14 +479,6 @@ class RedactorTest {
     var redactor = build("T", "abcdefgh");
     var result = redactor.redact("abcdefgh");
     assertThrows(UnsupportedOperationException.class, () -> result.counts().put("X", 1));
-  }
-
-  @Test
-  void redactorPatternCountMatchesRegistration() {
-    var registry = new SecretRegistry();
-    registry.register("A", "alphaalpha");
-    registry.register("B", "betabetab");
-    assertEquals(2, registry.redactor().patternCount());
   }
 
   @Test
@@ -494,17 +492,17 @@ class RedactorTest {
   }
 
   @Test
-  void sharedSuffixPatternsBothMatched() {
+  void overlappingSpansThatTouchStayTwoMarkers() {
     var redactor = build("ABC", "alphabxx", "BC", "phabxxxx");
     var result = redactor.redact("xxalphabxxxxalphabxxxx");
-    var counts = result.counts();
-    assertEquals(2, counts.values().stream().mapToInt(Integer::intValue).sum());
+    assertEquals("xx<redacted:ABC><redacted:ABC>", result.text());
+    assertEquals(Map.of("ABC", 2), result.counts());
   }
 
   @Test
   void redactPreservesNonAsciiSurroundingBytes() {
     var redactor = build("T", "abcdefgh");
-    var input = ("é" + "abcdefgh" + "☃").getBytes(StandardCharsets.UTF_8);
+    var input = "é" + "abcdefgh" + "☃";
     var result = redactor.redact(input);
     var decoded = result.text();
     assertTrue(decoded.startsWith("é<redacted:T>"));
@@ -515,8 +513,7 @@ class RedactorTest {
   void worksFromBuildEvenWhenSomeSecretsAreNeverMatched() {
     var redactor = build("USED", "abcdefgh", "UNUSED", "qrstuvwx");
     var result = redactor.redact("only abcdefgh appears");
-    assertEquals(1, result.totalRedactions());
-    assertEquals(List.of("USED"), List.copyOf(result.counts().keySet()));
+    assertEquals(Map.of("USED", 1), result.counts());
   }
 
   private static String randomAscii(Random rng, int len) {

@@ -8,6 +8,7 @@ package com.standardapplied.helios.core.common;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,16 @@ class SecretRegistryTest {
     assertEquals(1, registry.size());
     assertTrue(registry.leaks("ghp_other67890"));
     assertFalse(registry.leaks("ghp_abc12345"));
+  }
+
+  @Test
+  void reRegisteringANameKeepsItsPositionAsTheFirstNameOfAValue() {
+    var registry = new SecretRegistry();
+    registry.register("FIRST", "ghp_abc12345");
+    registry.register("SECOND", "ghp_other67890");
+    registry.register("FIRST", "ghp_other67890");
+
+    assertEquals("<redacted:FIRST>", registry.redactor().redact("ghp_other67890").text());
   }
 
   @Test
@@ -194,21 +205,42 @@ class SecretRegistryTest {
   }
 
   @Test
+  void leaksFindsAValueSurroundedByNonAsciiText() {
+    var registry = new SecretRegistry();
+    registry.register("T", "ghp_secrettoken");
+    assertTrue(registry.leaks("日本語 é😀ghp_secrettoken😀 ü"));
+    assertFalse(registry.leaks("日本語 ghp_secret😀token"));
+  }
+
+  @Test
+  void redactorIsCachedUntilTheNextRegister() {
+    var registry = new SecretRegistry();
+    registry.register("A", "alphaalphaalpha");
+    var first = registry.redactor();
+    assertSame(first, registry.redactor());
+
+    registry.register("B", "betabetabeta");
+
+    var second = registry.redactor();
+    assertNotSame(first, second);
+    assertEquals("<redacted:B>", second.redact("betabetabeta").text());
+  }
+
+  @Test
   void redactorIsSnapshot() {
     var registry = new SecretRegistry();
     registry.register("A", "alphaalphaalpha");
     var first = registry.redactor();
     registry.register("B", "betabetabeta");
-    var second = registry.redactor();
-    assertNotSame(first, second);
-    assertEquals(1, first.patternCount());
-    assertEquals(2, second.patternCount());
+    var input = "alphaalphaalpha betabetabeta";
+    assertEquals("<redacted:A> betabetabeta", first.redact(input).text());
+    assertEquals("<redacted:A> <redacted:B>", registry.redactor().redact(input).text());
   }
 
   @Test
   void redactorEmptyWhenNoSecrets() {
     var registry = new SecretRegistry();
-    assertEquals(0, registry.redactor().patternCount());
+    assertEquals("alphaalphaalpha", registry.redactor().redact("alphaalphaalpha").text());
   }
 
   @Test
@@ -228,7 +260,7 @@ class SecretRegistryTest {
             try {
               go.await();
               for (var i = 0; i < perThread; i++) {
-                registry.register("T-%d-%d".formatted(threadId, i), "value%08d".formatted(i));
+                registry.register("T-%d-%d".formatted(threadId, i), value(threadId, i));
               }
             } catch (Exception e) {
               failures.incrementAndGet();
@@ -242,5 +274,15 @@ class SecretRegistryTest {
     Await.latch("every registering thread to finish", done);
     assertEquals(0, failures.get());
     assertEquals(threads * perThread, registry.size());
+    var redactor = registry.redactor();
+    for (var t = 0; t < threads; t++) {
+      for (var i = 0; i < perThread; i++) {
+        assertEquals("<redacted:T-%d-%d>".formatted(t, i), redactor.redact(value(t, i)).text());
+      }
+    }
+  }
+
+  private static String value(int threadId, int index) {
+    return "value-%d-%08d".formatted(threadId, index);
   }
 }
