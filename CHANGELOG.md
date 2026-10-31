@@ -6,6 +6,21 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**The redactor is a plain scan, cached by its registry; overlapping secrets become one marker.**
+`AhoCorasick` and the byte path are gone. `SecretRegistry.redactor()` returns the same instance
+until the next `register`. With `A = xxxxxxxxYY` and `B = YYzzzzzzzz`, `xxxxxxxxYYzzzzzzzz` used to
+keep eight characters of `B`; no character of either survives now.
+
+| 2.x | 3.0 |
+|---|---|
+| `Redactor.redact(byte[])` | removed; decode and call `redact(String)` |
+| `RedactionResult(byte[] bytes, Map counts)`, `bytes()` | `RedactionResult(String text, Map counts)`; `text()` is the component |
+| `RedactionResult.totalRedactions()` | removed; sum `counts().values()` |
+| `Redactor.patternCount()` | removed; `SecretRegistry.size()` |
+| `Redactor.of(Map<String, byte[]>)` | `Redactor.of(Map<String, String>)`; an empty value now throws |
+| Overlapping occurrences: the first kept, the rest dropped, and what they did not share left in the text | one marker naming the first; `counts()` counts markers, so a secret inside another's marker is not counted |
+| `Redactor.redact(String)` replaced an unpaired surrogate with `?` | it stays as it is |
+
 **History holds at most `SessionLimits.maxToolResultChars` of each tool result.** A tool result of
 any size used to enter history; now its redacted text enters history with only its first and last
 32,768 characters by default and the marker between them. The model, the compactor and the session
