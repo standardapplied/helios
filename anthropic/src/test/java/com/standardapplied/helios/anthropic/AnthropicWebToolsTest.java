@@ -15,16 +15,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Reasoning;
+import com.standardapplied.helios.core.model.Reasoning.Display;
+import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.provider.SseReader;
+import com.standardapplied.helios.core.test.Golden;
+import com.standardapplied.helios.core.test.ModelHarness;
 import java.io.ByteArrayInputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -32,12 +41,32 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AnthropicWebToolsTest {
 
+  /**
+   * A live claude-sonnet-5-5 turn and its answer, recorded 2026-11-01. The search runs from code
+   * execution: its {@code server_tool_use} opens whole, with input and {@code caller}, and a signed
+   * thinking block follows it, so the API rejects a replay that alters that block.
+   */
+  private static final String DYNAMIC_FILTERING_LOOP =
+      "anthropic/streams/dynamic-filtering-loop.sse";
+
   private final ObjectMapper objectMapper =
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
   private static AnthropicRequestBuilder requests(ModelConfig config) {
     var model = AnthropicModelId.CLAUDE_OPUS_4_8;
     return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+  }
+
+  private static Model dynamicFilteringModel(URI uri) {
+    return new AnthropicProvider()
+        .create(
+            AnthropicModelId.CLAUDE_SONNET_5_5.id(),
+            ModelConfig.newBuilder()
+                .withApiKey("test-key")
+                .withBaseUrl(uri + "/v1/messages")
+                .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
+                .withWebSearch(true)
+                .build());
   }
 
   // ── request emission ──────────────────────────────────────────────────────
@@ -605,6 +634,81 @@ class AnthropicWebToolsTest {
                     .build(List.of(Message.user("Hi")), List.of(collider), null)
                     .body());
     assertTrue(ex.getMessage().contains("web_search"));
+  }
+
+  @Test
+  void theNextTurnReplaysEveryBlockThatArrivedWholeAsItArrived() {
+    var replies =
+        Arrays.asList(Golden.read(DYNAMIC_FILTERING_LOOP).split(ModelHarness.NEXT_RESPONSE));
+    var history = new ArrayList<>(List.of(Message.user("Find the year.")));
+
+    var requests =
+        ModelHarness.exchange(
+            replies,
+            AnthropicWebToolsTest::dynamicFilteringModel,
+            model -> {
+              var turn = model.chat(history, List.of());
+              history.add(turn.toMessage());
+              turn.toolCalls().forEach(c -> history.add(Message.tool(c.id(), c.name(), "saved")));
+              model.chat(history, List.of());
+            });
+
+    assertWholeBlocksReplayed(replies.getFirst(), requests.get(1).body());
+  }
+
+  @Test
+  void aPausedTurnResumesWithEveryBlockThatArrivedWholeAsItArrived() {
+    var replies =
+        new ArrayList<>(
+            Arrays.asList(Golden.read(DYNAMIC_FILTERING_LOOP).split(ModelHarness.NEXT_RESPONSE)));
+    replies.set(
+        0,
+        replies
+            .getFirst()
+            .replace("\"stop_reason\":\"tool_use\"", "\"stop_reason\":\"pause_turn\""));
+
+    var requests =
+        ModelHarness.exchange(
+            replies,
+            AnthropicWebToolsTest::dynamicFilteringModel,
+            model -> model.chat(List.of(Message.user("Find the year.")), List.of()));
+
+    assertWholeBlocksReplayed(replies.getFirst(), requests.get(1).body());
+  }
+
+  @SuppressWarnings("unchecked")
+  private void assertWholeBlocksReplayed(String recording, String requestBody) {
+    var messages =
+        (List<Map<String, Object>>) objectMapper.readValue(requestBody, Map.class).get("messages");
+    var replayed =
+        (List<Map<String, Object>>)
+            messages.stream()
+                .filter(message -> "assistant".equals(message.get("role")))
+                .findFirst()
+                .orElseThrow()
+                .get("content");
+    var whole = blocksThatArrivedWhole(recording);
+
+    assertEquals(Map.of("query", "Austin, Texas founded year"), whole.get(1).get("input"));
+    whole.forEach((index, block) -> assertEquals(block, replayed.get(index), "block " + index));
+  }
+
+  @SuppressWarnings("unchecked")
+  private TreeMap<Integer, Map<String, Object>> blocksThatArrivedWhole(String recording) {
+    var whole = new TreeMap<Integer, Map<String, Object>>();
+    for (var line : recording.split("\n")) {
+      if (line.startsWith("data: ")) {
+        Map<String, Object> event = objectMapper.readValue(line.substring(6), Map.class);
+        var index = (Integer) event.get("index");
+        switch ((String) event.get("type")) {
+          case "content_block_start" ->
+              whole.put(index, (Map<String, Object>) event.get("content_block"));
+          case "content_block_delta" -> whole.remove(index);
+          default -> {}
+        }
+      }
+    }
+    return whole;
   }
 
   @Test
