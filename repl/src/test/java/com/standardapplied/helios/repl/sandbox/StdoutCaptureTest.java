@@ -66,7 +66,7 @@ class StdoutCaptureTest {
   }
 
   @Test
-  void takeLeavesTheFinalNewlineOutAndKeepsTheCount() {
+  void aNewlineAtTheCutStaysInTheKeptTextAndEveryCharIsAccountedFor() {
     var printed = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1) + "\nab";
     var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
     var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
@@ -74,8 +74,21 @@ class StdoutCaptureTest {
     capture.awaitEnd(Await.HANG_GUARD);
 
     var cut = capture.take();
-    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1), cut.kept());
+    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS), cut.kept());
     assertEquals(2, cut.discarded());
+  }
+
+  @Test
+  void theFinalNewlineOfOutputThatFitsIsLeftOut() {
+    var printed = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1) + "\n";
+    var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    var cut = capture.take();
+    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1), cut.kept());
+    assertEquals(0, cut.discarded());
   }
 
   @Test
