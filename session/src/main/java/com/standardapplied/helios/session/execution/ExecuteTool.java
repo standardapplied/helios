@@ -60,8 +60,9 @@ import java.util.stream.Collectors;
  * less than the rule allows. A deny glob is a guard rail: {@code BASH/**rm **} misses {@code
  * rm<TAB>-rf} and {@code r''m}, and matches {@code echo farm x}. A wildcard allow rule on {@code
  * Execute} is not a sandbox: {@code *} matches {@code ;} and the extras lines. Real control is
- * {@code ASK}, whose prompt shows the arguments up to its limit and says when it cut them. A script
- * that carries a registered secret's value is refused before any rule or approver sees its key.
+ * {@code ASK}, whose prompt always names the extras a call sets and shows the arguments up to its
+ * limit, saying when it cut them, so an extra's value can be cut. A script that carries a
+ * registered secret's value is refused before any rule or approver sees its key.
  *
  * <p>Spec: §11 + §8.3.
  */
