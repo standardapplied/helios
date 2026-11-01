@@ -28,12 +28,19 @@ public final class ProcessTransport implements RpcTransport {
   /** Magic prefix on JSON-RPC lines from the sandbox process. */
   public static final String RPC_PREFIX = "\0RPC:";
 
+  /** Most characters of captured output the host keeps between two drains. */
+  public static final int MAX_CAPTURED_OUTPUT_CHARS = 1_000_000;
+
+  /** Longest line {@link #receive()} accepts, in characters, {@link #RPC_PREFIX} included. */
+  public static final int MAX_FRAME_CHARS = 8_000_000;
+
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
-  private final BufferedReader reader;
+  private final BoundedLineReader reader;
   private final BufferedWriter writer;
   private final AtomicBoolean open = new AtomicBoolean(true);
-  private final StringBuilder stdoutBuffer = new StringBuilder();
+  private final AtomicBoolean released = new AtomicBoolean(false);
+  private final CapturedOutput stdoutBuffer = new CapturedOutput();
 
   /**
    * Create a transport over the given streams.
@@ -48,7 +55,10 @@ public final class ProcessTransport implements RpcTransport {
     if (output == null) {
       throw new IllegalArgumentException("Output stream must not be null");
     }
-    this.reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+    this.reader =
+        new BoundedLineReader(
+            new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8)),
+            MAX_FRAME_CHARS);
     this.writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8));
   }
 
@@ -65,6 +75,12 @@ public final class ProcessTransport implements RpcTransport {
     }
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @throws IOException if reading fails, the message is malformed, or a line is longer than {@link
+   *     #MAX_FRAME_CHARS}
+   */
   @Override
   public RpcMessage receive() throws IOException {
     while (open.get()) {
@@ -87,27 +103,19 @@ public final class ProcessTransport implements RpcTransport {
         var json = line.substring(RPC_PREFIX.length());
         return deserializeMessage(json);
       }
-      synchronized (stdoutBuffer) {
-        if (!stdoutBuffer.isEmpty()) {
-          stdoutBuffer.append('\n');
-        }
-        stdoutBuffer.append(line);
-      }
+      stdoutBuffer.appendLine(line);
     }
     return null;
   }
 
   /**
-   * Drain and return any non-RPC stdout lines accumulated since the last drain.
+   * Drain and return the non-RPC stdout lines accumulated since the last drain, cut as {@link
+   * CapturedOutput#drain()} describes.
    *
    * @return captured stdout text, or empty string if none
    */
   public String drainStdout() {
-    synchronized (stdoutBuffer) {
-      var result = stdoutBuffer.toString();
-      stdoutBuffer.setLength(0);
-      return result;
-    }
+    return stdoutBuffer.drain();
   }
 
   @Override
@@ -117,9 +125,11 @@ public final class ProcessTransport implements RpcTransport {
 
   @Override
   public void close() throws IOException {
-    if (open.compareAndSet(true, false)) {
-      reader.close();
-      writer.close();
+    open.set(false);
+    if (released.compareAndSet(false, true)) {
+      try (reader) {
+        writer.close();
+      }
     }
   }
 

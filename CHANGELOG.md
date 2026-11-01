@@ -6,6 +6,22 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Sandbox output and RPC frames are capped, and a dead channel is a dead sandbox.** A snippet's
+stdout and stderr are each cut at 1,000,000 chars per execute, on both paths: what `System.out` and
+`System.err` capture during the execute, and what reaches the subprocess's raw stdout. Each ends in
+`\n[output truncated: <n> more chars discarded]`, a character is never split, and the session goes
+on with its state. An RPC frame over 8,000,000 chars closes the channel and ends the sandbox;
+printing does not reach that limit, only code that writes the socket itself. The caps are constants,
+`ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS` and `MAX_FRAME_CHARS`.
+
+| Before | 3.0 |
+|---|---|
+| A snippet's output was held whole, in the subprocess and then on the host | the first 1,000,000 chars of each stream, followed by the marker |
+| Any line of any length was read from the RPC socket | a line over 8,000,000 chars fails `ProcessTransport.receive` with an `IOException` naming the limit and ends the channel |
+| `JvmSandbox.isAlive` was the subprocess's liveness, so a sandbox whose channel had ended failed every execute with `Channel is closed` | it is `false` once the channel ended: `ReplSession.isOpen` is `false`, `ReplSession.execute` throws `ReplException("Sandbox is no longer alive")`, and `JvmSandbox.execute` returns a failure saying `its RPC channel closed` |
+| A disconnected `RpcChannel` and `ProcessTransport` never released their executor and streams | the channel disposes once, on the end of its transport or on `close()`, whichever comes first; a handler still running on that end is interrupted |
+| Subprocess stdout was read line by line, so a bare `\r` split a line and an unfinished line waited for its newline | it is read in chunks: a `\r` stays as printed, and a drain returns what has arrived so far |
+
 **The Gemini catalogue keeps 3.6, 3.7 and 3.8 Flash and adds 4 Argon.** A removed id is rejected
 like any unknown id: `GeminiProvider.create` throws `IllegalArgumentException` naming it and the
 supported ids. Live tests and `SessionDemoMain` run on Gemini 3.8 Flash.

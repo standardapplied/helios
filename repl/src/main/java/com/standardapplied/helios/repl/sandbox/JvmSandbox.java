@@ -217,7 +217,7 @@ public final class JvmSandbox implements Sandbox {
 
   @Override
   public boolean isAlive() {
-    return !closed.get() && process.isAlive();
+    return !closed.get() && process.isAlive() && rpc.channel().isActive();
   }
 
   /**
@@ -237,8 +237,8 @@ public final class JvmSandbox implements Sandbox {
    *       between snapshot and parent kill; those escape. Within a single JVM there is no portable
    *       defense — bounding runaway descendant creation is the deployer's responsibility,
    *       typically via cgroup pids.max or an external process supervisor.
-   *   <li><strong>Stdout reader join is best-effort.</strong> The reader's {@code readLine} returns
-   *       EOF when the subprocess's stdout pipe closes, which it does once {@link
+   *   <li><strong>Stdout reader join is best-effort.</strong> The reader's {@code read} returns EOF
+   *       when the subprocess's stdout pipe closes, which it does once {@link
    *       Process#destroyForcibly} takes effect. A subprocess stuck in uninterruptible kernel sleep
    *       (D-state) keeps the pipe open until the kernel unblocks it; the join then times out and
    *       the reader virtual thread leaks. Bounded to one orphan thread per stuck session — does
