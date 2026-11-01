@@ -68,6 +68,31 @@ class SandboxOutputCapTest {
   }
 
   @Test
+  void controlCharactersFloodingBothStreamsAreCutAndTheSessionGoesOnWithItsState() {
+    try (var sandbox = JvmSandbox.create(CONFIG, new HostFunctionRegistry())) {
+      sandbox.execute(ExecutionRequest.java("int kept = 41;"));
+
+      var printed =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  """
+                  var flood = String.valueOf((char) 27).repeat(1000000);
+                  System.out.print(flood);
+                  System.err.print(flood);
+                  """));
+
+      assertEquals(0, printed.exitCode(), printed.stderr());
+      assertTrue(printed.stdout().endsWith(" more chars discarded]"), "stdout cut");
+      assertTrue(printed.stderr().endsWith(" more chars discarded]"), "stderr cut");
+      assertTrue(sandbox.isAlive());
+
+      var after = sandbox.execute(ExecutionRequest.java("System.out.print(kept + 1);"));
+
+      assertEquals("42", after.stdout());
+    }
+  }
+
+  @Test
   void anExecuteThatPrintsToStderrPastTheCapIsCutTheSameWay() {
     try (var sandbox = JvmSandbox.create(CONFIG, new HostFunctionRegistry())) {
       var printed =

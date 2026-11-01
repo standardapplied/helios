@@ -6,9 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.FeedableInputStream;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.channels.AsynchronousCloseException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -94,6 +98,53 @@ class RpcChannelDisposalTest {
     streams.awaitBothClosed();
     assertFalse(channel.isActive());
     assertClosedOnce();
+  }
+
+  /**
+   * A socket's write blocks once the peer stops reading, and only closing the socket releases it.
+   * The input stands for the socket: disposal has to close it without waiting for the write.
+   */
+  @Test
+  void aDisconnectReleasesACallBlockedWritingToAPeerThatStoppedReading() {
+    var writeBlocked = new CountDownLatch(1);
+    var socketClosed = new CountDownLatch(1);
+    var fromPeer = new FeedableInputStream();
+    var input =
+        new FilterInputStream(fromPeer) {
+          @Override
+          public void close() throws IOException {
+            socketClosed.countDown();
+            super.close();
+          }
+        };
+    var output =
+        new OutputStream() {
+          @Override
+          public void write(int value) throws IOException {
+            writeBlocked.countDown();
+            try {
+              socketClosed.await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            throw new AsynchronousCloseException();
+          }
+        };
+    var blockedChannel =
+        new RpcChannel(
+            new ProcessTransport(input, output),
+            new HostFunctionRegistry(),
+            Await.HANG_GUARD.multipliedBy(5));
+    var call =
+        CompletableFuture.supplyAsync(
+            () -> blockedChannel.call("never-written", null), Thread.ofVirtual()::start);
+    Await.latch("the write to block", writeBlocked);
+
+    fromPeer.end();
+
+    var failure = Await.failure("the blocked call", call);
+    assertInstanceOf(RpcChannel.RpcException.class, failure);
+    assertFalse(blockedChannel.isActive());
   }
 
   /**
