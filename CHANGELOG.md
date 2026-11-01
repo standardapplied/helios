@@ -326,7 +326,7 @@ and an unordered map or set no longer compiles in their place.
 |---|---|
 | `JsonSchema.properties` is a `Map<String, JsonSchema>` | a `SequencedMap<String, JsonSchema>`, stored as an unmodifiable copy in the given order; a null name or schema is rejected. Pass a `LinkedHashMap`, or build with `JsonSchema.object().withProperty(...).build()` |
 | `ToolChoice.Required.allowedTools` is a `Set<String>` | a `SequencedSet<String>`, stored as an unmodifiable copy in the given order. Construct it through `ToolChoice.required(String...)`, which keeps the varargs order and drops a repeated name |
-| `gemini.api.ToolChoiceConfig.allowedTools` and `validated(Set<String>)` | `SequencedSet<String>` |
+| `gemini.api.ToolChoiceConfig.allowedTools` | `SequencedSet<String>` |
 | `Prompt.variables`, `Prompt.extractVariables(String)` and `Prompt.Builder.withVariables(Set<String>)` are a `Set<String>` | a `SequencedSet<String>` in order of first occurrence, stored as an unmodifiable copy; a null name is rejected. Pass a `LinkedHashSet`, or let `build()` extract them |
 | `persistence.mapper.DbTypeMapperProvider.readStringSet` returns a `Set<String>` | a `SequencedSet<String>` in the array's order |
 | `ModelIntegrationContract` (core test-jar) declares `model()` | also declares `model(ModelConfig.Builder)`: a subclass completes the builder with its API key and model id and returns a model the caller closes |
@@ -1228,6 +1228,11 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Fixed
 
+- **`ToolChoice.required(...)` did not force a tool call on Gemini.** Helios sent the names as
+  `allowed_tools` mode `validated`, which lets Gemini reply with text only. It now sends mode `any`
+  with the names, so the model must call one of them.
+- **`ToolChoice.none()` did not stop tool use on Anthropic.** Helios sent no `tool_choice`, which
+  the API reads as `auto`. It now sends `{"type":"none"}`.
 - **One large tool result could make every later model call fail.** The compactor keeps the latest
   messages, so the result stayed in every request. History now holds a bounded copy of it.
 - **A blocked first message still called the model.** When an `OnUserMessageHook` blocked the only

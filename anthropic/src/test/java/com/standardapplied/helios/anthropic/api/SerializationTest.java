@@ -184,6 +184,11 @@ class SerializationTest {
   }
 
   @Test
+  void serializeToolChoiceNone() throws Exception {
+    assertEquals("{\"type\":\"none\"}", objectMapper.writeValueAsString(ToolChoiceConfig.none()));
+  }
+
+  @Test
   void serializeThinkingDisabled() throws Exception {
     var thinking = ThinkingConfig.disabled();
     var json = objectMapper.writeValueAsString(thinking);

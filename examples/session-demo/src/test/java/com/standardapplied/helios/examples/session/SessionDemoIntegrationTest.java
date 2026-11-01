@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -37,7 +36,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Set;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -54,16 +52,14 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Assertions describe what the framework guarantees whatever the model writes: forced to call a
  * tool, the loop dispatches it and the provider accepts the next turn; the attachment-bearing user
  * message is accepted; and a memory write without an allow rule asks the user, who denies it, so
- * the permission system blocks it before dispatch and it never reaches disk. Which tool a forced
- * call picks is the model's choice: a run whose calls are not the ones under test skips, naming the
- * offline test that covers them. Forcing applies to every turn, so once the exploring session runs
- * out of file steps it calls the demo's other tools; only its first call is checked.
+ * the permission system blocks it before dispatch and it never reaches disk. Each forced session
+ * names the tools under test, so every call it makes is one of them.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class SessionDemoIntegrationTest {
 
-  private static final Set<String> FILE_READ_TOOLS =
-      Set.of(ReadTool.NAME, LsTool.NAME, GlobTool.NAME, GrepTool.NAME);
+  private static final List<String> FILE_READ_TOOLS =
+      List.of(ReadTool.NAME, LsTool.NAME, GlobTool.NAME, GrepTool.NAME);
 
   private static Model model;
 
@@ -89,7 +85,8 @@ final class SessionDemoIntegrationTest {
   @Test
   void agentExploresRepoWithItsFileTools(@TempDir Path tmp) throws Exception {
     seedFakeRepo(tmp);
-    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
+    var fileTools = ToolChoice.required(FILE_READ_TOOLS.toArray(String[]::new));
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(fileTools));
         var session =
             AgentSession.open(
                 SessionDemoMain.exploreAndRememberOptions(forced, tmp)
@@ -114,14 +111,7 @@ final class SessionDemoIntegrationTest {
       var toolNamesObserved =
           events.eventsOf(QueryEvent.ToolResult.class).stream().map(e -> e.call().name()).toList();
       assertFalse(toolNamesObserved.isEmpty());
-      assumeTrue(
-          FILE_READ_TOOLS.contains(toolNamesObserved.getFirst()),
-          () ->
-              forced.id()
-                  + " called "
-                  + toolNamesObserved
-                  + "; RecordedSessionTest#fileToolsRedactTheirOutputAndAttachWhatTheyRead covers"
-                  + " the file tools");
+      assertTrue(FILE_READ_TOOLS.containsAll(toolNamesObserved), toolNamesObserved::toString);
     }
   }
 
@@ -162,8 +152,8 @@ final class SessionDemoIntegrationTest {
             List.of(),
             List.of());
     EventCollector events;
-    String modelId;
-    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(ToolChoice.any()));
+    var memoryWrite = ToolChoice.required(MemoryWriteTool.NAME);
+    try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(memoryWrite));
         var session =
             AgentSession.open(
                 SessionOptions.newBuilder()
@@ -179,18 +169,13 @@ final class SessionDemoIntegrationTest {
               "Use MemoryWrite with op=create to save a note at /memories/test.md with content"
                   + " 'hello world'."));
       events.awaitRunEnded();
-      modelId = forced.id();
     }
 
     var calls = events.eventsOf(QueryEvent.ToolResult.class);
     assertFalse(calls.isEmpty());
-    assumeTrue(
-        calls.stream().anyMatch(result -> result.call().name().equals(MemoryWriteTool.NAME)),
-        () ->
-            modelId
-                + " called "
-                + calls.stream().map(QueryEvent.ToolResult::call).toList()
-                + "; Phase4AcceptanceTest#memoryWriteIsBlockedWhenUserDeniesAsk covers the block");
+    assertTrue(
+        calls.stream().allMatch(result -> result.call().name().equals(MemoryWriteTool.NAME)),
+        calls::toString);
     assertTrue(
         events.eventsOf(QueryEvent.ToolBlocked.class).stream()
             .anyMatch(block -> block.call().name().equals(MemoryWriteTool.NAME)),

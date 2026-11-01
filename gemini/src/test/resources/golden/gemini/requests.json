@@ -641,7 +641,7 @@
       "thinking_summaries" : "auto",
       "tool_choice" : {
         "allowed_tools" : {
-          "mode" : "validated",
+          "mode" : "any",
           "tools" : [ "weather" ]
         }
       }

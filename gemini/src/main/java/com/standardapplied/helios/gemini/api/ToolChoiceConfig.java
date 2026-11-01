@@ -18,16 +18,15 @@ import java.util.SequencedSet;
  * <ul>
  *   <li>Bare {@code ToolChoiceType} string ({@code auto}, {@code any}, {@code none}) when no
  *       allowed-tools restriction is given.
- *   <li>{@code ToolChoiceConfig} object {@code {"allowed_tools": {"mode": "validated", "tools":
- *       [...]}}} when {@link #validated(SequencedSet)} is used to lock the model down to a specific
- *       subset.
+ *   <li>{@code ToolChoiceConfig} object {@code {"allowed_tools": {"mode": "any", "tools": [...]}}}
+ *       when {@link #any(SequencedSet)} forces a call to one of a specific subset.
  * </ul>
  *
  * Goes inside {@link InteractionGenerationConfig#toolChoice()}, not at the root of the request.
  *
  * @param mode the {@code ToolChoiceType} discriminator
- * @param allowedTools the {@code tools} restriction; non-null only when {@link
- *     #validated(SequencedSet)} is used
+ * @param allowedTools the {@code tools} restriction; non-null only when {@link #any(SequencedSet)}
+ *     is used
  */
 public record ToolChoiceConfig(String mode, SequencedSet<String> allowedTools) {
 
@@ -39,12 +38,12 @@ public record ToolChoiceConfig(String mode, SequencedSet<String> allowedTools) {
     return new ToolChoiceConfig("any", null);
   }
 
-  public static ToolChoiceConfig none() {
-    return new ToolChoiceConfig("none", null);
+  public static ToolChoiceConfig any(SequencedSet<String> allowedTools) {
+    return new ToolChoiceConfig("any", allowedTools);
   }
 
-  public static ToolChoiceConfig validated(SequencedSet<String> allowedTools) {
-    return new ToolChoiceConfig("validated", allowedTools);
+  public static ToolChoiceConfig none() {
+    return new ToolChoiceConfig("none", null);
   }
 
   @JsonValue
