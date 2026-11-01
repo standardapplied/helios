@@ -170,11 +170,10 @@ different one.
    strict `json_schema`, Gemini `response_format`). `core.test.Accepted` holds these checks.
 2. **Force what can be forced.** Force tool use with `ModelConfig.Builder.withToolChoice`:
    on Anthropic only for a model whose `AnthropicModelId.acceptsForcedToolChoice()` is true and
-   with no reasoning set; on OpenAI with `ToolChoice.required(name)`; on Gemini only with
-   `ToolChoice.any()`, since Helios sends `required(...)` as `allowed_tools` mode `validated`,
-   which still allows a text-only reply. If the API rejects `any()` with a test's thinking config,
-   the step cannot be forced (rule 3). A session's tool choice applies on every turn, so a forced
-   session ends in `ErrorMaxTurns`; a test that forces one accepts that terminal.
+   with no reasoning set; on OpenAI and Gemini with `ToolChoice.required(name)`. If the API rejects
+   the forced choice with a test's thinking config, the step cannot be forced (rule 3). A session's
+   tool choice applies on every turn, so a forced session ends in `ErrorMaxTurns`; a test that
+   forces one accepts that terminal.
 3. **Skip what cannot be forced.** A tool call on a model that rejects forced tool use, a progress
    note or thinking text, a citation or grounding, a web search, valid JSON where the provider
    does not constrain it, and the arguments the model passes: check the step with

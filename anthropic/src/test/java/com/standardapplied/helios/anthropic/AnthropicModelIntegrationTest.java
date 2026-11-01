@@ -7,10 +7,12 @@ package com.standardapplied.helios.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
@@ -18,6 +20,7 @@ import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.schema.Description;
 import com.standardapplied.helios.core.schema.Nullable;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -214,6 +217,23 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
           assertTrue(calculator.cost(candidate.id(), response.usage()).microUsd() > 0, label);
         }
       }
+    }
+  }
+
+  @Test
+  void toolChoiceNoneStopsACallThePromptAsksFor() {
+    var weatherTool = stringTool("get_weather", "Get the current weather for a city", "city");
+    var messages =
+        List.of(Message.user("What is the weather in Paris right now? Use the get_weather tool."));
+    var config =
+        ModelConfig.newBuilder().withApiKey(apiKey).withToolChoice(ToolChoice.none()).build();
+
+    try (var forbidden =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_4_5.id(), config)) {
+      var response = Accepted.toolTurn(forbidden.chat(messages, List.of(weatherTool)));
+
+      assertNotEquals(FinishReason.TOOL_CALLS, response.finishReason());
+      assertFalse(response.hasToolCalls());
     }
   }
 

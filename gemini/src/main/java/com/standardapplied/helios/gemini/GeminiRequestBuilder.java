@@ -163,7 +163,7 @@ final class GeminiRequestBuilder implements RequestFactory<InteractionTurn> {
       case ToolChoice.Auto auto -> ToolChoiceConfig.auto();
       case ToolChoice.Any any -> ToolChoiceConfig.any();
       case ToolChoice.None none -> ToolChoiceConfig.none();
-      case ToolChoice.Required required -> ToolChoiceConfig.validated(required.allowedTools());
+      case ToolChoice.Required required -> ToolChoiceConfig.any(required.allowedTools());
     };
   }
 }
