@@ -416,7 +416,7 @@ final class StreamingSessionTest {
               .create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config.apply(uri + "/v1/messages"));
       case "gemini" ->
           new GeminiProvider()
-              .create(GeminiModelId.GEMINI_3_5_FLASH.id(), config.apply(uri + "/v1beta"));
+              .create(GeminiModelId.GEMINI_3_8_FLASH.id(), config.apply(uri + "/v1beta"));
       default ->
           new OpenAIProvider()
               .create(OpenAIModelId.GPT_5_6.id(), config.apply(uri + "/v1/responses"));

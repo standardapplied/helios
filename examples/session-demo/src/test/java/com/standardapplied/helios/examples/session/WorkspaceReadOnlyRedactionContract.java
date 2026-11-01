@@ -41,8 +41,9 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Each case forces the model to call a tool on every turn, with its tool the only one it is
  * given beside the built-in AskUserQuestion, so each session ends at its two-turn limit. The tool
  * and its arguments are the model's choice: a case whose first call is not its tool with exactly
- * the arguments the user asked for skips, and {@code RecordedSessionTest} replays a recorded
- * session whose calls do. Each subclass supplies its model and carries its own API-key gate.
+ * the canonical arguments of what the user asked for skips, and {@code RecordedSessionTest} replays
+ * a recorded session whose calls do. Each subclass supplies its model and carries its own API-key
+ * gate.
  */
 abstract class WorkspaceReadOnlyRedactionContract {
 
@@ -64,7 +65,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
             new SecretRegistry(),
             "List every markdown file in the workspace using the Glob tool with pattern"
                 + " '**/*.md'.",
-            Map.of("pattern", "**/*.md"));
+            Map.of("path", ".", "pattern", "**/*.md"));
 
     var output = result.result().output();
     assertTrue(output.contains("intro.md") && output.contains("guide.md"), output);
@@ -85,7 +86,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
             GrepTool.binding(WorkspaceRoot.of(corpus)),
             new SecretRegistry(),
             "Use Grep to find which file in the workspace mentions 'reactor'.",
-            Map.of("pattern", "reactor"));
+            Map.of("path", ".", "pattern", "reactor"));
 
     var output = result.result().output();
     assertTrue(output.contains("patterns.md"), output);
@@ -107,7 +108,7 @@ abstract class WorkspaceReadOnlyRedactionContract {
             ReadTool.binding(WorkspaceRoot.of(corpus)),
             registry,
             "Use Read to read 'config.yaml' from the workspace.",
-            Map.of("path", "config.yaml"));
+            Map.of("path", "./config.yaml"));
 
     var output = result.result().output();
     assertTrue(output.contains("<redacted:OPENAI_KEY>"), output);
@@ -119,8 +120,8 @@ abstract class WorkspaceReadOnlyRedactionContract {
    * Run {@code request} in a session whose only tool is {@code tool} and whose secret registry is
    * {@code secrets}, with the model forced to call a tool. Asserts what holds whatever the model
    * does: the session ends cleanly with no error and a tool was called. It skips unless the first
-   * call was {@code tool} with exactly {@code arguments}, the ones the expected output follows
-   * from, then asserts the call succeeded and returns its result.
+   * call was {@code tool} with exactly {@code arguments}, the canonical ones the expected output
+   * follows from, then asserts the call succeeded and returns its result.
    */
   private QueryEvent.ToolResult call(
       ToolBinding tool, SecretRegistry secrets, String request, Map<String, ?> arguments) {

@@ -11,38 +11,51 @@ KeepAlive[]
 KeepAlive[]
 KeepAlive[]
 KeepAlive[]
-KeepAlive[]
-KeepAlive[]
-KeepAlive[]
-KeepAlive[]
-KeepAlive[]
-KeepAlive[]
 TextDelta[text=The capital of Australia is **Canberra**]
-TextDelta[text=. 
-
-### Approximate Population
-According to the latest **Australian Bureau of Statistics (ABS)** data released in March 2]
-TextDelta[text=026:
-* As of June 30, 2]
-TextDelta[text=025, Canberra's Estimated Resident Population (ERP) was **484,630**]
 TextDelta[text=.
-* With an annual growth rate of roughly 1.3%,]
-TextDelta[text= the population is projected to surpass **490,000** during 2026.]
-TextDelta[text=
 
-*(Note: The ABS and local demographers typically use the population of the entire Australian Capital Territory (ACT) as the]
-TextDelta[text= representative figure for Canberra, as over 99% of ACT residents live within the Canberra urban area]
-TextDelta[text=.)*]
+### Official Population Figures
+
+According to the **Australian Bureau of Statistics (ABS)**:
+
+*]
+TextDelta[text= **Greater Capital City (Canberra / Australian Capital Territory):** As of **June 30, 2025**,]
+TextDelta[text= the official Estimated Resident Population (ERP) for Canberra was **484,630**, representing an annual increase of approximately]
+TextDelta[text= 1.3%.
+* **Canberra–Que]
+TextDelta[text=anbeyan Significant Urban Area:** When including the adjacent urban area of Queanbeyan across the New South Wales border, the combined]
+TextDelta[text= population stood at **521,049** as of June 30, 2025]
+TextDelta[text=.
+* **Census Count (Historical Baseline):** At the most recent comprehensive census (]
+TextDelta[text=August 2021), the usual resident population counted for the ACT/Canberra was approximately **454,]
+TextDelta[text=000**.
+
+***
+
+**Sources:**
+*]
+TextDelta[text= [Australian Bureau of Statistics – *Regional population, 2024–25 financial year*](https://www.abs.gov.au/statistics/]
+TextDelta[text=people/population/regional-population/latest-release)
+*]
+TextDelta[text= [Australian Bureau of Statistics – *Snapshot of Australian Capital Territory (2021 Census)*](https://www.abs.gov.au/articles/]
+TextDelta[text=snapshot-act-2021)]
 KeepAlive[]
 KeepAlive[]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=391, outputTokens=214, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=605], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_1, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=SIG-5}, citations=[Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R1, title=welcomingcities.org.au, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=google.com, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=164, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=164, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=id.com.au, content=null, startIndex=44, endIndex=251, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=251, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R5, title=dailycanberra.com.au, content=null, startIndex=253, endIndex=361, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R5, title=dailycanberra.com.au, content=null, startIndex=364, endIndex=588, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R6, title=buildstreet.com.au, content=null, startIndex=364, endIndex=588, metadata={}]]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=139, outputTokens=337, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=476], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_1, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=SIG-3}, citations=[Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R1, title=wikipedia.org, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=abs.gov.au, content=null, startIndex=139, endIndex=364, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=buildstreet.com.au, content=null, startIndex=139, endIndex=364, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=buildstreet.com.au, content=null, startIndex=368, endIndex=570, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=abs.gov.au, content=null, startIndex=574, endIndex=757, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=abs.gov.au, content=null, startIndex=780, endIndex=953, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=abs.gov.au, content=null, startIndex=956, endIndex=1101, metadata={}]]]
 onComplete
 == chat
-Response[content=The capital of Australia is **Canberra**. 
+Response[content=The capital of Australia is **Canberra**.
 
-### Approximate Population
-According to the latest **Australian Bureau of Statistics (ABS)** data released in March 2026:
-* As of June 30, 2025, Canberra's Estimated Resident Population (ERP) was **484,630**.
-* With an annual growth rate of roughly 1.3%, the population is projected to surpass **490,000** during 2026.
+### Official Population Figures
 
-*(Note: The ABS and local demographers typically use the population of the entire Australian Capital Territory (ACT) as the representative figure for Canberra, as over 99% of ACT residents live within the Canberra urban area.)*, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=391, outputTokens=214, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=605], thinking=null, citations=[Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R1, title=welcomingcities.org.au, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=google.com, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=164, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=164, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=id.com.au, content=null, startIndex=44, endIndex=251, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=abs.gov.au, content=null, startIndex=44, endIndex=251, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R5, title=dailycanberra.com.au, content=null, startIndex=253, endIndex=361, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R5, title=dailycanberra.com.au, content=null, startIndex=364, endIndex=588, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R6, title=buildstreet.com.au, content=null, startIndex=364, endIndex=588, metadata={}]], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_1, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=SIG-5}]
+According to the **Australian Bureau of Statistics (ABS)**:
+
+* **Greater Capital City (Canberra / Australian Capital Territory):** As of **June 30, 2025**, the official Estimated Resident Population (ERP) for Canberra was **484,630**, representing an annual increase of approximately 1.3%.
+* **Canberra–Queanbeyan Significant Urban Area:** When including the adjacent urban area of Queanbeyan across the New South Wales border, the combined population stood at **521,049** as of June 30, 2025.
+* **Census Count (Historical Baseline):** At the most recent comprehensive census (August 2021), the usual resident population counted for the ACT/Canberra was approximately **454,000**.
+
+***
+
+**Sources:**
+* [Australian Bureau of Statistics – *Regional population, 2024–25 financial year*](https://www.abs.gov.au/statistics/people/population/regional-population/latest-release)
+* [Australian Bureau of Statistics – *Snapshot of Australian Capital Territory (2021 Census)*](https://www.abs.gov.au/articles/snapshot-act-2021), parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=139, outputTokens=337, cacheCreationInputTokens=0, cacheReadInputTokens=0, totalTokens=476], thinking=null, citations=[Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R1, title=wikipedia.org, content=null, startIndex=0, endIndex=40, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=abs.gov.au, content=null, startIndex=139, endIndex=364, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=buildstreet.com.au, content=null, startIndex=139, endIndex=364, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R3, title=buildstreet.com.au, content=null, startIndex=368, endIndex=570, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=abs.gov.au, content=null, startIndex=574, endIndex=757, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R2, title=abs.gov.au, content=null, startIndex=780, endIndex=953, metadata={}], Citation[sourceId=https://vertexaisearch.cloud.google.com/grounding-api-redirect/R4, title=abs.gov.au, content=null, startIndex=956, endIndex=1101, metadata={}]], metadata={gemini.apiVersion=v1beta, gemini.interactionId=int_1, gemini.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, gemini.thoughtSignatures=SIG-3}]

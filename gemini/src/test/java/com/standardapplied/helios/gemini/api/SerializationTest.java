@@ -39,12 +39,12 @@ class SerializationTest {
   void serializeSimpleUserInputStep() throws Exception {
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("Hello")))
             .build();
 
     var json = objectMapper.writeValueAsString(request);
-    assertTrue(json.contains("\"model\":\"gemini-3-flash-preview\""));
+    assertTrue(json.contains("\"model\":\"gemini-3.8-flash\""));
     assertTrue(json.contains("\"type\":\"user_input\""));
     assertTrue(json.contains("\"type\":\"text\""));
     assertTrue(json.contains("\"text\":\"Hello\""));
@@ -123,10 +123,7 @@ class SerializationTest {
             Step.modelOutput("You should meet Alice, Bob, and Carol."));
 
     var request =
-        InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
-            .withInput(input)
-            .build();
+        InteractionRequest.newBuilder().withModel("gemini-3.8-flash").withInput(input).build();
 
     var json = objectMapper.writeValueAsString(request);
     assertTrue(json.contains("\"type\":\"user_input\""));
@@ -223,7 +220,7 @@ class SerializationTest {
 
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withSystemInstruction("You are a helpful assistant.")
             .withInput(input)
             .withTools(toolDefinitions)
@@ -244,7 +241,7 @@ class SerializationTest {
             .build();
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("hi")))
             .withTools(List.of(ToolDefinition.googleSearch()))
             .withGenerationConfig(gen)
@@ -295,7 +292,7 @@ class SerializationTest {
             "type", "object", "properties", Map.of("name", Map.of("type", "string")));
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("Extract")))
             .withResponseFormat(ResponseFormat.json(schema))
             .build();
@@ -321,7 +318,7 @@ class SerializationTest {
   void serializeRequestWithPreviousInteractionId() throws Exception {
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("Follow-up")))
             .withPreviousInteractionId("interaction_abc123")
             .build();
@@ -334,7 +331,7 @@ class SerializationTest {
   void serializeRequestWithoutPreviousInteractionIdOmitsField() throws Exception {
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("Hello")))
             .build();
     var json = objectMapper.writeValueAsString(request);
@@ -349,7 +346,7 @@ class SerializationTest {
         """
         {
           "id": "int_123",
-          "model": "gemini-3-flash-preview",
+          "model": "gemini-3.8-flash",
           "status": "completed",
           "steps": [
             {
@@ -707,7 +704,7 @@ class SerializationTest {
             .build();
     var request =
         InteractionRequest.newBuilder()
-            .withModel("gemini-3-flash-preview")
+            .withModel("gemini-3.8-flash")
             .withInput(List.of(Step.userInput("hi")))
             .withTools(List.of(ToolDefinition.googleSearch()))
             .withGenerationConfig(gen)
@@ -715,7 +712,7 @@ class SerializationTest {
             .withStream(true)
             .build();
 
-    assertEquals("gemini-3-flash-preview", request.model());
+    assertEquals("gemini-3.8-flash", request.model());
     assertEquals(1, request.input().size());
     assertEquals(1, request.tools().size());
     assertEquals(16, request.generationConfig().maxOutputTokens());

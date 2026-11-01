@@ -53,7 +53,7 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
     return uri ->
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(), config.withBaseUrl(uri + "/v1beta").build());
+                GeminiModelId.GEMINI_3_8_FLASH.id(), config.withBaseUrl(uri + "/v1beta").build());
   }
 
   @Override
@@ -147,19 +147,19 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
   @Test
   void aRequestsStampFollowsItsSystemInstructionAndToolsOnly() {
     var tools = List.of(tool("weather", "Current weather"));
-    var stamp = stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", tools);
+    var stamp = stamp(GeminiModelId.GEMINI_3_8_FLASH, "sys", tools);
 
-    assertEquals(stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", tools));
     assertEquals(stamp, stamp(GeminiModelId.GEMINI_3_8_FLASH, "sys", tools));
-    assertNotEquals(stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "other", tools));
+    assertEquals(stamp, stamp(GeminiModelId.GEMINI_3_8_FLASH, "sys", tools));
+    assertNotEquals(stamp, stamp(GeminiModelId.GEMINI_3_8_FLASH, "other", tools));
     assertNotEquals(
         stamp,
         stamp(
-            GeminiModelId.GEMINI_3_5_FLASH,
+            GeminiModelId.GEMINI_3_8_FLASH,
             "sys",
             List.of(tool("weather", "Current weather"), tool("time", "Current time"))));
     assertNotEquals(
-        stamp, stamp(GeminiModelId.GEMINI_3_5_FLASH, "sys", List.of(tool("weather", "Forecast"))));
+        stamp, stamp(GeminiModelId.GEMINI_3_8_FLASH, "sys", List.of(tool("weather", "Forecast"))));
     assertEquals(64, stamp.length());
   }
 

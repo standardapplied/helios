@@ -55,7 +55,7 @@ class GeminiRequestSnapshotTest {
           modelAt(id, settings(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))),
           withTools(THOUGHTS));
     }
-    var flash = GeminiModelId.GEMINI_3_5_FLASH;
+    var flash = GeminiModelId.GEMINI_3_8_FLASH;
     var low = settings(new Reasoning.Effort(Level.LOW, Display.HIDDEN));
     snapshot("schema", modelAt(flash, low), withSchema(List.of()));
     snapshot("schema and tools", modelAt(flash, low), withSchema(ConversationFixture.tools()));

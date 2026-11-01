@@ -6,6 +6,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**The Gemini catalogue keeps 3.6, 3.7 and 3.8 Flash and adds 4 Argon.** A removed id is rejected
+like any unknown id: `GeminiProvider.create` throws `IllegalArgumentException` naming it and the
+supported ids. Live tests and `SessionDemoMain` run on Gemini 3.8 Flash.
+
+| 2.x | 3.0 |
+|---|---|
+| `GEMINI_3_FLASH_PREVIEW` (`gemini-3-flash-preview`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
+| `GEMINI_3_1_PRO_PREVIEW` (`gemini-3.1-pro-preview`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`) |
+| `GEMINI_3_1_FLASH_LITE` (`gemini-3.1-flash-lite`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
+| `GEMINI_3_5_FLASH` (`gemini-3.5-flash`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
+| `GEMINI_3_5_FLASH_LITE` (`gemini-3.5-flash-lite`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
+
 **The redactor is a plain scan, cached by its registry; overlapping secrets become one marker.**
 `AhoCorasick` and the byte path are gone. `SecretRegistry.redactor()` returns the same instance
 until the next `register`. With `A = xxxxxxxxYY` and `B = YYzzzzzzzz`, `xxxxxxxxYYzzzzzzzz` used to
@@ -1018,6 +1030,8 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Added
 
+- Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
+  off; 65,536 output tokens per request.
 - **`SessionLimits.maxToolResultChars()`**, set with `Builder.withMaxToolResultChars(int)`, and
   `Strings.truncatedMiddle(text, maxChars, note)`, which keeps a text's start and end.
 - **Every run records a trace.** `SessionOptions.Builder.withTraceListener(listener)` hands the

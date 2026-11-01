@@ -15,7 +15,7 @@ final class PromptStamps {
   /** The stamp of a request sending {@code messages}' system instruction and {@code tools}. */
   static String of(List<Message> messages, List<Tool> tools) {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    return new GeminiRequestBuilder(GeminiModelId.GEMINI_3_5_FLASH, config)
+    return new GeminiRequestBuilder(GeminiModelId.GEMINI_3_8_FLASH, config)
         .build(messages, tools, null)
         .promptStamp();
   }
