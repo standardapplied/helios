@@ -96,6 +96,40 @@ class CapturedOutputTest {
   }
 
   @Test
+  void nothingIsKeptOnceAnythingWasDropped() {
+    var output = new CapturedOutput();
+    output.append("kept");
+    output.discard(1);
+
+    output.append("late");
+
+    assertEquals("kept\n[output truncated: 5 more chars discarded]", output.drain());
+  }
+
+  @Test
+  void takeReturnsTheKeptTextAndTheCountAndStartsOver() {
+    var output = new CapturedOutput();
+    output.append(AT_CAP + "xy");
+
+    assertEquals(new CapturedOutput.Cut(AT_CAP, 2), output.take());
+    assertEquals(new CapturedOutput.Cut("", 0), output.take());
+  }
+
+  @Test
+  void aCutAppendedToABufferKeepsItsCount() {
+    var output = new CapturedOutput();
+
+    output.append(new CapturedOutput.Cut("kept", 7));
+
+    assertEquals("kept\n[output truncated: 7 more chars discarded]", output.drain());
+  }
+
+  @Test
+  void aCutWithNothingDroppedHasNoMarker() {
+    assertEquals("kept", new CapturedOutput.Cut("kept", 0).text());
+  }
+
+  @Test
   void charactersDroppedBeforeTheBufferAreReported() {
     var output = new CapturedOutput();
     output.append("kept");

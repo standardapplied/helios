@@ -118,6 +118,11 @@ public final class ProcessTransport implements RpcTransport {
     return stdoutBuffer.drain();
   }
 
+  /** As {@link #drainStdout()}, for a caller that adds output of its own to what was set aside. */
+  public CapturedOutput.Cut takeStdout() {
+    return stdoutBuffer.take();
+  }
+
   @Override
   public boolean isOpen() {
     return open.get();
@@ -157,7 +162,9 @@ public final class ProcessTransport implements RpcTransport {
       if (!(map.get("method") instanceof String method)) {
         throw new IOException("JSON-RPC 'method' field must be a string: " + map.get("method"));
       }
-      return map.containsKey("id") ? request(map, method) : notification(map, method);
+      return map.containsKey("id")
+          ? new RpcMessage.Request(String.valueOf(map.get("id")), method, map.get("params"))
+          : new RpcMessage.Notification(method, map.get("params"));
     }
     if (map.containsKey("error")) {
       return errorResponse(map, json);
@@ -166,14 +173,6 @@ public final class ProcessTransport implements RpcTransport {
       return response(map);
     }
     throw new IOException("Unrecognized JSON-RPC message: " + json);
-  }
-
-  private static RpcMessage.Request request(Map<?, ?> map, String method) {
-    return new RpcMessage.Request(String.valueOf(map.get("id")), method, map.get("params"));
-  }
-
-  private static RpcMessage.Notification notification(Map<?, ?> map, String method) {
-    return new RpcMessage.Notification(method, map.get("params"));
   }
 
   private static RpcMessage.ErrorResponse errorResponse(Map<?, ?> map, String json)

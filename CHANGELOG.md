@@ -8,7 +8,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 **Sandbox output and RPC frames are capped, and a dead channel is a dead sandbox.** A snippet's
 stdout and stderr are each cut at 1,000,000 chars per execute, on both paths: what `System.out` and
-`System.err` capture during the execute, and what reaches the subprocess's raw stdout. Each ends in
+`System.err` capture during the execute, and what reaches the subprocess's raw stdout. Stdout from
+the two paths is joined and cut as one output. Each stream ends in one
 `\n[output truncated: <n> more chars discarded]`, a character is never split, and the session goes
 on with its state. Output that JSON escapes heavily is cut earlier during an execute, because the
 reply carries it escaped: a stream of control characters keeps about 444,000 chars. Timeout

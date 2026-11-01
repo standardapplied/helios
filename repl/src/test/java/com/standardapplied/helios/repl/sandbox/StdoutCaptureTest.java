@@ -66,6 +66,19 @@ class StdoutCaptureTest {
   }
 
   @Test
+  void takeLeavesTheFinalNewlineOutAndKeepsTheCount() {
+    var printed = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1) + "\nab";
+    var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    var cut = capture.take();
+    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1), cut.kept());
+    assertEquals(2, cut.discarded());
+  }
+
+  @Test
   void outputWithNoNewlineIsCutAtTheCapAndTheStreamIsReadToItsEnd() {
     var printed = "x".repeat(3_000_000);
     var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));

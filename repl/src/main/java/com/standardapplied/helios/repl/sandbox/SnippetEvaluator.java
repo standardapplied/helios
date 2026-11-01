@@ -170,8 +170,10 @@ final class SnippetEvaluator {
     }
 
     var result = new LinkedHashMap<String, Object>();
-    result.put("stdout", CapturedStream.text(stdoutCapture));
-    result.put("stderr", CapturedStream.text(stderrCapture, timeoutCapture));
+    var stdout = CapturedStream.cut(stdoutCapture);
+    result.put("stdout", stdout.kept());
+    result.put("stdoutDiscarded", stdout.discarded());
+    result.put("stderr", CapturedStream.cut(stderrCapture, timeoutCapture).text());
     result.put("exitCode", exitCode.get());
     result.put("timedOut", timedOut.get());
     return result;
