@@ -86,7 +86,7 @@ class GeminiContinuationIntegrationTest {
                 GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder()
                     .withApiKey(System.getenv("GEMINI_API_KEY"))
-                    .withToolChoice(ToolChoice.any())
+                    .withToolChoice(ToolChoice.required("get_temperature"))
                     .build())) {
       var response1 = Accepted.toolTurn(forced.chat(messages, tools));
 

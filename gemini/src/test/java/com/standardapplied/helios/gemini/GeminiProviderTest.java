@@ -14,12 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.ToolChoice;
 import com.standardapplied.helios.core.provider.StreamingModel;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.gemini.api.GeminiJson;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -127,20 +131,46 @@ class GeminiProviderTest {
   }
 
   @Test
-  @SuppressWarnings("unchecked")
   void aGemini4ArgonRequestCarriesItsIdAndOutputCeiling() {
-    var request =
-        new GeminiRequestBuilder(GeminiModelId.GEMINI_4_ARGON, ModelConfig.of("test-api-key"))
-            .build(List.of(Message.user("Hi")), null, null)
-            .request();
-
-    var body =
-        JsonMapper.builder()
-            .build()
-            .readValue(GeminiJson.LENIENT.writeValueAsString(request), Map.class);
+    var body = requestBody(GeminiModelId.GEMINI_4_ARGON, ModelConfig.of("test-api-key"), null);
 
     assertEquals("gemini-4-argon", body.get("model"));
+    assertEquals(65_536, generationConfig(body).get("max_output_tokens"));
+  }
+
+  @ParameterizedTest
+  @EnumSource(GeminiModelId.class)
+  void requiredForcesACallToTheNamedToolOnEveryModel(GeminiModelId model) {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey("test-api-key")
+            .withToolChoice(ToolChoice.required("weather"))
+            .build();
+    var weather =
+        Tool.newBuilder()
+            .withName("weather")
+            .withDescription("The weather")
+            .withExecutor((arguments, context) -> ToolResult.success("sunny"))
+            .build();
+
+    var body = requestBody(model, config, List.of(weather));
+
     assertEquals(
-        65_536, ((Map<String, Object>) body.get("generation_config")).get("max_output_tokens"));
+        Map.of("allowed_tools", Map.of("mode", "any", "tools", List.of("weather"))),
+        generationConfig(body).get("tool_choice"));
+  }
+
+  private static Map<?, ?> requestBody(GeminiModelId model, ModelConfig config, List<Tool> tools) {
+    var request =
+        new GeminiRequestBuilder(model, config)
+            .build(List.of(Message.user("Hi")), tools, null)
+            .request();
+    return JsonMapper.builder()
+        .build()
+        .readValue(GeminiJson.LENIENT.writeValueAsString(request), Map.class);
+  }
+
+  private static Map<?, ?> generationConfig(Map<?, ?> body) {
+    return (Map<?, ?>) body.get("generation_config");
   }
 }

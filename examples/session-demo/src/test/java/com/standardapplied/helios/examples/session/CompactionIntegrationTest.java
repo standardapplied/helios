@@ -100,7 +100,9 @@ final class CompactionIntegrationTest {
                 GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder()
                     .withApiKey(System.getenv("GEMINI_API_KEY"))
-                    .withToolChoice(ToolChoice.any())
+                    .withToolChoice(
+                        ToolChoice.required(
+                            ReadTool.NAME, LsTool.NAME, GlobTool.NAME, GrepTool.NAME))
                     .build());
   }
 

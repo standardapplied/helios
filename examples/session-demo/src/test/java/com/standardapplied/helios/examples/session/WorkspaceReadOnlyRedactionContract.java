@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -38,12 +39,11 @@ import org.junit.jupiter.api.io.TempDir;
  * arguments reach the tool, and that the tool's output is what Helios produces for them, redaction
  * included.
  *
- * <p>Each case forces the model to call a tool on every turn, with its tool the only one it is
- * given beside the built-in AskUserQuestion, so each session ends at its two-turn limit. The tool
- * and its arguments are the model's choice: a case whose first call is not its tool with exactly
- * the canonical arguments of what the user asked for skips, and {@code RecordedSessionTest} replays
- * a recorded session whose calls do. Each subclass supplies its model and carries its own API-key
- * gate.
+ * <p>Each case forces the model to call its tool on every turn, so each session ends at its
+ * two-turn limit. The arguments are the model's choice: a case whose first call does not carry
+ * exactly the canonical arguments of what the user asked for skips, and {@code RecordedSessionTest}
+ * replays a recorded session whose calls do. Each subclass supplies its model and carries its own
+ * API-key gate.
  */
 abstract class WorkspaceReadOnlyRedactionContract {
 
@@ -118,14 +118,14 @@ abstract class WorkspaceReadOnlyRedactionContract {
 
   /**
    * Run {@code request} in a session whose only tool is {@code tool} and whose secret registry is
-   * {@code secrets}, with the model forced to call a tool. Asserts what holds whatever the model
-   * does: the session ends cleanly with no error and a tool was called. It skips unless the first
-   * call was {@code tool} with exactly {@code arguments}, the canonical ones the expected output
-   * follows from, then asserts the call succeeded and returns its result.
+   * {@code secrets}, with the model forced to call it. Asserts what holds whatever the model does:
+   * the session ends cleanly with no error and the first call was {@code tool}. It skips unless
+   * that call carried exactly {@code arguments}, the canonical ones the expected output follows
+   * from, then asserts the call succeeded and returns its result.
    */
   private QueryEvent.ToolResult call(
       ToolBinding tool, SecretRegistry secrets, String request, Map<String, ?> arguments) {
-    try (var model = createModel(ToolChoice.any());
+    try (var model = createModel(ToolChoice.required(tool.name()));
         var session =
             AgentSession.open(
                 SessionOptions.newBuilder()
@@ -147,14 +147,14 @@ abstract class WorkspaceReadOnlyRedactionContract {
       var results = events.eventsOf(QueryEvent.ToolResult.class);
       assertFalse(results.isEmpty());
       var first = results.getFirst();
+      assertEquals(tool.name(), first.call().name());
       assumeTrue(
-          first.call().name().equals(tool.name()) && arguments.equals(first.call().arguments()),
+          arguments.equals(first.call().arguments()),
           () ->
               model.id()
                   + " called "
                   + results.stream().map(QueryEvent.ToolResult::call).toList()
                   + " instead of "
-                  + tool.name()
                   + arguments
                   + "; "
                   + COUNTERPART);

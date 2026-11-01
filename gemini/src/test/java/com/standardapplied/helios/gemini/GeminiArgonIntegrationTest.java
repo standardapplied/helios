@@ -40,7 +40,7 @@ class GeminiArgonIntegrationTest {
     try (var forced =
         provider.create(
             GeminiModelId.GEMINI_4_ARGON.id(),
-            settings().withToolChoice(ToolChoice.any()).build())) {
+            settings().withToolChoice(ToolChoice.required(TOOL_NAME)).build())) {
       var turn = Accepted.toolTurn(forced.chat(messages, tools));
 
       assertEquals(FinishReason.TOOL_CALLS, turn.finishReason());
