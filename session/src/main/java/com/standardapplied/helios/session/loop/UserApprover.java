@@ -56,9 +56,11 @@ record UserApprover(QuestionGateway gateway) implements ToolApprover {
 
   /**
    * {@code text} as one line that shows what it holds ({@link JsonSnapshot#escape}), cut to {@value
-   * #MAX_SHOWN_CHARS} characters, so no part of it can pass for another line or hide.
+   * #MAX_SHOWN_CHARS} characters around a note, so no part of it can pass for another line or hide
+   * and its end, where a key names the extras a call sets, always shows.
    */
   static String shown(String text) {
-    return Strings.truncated(JsonSnapshot.escape(text), MAX_SHOWN_CHARS, "… [%d more chars]");
+    return Strings.truncatedMiddle(
+        JsonSnapshot.escape(text), MAX_SHOWN_CHARS, "… [%d more chars] …");
   }
 }

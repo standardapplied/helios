@@ -35,6 +35,7 @@ final class ExecutePermissionSessionTest {
   private static final String DANGEROUS = "ls; rm -rf ~/";
   private static final Map<String, String> EXPORTED_LS =
       Map.of("BASH_FUNC_ls%%", "() { rm -rf ~/; }");
+  private static final String PADDED_LS = "ls #" + "a".repeat(1100);
 
   private final RecordingProvider provider = new RecordingProvider(new CopyOnWriteArrayList<>());
   private final SecretRegistry secrets = new SecretRegistry();
@@ -79,6 +80,28 @@ final class ExecutePermissionSessionTest {
     var asked = run.events().eventsOf(QueryEvent.QuestionAsked.class);
     assertEquals(1, asked.size(), "questions");
     return asked.getFirst().request().question();
+  }
+
+  private static String firstLine(String question) {
+    return question.lines().findFirst().orElseThrow();
+  }
+
+  private WriteToolSessions.Run denied(ToolCall call) {
+    return run(
+        options(Permission.empty(PermissionMode.DEFAULT)),
+        session -> QuestionAnswers.selecting(session, "Deny"),
+        call);
+  }
+
+  private WriteToolSessions.Run deniedPaddedExport() {
+    return denied(
+        execute(
+            "runtime",
+            "bash",
+            "script",
+            PADDED_LS,
+            "environment",
+            Map.of("BASH_FUNC_ls%%", "() { echo PWNED; }")));
   }
 
   @Test
@@ -335,11 +358,96 @@ final class ExecutePermissionSessionTest {
 
     assertEquals(
         "Allow Execute(BASH/echo "
-            + "a".repeat(1006)
-            + "… [95 more chars]?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"echo "
+            + "a".repeat(494)
+            + "… [95 more chars] …"
+            + "a".repeat(511)
+            + ")?\n\nArguments: {\"runtime\":\"bash\",\"script\":\"echo "
             + "a".repeat(991)
             + "\nArguments cut: 111 more chars not shown",
         onlyQuestion(run));
+  }
+
+  @Test
+  void aCutKeyStillNamesTheExtraBehindAPaddedScript() {
+    var run = deniedPaddedExport();
+
+    assertEquals(
+        "Allow Execute(BASH/ls #"
+            + "a".repeat(495)
+            + "… [108 more chars] …"
+            + "a".repeat(497)
+            + "\\n+environment)?",
+        firstLine(onlyQuestion(run)));
+    assertEquals(List.of(), provider.executed);
+  }
+
+  @Test
+  void aCutKeyNamesEveryExtraTheCallSets() {
+    var run =
+        denied(
+            execute(
+                "runtime",
+                "bash",
+                "script",
+                PADDED_LS,
+                "args",
+                List.of("x"),
+                "environment",
+                Map.of("A", "b"),
+                "stdin",
+                "y",
+                "workingDirectory",
+                "/tmp"));
+
+    assertEquals(
+        "Allow Execute(BASH/ls #"
+            + "a".repeat(495)
+            + "… [142 more chars] …"
+            + "a".repeat(463)
+            + "\\n+args\\n+environment\\n+stdin\\n+workingDirectory)?",
+        firstLine(onlyQuestion(run)));
+  }
+
+  @Test
+  void aCutKeyLeavesTheMarkThatTheArgumentsAreCut() {
+    var question = onlyQuestion(deniedPaddedExport());
+
+    assertEquals(
+        "Arguments cut: 164 more chars not shown",
+        question.substring(question.lastIndexOf('\n') + 1));
+  }
+
+  @Test
+  void aCutReasonKeepsItsOwnEnd() {
+    var asked = deniedPaddedExport().events().eventsOf(QueryEvent.QuestionAsked.class);
+
+    assertEquals(
+        "default-ask on EXECUTION (Execute(BASH/ls #"
+            + "a".repeat(469)
+            + "… [135 more chars] …"
+            + "a".repeat(496)
+            + "\\n+environment))",
+        asked.getFirst().request().options().getFirst().description());
+  }
+
+  @Test
+  void aKeyOfExactlyTheLimitInEscapedCharsIsShownWhole() {
+    var script = "\"" + "a".repeat(1008);
+
+    var run = denied(execute("runtime", "bash", "script", script));
+
+    assertEquals("Allow Execute(BASH/\\\"" + "a".repeat(1008) + ")?", firstLine(onlyQuestion(run)));
+  }
+
+  @Test
+  void aKeyOneEscapedCharOverTheLimitIsCut() {
+    var script = "\"" + "a".repeat(1009);
+
+    var run = denied(execute("runtime", "bash", "script", script));
+
+    assertEquals(
+        "Allow Execute(BASH/\\\"" + "a".repeat(497) + "… [1 more chars] …" + "a".repeat(511) + ")?",
+        firstLine(onlyQuestion(run)));
   }
 
   @Test
