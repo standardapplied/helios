@@ -19,18 +19,14 @@ import java.util.EnumSet;
 public enum GeminiModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // reasoning lists each model's documented thinking_level set (Gemini thinking guide and Gemini 3
-  // guide, 2026-10-08): 3.8 Flash, 3.7 Flash and 3.1 Pro accept low/medium/high; the rest also
-  // accept minimal. Gemini 3.x cannot turn thinking off; thought summaries are on or off through
-  // thinking_summaries.
-  GEMINI_3_FLASH_PREVIEW("gemini-3-flash-preview", 1_048_576, 65_536, Level.MINIMAL),
-  GEMINI_3_1_PRO_PREVIEW("gemini-3.1-pro-preview", 1_048_576, 65_536, Level.LOW),
-  GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite", 1_048_576, 65_536, Level.MINIMAL),
-  GEMINI_3_5_FLASH("gemini-3.5-flash", 1_048_576, 65_536, Level.MINIMAL),
-  GEMINI_3_5_FLASH_LITE("gemini-3.5-flash-lite", 1_048_576, 65_536, Level.MINIMAL),
+  // reasoning lists each model's documented thinking_level set (Gemini thinking guide, Gemini 3
+  // guide and Gemini 4 Argon page, 2026-10-20): 3.7 Flash, 3.8 Flash and 4 Argon accept
+  // low/medium/high; 3.6 Flash also accepts minimal. None can turn thinking off; thought summaries
+  // are on or off through thinking_summaries.
   GEMINI_3_6_FLASH("gemini-3.6-flash", 1_048_576, 65_536, Level.MINIMAL),
   GEMINI_3_7_FLASH("gemini-3.7-flash", 1_048_576, 65_536, Level.LOW),
-  GEMINI_3_8_FLASH("gemini-3.8-flash", 1_048_576, 65_536, Level.LOW);
+  GEMINI_3_8_FLASH("gemini-3.8-flash", 1_048_576, 65_536, Level.LOW),
+  GEMINI_4_ARGON("gemini-4-argon", 1_048_576, 65_536, Level.LOW);
 
   private final String id;
   private final int contextWindow;

@@ -12,15 +12,17 @@ import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
 import com.standardapplied.helios.core.provider.StreamingModel;
 import com.standardapplied.helios.gemini.api.GeminiJson;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * ModelProvider implementation for Google's Gemini API.
  *
- * <p>Supports Gemini 3 models through the Interactions API, at the configured API version. Every
- * request streams over SSE, so a blocking {@code chat} drains the stream rather than waiting on one
- * long HTTP read, and a per-line idle timeout turns a stalled stream into a {@link
- * GeminiException}, which is not retried. A turn continuing an interaction the server no longer
- * holds is resent once with the whole conversation.
+ * <p>Supports the {@link GeminiModelId} catalogue through the Interactions API, at the configured
+ * API version. Every request streams over SSE, so a blocking {@code chat} drains the stream rather
+ * than waiting on one long HTTP read, and a per-line idle timeout turns a stalled stream into a
+ * {@link GeminiException}, which is not retried. A turn continuing an interaction the server no
+ * longer holds is resent once with the whole conversation.
  */
 public class GeminiProvider implements ModelProvider {
 
@@ -45,7 +47,8 @@ public class GeminiProvider implements ModelProvider {
     }
     var id = GeminiModelId.fromId(modelId);
     if (id == null) {
-      throw new IllegalArgumentException("Unsupported model: " + modelId);
+      throw new IllegalArgumentException(
+          "Unsupported model: " + modelId + ". Supported models: " + supportedIds());
     }
     validate(config);
     var endpoint = GeminiEndpoint.of(config);
@@ -69,6 +72,12 @@ public class GeminiProvider implements ModelProvider {
   @Override
   public boolean supports(String modelId) {
     return GeminiModelId.isSupported(modelId);
+  }
+
+  private static String supportedIds() {
+    return Stream.of(GeminiModelId.values())
+        .map(GeminiModelId::id)
+        .collect(Collectors.joining(", "));
   }
 
   private static void validate(ModelConfig config) {

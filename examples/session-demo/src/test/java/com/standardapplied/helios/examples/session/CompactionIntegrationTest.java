@@ -97,7 +97,7 @@ final class CompactionIntegrationTest {
     forced =
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder()
                     .withApiKey(System.getenv("GEMINI_API_KEY"))
                     .withToolChoice(ToolChoice.any())

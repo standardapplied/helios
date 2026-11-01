@@ -53,7 +53,7 @@ class GeminiGroundedStructuredOutputIntegrationTest {
   static void setUp() {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config = ModelConfig.newBuilder().withApiKey(apiKey).withWebSearch(true).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
   }
 
   @AfterAll
@@ -92,7 +92,7 @@ class GeminiGroundedStructuredOutputIntegrationTest {
     Accepted.textReply(response);
     assumeTrue(
         response.hasCitations(),
-        GeminiModelId.GEMINI_3_5_FLASH.id()
+        GeminiModelId.GEMINI_3_8_FLASH.id()
             + " cited no source; GeminiStreamTranscriptTest \"grounded\" covers the citation"
             + " harvest");
     response

@@ -24,7 +24,7 @@ class GeminiStreamCloseTest extends StreamCloseContract {
             .withResponseTimeout(Duration.ofMinutes(10))
             .withStreamIdleTimeout(streamIdleTimeout)
             .build();
-    return new GeminiProvider().create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
+    return new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
   }
 
   @Override

@@ -36,7 +36,7 @@ class GeminiRestructuredPartsTest {
     for (var choice : List.of(ToolChoice.auto(), ToolChoice.any(), ToolChoice.none())) {
       var requests =
           new GeminiRequestBuilder(
-              GeminiModelId.GEMINI_3_5_FLASH,
+              GeminiModelId.GEMINI_3_8_FLASH,
               ModelConfig.newBuilder().withApiKey("k").withToolChoice(choice).build());
 
       var config =
@@ -52,13 +52,13 @@ class GeminiRestructuredPartsTest {
     var model =
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder()
                     .withApiKey("k")
                     .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
                     .build());
 
-    assertEquals(GeminiModelId.GEMINI_3_5_FLASH.maxOutputTokens(), model.maxOutputTokens());
+    assertEquals(GeminiModelId.GEMINI_3_8_FLASH.maxOutputTokens(), model.maxOutputTokens());
     assertEquals(RawOutputCapturePolicy.DISABLED, model.rawOutputCapturePolicy());
   }
 
@@ -91,7 +91,7 @@ class GeminiRestructuredPartsTest {
     var model =
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder()
                     .withApiKey("k")
                     .withBaseUrl("http://127.0.0.1:1/v1beta")

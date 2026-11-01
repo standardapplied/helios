@@ -482,7 +482,7 @@ class PgTraceStoreTest {
             .withOutputText("Hi there, how can I help?")
             .withUserId("user-42")
             .withSessionId(sessionId)
-            .withModelId("gemini-2.0-flash")
+            .withModelId("gemini-3.8-flash")
             .withPromptName("agent-prompt")
             .withPromptVersion(3)
             .withTotalTokens(250)
@@ -498,7 +498,7 @@ class PgTraceStoreTest {
     assertEquals("Hi there, how can I help?", found.outputText());
     assertEquals("user-42", found.userId());
     assertEquals(sessionId, found.sessionId());
-    assertEquals("gemini-2.0-flash", found.modelId());
+    assertEquals("gemini-3.8-flash", found.modelId());
     assertEquals("agent-prompt", found.promptName());
     assertEquals(3, found.promptVersion());
     assertEquals(250, found.totalTokens());
@@ -677,7 +677,7 @@ class PgTraceStoreTest {
         Trace.newBuilder()
             .withName("gemini-trace")
             .withStartTime(base)
-            .withModelId("gemini-2.0-flash")
+            .withModelId("gemini-3.8-flash")
             .build());
     store.onTrace(
         Trace.newBuilder()
@@ -686,10 +686,10 @@ class PgTraceStoreTest {
             .withModelId("gpt-4o")
             .build());
 
-    var result = store.list(Paginate.of(), "model_id eq \"gemini-2.0-flash\"");
+    var result = store.list(Paginate.of(), "model_id eq \"gemini-3.8-flash\"");
 
     assertEquals(1, result.items().size());
-    assertEquals("gemini-2.0-flash", result.items().getFirst().modelId());
+    assertEquals("gemini-3.8-flash", result.items().getFirst().modelId());
   }
 
   @Test

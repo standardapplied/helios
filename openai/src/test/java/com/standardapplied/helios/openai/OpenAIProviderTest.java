@@ -93,7 +93,7 @@ class OpenAIProviderTest {
 
   @Test
   void doesNotSupportGemini() {
-    assertFalse(provider.supports("gemini-3-flash-preview"));
+    assertFalse(provider.supports("gemini-3.8-flash"));
   }
 
   @Test

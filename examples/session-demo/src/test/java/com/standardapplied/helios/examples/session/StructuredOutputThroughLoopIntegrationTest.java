@@ -58,7 +58,7 @@ final class StructuredOutputThroughLoopIntegrationTest {
     var apiKey = System.getenv("GEMINI_API_KEY");
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withToolChoice(ToolChoice.none()).build();
-    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
   }
 
   @AfterAll
