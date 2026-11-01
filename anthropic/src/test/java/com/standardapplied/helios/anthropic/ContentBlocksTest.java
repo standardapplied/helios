@@ -60,6 +60,31 @@ class ContentBlocksTest {
   }
 
   @Test
+  void aServerToolUseOpeningWithoutInputClosesWithAnEmptyOne() {
+    var payload =
+        "{\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s1\",\"name\":\"web_search\"}}";
+    blocks.start(0, block("server_tool_use"), payload);
+
+    blocks.stop(0);
+
+    assertEquals(Map.of(), blocks.verbatim().echo(0).get("input"));
+  }
+
+  @Test
+  void aServerToolUseOpeningWithAnEmptyInputClosesWithTheInputItStreamed() {
+    var payload =
+        "{\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s1\","
+            + "\"name\":\"code_execution\",\"input\":{}}}";
+    blocks.start(0, block("server_tool_use"), payload);
+    blocks.delta(0, delta("input_json_delta", null, "{\"code\":\"pri", null, null, null));
+    blocks.delta(0, delta("input_json_delta", null, "nt(1)\"}", null, null, null));
+
+    blocks.stop(0);
+
+    assertEquals(Map.of("code", "print(1)"), blocks.verbatim().echo(0).get("input"));
+  }
+
+  @Test
   void inputForABlockThatIsNotOpenIsDropped() {
     assertNull(blocks.delta(4, delta("input_json_delta", null, "{\"a\":1}", null, null, null)));
     assertNull(blocks.stop(4));
