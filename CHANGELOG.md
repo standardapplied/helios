@@ -1228,6 +1228,9 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Fixed
 
+- **A web search run from code execution broke the next request.** Helios blanked its `input` and
+  dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
+  send failed.
 - **`ToolChoice.required(...)` did not force a tool call on Gemini.** Helios sent the names as
   `allowed_tools` mode `validated`, which lets Gemini reply with text only. It now sends mode `any`
   with the names, so the model must call one of them.

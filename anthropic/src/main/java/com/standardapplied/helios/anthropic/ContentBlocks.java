@@ -48,7 +48,7 @@ final class ContentBlocks {
     switch (block.type()) {
       case "thinking" -> thinking.start(index);
       case "text" -> text.start(index, block.text());
-      case "server_tool_use" -> verbatim.startServerToolUse(index, block);
+      case "server_tool_use" -> verbatim.startServerToolUse(index, payload);
       case null, default -> {
         if (VerbatimBlocks.arrivesWhole(block.type())) {
           verbatim.capture(index, payload);
