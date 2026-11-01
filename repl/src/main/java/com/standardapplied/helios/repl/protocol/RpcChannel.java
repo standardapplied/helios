@@ -78,7 +78,8 @@ public final class RpcChannel implements AutoCloseable {
     this.transport = transport;
     this.registry = registry;
     this.callTimeout = callTimeout;
-    this.readerThread = Thread.ofVirtual().name("rpc-reader").start(this::readLoop);
+    this.readerThread = Thread.ofVirtual().name("rpc-reader").unstarted(this::readLoop);
+    readerThread.start();
   }
 
   /**
@@ -107,12 +108,14 @@ public final class RpcChannel implements AutoCloseable {
    */
   public Object call(String method, Object params, Duration timeout) {
     requirePositive(timeout);
-    if (closed.get()) {
-      throw new RpcException("Channel is closed");
-    }
     var id = String.valueOf(idCounter.incrementAndGet());
     var future = new CompletableFuture<Object>();
     pendingCalls.put(id, future);
+    // Checked after the put: a close that sets closed later still finds this call and fails it.
+    if (closed.get()) {
+      pendingCalls.remove(id);
+      throw new RpcException("Channel is closed");
+    }
     try {
       transport.send(new RpcMessage.Request(id, method, params));
       return future.get(TimeUnit.NANOSECONDS.convert(timeout), TimeUnit.NANOSECONDS);
@@ -163,6 +166,10 @@ public final class RpcChannel implements AutoCloseable {
     return !closed.get() && transport.isOpen();
   }
 
+  /**
+   * Release the reader, the handlers, the pending calls and the transport, once: the read loop ends
+   * here too, so a channel whose transport ended leaves nothing behind for a later close.
+   */
   @Override
   public void close() {
     if (closed.compareAndSet(false, true)) {
@@ -196,10 +203,7 @@ public final class RpcChannel implements AutoCloseable {
         LOG.log(Level.WARNING, "Reader loop error", e);
       }
     } finally {
-      closed.set(true);
-      pendingCalls.forEach(
-          (id, future) -> future.completeExceptionally(new RpcException("Channel closed")));
-      pendingCalls.clear();
+      close();
     }
   }
 

@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.repl.sandbox;
 
-import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -19,9 +18,9 @@ import jdk.jshell.SourceCodeAnalysis;
 
 /**
  * Evaluates the host's snippets in the sandbox's JShell. Each execute captures the snippet's stdout
- * and stderr by swapping {@code System.out} and {@code System.err}, runs it on a platform thread in
- * a thread group of its own so a timeout can find every thread the snippet started, and answers
- * with its output, exit code and timeout flag.
+ * and stderr by swapping {@code System.out} and {@code System.err} for {@link CapturedStream}s,
+ * runs it on a platform thread in a thread group of its own so a timeout can find every thread the
+ * snippet started, and answers with its output, exit code and timeout flag.
  *
  * <p>Only one execute may run at a time: the standard streams are JVM-global, so concurrent
  * executes would corrupt each other's capture. A {@link Semaphore} rejects the second; the host
@@ -123,11 +122,11 @@ final class SnippetEvaluator {
     var code = params.get("code") instanceof String s ? s : "";
     var timeoutMs = params.get("timeoutMs") instanceof Number n ? n.longValue() : 30000L;
 
-    var stdoutCapture = new ByteArrayOutputStream();
-    var stderrCapture = new ByteArrayOutputStream();
+    var stdoutCapture = new CapturedStream();
+    var stderrCapture = new CapturedStream();
     var captureOut = new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8);
     var captureErr = new PrintStream(stderrCapture, true, StandardCharsets.UTF_8);
-    var timeoutCapture = new ByteArrayOutputStream();
+    var timeoutCapture = new CapturedStream();
     var timeoutErr = new PrintStream(timeoutCapture, true, StandardCharsets.UTF_8);
 
     var originalOut = System.out;
@@ -171,11 +170,8 @@ final class SnippetEvaluator {
     }
 
     var result = new LinkedHashMap<String, Object>();
-    result.put("stdout", stdoutCapture.toString(StandardCharsets.UTF_8));
-    result.put(
-        "stderr",
-        stderrCapture.toString(StandardCharsets.UTF_8)
-            + timeoutCapture.toString(StandardCharsets.UTF_8));
+    result.put("stdout", stdoutCapture.text());
+    result.put("stderr", stderrCapture.text() + timeoutCapture.text());
     result.put("exitCode", exitCode.get());
     result.put("timedOut", timedOut.get());
     return result;

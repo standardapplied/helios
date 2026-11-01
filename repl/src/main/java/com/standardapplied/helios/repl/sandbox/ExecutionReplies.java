@@ -41,10 +41,16 @@ final class ExecutionReplies {
         .build();
   }
 
-  /** The result of an execute sent to a sandbox that is closed or whose subprocess has exited. */
+  /**
+   * The result of an execute sent to a sandbox that is closed, whose subprocess has exited, or
+   * whose RPC channel ended with the subprocess still running.
+   */
   static ExecutionResult notAlive(boolean closed, Process process) {
     if (closed) {
       return ExecutionResult.failure("Sandbox process is not alive: the sandbox is closed");
+    }
+    if (process.isAlive()) {
+      return ExecutionResult.failure("Sandbox is not alive: its RPC channel closed");
     }
     var exitCode = process.exitValue();
     var reason = "Sandbox process is not alive: it exited with code " + exitCode;

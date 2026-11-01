@@ -74,6 +74,11 @@ final class FakeSandboxProcess implements AutoCloseable {
             Thread.ofVirtual()::start);
   }
 
+  /** Writes {@code text} to the stream the transport reads, as code that reached it could. */
+  void feedRaw(String text) {
+    fromProcess.feed(text);
+  }
+
   /** The request line the last {@link #answerNextWith} answered. */
   String answeredRequest() {
     return Await.value("the fake subprocess's answer", answer);
