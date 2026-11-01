@@ -1,0 +1,373 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-sonnet-5-5","id":"msg_011CgcoYesztG6aKveC6Pk8k","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":0,"cache_read_input_tokens":6205,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"service_tier":"standard","inference_geo":"global","speed":"standard"},"input_transformations":[],"diagnostics":null}            }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_01M8qZqwXJbBKqwkrVJfsUPr","name":"code_execution","input":{}}  }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"code\": \"r"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" = await web_search({\\\"query"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\\": \\\"Austin, Tex"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"as founded year\\\"})\\nfor"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" x in r[:5]:"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\n    print(x.get('"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"title"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"'), x.get('url'"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"))\\n    print(x.get"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"('content','')[:400]."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"replace(\\\""}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\\\n\\\",\\\" \\\"))\\n    "}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"print()"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"}"}       }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0              }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srvtoolu_01Xbs9jSK4xj4FN2Kk8smJoQ","name":"web_search","input":{"query":"Austin, Texas founded year"},"caller":{"type":"code_execution_20260120","tool_id":"srvtoolu_01M8qZqwXJbBKqwkrVJfsUPr"}}  }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1  }
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_01Xbs9jSK4xj4FN2Kk8smJoQ","content":[{"type":"web_search_result","title":"Austin Texas","url":"https://storymaps.arcgis.com/stories/7304328db79344c2897176f32951bfde","encrypted_content":"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","page_age":"2186 days ago"},{"type":"web_search_result","title":"History of the city of Austin, Texas","url":"https://www.britannica.com/summary/Austin-Texas","encrypted_content":"EogGCioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDJNkh1K3UIuAr3QEMBoMhe8nQ8NZUKhdMe1nIjChi/MI9qClNodCZICnx3iIOAJZX3aFcn4eIDoLf5vuaFwiFF/UkSVDbCV6wUgejaAqiwU92pb/lOI9n9N7MFlHs2cD2nkk4YuQQoLWmccWMGyFIiEBnE1bSZT7jn5MXru5LSdKUZgTKZif5A7Qdvo1OKqVaP1NyWJfxZ9px2oNhOMBHGFtD4XMxMRFlVRv4p77xgZvaJF43paDJ1nGiMsDQMSe6LPxIRl1PcqJE2YnaTpORww7sc8OAPyth7NclQyUG+ldP8ahqpgH3frfqCIK1PFRwerBUkhQcJKKDCEX2Otrf7mCrvC273uLN6gQAmqfPEmMPxKy3UFajEjZqC7Ep26BSwzudmao/UQpzJu1tHc9VxvqKjfD4zIobf/AxqtqlfJ6sALEOE3I9oLPCmfD/wYhl/+Lv68zvQzoYXe90mtWm7eeoK8dJslM/CyIl3fM38/fdamCrHEsNCCHl/U7wHBczWzosHZQ1g5pwOVVcMYlHAlz4S2YaPPnfOitqBqczyyAB9YjfE12s6i1FOmQYiO8Z9ZI52hBFWW96wYWXrFUaGyz31dd5Q0ZzXIMfr8++/S667nYSGJcikC9qV21dO3xmLTqeD+d+PyU7LgV0bUMccYf5IuSHde908cUJXsPMzJRHBvCaBgQM0XuJ25+wMhlEcOan4p1C4xxud1v7FJKoJuZGCuYuW2ixvy5ujdL+MOUjEsXn3uV2EHhIrktdnXJci4gXCDek6BHOLDPK7Q290ruoc4wL82sowGiKKSW9aTbdZlVgeGkJL0YjA9nuTfisVoOgZmVJqdzcn4A8G+rzXRGwbUBoGM8bFH5PO4/RIWLCv8UAIbsRwveqN8oTsm8PRHi12zPnwCis9F/jxdDY2YGml6ICMXA2upSS4KZtf6RBxHTGvQbwGYOeXiWEylbv1qEzXEqKSHaCFkYAw==","page_age":"1790 days ago"},{"type":"web_search_result","title":"Austin, Texas","url":"https://www.ebsco.com/research-starters/geography-and-cartography/austin-texas/","encrypted_content":"ErINCioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDFJ+dR9SZMAiYhUFuRoMvXtC2664iTLiAlwiIjDeDjm+SzB+N0r4qLfD+0pZAOnfR/WjPl9zoWuniJCj+WID0d02wygPips2lVuDcsMqtQxBOyFeliYnpKb+XW6Kg9e4L4w20ib6GIMuBi8gcWJBlsA9Q48xG/0z9lqS2G1bLABowxBzvO7ilekgn+YpPlYfF/3rl5GP5u5TGM4jATvNYlcnhx0tPJk8M82LyrviaNJlSm5pRxIwwPWbVR/rKwQmgbycmWBWw2SgedjVU1LF/ZGAphYAKKC3nsgFk7vgEF6oERH3OxEnMRVNX7MaSSl7MbPx52z/sBV7qUCznBAo1f9+ds4nG6yOrRIMZiYrJcHL5E5qZ8JoMoTsM9/nDMLWIXV1UQPMHPMVZJ/CsB6ejlmlNNgEa5ZofSeLZ2t4sR75qxtX9zbeDiTouhdpSRvOs347LynLy8bO60B7yKGAuSbF/Y0oRKin59df2UdsAW+qek9Di8SMNGeGpaRFA7AcPfiEs2Fbj2nAmpu7o6e9GZg8eIzLUxogszKx5X+fe0cmoxAgvI3D8ZKqU84aEZEA6+Fdg2xLllBUMQLj/Lc2j6ukUzfmwouIxusWXtRMCFjasBg8tJxq/tPjrCNPer5OLB8P8MXCjn00uTSZmEJCf8I8PhaRLeEZUL+Wz8N7VORK/H+3JGO2f5fPfoNEKQXm+6RzCyubWI2oFujeUT7vcKVt3skRBmDd+xFJbMmi6rHP67mIhSylrgD1Ionz6RmPzxK2KnE83wx4kuwLLDxgLF9jXt1Z4bxwGWECbFmAWEXmYN2Qr9F+r54Ft4L1KcQyA9Jbx+RK79J7mQ/11+iyO1ZJ8xUt8BmA31MLu4NOdrZJVqvZjGFNBSUXct8oZ4ZTu5OqPymsqwyas1yRKuhYXovPI1eDgvXmrRMK7Cwo2dZfNrokq2lpevlCDn8+2GDLjvPbrng8SbYvFDXjQ4K3/0YREM5J/cNb2PhUYM9d0xSuBotKc5oqkFP0TaQKuMpQV5Izr1qRCSUWWR9ZtfYAG6tt1b8rJI5wbe9EuXZQBoYZG+of2XIl0GQ8RK9TNfghtl2PoPnVHxsYc4+gAkZCxtA1G8Zpr+74N/ewRnuCMcAwmJFjj4J1wR8cIzguErm2nx4gqWS0I2AeiYV8ixy/k6+NJOrHItlpsvq0nFjhTROjPNgcZXOELvmf4++xd8waCxDGOTO/kg6eydsG1EgST28Qgs1hFrUj0p6R9xH5eun19C9s+JHmSBtdVpP3OiNQFJsLOQeyL+ILek25fHdym2Tovkb1Q8Wz5SF1G7zsBgRvZkBgk38e7wWmoz19Zs6Y4Yiqg5gKPp5Z/r7BOn4WYILY0DprOjQ4UcBWZghPTOVaPK+hebQ2+6esmC+f+WMd8ONo9TyzVU26Kk8eOjYrG9g8qMoBX6dqxMjojK5ta8MiGb1iRKdXVpR/vyqUxx6j7pwrIzX+ZrAIG87IPqhpoOiuCMsu4p9PRl8a4v/Gh47wK62CmQlaVLJT/+NLBKpi4VwBiN6Fv/6Ssmz1iHcWjicah600p7jSB1rIpueJ1HBAfVyeYSquiNFlQA01Bc2xRT8152SK2K90ZrUzv12GJ4NjecPoTIHyJmmDq4ciOzqej5jNuYH6m3rbis/eShpEQCjQRitZO+pnjaDWA5i89+8Ut6sEYc8xqACEZsz2cs80tJhIqF1df+FjwzrZERKyL14UPotCTpaJxZoK+3l4asa2qQle9LIRS/pWiCcBx74aoxw1civQKIKAeR04CFud+UTXvt4I8Y9YFWl3IaW4X7le0jS22V1+jJDdQcEiUij79M/F2NlqXaq0PoKIsI+CrTx8UxOV31q+/Xj6XABz0cwSoL+8Ufv7nTOBawmXpbDQq6EFUYAqjWAozb1sexeCGC7tgxRF+s4GAtbrdFCsfmXlNk6eMYbq7l8d22gA3DNT0XfL2dUBWr1QRf2SMRKAcTOxRTU3XmFOuCzleRiBnFRQDGkVBkYI282wYoq7l3fn8VejOQJ7FaX3f/eEq85Z+sJ+rA4CxPXhH98FhsV5KW7ObdzPicigJJ5nbhcegcEvpAQSFQLsqgPQ6oCiYOEQXhcVGlkpNYJNtgTRiU+ESPxXnb+lWyD4RcN4vYtTLK0Ex2ZlM7l54QSfDZ+HdP7TxEZs6Ty7nEdAr+i/5gwD9RdR9vo7Be6ilK1H3AeAC3ZieLZu3hgD","page_age":null},{"type":"web_search_result","title":"A Comprehensive History of Austin, Texas","url":"https://www.tshaonline.org/handbook/entries/austin-tx-travis-county","encrypted_content":"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","page_age":"25 days ago"},{"type":"web_search_result","title":"City of Austin Turns 179 Years Old","url":"https://spectrumlocalnews.com/tx/south-texas-el-paso/news/2018/12/27/city-of-austin-turns-179-years-old","encrypted_content":"EpQICioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDGYhps7MO27Z2iMWERoMWRmu5fS2w4LNTgkAIjDtybS6Ix9T23u/WPSxF5fOl3BqoqZM12MBtbQroET3uCvRnTYptpcp5/s6P9iZ79QqlwfshF3+B4hqKQ6osKUFI5bMhX5LS8oam0lR7jat4u0CGux7Q1vZsEHOIbEFxOUE5GdmDStlF/vbMbPNAMOgqsBtkHpyyfI+J9IFrxVoaqbxjlw5WeBVrHxHPFup8CLV2KdcFJcS7hzHmvg1v/1quZEV035Q5qdJX2Aq7eDXM7vHPBzdkwoSLoOpHgt7BOJbdkmQ3+COhIK0MvhNwWHcxkeZJBS7EILsFuAEnNFkryIOnGdHY4EorbVEjzgrHh+PBHRlt/tXOM6OU5u1NSN6/c1QgXOe1IEhNIwybiEY45uQQRSMot+J5KquNhgT+WfIBsxKGJT5xvqKFpGRC3mf1Wxyj9OAqubgeGqoKZgzsTTIvdYCVAFctD6XO/f78+EO6garUqYo12mZuBUQk7xYehN2UHk8gXuVqpHtu5Pocne8qRXWguHd+gpS8FeSotckFoakytPXP/fvSCJRsb2xgLiHDwqTFDaLVFG0I0e24SbrPTYVLKYtH9zV36+LKzKwT0cCwEvGDQ/ct4pm7JzkY44kTde2x9h+5gccsbYKDBN2KWRHzZ20WlA+Vfndp0B8t8fFeEnJ81pdZJet6tI3PdtA5G1a4V4LaEPGCcepv0x5UYyUt9vq2XOEryjhrL+JlDqN314h2YlLHAa+vm9Lmt+lQLdguq6FoxWY0U164bei5WkTlZ9/ZX2A9EEkHqAoHwBGOQ6jhGuKmZ/ykFSEVfvdXxwsZVc+bvZl64IJMNnMX8YfvqSdt9w9brMN7FJAXCpbj6FYxKJZCeeXPVCrv7+ZuA4mAFELEz/reY9c0uTGw587HkL27PdcrE6Z4DAsr87kIDUuwoLDj3bHldnn5Id9un72yxZLs3MPJOV5ub1B70Q8BUVIqv33kUi/b3Me5V5KHvz3Sa+8T2yiWne2DJgz8pXk9NCVwYRJtH1NaI/7WTDgDDakHB8yZm0WDzneDIRv8sBVZEG7CmK7q+b6ef4ovjdk246G7euvUabWC4pP5GUkTZJYbNq24n9lVx9YOQZA6+0IEZr2mzAkRPouJYcFdxWzmYOSS5pDc8s79TSk+h1iW+zufXrFBXRJAIbjEjBK8F7nAZAzot23wWiCWGiqn63q1twlocWx7CclX50+4p7mIIySaK9kfJBVnBboJHa6JBZhmh7vJT1Jo3M3IQ9AAlqfEJrhVMjTgRPbXtUZ0wdRC1LU5S2vRy9bKzqvKh5KGONSUbTCGAM=","page_age":"2865 days ago"},{"type":"web_search_result","title":"Timeline of Austin, Texas","url":"https://en.wikipedia.org/wiki/Timeline_of_Austin,_Texas","encrypted_content":"EuINCioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDPGWylE7tE7Y18uu+xoMImMSnPdfMp094jfcIjDDimyscBUNuVRQy/gRE01Cwh++92ybL8RanMPZix4e2wRha0IlEdscuZg+oovHABEq5Qz2g31Gjv7mGFQmbu7MU4Pr4lER7gZeBCdKDzLgrVUpYZ2CBaSpWCIFLLcLiSfnB6ynYU7KCAbljV3ZV47tq+aBfr427Apk33JaYQ8flgx/RXNA0ASawn1kZFg5TwQYUtGidCm/Rumq5MYDONlEIgM7Gh1dfvvzdQ7r/JsoC3Cp3flC9dkb4CRynzULW54YRHnbUDoNW/Tjb5EXiza8o+aEiNV5gd0xiMb59XP46ouiqq3MrmDVvs8/rZmBEyfZFKdTt1N+FuXKYQvz1O578iquVU6yAB9ztsp0IiGMY+IJq/ONda4ewuxc/EK2bK8f2HpGG0FhoZ7YRDN0IcdnwtUZKmECxKFY4TPK8l4ZSZB8IZOeyNWh2dbupNKe1tgk2Lolle2F0tY4KZt3bzv5su+c2MZeHocIMbhu53tisVkE/DaKlWzzL+40b6+ssQsq1H1ZfW459RKu/38sYr+Nu1XW4I9SNr34RUu2IW1ft1OD3g3YdNseovig33PuUiENxQ76iD2Ec1wQ3m81oaLfXs3b+H4EqItemXa/QJ3YrUxjmyYnOtqFSkVkCDi/uMPTQFvkttI9GS7jLSAnJcAPyShyesei5mXhlKi0m6K4cglWLRyC65i17WtsLcnK/GfM7ZaicDTKoXazyGdlgHmj502WMkOXKjA9N+hRFtZ8rI4Q9Epb6V/5UlffK7m88Q7PzoxFIFPm7t4oOYG6p8Pik0/DruCk3Koa9w4xBrtBlDE5MeLW9SSh4QucrNT8Jqp+6UoPRWXoMJAUkPLvVl2RazMfTHaoDZANJ116AXAhQzc7W6D6bQMvHbr0eKS6a9/f0rUF/kc7Bwc51PeV7/6THQglkfCo9u5B7zsuSlpadQ16Li6gvUul/6Jml28RkM5AgaA8al2khjXgCJXCTIicNAM11Nvc/MCIFzlOme9cvtt50IltUf3RsYpSmpbnCfmC/IW/WIUqFpHNfN4eJmErhiS6Nitv+A7Ab9X8O5F/CjWBTHXulhBHPGghD7QZVVxpB8/C/SM4qlsK/Nrlfr82qHG7WSnDWBGDMV+6ZWJ9/+A4+tdcsUwz7uSV7+NgG/37knSJPbOljkOpZPk4jkz5czqf2UEG0LuKE58KvOAzqs16zo/J1hnLJBUB9GR2KRp3t9w7ygbZk5ENyd8NYkVboV0DWt0munG+VFA8tPVr5r0GFW7JkAdsdmbcQgMGHYZMKKH1e6jk/L15NGd/g41LMTnp+7rBmxR+ZbZP8NtAqqc/Ez49d3uINw7FOIuIOi0wtGGc83B+lAouo2noYvoLW3v/wrjcCVvsj9FvQEME6v3SBQ9uT6j2OmMyNXaUZ6nnTlwKImVYJEBJLLsqxhe7Wm7CqSQp+mFaUuu0Xx8B3Rhk9uXbGoej4oyMGQ963gtfc3UcgVplDTLDjQnhkV/C2ICRYE/6dc8wyWfh9xtbgV3Cuzn9AGpyyXU0rCXpPG8IkRuq4O4JtwAvwLuBJ+s34eRLmtMiV5oE1o7hX6/6qgj6Y2X2DI67iFUojKQcViqCDZIpf3ka6iHmYzBwM1SaRwT7FwwZggtskd3NkjqFTmkRCCjswEqV1H008ZTClBF94zn6TOBKrR2rPvNBiczCtNJb1Z5tQhBjnJ4hCxlVOCm8unHutUd4loGvbzu+xCTnQVEcqZUtPFif/uhypSXbpPC9jyr/qazTtcb7bJrhBZpE5Jc9ITLhceFhQyDqC2CsIPE1lDs6TY1j6U4bdn9e9AMp+V4Q2g1RvI5lZRO801YpR6kz1meIBvlIYikoeXxIXSYGX5lEN2p+dlMHxM1gOJwT26XXlo30yvGPRbdUWqkzDB3VDa+9yws4dL0QGAEQipXd3oFNaUjVJj5fbOHna7oB+Ga9cEH8w1Uan7FNmB3qdJK14Qh+u75CUM3gNbMAGlFeONQs8FnA0QgqLLjS+1BDnuMgrn2vCZEZSAl4S1XdTUjmeww8b+V5ou9TKmi9/bqSssIRLNMYMd82E8gnMg1wxstnj58in0ZvyROkPB6dSYtyIjwf7PhOv89aW/DjCTxZ5bb+5ouIZcWueIZXosrfmBQ7W6SZKpdfy1mzyxRl+chUBAsGsN+TJfDjUdV9Idj8Fuxk49zzUN3P5oRZ0o7N87SzxyOoQe4VrujZxaQd0l5FX3TVE7cLJRMQM6ywBSpvFuI4HRgD","page_age":null},{"type":"web_search_result","title":"Travis County, Texas","url":"https://en.wikipedia.org/wiki/Travis_County,_Texas","encrypted_content":"Es4NCioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDPgmT50Ts2qY+yQ3eBoMMaG29gJhfnjaOjzIIjBenabLxiUGwQwsLZOzuBv+/ija7MzPHqE0ieuWtUQ3r6axd+kXODsvB8QSkgAruecq0QxEs3evMoZuAU7zwlW4o2S2/J+dpifObRs7+oTxcUXNCQI5S/htBYx0APGrTVNqDubVB8c7FhHxL1MuTwW4lZzLi2VY0AdFYe3bFhOLXEbvZCJTAyOLvgsZz7eB+KUlVn12eVL3EnW8M28NR3OdwVzX2STKNa1rP4cSylUQuWBn7DAHZgtADvf9TLmOx3DXxfyxo5kaE77Rrfroik0FevO4YwDt1TktbLEKbfYm+YzuO/z2SYmzY5FiFBVn+9fFfa0Q5wlWGuaYE3qP0PISYYg1hi6ubxysLiKlHnlpDgFJycjbB13Jz4yC8L/aBylDapGBce/wIq51uyG0MJXPuh3GXrzo+YLzUvfwkE2JTdwR67kfQJzivvHmccxfgNPrNSF3UM5ZrDZTmb39nXZRjkT6QIJSn7lxfDiVj9XwD+aF9SUwyT7RdtMVSGsYPr/UoULq7iAAL9mXOsPSAskUVtxZqRBD2SI6vRZDdmdu1fVCU70+e+zffV6UBLwcW+qCJ3UJ6xp6CldCADL9HUzSr/SSm0r+mKQMxQ7bICpVXQ7VfvR2MkTNXsHXQbq8kYmZuNqJArYBVQz+JrTiaA7Qp0qBJ5x+u5y6Db/dV1KUCYSNDYVKtnIyhtHpHjyX4ubkc2RcPdxAMI3aLuG6EhDzk3f4RkVC0wcgOjHrjFpDQHuFIuv3AZk06o+ytEetkaCMH9lqh2SS9GamHvU/e1oIdvnS7c+xFdKtbl17pfGWuH1MoofR1NpYAe62XmQC8uNqUAPLCL5YHnrmZEClwW+WsduX80VjevLI0NcyHrVxhuHynT9X7Ca/iShUOk16oy13ytZB4VklKgY1hn1xmXPxSS3e18JpuPku9q7SStoB/sHJP5TWUsxVIADdhVuQv0Ees5PaFTQrPgFRPwEijA5tXIeqh7OXwN0qFSPiEfAxGkETjnpQUJF6VPeBF20r6ET0Hpt0zMHMDJOPkQHLLA6eviYJawuHVvpAZkRxY3vNJJSsZY2G1KJ3Hn0l7kbgXH/JBEV1g/W4LKl4pjraW+/v1EMrwPOp55ZX4kl05AdidchpFICbbnzCilIFhC9FHB9635rO8ss1NX3m6Os5i1hOZVDzZl26x5Cv3AzD1j6q+qWKQqGdIL2s95N4C2urA3JNesApWeWeOgN48280qj42n6kc2wgP0XlY2LfAo7VnN1LuIgMLNLpSQhZBKKQHogNjoYZQntI5LpphcSXD5aUIv+jKiHR8PTSurRB++3sakQN0fla4YegiBM2BHRm23s/TLG2u+u0x756PBao7G8geceCA6io6jykRI0YknvgZGQcHR5+/Pg78Bds53JnVhZjzEX5BanAEMvyZUBPUzw6UGQe0FqmXdBChcHR+UztuYGnHxgP4VhSI+zChS30MQUdsyPj75+ah+UMh1gaMT/Xu3/hltanHDO/vK5VfPqZ0yG0a1faYpCEx1Ft2hPt1p4AL3nLTfFnQb94vRpnwxIOyk/jVS2gepVEFVdvjG0zRZsE6C1kmHkG3cuiIWzGx+XGunaSOmc9+aQTCJ7BdMXjvQPkPjWvrp1smjIlx/gGMsK5+r+gSulrKAYW+8B3n6t5rPaSOWRtOGo6bM8Xu5/rU3qBu4lUolc2xZ5BfRM6OuAfuUD1yYAkkbvZ/UV4vn7G89kni8/1oVN7GU0NSRI9oGYTLyFvcDzT4o7uTuweobtoPxB78OoDLna9AyL6pPuh+gIoy9AsMVrcH6IhqSq8TTrQBO/tjbZjuwZpzWz12NLSRgYxhh0Y+XWb4omjEMVSDUU/4+Mdu9J9lwDJXjRHpwHPOePXuawAsy09Lb711tRmFujUPveeHvIr1w5kSWCnkR2eDNg0nwpdICEY/OSJRd1edBIGFSAGU6iuc7J4FRBdql3k+v3IJFWejoQ0RXcirpFvN7/YIMes3CaBZPZh2kKDD6D8mCaTIfuafQxIIopGKqZjewTV+FCeot+nZNa4FJfHroY/XGrSd1D7lxxRV+MxWiUlkOrB6wiYQQM8fXvB2IeUSdcKjdCz4uNfxBXxDWpPESQT+dSORItFi/mC2Nd0kkuj7DtpOq3FwSEiBQCc+vYvhHTENkRJutZo2oWfJuCixkGkfx5ytbSyDWKPQMAZslmInjiPLYH/vP//g9uEp88oYAw==","page_age":null},{"type":"web_search_result","title":"History of Austin, Texas","url":"https://en.wikipedia.org/wiki/History_of_Austin,_Texas","encrypted_content":"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","page_age":null},{"type":"web_search_result","title":"Stephen F. Austin","url":"https://cityofaustin.in.gov/stephen-f-austin/","encrypted_content":"EpMICioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDM9uZjAAV8H8x9pZAhoM6Bw1yAYolV3DJymxIjAmiG6dg2AixhEP8jdcW+Wgi7WuSaHsl48A6bJRzBCOlB/QUIicaaEmPl6GLjD8sWEqlgeS5tf+myJr9ArZuyWWTwjlOWcVShGA7w783v7710AS161E80pb+TRcCSAfIqTJ0iQpis++ExvHwk3/W5lGxR0OSzWCieGrY2RuXwH2nAHN4xFPgg6mFdEDvvjBIQgcOLOWDh7tJg0RQMDYzWUUsaYE4xBwenEsyLEKGkTGJytPTtisSH59VlczjQ9E3Fc9R8f56C8g4ppsdkEmiPTKLl/lYv8MIU/tJveYRB94HDy8KHlTp0RThS0ZNBMxAE/ClXIObnqOZMa4xqd41W14gJG3CsjgrVLAx7jUK6EhbRCIFdf761y23poWyJA8RjCXf1WWjdnzQSlxhjJ6+WbZd3fKQnpvRtV6Qdt8K9+ixnLLaYUCfjm8yni42pMBVTmZHMN4n5CPXGa6H5MHyn/OhPSyLzBeRg+2THOXqePhQKATp+DIgRV1FMfy1JTP0HYzBZ1J8hvETjxya9sKzmx1eCNZ9betceJYBBssPSyoiCNByjDgHefLL2lecXPMMu6e/Iob8N4LANYubCk72SqlyQEzftxiQ3uAo/tDrxQ0JvX6Cp9upuIjViKEJ7p8f4TkQLaDx7xN/cEsAFW9FqlO+DwcN/9wmyVJBezoJg/v67NqSInbX1TsPYn4IFOmAflYZmNBuYWxtaa+FKr4cVJF63hB8x3/hCWcTtP5qRaR1s/nYxdNQVln5ScGTO9JqzKknhO6uN9MpL1ze71ePmhXn/dk1Yhzv5ok17jzzlSASbieUxa+MNU7LCzq/cBJMmVxXgivzI66n/7ypnGKCUNs7+eD9CMaaY7BWlWU2JLlnObMlRt3JeUA4+d2+7TNaGui4iPqHNNMr2RH9wrDmni7J4Q1uoUjgQHRITqogLX/gG4lPvFJhhYMqURS2cRQR1AKcvZDFZWwO6CIDivxdDTDKCMi0F/EQXy1mRIpGhf714RIUTSAkqXaZz2+QgCG/9tFQEeT7M3xM4I/yClXwLKpX1kRMSD/pf7Mn9s9Q8HxF9ke6NB+Ofe2XHzwdFLq6M/ZqWpGK+q4OFxNCwGeCEgSAIdb4QRhz2yMgeJP85Z2SH8d4YIIMP14Yc22+jLWO1fK6sHZ6h8ZdX6K9HOuR4Ji9oTll9cfDjM8zq332JQ1B1m+J6/HBcjE0nLHSfavMnpcA5kldx7r1eI04w2sxBgKxgLfBDIlp1YVZpjNq9QWnrtqXElpTlqjxCnNGjeWQSJjlFFS746PppcYAw==","page_age":"1006 days ago"},{"type":"web_search_result","title":"Austin","url":"https://texan.fandom.com/wiki/Austin","encrypted_content":"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","page_age":"227 days ago"}],"caller":{"type":"code_execution_20260120","tool_id":"srvtoolu_01M8qZqwXJbBKqwkrVJfsUPr"}}          }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2  }
+
+event: content_block_start
+data: {"type":"content_block_start","index":3,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_01M8qZqwXJbBKqwkrVJfsUPr","content":{"type":"encrypted_code_execution_result","encrypted_stdout":"Eo4BCioIFRgCIiQyZjAwYmFkMi0wMjk5LTQxNWUtOTgwNy01ZDJiMTc5MjBhMDkSDKGggYVUZ7ILPPsejRoM8A1gWrV4Y2v7USX7IjCsikYa9v5jaopS6C8DIBl0hmRZO2zdaV00JCImOy2crmQOYdCLZF9dKf+t/cw5F/0qEvv6/uNzU8cXDiP39qA1/m75RRgD","stderr":"Traceback (most recent call last):\n  File \"/usr/local/lib/python3.11/asyncio/runners.py\", line 190, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/asyncio/base_events.py\", line 654, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"/tmp/srvtoolu_01M8qZqwXJbBKqwkrVJfsUPr/cell.py\", line 10, in <module>\n    print(x.get('title'), x.get('url'))\n          ^^^^^\nAttributeError: 'str' object has no attribute 'get'\n","return_code":1,"content":[]}}          }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":3            }
+
+event: content_block_start
+data: {"type":"content_block_start","index":4,"content_block":{"type":"server_tool_use","id":"srvtoolu_015yo7dv3uo5Nq58wDfLkR43","name":"code_execution","input":{}}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"{\"code\": \"print(type("}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"r), len(r))\\nprint"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"(str(r)"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"[:3"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"000])"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"\"}"}              }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":4               }
+
+event: content_block_start
+data: {"type":"content_block_start","index":5,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_015yo7dv3uo5Nq58wDfLkR43","content":{"type":"code_execution_result","stdout":"<class 'str'> 15536\n[{\"type\": \"web_search_result\", \"title\": \"Austin Texas\", \"url\": \"https://storymaps.arcgis.com/stories/7304328db79344c2897176f32951bfde\", \"content\": \"The city of Austin Texas was founded In December of 1839.\\n\\n# Austin Texas\\nAustin is the southernmost state capital of the contiguous 48 states, is located in Central\\u00a0Texas.\\u00a0Austin\\u00a0is 146 miles northwest of Houston which is the largest and the capital city in Texas.\\n\\n**History of Austin**\\n\\nThe city of Austin Texas was founded In December of 1839. It is the capital of Texas and was named in the honor of Stephan F. Austin. It was formerly known as Waterloo city.\\n\\nIn 1888 civic leader Alexander P. Wooldridge proposed the building of a dam across the Colorado River and use water power to attract manufacturing. Although the Dam was not complete, the town is now emerging and attracting others around the area, but in contrast it still could not sustain the size of the population.\\n\\nAustin had only one paved street thought-out the whole city due to\\u00a0the heavy municipal indebtedness incurred in building the dam which resulted in the neglect of city services. In 1905 Austin had few sanitary sewers, virtually no public parks or playgrounds.\\n\\nThe city of Austin Texas was founded In December of 1839. It is the capital of Texas and was named in the honor of Stephan F. Austin. It was formerly known as Waterloo city.\\n\\nAustin was flourishing after being established as a city and was doing great until about 1942 when the Mexican troops captured San Antonio to take back Texas. It was then an executive order from Sam Houston to move the national Archives from Austin to Houston for safekeeping. This did not go through and the national archives remained in Austin.\", \"page_age\": \"2186 days ago\"}, {\"type\": \"web_search_result\", \"title\": \"History of the city of Austin, Texas\", \"url\": \"https://www.britannica.com/summary/Austin-Texas\", \"content\": \"Austin, Texas(more). Austin, City (pop., 2020: 961,855), capital of Texas, U.S. It was founded in 1835 as the village of Waterloo on the Colorado River in south-central Texas. In 1839 it was made capital of the Republic of Texas and renamed ...\\n\\n# Austin summary\\n## Discover interesting historical facts about Austin, Texas\\n**Austin**, City (pop., 2020: 961,855), capital of Texas, U.S. It was founded in 1835 as the village of Waterloo on the Colorado River in south-central Texas. In 1839 it was made capital of the Republic of Texas and renamed to honour Stephen Austin; when Texas became a state in 1845, Austin was its capital.\", \"page_age\": \"1790 days ago\"}, {\"type\": \"web_search_result\", \"title\": \"Austin, Texas\", \"url\": \"https://www.ebsco.com/research-starters/geography-and-cartography/austin-texas/\", \"content\": \"Austin, Texas, is the capital city of the state and a significant cultural and political hub. Founded in 1839, it has grown into one of the largest and most prosperous cities in the U.S., with a population of approximately 974,447 as of 2022, \n","stderr":"","return_code":0,"content":[],"abort_reason":null}}          }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":5       }
+
+event: content_block_start
+data: {"type":"content_block_start","index":6,"content_block":{"type":"thinking","thinking":"","signature":""}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"Sources differ"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":" slightly here"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"—"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"some c"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"ite 1835 for"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":" Waterloo village"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":", but "} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"1839 for Austin se"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"ems right"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":", so I'll go with that"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"."}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"thinking_delta","thinking":"\n\n"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":6,"delta":{"type":"signature_delta","signature":"CAQSoQUKEAgTGAI4AUIIdGhpbmtpbmcSDDxOUE34tVdm2NscZxoMM0Vvuf2b0rDC2GmIIjDkKin971hfcsOUiTwkL0yytDUitUq1zta/PX8Rafnu+H+a3cfKHDChTI0Wx/MjKOoqvgQgZqp4PHjeI/6Fl+/pjMJal8jkrXNM3cqc5CeX5nDkK8ueLGRByfOl954CcUfc9l4OqDleOnom926WMn9FGpgolR1/OZ0yRfIywfJ5zOw8y2CCpUrQi4u/ET17Cd59x/w6edXokgXFmfaY/9/DUwIsbIswaFYKCW49oXGu3Gdi5vbtFt0Rw5i1n5hlCjePThreRV596FBXpqRGa4EgtwHciMgEJtIqnZEibwiD5+ewBoLDivOpq9FSLq9FggNmIIr1nxfhM6HNFt7p12JMQcXuBwMwPKHoNQt/zQU7ytpo5ppC2dZAqBZ6CZwt83Gcv//H+PbtiEOg+T9ViUUAo/pr3wMI+zBE8v5Y5fnv5Q/JyIjnZijf7ZuWdV5uF7mCcgGFPcXOsn43Or1JiEVoQHANXdE1yPyrG73REHao243CrmDPrMW2Z6RCYaa/Rh0xtRAKH4JaFg6XlnooUDyg3RAoyinLwWEh+oZCHVo0WGJe1wSChc639JxNlYtgJH/EvOiHjdG0f4HHzsjtMeOoy+/iyZa/hY37LLzS+K+PHH+PXOmhtdQ9WZloEID0ZcePyb9wUUYEfOm7B88svf6dhrFzy28MTBjSrglWB65VwGKQRGP6ywZrxTxxaRvE1+h/7GhjmpEhrFyxcg7GnF9aJ8fHe6AORzu34xKDtEUyglztD8l+XlZAUIqbKaJrhSytqsqcSbijxKkOLUVp7V4eaZBmurCojKdmeNfWGpxR4PmA8SfEw2jqQsxFI11hWf58GAE="}               }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":6      }
+
+event: content_block_start
+data: {"type":"content_block_start","index":7,"content_block":{"type":"tool_use","id":"toolu_019RZ6X4Xjp2WLChgAuzAQmL","name":"save_note","input":{},"caller":{"type":"direct"}}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":""}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"{\"text\""}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":": \"Aust"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"in, Tex"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"as was "}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"founded"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":" in 183"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"9 (it w"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"as esta"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"blished"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":" as the"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":" capita"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"l of th"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"e Repub"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"lic of "}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"Texas a"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"nd name"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"d Austi"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"n that "}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"year; t"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"he earl"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"ier vil"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"lage of"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":" Waterl"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"oo date"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"s to ab"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"out 183"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":7,"delta":{"type":"input_json_delta","partial_json":"5).\"}"}            }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":7           }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"container":{"id":"container_011DQc6c81fX5Zn7TEdritvr","expires_at":"2026-11-01T21:01:11.250203Z"}},"usage":{"input_tokens":8,"cache_creation_input_tokens":1669,"cache_read_input_tokens":19097,"output_tokens":344,"output_tokens_details":{"thinking_tokens":43},"server_tool_use":{"web_search_requests":1,"web_fetch_requests":0}}}
+
+event: message_stop
+data: {"type":"message_stop"            }
+
+=== next response ===
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-sonnet-5-5","id":"msg_011CgcoyNdeY657BciT93W1i","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":8030,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":176,"service_tier":"standard","inference_geo":"global","speed":"standard"},"input_transformations":[],"diagnostics":null}     }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I saved this"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" note: \""} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Austin, Texas was"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" founded in 1839 ("}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"it was established as the capital of"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the Republic of Texas"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" and named Austin that year;"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the earlier village of Wa"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"terloo dates to about "}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1835).\"\n\nI chose"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" "}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1839 because several sources give"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" it as the foun"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ding year. Britannica says"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" sett"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lement began as the"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" village of Waterloo in"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 1835."}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" It says"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Wa"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"terloo became the capital of"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the Republic of Texas"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" in"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 1839 and was renam"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ed for"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" St"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ephen F"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":". Austin. If"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" you want the"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" ear"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"l"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ier Waterloo date inst"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ead, I can update"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the note."}      }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0        }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":8030,"output_tokens":176,"output_tokens_details":{"thinking_tokens":0}}       }
+
+event: message_stop
+data: {"type":"message_stop"         }
+

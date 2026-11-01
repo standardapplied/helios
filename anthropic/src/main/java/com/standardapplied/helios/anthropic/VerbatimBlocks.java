@@ -5,7 +5,6 @@ package com.standardapplied.helios.anthropic;
 import com.standardapplied.helios.anthropic.api.AnthropicJson;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -13,9 +12,9 @@ import java.util.TreeMap;
 
 /**
  * The blocks of a streamed turn that must go back exactly as they arrived: each {@code
- * server_tool_use} with its streamed input, and each block delivered whole when it opens — every
- * server-tool result and {@code redacted_thinking}. Dropping a result leaves its server tool use
- * unpaired, which the API rejects.
+ * server_tool_use}, and each block delivered whole when it opens — every server-tool result and
+ * {@code redacted_thinking}. Dropping a result leaves its server tool use unpaired, which the API
+ * rejects.
  */
 final class VerbatimBlocks implements RawContentEcho.Source {
 
@@ -28,14 +27,13 @@ final class VerbatimBlocks implements RawContentEcho.Source {
     return type != null && (type.endsWith("_tool_result") || type.equals("redacted_thinking"));
   }
 
-  /** A server tool use opening at {@code index}; its input streams in until it closes. */
-  void startServerToolUse(int index, ContentBlock block) {
-    seen = true;
-    var raw = new LinkedHashMap<String, Object>();
-    raw.put("type", "server_tool_use");
-    raw.put("id", block.id());
-    raw.put("name", block.name());
-    blocks.put(index, raw);
+  /**
+   * A server tool use opening at {@code index}, kept whole from {@code payload}. One Claude calls
+   * directly streams its input until it closes; one called from code execution opens with its input
+   * and {@code caller} and streams none, and goes back with both or the API rejects the turn.
+   */
+  void startServerToolUse(int index, String payload) {
+    capture(index, payload);
     serverToolInputs.put(index, new StringBuilder());
   }
 
@@ -69,7 +67,9 @@ final class VerbatimBlocks implements RawContentEcho.Source {
       return false;
     }
     var block = blocks.get(index);
-    block.put("input", ToolUseBlocks.arguments((String) block.get("name"), input.toString()));
+    if (!input.isEmpty() || !block.containsKey("input")) {
+      block.put("input", ToolUseBlocks.arguments((String) block.get("name"), input.toString()));
+    }
     return true;
   }
 

@@ -451,7 +451,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       var config =
           ModelConfig.newBuilder()
               .withApiKey(apiKey)
-              .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
+              .withReasoning(new Reasoning.Effort(Level.HIGH, Display.SUMMARY))
               .withMaxOutputTokens(16_000)
               .withWebSearch(true)
               .build();
