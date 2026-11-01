@@ -55,7 +55,7 @@ public final class SessionDemoMain {
     var model =
         new GeminiProvider()
             .create(
-                GeminiModelId.GEMINI_3_5_FLASH.id(),
+                GeminiModelId.GEMINI_3_8_FLASH.id(),
                 ModelConfig.newBuilder().withApiKey(apiKey).build());
 
     try {

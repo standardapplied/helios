@@ -68,14 +68,14 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>{@code anthropic/sessions/progress-loop} is a live claude-opus-5-5 matchmaking session under
  * {@code Display.PROGRESS}, recorded 2026-10-09.
  *
- * <p>{@code gemini/sessions/grounded} is a live gemini-3.5-flash Google Search session, recorded
- * 2026-10-09.
+ * <p>{@code gemini/sessions/grounded} is a live gemini-3.8-flash Google Search session, recorded
+ * 2026-11-01.
  *
  * <p>{@code anthropic/sessions/file-tools} is a live claude-sonnet-4-6 file-tool session, recorded
  * 2026-10-09.
  *
- * <p>{@code gemini/sessions/file-tools} is a live gemini-3.5-flash file-tool session, recorded
- * 2026-10-09.
+ * <p>{@code gemini/sessions/file-tools} is a live gemini-3.8-flash file-tool session, recorded
+ * 2026-11-01.
  *
  * <p>{@code anthropic/sessions/compaction} is a live claude-opus-5-5 {@link CompactingSession}
  * under {@code Display.SUMMARY}, recorded 2026-10-23.
@@ -281,7 +281,7 @@ final class RecordedSessionTest {
   private static Model gemini(URI uri) {
     return new GeminiProvider()
         .create(
-            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            GeminiModelId.GEMINI_3_8_FLASH.id(),
             ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(uri + "/v1beta").build());
   }
 

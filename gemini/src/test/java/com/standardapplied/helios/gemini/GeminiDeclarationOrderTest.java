@@ -35,7 +35,7 @@ class GeminiDeclarationOrderTest {
         uri ->
             new GeminiProvider()
                 .create(
-                    GeminiModelId.GEMINI_3_5_FLASH.id(),
+                    GeminiModelId.GEMINI_3_8_FLASH.id(),
                     ModelConfig.newBuilder()
                         .withApiKey("test-key")
                         .withBaseUrl(uri + "/v1beta")

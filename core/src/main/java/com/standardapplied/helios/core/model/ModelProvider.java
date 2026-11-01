@@ -20,11 +20,11 @@ import java.util.ServiceLoader;
  *
  * <pre>{@code
  * // Auto-discover provider and create model
- * Model model = ModelProvider.resolve("gemini-3-flash", config);
+ * Model model = ModelProvider.resolve("gemini-3.8-flash", config);
  *
  * // Explicit provider lookup
  * ModelProvider gemini = ModelProvider.provider("gemini").orElseThrow();
- * Model model = gemini.create("gemini-3-flash", config);
+ * Model model = gemini.create("gemini-3.8-flash", config);
  *
  * // List all available providers
  * List<ModelProvider> all = ModelProvider.providers();
@@ -42,7 +42,7 @@ public interface ModelProvider {
   /**
    * Create a model instance with the given model ID and configuration.
    *
-   * @param modelId the specific model to use (e.g., "gemini-3-flash", "claude-3-opus")
+   * @param modelId the specific model to use (e.g., "gemini-3.8-flash", "claude-3-opus")
    * @param config provider configuration (API key, timeouts, etc.)
    * @return a configured Model instance
    * @throws IllegalArgumentException if the model ID is not supported by this provider
@@ -84,7 +84,7 @@ public interface ModelProvider {
   /**
    * Auto-discover which provider supports the given model ID and create the model.
    *
-   * @param modelId the model identifier (e.g., "gemini-3-flash", "claude-3-opus")
+   * @param modelId the model identifier (e.g., "gemini-3.8-flash", "claude-3-opus")
    * @param config provider configuration
    * @return the created model
    * @throws IllegalArgumentException if no provider supports the model ID

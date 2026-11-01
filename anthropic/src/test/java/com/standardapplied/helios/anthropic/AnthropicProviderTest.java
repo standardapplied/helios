@@ -63,7 +63,7 @@ class AnthropicProviderTest {
   @Test
   void doesNotSupportOtherProviderModels() {
     assertFalse(provider.supports("gpt-4"));
-    assertFalse(provider.supports("gemini-3-flash-preview"));
+    assertFalse(provider.supports("gemini-3.8-flash"));
     assertFalse(provider.supports("llama-3"));
   }
 

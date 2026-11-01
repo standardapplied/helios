@@ -20,7 +20,7 @@ import java.util.List;
  * <p>{@code tool_choice} lives inside {@link InteractionGenerationConfig}, not at the top level —
  * setting it at the root is silently ignored by the server.
  *
- * @param model the model identifier (e.g. {@code gemini-3-flash-preview})
+ * @param model the model identifier (e.g. {@code gemini-3.8-flash})
  * @param input the step timeline being sent to the model
  * @param previousInteractionId interaction ID to continue from (enables stateful continuation)
  * @param systemInstruction system-level guidance for the model

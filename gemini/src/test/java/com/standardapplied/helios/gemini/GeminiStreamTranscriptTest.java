@@ -16,8 +16,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * Characterization: for each recorded stream under {@code golden/gemini/streams}, the exact events
  * {@code chatStream} yields and the response {@code chat} assembles.
  *
- * <p>{@code grounded} is a live gemini-3.5-flash Google Search turn with its url citations,
- * recorded 2026-10-09; {@code requires-action} (a function-call turn under tool choice {@code any})
+ * <p>{@code grounded} is a live gemini-3.8-flash Google Search turn with its url citations,
+ * recorded 2026-11-01; {@code requires-action} (a function-call turn under tool choice {@code any})
  * and {@code incomplete} (a five-token output ceiling) are live gemini-3.8-flash turns recorded
  * 2026-10-13, and {@code eof-in-thinking} is the live thought-summary turn of that day cut after
  * its thought. The other streams are hand-built from the documented event shapes (Interactions API
@@ -70,7 +70,7 @@ class GeminiStreamTranscriptTest {
   private static Model modelAt(URI uri) {
     return new GeminiProvider()
         .create(
-            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            GeminiModelId.GEMINI_3_8_FLASH.id(),
             ModelConfig.newBuilder().withApiKey("test-key").withBaseUrl(uri + "/v1beta").build());
   }
 }
