@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.repl.protocol.CapturedOutput;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcError;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
@@ -147,7 +148,7 @@ class ExecutionResultMappingTest {
   }
 
   private static boolean timedOutOf(Map<String, Object> reply) {
-    return ExecutionReplies.toExecutionResult(reply, "").timedOut();
+    return ExecutionReplies.toExecutionResult(reply, new CapturedOutput.Cut("", 0)).timedOut();
   }
 
   private static ExecutionResult execute(Object reply, String... plainOutput) throws Exception {

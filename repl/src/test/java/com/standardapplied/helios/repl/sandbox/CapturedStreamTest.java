@@ -5,6 +5,7 @@ import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_CAPT
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.repl.protocol.CapturedOutput;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
 import java.io.IOException;
@@ -32,7 +33,7 @@ class CapturedStreamTest {
   }
 
   private static String captured(String printed) {
-    return CapturedStream.text(printing(printed));
+    return CapturedStream.cut(printing(printed)).text();
   }
 
   private static int serializedChars(Map<String, Object> reply) throws IOException {
@@ -106,7 +107,7 @@ class CapturedStreamTest {
     assertEquals(
         "\uFFFD".repeat(MAX_CAPTURED_OUTPUT_CHARS)
             + "\n[output truncated: 2000000 more chars discarded]",
-        CapturedStream.text(stream));
+        CapturedStream.cut(stream).text());
   }
 
   @Test
@@ -178,7 +179,7 @@ class CapturedStreamTest {
 
     assertEquals(
         ALMOST_AT_CAP + "a\n[output truncated: 1 more chars discarded]",
-        CapturedStream.text(almostFull, next));
+        CapturedStream.cut(almostFull, next).text());
   }
 
   @Test
@@ -188,11 +189,28 @@ class CapturedStreamTest {
 
     assertEquals(
         ALMOST_AT_CAP + "x\n[output truncated: 22 more chars discarded]",
-        CapturedStream.text(full, next));
+        CapturedStream.cut(full, next).text());
+  }
+
+  @Test
+  void aCaptureCutForItsEscapedWidthKeepsTheNextOutOfTheKeptText() {
+    var cut = printing(ESCAPE.repeat(ESCAPES_THAT_FIT + 1));
+    var next = printing("Execution timed out\n");
+
+    assertEquals(
+        ESCAPE.repeat(ESCAPES_THAT_FIT) + "\n[output truncated: 21 more chars discarded]",
+        CapturedStream.cut(cut, next).text());
+  }
+
+  @Test
+  void aCutHoldsTheKeptTextAndTheCountApart() {
+    var printed = "x".repeat(MAX_CAPTURED_OUTPUT_CHARS);
+
+    assertEquals(new CapturedOutput.Cut(printed, 3), CapturedStream.cut(printing(printed + "abc")));
   }
 
   @Test
   void capturesThatFitAreReadOneAfterTheOther() {
-    assertEquals("ab", CapturedStream.text(printing("a"), printing("b")));
+    assertEquals("ab", CapturedStream.cut(printing("a"), printing("b")).text());
   }
 }

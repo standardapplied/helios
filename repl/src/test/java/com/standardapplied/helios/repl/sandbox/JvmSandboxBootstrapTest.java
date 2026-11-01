@@ -728,6 +728,20 @@ class JvmSandboxBootstrapTest {
   }
 
   @Test
+  void aReplyHoldsTheKeptStdoutAndTheCountDroppedApart() {
+    var result =
+        evaluator.handleExecute(
+            Map.of(
+                "code",
+                "System.out.print(\"x\".repeat(%d));".formatted(MAX_CAPTURED_OUTPUT_CHARS + 2),
+                "timeoutMs",
+                BEYOND_HANG_GUARD_MS));
+
+    assertEquals("x".repeat(MAX_CAPTURED_OUTPUT_CHARS), result.get("stdout"));
+    assertEquals(2L, result.get("stdoutDiscarded"));
+  }
+
+  @Test
   void aTimeoutAfterStderrFilledLeavesTheMarkerLast() {
     timeoutsFiredByTheTest();
     var fillStderr = "System.err.print(\"x\".repeat(%d));\n".formatted(MAX_CAPTURED_OUTPUT_CHARS);

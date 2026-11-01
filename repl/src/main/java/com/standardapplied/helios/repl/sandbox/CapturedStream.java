@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets;
  */
 final class CapturedStream extends OutputStream {
 
-  /** One capture's share of a reply frame, which also holds its fields and two markers. */
+  /** One capture's share of a reply frame, which also holds its fields and a marker. */
   static final int MAX_ESCAPED_CHARS = (MAX_FRAME_CHARS - 4_096) / 3;
 
   private static final int MAX_UTF8_BYTES_PER_CHAR = 3;
@@ -51,16 +51,13 @@ final class CapturedStream extends OutputStream {
     };
   }
 
-  /**
-   * The text {@code captures} kept, in order, cut as one output, followed by the truncation marker
-   * if anything was dropped.
-   */
-  static String text(CapturedStream... captures) {
+  /** What {@code captures} kept and dropped, in order, cut as one output. */
+  static CapturedOutput.Cut cut(CapturedStream... captures) {
     var output = new CapturedOutput();
     for (var capture : captures) {
       capture.appendTo(output);
     }
-    return output.drain();
+    return output.take();
   }
 
   private synchronized void appendTo(CapturedOutput output) {

@@ -2,6 +2,7 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import com.standardapplied.helios.repl.protocol.CapturedOutput;
+import com.standardapplied.helios.repl.protocol.CapturedOutput.Cut;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -21,11 +22,11 @@ final class StdoutCapture {
 
   private static final int CHUNK_CHARS = 8192;
 
-  private final Supplier<String> drain;
+  private final Supplier<Cut> take;
   private final Thread reader;
 
-  private StdoutCapture(Supplier<String> drain, Thread reader) {
-    this.drain = drain;
+  private StdoutCapture(Supplier<Cut> take, Thread reader) {
+    this.take = take;
     this.reader = reader;
   }
 
@@ -36,17 +37,22 @@ final class StdoutCapture {
         Thread.ofVirtual()
             .name("helios-sandbox-stdout-reader")
             .start(() -> readChunks(process, buffer));
-    return new StdoutCapture(() -> withoutFinalNewline(buffer.drain()), reader);
+    return new StdoutCapture(() -> withoutFinalNewline(buffer.take()), reader);
   }
 
   /** The output {@code transport} set aside, for a sandbox with no reader of its own. */
   static StdoutCapture of(ProcessTransport transport) {
-    return new StdoutCapture(transport::drainStdout, null);
+    return new StdoutCapture(transport::takeStdout, null);
   }
 
   /** The output captured since the last drain; the buffer is cleared for the next execute. */
   String drain() {
-    return drain.get();
+    return take().text();
+  }
+
+  /** As {@link #drain()}, for a caller that adds output of its own to what was captured. */
+  Cut take() {
+    return take.get();
   }
 
   /** Stop the reader of a launch that failed. */
@@ -83,7 +89,10 @@ final class StdoutCapture {
     }
   }
 
-  private static String withoutFinalNewline(String captured) {
-    return captured.endsWith("\n") ? captured.substring(0, captured.length() - 1) : captured;
+  private static Cut withoutFinalNewline(Cut cut) {
+    var kept = cut.kept();
+    return kept.endsWith("\n")
+        ? new Cut(kept.substring(0, kept.length() - 1), cut.discarded())
+        : cut;
   }
 }

@@ -157,13 +157,89 @@ class SandboxOutputCapTest {
   @Test
   void aReplyTheBootstrapBuiltNeverReachesTheFrameLimit() throws IOException {
     try (var fake = new FakeSandboxProcess()) {
-      var stdout = "x".repeat(MAX_CAPTURED_OUTPUT_CHARS) + MARKER;
-      fake.answerNext(Map.of("stdout", stdout, "stderr", stdout, "exitCode", 0));
+      fake.answerNext(
+          Map.of(
+              "stdout",
+              "x".repeat(MAX_CAPTURED_OUTPUT_CHARS),
+              "stdoutDiscarded",
+              2_000_000,
+              "stderr",
+              CUT_AT_THE_CAP,
+              "exitCode",
+              0));
 
       var result = fake.sandbox().execute(ExecutionRequest.java("1 + 1"));
 
-      assertEquals(stdout, result.stdout());
+      assertEquals(CUT_AT_THE_CAP, result.stdout());
+      assertEquals(CUT_AT_THE_CAP, result.stderr());
       assertTrue(fake.sandbox().isAlive());
+    }
+  }
+
+  @Test
+  void stdoutFromBothPathsIsCutAsOneOutputThoughEachFitsItsOwnCap() throws IOException {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(
+          Map.of("stdout", "b".repeat(750_000), "stderr", "", "exitCode", 0), "a".repeat(750_000));
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("1 + 1"));
+
+      assertEquals(
+          "a".repeat(750_000)
+              + "\n"
+              + "b".repeat(249_999)
+              + "\n[output truncated: 500001 more chars discarded]",
+          result.stdout());
+    }
+  }
+
+  @Test
+  void stdoutFromBothPathsPastTheirCapsEndsInOneMarkerCountingBoth() throws IOException {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext(
+          Map.of(
+              "stdout",
+              "b".repeat(MAX_CAPTURED_OUTPUT_CHARS),
+              "stdoutDiscarded",
+              2_000_000,
+              "stderr",
+              "",
+              "exitCode",
+              0),
+          "a".repeat(3_000_000));
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("1 + 1"));
+
+      assertEquals(
+          "a".repeat(MAX_CAPTURED_OUTPUT_CHARS)
+              + "\n[output truncated: 5000001 more chars discarded]",
+          result.stdout());
+    }
+  }
+
+  @Test
+  void aBareValueReplyKeepsTheMarkerOfCapturedStdout() throws IOException {
+    try (var fake = new FakeSandboxProcess()) {
+      fake.answerNext("a value", "x".repeat(MAX_CAPTURED_OUTPUT_CHARS + 2));
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("1 + 1"));
+
+      assertEquals(
+          "x".repeat(MAX_CAPTURED_OUTPUT_CHARS) + "\n[output truncated: 2 more chars discarded]",
+          result.stdout());
+    }
+  }
+
+  @Test
+  void stdoutFromBothPathsThatFitsTogetherIsNotCut() throws IOException {
+    try (var fake = new FakeSandboxProcess()) {
+      var half = "x".repeat(MAX_CAPTURED_OUTPUT_CHARS / 2);
+      var rest = half.substring(1);
+      fake.answerNext(Map.of("stdout", rest, "stderr", "", "exitCode", 0), half);
+
+      var result = fake.sandbox().execute(ExecutionRequest.java("1 + 1"));
+
+      assertEquals(half + "\n" + rest, result.stdout());
     }
   }
 }

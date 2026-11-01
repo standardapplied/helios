@@ -11,14 +11,35 @@ import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_CAPT
  */
 public final class CapturedOutput {
 
+  /** Text a buffer kept and the count of characters it dropped, not yet joined by the marker. */
+  public record Cut(String kept, long discarded) {
+
+    /** The kept text, followed by {@code \n[output truncated: <n> more chars discarded]} if due. */
+    public String text() {
+      return discarded == 0
+          ? kept
+          : kept + "\n[output truncated: " + discarded + " more chars discarded]";
+    }
+  }
+
   private final StringBuilder kept = new StringBuilder();
   private long discarded;
 
-  /** Keeps as much of {@code text} as the cap allows and counts the rest. */
+  /**
+   * Keeps as much of {@code text} as the cap allows and counts the rest. Nothing is kept once
+   * anything was dropped, so the kept text stays an unbroken prefix of the output.
+   */
   public synchronized void append(String text) {
-    var room = Math.min(text.length(), MAX_CAPTURED_OUTPUT_CHARS - kept.length());
+    var room =
+        discarded > 0 ? 0 : Math.min(text.length(), MAX_CAPTURED_OUTPUT_CHARS - kept.length());
     kept.append(text, 0, room);
     discarded += text.length() - room;
+  }
+
+  /** Appends what another buffer kept and counts what it dropped. */
+  public synchronized void append(Cut cut) {
+    append(cut.kept());
+    discard(cut.discarded());
   }
 
   /** Appends {@code line}, separated by {@code \n} from anything already kept. */
@@ -35,24 +56,27 @@ public final class CapturedOutput {
   }
 
   /**
-   * Returns the text kept since the last drain, followed by {@code \n[output truncated: <n> more
-   * chars discarded]} if anything was dropped, and starts over. A surrogate pair the cap would
-   * split is dropped whole.
-   *
-   * @return the captured text, or an empty string if there is none
+   * Returns what was kept and dropped since the last read and starts over. A surrogate pair the cap
+   * would split is dropped whole.
    */
-  public synchronized String drain() {
+  public synchronized Cut take() {
     if (kept.length() == MAX_CAPTURED_OUTPUT_CHARS
         && Character.isHighSurrogate(kept.charAt(MAX_CAPTURED_OUTPUT_CHARS - 1))) {
       kept.setLength(MAX_CAPTURED_OUTPUT_CHARS - 1);
       discarded++;
     }
-    var captured =
-        discarded == 0
-            ? kept.toString()
-            : kept + "\n[output truncated: " + discarded + " more chars discarded]";
+    var cut = new Cut(kept.toString(), discarded);
     kept.setLength(0);
     discarded = 0;
-    return captured;
+    return cut;
+  }
+
+  /**
+   * Returns {@link #take()} as {@link Cut#text() text}.
+   *
+   * @return the captured text, or an empty string if there is none
+   */
+  public synchronized String drain() {
+    return take().text();
   }
 }

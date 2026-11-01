@@ -206,7 +206,7 @@ public final class JvmSandbox implements Sandbox {
     var wait = config.executeReplyWait(budget);
     try {
       var reply = rpc.channel().call("execute", params, wait);
-      return ExecutionReplies.toExecutionResult(reply, stdout.drain());
+      return ExecutionReplies.toExecutionResult(reply, stdout.take());
     } catch (RpcChannel.RpcTimeoutException e) {
       close();
       return ExecutionReplies.unanswered(stdout.drain(), wait);

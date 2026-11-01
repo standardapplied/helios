@@ -552,6 +552,19 @@ class ProcessTransportTest {
   }
 
   @Test
+  void takeStdoutHoldsTheKeptLinesAndTheCountApart() throws Exception {
+    var line = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS + 2);
+    var transport = transportOver(line + "\n" + RESPONSE_FRAME + "\n");
+
+    assertInstanceOf(RpcMessage.Response.class, transport.receive());
+
+    var cut = transport.takeStdout();
+    assertEquals(line.substring(2), cut.kept());
+    assertEquals(2, cut.discarded());
+    assertEquals("", transport.drainStdout());
+  }
+
+  @Test
   void drainStdoutKeepsTheFirstCharsOfNonRpcLinesAndCountsTheRest() throws Exception {
     var joined = "x".repeat(99) + ("\n" + "x".repeat(99)).repeat(29_999) + "x";
     assertEquals(3_000_000, joined.length());
