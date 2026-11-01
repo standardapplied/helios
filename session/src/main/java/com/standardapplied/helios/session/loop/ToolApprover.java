@@ -31,10 +31,11 @@ public interface ToolApprover {
    * {@code Allow <tool>(<key>)?}, a blank line and {@code Arguments: <arguments>} (see {@link
    * ApprovalRequest#arguments}), and options {@code Allow}, described by the request's reason, and
    * {@code Deny}; the key and the reason show escaped as JSON string text ({@link
-   * com.standardapplied.helios.core.common.JsonSnapshot#escape}), cut after 1024 characters. It
-   * asks under a fresh {@code perm-} question id per request. A response to that question selecting
-   * only {@code Allow} (case-insensitive) allows the call; any other answer, a response to another
-   * question or one selecting more than one option denies it.
+   * com.standardapplied.helios.core.common.JsonSnapshot#escape}), cut to 1024 characters around a
+   * note, keeping their start and end. It asks under a fresh {@code perm-} question id per request.
+   * A response to that question selecting only {@code Allow} (case-insensitive) allows the call;
+   * any other answer, a response to another question or one selecting more than one option denies
+   * it.
    *
    * @param gateway the channel to the user; non-null
    * @return the approver
