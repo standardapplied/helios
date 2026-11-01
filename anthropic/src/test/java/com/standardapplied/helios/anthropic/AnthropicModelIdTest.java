@@ -79,7 +79,7 @@ class AnthropicModelIdTest {
   @Test
   void hasClaudePrefixRejectsNonClaudeAndBlank() {
     assertFalse(AnthropicModelId.hasClaudePrefix("gpt-5"));
-    assertFalse(AnthropicModelId.hasClaudePrefix("gemini-3-flash-preview"));
+    assertFalse(AnthropicModelId.hasClaudePrefix("gemini-3.8-flash"));
     assertFalse(AnthropicModelId.hasClaudePrefix("Claude-opus-4-8"));
     assertFalse(AnthropicModelId.hasClaudePrefix(null));
     assertFalse(AnthropicModelId.hasClaudePrefix(""));
@@ -219,6 +219,6 @@ class AnthropicModelIdTest {
   @Test
   void isSupportedReturnsFalseForOtherProviderModels() {
     assertFalse(AnthropicModelId.isSupported("gpt-4"));
-    assertFalse(AnthropicModelId.isSupported("gemini-3-flash-preview"));
+    assertFalse(AnthropicModelId.isSupported("gemini-3.8-flash"));
   }
 }

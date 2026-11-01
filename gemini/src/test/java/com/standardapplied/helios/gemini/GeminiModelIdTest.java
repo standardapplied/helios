@@ -10,50 +10,44 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.EnumSet;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class GeminiModelIdTest {
 
   @Test
+  void theCatalogueIsExactlyTheFourSupportedModels() {
+    assertEquals(
+        EnumSet.of(
+            GeminiModelId.GEMINI_3_6_FLASH,
+            GeminiModelId.GEMINI_3_7_FLASH,
+            GeminiModelId.GEMINI_3_8_FLASH,
+            GeminiModelId.GEMINI_4_ARGON),
+        EnumSet.allOf(GeminiModelId.class));
+  }
+
+  @Test
   void enumHasCorrectId() {
-    assertEquals("gemini-3-flash-preview", GeminiModelId.GEMINI_3_FLASH_PREVIEW.id());
-    assertEquals("gemini-3.1-pro-preview", GeminiModelId.GEMINI_3_1_PRO_PREVIEW.id());
-    assertEquals("gemini-3.1-flash-lite", GeminiModelId.GEMINI_3_1_FLASH_LITE.id());
-    assertEquals("gemini-3.5-flash", GeminiModelId.GEMINI_3_5_FLASH.id());
-    assertEquals("gemini-3.5-flash-lite", GeminiModelId.GEMINI_3_5_FLASH_LITE.id());
     assertEquals("gemini-3.6-flash", GeminiModelId.GEMINI_3_6_FLASH.id());
     assertEquals("gemini-3.7-flash", GeminiModelId.GEMINI_3_7_FLASH.id());
+    assertEquals("gemini-3.8-flash", GeminiModelId.GEMINI_3_8_FLASH.id());
+    assertEquals("gemini-4-argon", GeminiModelId.GEMINI_4_ARGON.id());
   }
 
-  @Test
-  void contextWindowValues() {
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_FLASH_PREVIEW.contextWindow());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_1_PRO_PREVIEW.contextWindow());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_1_FLASH_LITE.contextWindow());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_5_FLASH.contextWindow());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_1_FLASH_LITE.maxOutputTokens());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_5_FLASH.maxOutputTokens());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_5_FLASH_LITE.contextWindow());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_5_FLASH_LITE.maxOutputTokens());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_6_FLASH.contextWindow());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_6_FLASH.maxOutputTokens());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_7_FLASH.contextWindow());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_7_FLASH.maxOutputTokens());
+  @ParameterizedTest
+  @EnumSource(GeminiModelId.class)
+  void everyModelHasTheDocumentedWindowAndOutputCeiling(GeminiModelId model) {
+    assertEquals(1_048_576, model.contextWindow());
+    assertEquals(65_536, model.maxOutputTokens());
   }
 
-  @Test
-  void fromIdReturnsMatchingEnum() {
-    assertEquals(
-        GeminiModelId.GEMINI_3_FLASH_PREVIEW, GeminiModelId.fromId("gemini-3-flash-preview"));
-    assertEquals(
-        GeminiModelId.GEMINI_3_1_PRO_PREVIEW, GeminiModelId.fromId("gemini-3.1-pro-preview"));
-    assertEquals(
-        GeminiModelId.GEMINI_3_1_FLASH_LITE, GeminiModelId.fromId("gemini-3.1-flash-lite"));
-    assertEquals(GeminiModelId.GEMINI_3_5_FLASH, GeminiModelId.fromId("gemini-3.5-flash"));
-    assertEquals(
-        GeminiModelId.GEMINI_3_5_FLASH_LITE, GeminiModelId.fromId("gemini-3.5-flash-lite"));
-    assertEquals(GeminiModelId.GEMINI_3_6_FLASH, GeminiModelId.fromId("gemini-3.6-flash"));
-    assertEquals(GeminiModelId.GEMINI_3_7_FLASH, GeminiModelId.fromId("gemini-3.7-flash"));
+  @ParameterizedTest
+  @EnumSource(GeminiModelId.class)
+  void fromIdAndIsSupportedResolveEveryModel(GeminiModelId model) {
+    assertEquals(model, GeminiModelId.fromId(model.id()));
+    assertTrue(GeminiModelId.isSupported(model.id()));
   }
 
   @Test
@@ -70,34 +64,6 @@ class GeminiModelIdTest {
   void fromIdReturnsNullForBlank() {
     assertNull(GeminiModelId.fromId(""));
     assertNull(GeminiModelId.fromId("   "));
-  }
-
-  @Test
-  void isSupportedReturnsTrueForKnownModels() {
-    assertTrue(GeminiModelId.isSupported("gemini-3-flash-preview"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.1-pro-preview"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.1-flash-lite"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.5-flash"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.5-flash-lite"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.6-flash"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.7-flash"));
-  }
-
-  @Test
-  void gemini38FlashIsCatalogued() {
-    assertEquals("gemini-3.8-flash", GeminiModelId.GEMINI_3_8_FLASH.id());
-    assertEquals(1_048_576, GeminiModelId.GEMINI_3_8_FLASH.contextWindow());
-    assertEquals(65_536, GeminiModelId.GEMINI_3_8_FLASH.maxOutputTokens());
-    assertEquals(GeminiModelId.GEMINI_3_8_FLASH, GeminiModelId.fromId("gemini-3.8-flash"));
-    assertTrue(GeminiModelId.isSupported("gemini-3.8-flash"));
-  }
-
-  @Test
-  void flashLitePreviewIdIsRetiredAndNotSupported() {
-    // Per Google's May 2026 GA announcement, gemini-3.1-flash-lite-preview shuts down
-    // 2026-05-25. Helios exposes the GA id only — the preview alias must NOT resolve.
-    assertNull(GeminiModelId.fromId("gemini-3.1-flash-lite-preview"));
-    assertFalse(GeminiModelId.isSupported("gemini-3.1-flash-lite-preview"));
   }
 
   @Test

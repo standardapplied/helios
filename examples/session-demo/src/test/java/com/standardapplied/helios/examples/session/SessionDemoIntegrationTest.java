@@ -75,7 +75,7 @@ final class SessionDemoIntegrationTest {
   private static Model gemini(ModelConfig.Builder config) {
     return new GeminiProvider()
         .create(
-            GeminiModelId.GEMINI_3_5_FLASH.id(),
+            GeminiModelId.GEMINI_3_8_FLASH.id(),
             config.withApiKey(System.getenv("GEMINI_API_KEY")).build());
   }
 

@@ -171,7 +171,7 @@ class TraceTest {
             .withOutputText("Hi there")
             .withUserId("user-1")
             .withSessionId(sessionId)
-            .withModelId("gemini-2.0-flash")
+            .withModelId("gemini-3.8-flash")
             .withPromptName("agent-prompt")
             .withPromptVersion(3)
             .withTotalTokens(150)
@@ -187,7 +187,7 @@ class TraceTest {
     assertEquals("Hi there", copy.outputText());
     assertEquals("user-1", copy.userId());
     assertEquals(sessionId, copy.sessionId());
-    assertEquals("gemini-2.0-flash", copy.modelId());
+    assertEquals("gemini-3.8-flash", copy.modelId());
     assertEquals("agent-prompt", copy.promptName());
     assertEquals(3, copy.promptVersion());
     assertEquals(150, copy.totalTokens());

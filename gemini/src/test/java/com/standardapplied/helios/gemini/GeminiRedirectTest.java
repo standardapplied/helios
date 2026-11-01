@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class GeminiRedirectTest {
 
   private static Model trapped(ModelConfig config) {
-    return new GeminiProvider().create(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), config);
+    return new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
   }
 
   @ParameterizedTest

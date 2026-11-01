@@ -85,42 +85,42 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void constructorRequiresConfig() {
     assertThrows(
-        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, null));
+        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_8_FLASH, null));
   }
 
   @Test
   void constructorRequiresApiKey() {
     var config = ModelConfig.newBuilder().build();
     assertThrows(
-        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config));
+        IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_8_FLASH, config));
   }
 
   @Test
   void idReturnsModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), model.id());
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
+    assertEquals(GeminiModelId.GEMINI_3_8_FLASH.id(), model.id());
   }
 
   @Test
   void providerReturnsGemini() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
     assertEquals("gemini", model.provider());
   }
 
   @Test
   void contextWindowReturnsModelValueByDefault() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
-    assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.contextWindow(), model.contextWindow());
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
+    assertEquals(GeminiModelId.GEMINI_3_8_FLASH.contextWindow(), model.contextWindow());
   }
 
   @Test
   void contextWindowConfigOverrideWins() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(2_000_000).build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
     assertEquals(2_000_000, model.contextWindow());
   }
 
@@ -164,7 +164,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
       var error =
           assertThrows(
               IllegalArgumentException.class,
-              () -> create(GeminiModelId.GEMINI_3_7_FLASH, config),
+              () -> create(GeminiModelId.GEMINI_3_8_FLASH, config),
               value);
       assertTrue(error.getMessage().contains("apiVersion"));
       assertFalse(error.getMessage().contains("secret"));
@@ -180,10 +180,10 @@ class GeminiModelTest extends BoundedErrorBodyContract {
     var temperatureError =
         assertThrows(
             IllegalArgumentException.class,
-            () -> create(GeminiModelId.GEMINI_3_7_FLASH, withTemperature));
+            () -> create(GeminiModelId.GEMINI_3_8_FLASH, withTemperature));
     var topPError =
         assertThrows(
-            IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_7_FLASH, withTopP));
+            IllegalArgumentException.class, () -> create(GeminiModelId.GEMINI_3_8_FLASH, withTopP));
 
     assertTrue(temperatureError.getMessage().contains("temperature"));
     assertTrue(topPError.getMessage().contains("topP"));
@@ -192,7 +192,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void urlContextWithFunctionToolsThrows() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withWebFetch(true).build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
 
     var tool =
         Tool.newBuilder()
@@ -215,7 +215,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
 
   private static Model createModel() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    return create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    return create(GeminiModelId.GEMINI_3_8_FLASH, config);
   }
 
   // --- convertMessages: every TOOL message becomes its own function_result step ---
@@ -747,7 +747,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   void statelessInteractionsResendLocalHistoryWithoutInteractionId() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withProviderContinuation(false).build();
-    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_7_FLASH, config);
+    var requests = new GeminiRequestBuilder(GeminiModelId.GEMINI_3_8_FLASH, config);
     var messages =
         List.of(
             Message.system("system"),
@@ -810,14 +810,14 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void closeReleasesHttpClientResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
     model.close();
   }
 
   @Test
   void closeIsIdempotent() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
     model.close();
     model.close();
     model.close();
@@ -826,8 +826,8 @@ class GeminiModelTest extends BoundedErrorBodyContract {
   @Test
   void modelUsableInTryWithResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    try (var model = create(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config)) {
-      assertEquals(GeminiModelId.GEMINI_3_FLASH_PREVIEW.id(), model.id());
+    try (var model = create(GeminiModelId.GEMINI_3_8_FLASH, config)) {
+      assertEquals(GeminiModelId.GEMINI_3_8_FLASH.id(), model.id());
     }
   }
 
@@ -982,7 +982,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
               .withApiVersion("v1")
               .withBaseUrl(baseUrl)
               .build();
-      var model = create(GeminiModelId.GEMINI_3_7_FLASH, config);
+      var model = create(GeminiModelId.GEMINI_3_8_FLASH, config);
       var video = FileReference.of("https://files.example/private", "video/mp4");
       var message =
           Message.newBuilder()
@@ -1057,7 +1057,7 @@ class GeminiModelTest extends BoundedErrorBodyContract {
 
   private static GeminiRequestBuilder defaultRequests() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    return new GeminiRequestBuilder(GeminiModelId.GEMINI_3_FLASH_PREVIEW, config);
+    return new GeminiRequestBuilder(GeminiModelId.GEMINI_3_8_FLASH, config);
   }
 
   private static GeminiStreams streams(ModelConfig config) {

@@ -9,7 +9,7 @@ import com.standardapplied.helios.gemini.GeminiProvider;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
- * {@link ReadToolMultimodalContract} on Gemini 3.5 Flash: the provider adapter must turn each
+ * {@link ReadToolMultimodalContract} on Gemini 3.8 Flash: the provider adapter must turn each
  * attachment into {@code inline_data}. Guarded by {@code GEMINI_API_KEY} so the suite stays
  * runnable offline.
  */
@@ -23,6 +23,6 @@ final class ReadToolMultimodalThroughLoopIntegrationTest extends ReadToolMultimo
             .withApiKey(System.getenv("GEMINI_API_KEY"))
             .withToolChoice(toolChoice)
             .build();
-    return new GeminiProvider().create(GeminiModelId.GEMINI_3_5_FLASH.id(), config);
+    return new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config);
   }
 }

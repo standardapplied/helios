@@ -32,7 +32,7 @@ import java.util.UUID;
  * @param userId who triggered this trace
  * @param sessionId the session this trace belongs to, such as an agent session's id; null when the
  *     trace belongs to none
- * @param modelId model identifier (e.g., "gemini-2.0-flash")
+ * @param modelId model identifier (e.g., "gemini-3.8-flash")
  * @param promptName prompt registry name
  * @param promptVersion prompt registry version
  * @param totalTokens aggregated token count from model calls

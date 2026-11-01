@@ -47,17 +47,13 @@ class GeminiReasoningTest {
   private static final Map<Display, String> SUMMARIES =
       Map.of(Display.HIDDEN, "none", Display.SUMMARY, "auto");
 
-  /** The thinking levels each model documents; no Gemini 3.x model can turn thinking off. */
+  /** The thinking levels each model documents; no catalogued model can turn thinking off. */
   private static final Map<GeminiModelId, Set<Level>> DOCUMENTED =
       Map.of(
-          GeminiModelId.GEMINI_3_FLASH_PREVIEW, MINIMAL_TO_HIGH,
-          GeminiModelId.GEMINI_3_1_PRO_PREVIEW, LOW_TO_HIGH,
-          GeminiModelId.GEMINI_3_1_FLASH_LITE, MINIMAL_TO_HIGH,
-          GeminiModelId.GEMINI_3_5_FLASH, MINIMAL_TO_HIGH,
-          GeminiModelId.GEMINI_3_5_FLASH_LITE, MINIMAL_TO_HIGH,
           GeminiModelId.GEMINI_3_6_FLASH, MINIMAL_TO_HIGH,
           GeminiModelId.GEMINI_3_7_FLASH, LOW_TO_HIGH,
-          GeminiModelId.GEMINI_3_8_FLASH, LOW_TO_HIGH);
+          GeminiModelId.GEMINI_3_8_FLASH, LOW_TO_HIGH,
+          GeminiModelId.GEMINI_4_ARGON, LOW_TO_HIGH);
 
   static Stream<Arguments> acceptedCells() {
     return ReasoningMatrix.cells(DOCUMENTED, GeminiReasoningTest::accepts, true);
@@ -115,14 +111,14 @@ class GeminiReasoningTest {
   }
 
   @Test
-  void offIsRejectedBecauseGemini3CannotStopThinking() {
+  void offIsRejectedBecauseGeminiCannotStopThinking() {
     var rejection =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new GeminiProvider().create("gemini-3.5-flash", config(new Reasoning.Off())));
+            () -> new GeminiProvider().create("gemini-3.8-flash", config(new Reasoning.Off())));
 
     assertTrue(
-        rejection.getMessage().startsWith("Model gemini-3.5-flash does not accept Reasoning.Off"));
+        rejection.getMessage().startsWith("Model gemini-3.8-flash does not accept Reasoning.Off"));
   }
 
   @SuppressWarnings("unchecked")

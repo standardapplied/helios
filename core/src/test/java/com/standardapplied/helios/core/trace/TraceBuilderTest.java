@@ -155,7 +155,7 @@ class TraceBuilderTest {
         .withOutputText("4")
         .withUserId("user-1")
         .withSessionId(sessionId)
-        .withModelId("gemini-2.0-flash")
+        .withModelId("gemini-3.8-flash")
         .withPromptName("math-agent")
         .withPromptVersion(2)
         .withGroupId("eval-batch-1")
@@ -167,7 +167,7 @@ class TraceBuilderTest {
     assertEquals("4", trace.outputText());
     assertEquals("user-1", trace.userId());
     assertEquals(sessionId, trace.sessionId());
-    assertEquals("gemini-2.0-flash", trace.modelId());
+    assertEquals("gemini-3.8-flash", trace.modelId());
     assertEquals("math-agent", trace.promptName());
     assertEquals(2, trace.promptVersion());
     assertEquals("eval-batch-1", trace.groupId());
