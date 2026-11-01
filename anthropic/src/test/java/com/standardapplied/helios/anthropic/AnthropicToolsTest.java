@@ -91,7 +91,7 @@ class AnthropicToolsTest {
   }
 
   @Test
-  void buildRequestToolChoiceNoneReturnsNull() {
+  void buildRequestToolChoiceNoneSendsNone() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
     var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
@@ -104,7 +104,18 @@ class AnthropicToolsTest {
             .build();
     var request = requests.build(List.of(Message.user("Hi")), List.of(tool), null).body();
 
-    assertNull(request.toolChoice());
+    assertEquals("none", request.toolChoice().type());
+  }
+
+  @Test
+  void buildRequestToolChoiceNoneSendsNoneWithoutTools() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+
+    var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
+
+    assertEquals("none", request.toolChoice().type());
   }
 
   @Test
@@ -175,7 +186,7 @@ class AnthropicToolsTest {
         requests(AnthropicModelId.CLAUDE_FABLE_5_1, none)
             .build(List.of(Message.user("Hi")), List.of(tool), null)
             .body();
-    assertNull(noneRequest.toolChoice());
+    assertEquals("none", noneRequest.toolChoice().type());
   }
 
   @Test

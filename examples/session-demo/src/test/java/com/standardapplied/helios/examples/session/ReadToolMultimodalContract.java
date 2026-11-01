@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -34,9 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
  * the {@code InlineFile} into its image / document block → the live server accepting the binary
  * payload.
  *
- * <p>The model is forced to call a tool on every turn, with Read the only one it is given beside
- * the built-in AskUserQuestion, so each session ends at its two-turn limit after the second
- * request, the one carrying the attachment. Which tool and path the model picks is its choice: a
+ * <p>The model is forced to call Read on every turn, so each session ends at its two-turn limit
+ * after the second request, the one carrying the attachment. The path it passes is its choice: a
  * run whose first turn attaches no file skips, since only a first-turn attachment reaches a
  * request, and {@code RecordedSessionTest} replays a recorded session that reads and attaches both
  * files. The fixtures are a 1x1 PNG and a one-page "Hello, world!" PDF from {@link
@@ -66,7 +66,7 @@ abstract class ReadToolMultimodalContract {
 
   private void readAndAttach(Path workspace, String file) {
     var read = ReadTool.binding(WorkspaceRoot.of(workspace));
-    try (var model = createModel(ToolChoice.any());
+    try (var model = createModel(ToolChoice.required(ReadTool.NAME));
         var session =
             AgentSession.open(
                 SessionPresets.readOnly(model, workspace)
@@ -85,12 +85,14 @@ abstract class ReadToolMultimodalContract {
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
       var results = events.eventsOf(QueryEvent.ToolResult.class);
       assertFalse(results.isEmpty());
+      var first = results.getFirst();
+      assertEquals(1, first.turnIndex());
+      assertEquals(ReadTool.NAME, first.call().name());
       assumeTrue(
           results.stream()
               .anyMatch(
                   result ->
                       result.turnIndex() == 1
-                          && result.call().name().equals(ReadTool.NAME)
                           && result.result().succeeded()
                           && result.result().hasAttachments()),
           () ->

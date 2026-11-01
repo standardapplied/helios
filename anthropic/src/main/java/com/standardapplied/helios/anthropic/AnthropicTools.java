@@ -51,13 +51,13 @@ record AnthropicTools(List<ToolDefinition> client, List<ToolDefinition> server) 
     return toolChoice instanceof ToolChoice.Any || toolChoice instanceof ToolChoice.Required;
   }
 
-  /** The wire tool choice for {@code toolChoice}, or {@code null} to send none. */
+  /** The wire tool choice for {@code toolChoice}, or {@code null} when none is set. */
   static ToolChoiceConfig choice(ToolChoice toolChoice) {
     return switch (toolChoice) {
       case null -> null;
       case ToolChoice.Auto auto -> ToolChoiceConfig.auto();
       case ToolChoice.Any any -> ToolChoiceConfig.any();
-      case ToolChoice.None none -> null;
+      case ToolChoice.None none -> ToolChoiceConfig.none();
       case ToolChoice.Required required -> {
         if (required.allowedTools().size() > 1) {
           throw new IllegalStateException(

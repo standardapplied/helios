@@ -265,11 +265,11 @@ class SerializationTest {
   }
 
   @Test
-  void toolChoiceValidatedSerializesAsAllowedToolsObjectInGivenOrder() throws Exception {
-    var validated = ToolChoiceConfig.validated(new LinkedHashSet<>(List.of("b", "a")));
+  void toolChoiceAnyWithNamesSerializesAsAllowedToolsObjectInGivenOrder() throws Exception {
+    var restricted = ToolChoiceConfig.any(new LinkedHashSet<>(List.of("b", "a")));
     assertEquals(
-        "{\"allowed_tools\":{\"mode\":\"validated\",\"tools\":[\"b\",\"a\"]}}",
-        objectMapper.writeValueAsString(validated));
+        "{\"allowed_tools\":{\"mode\":\"any\",\"tools\":[\"b\",\"a\"]}}",
+        objectMapper.writeValueAsString(restricted));
   }
 
   @Test
@@ -278,9 +278,9 @@ class SerializationTest {
     assertNull(ToolChoiceConfig.auto().allowedTools());
     assertEquals("any", ToolChoiceConfig.any().mode());
     assertEquals("none", ToolChoiceConfig.none().mode());
-    var validated = ToolChoiceConfig.validated(new LinkedHashSet<>(List.of("a")));
-    assertEquals("validated", validated.mode());
-    assertEquals(Set.of("a"), validated.allowedTools());
+    var restricted = ToolChoiceConfig.any(new LinkedHashSet<>(List.of("a")));
+    assertEquals("any", restricted.mode());
+    assertEquals(Set.of("a"), restricted.allowedTools());
   }
 
   // --- Response-format selector ---
