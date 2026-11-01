@@ -91,7 +91,7 @@ final class StdoutCapture {
 
   private static Cut withoutFinalNewline(Cut cut) {
     var kept = cut.kept();
-    return kept.endsWith("\n")
+    return cut.discarded() == 0 && kept.endsWith("\n")
         ? new Cut(kept.substring(0, kept.length() - 1), cut.discarded())
         : cut;
   }
