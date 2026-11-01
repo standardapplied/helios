@@ -5,9 +5,10 @@
 package com.standardapplied.helios.session.execution;
 
 import com.standardapplied.helios.core.process.BoundedProcess;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,7 +26,9 @@ final class InflightProcesses implements AutoCloseable {
 
   private static final java.lang.Runtime JVM = java.lang.Runtime.getRuntime();
 
-  private final Set<BoundedProcess> inflight = ConcurrentHashMap.newKeySet();
+  // Not a ConcurrentHashMap key set: its size() lags a removal by another thread, and a call's
+  // untrack races the reap, so size() could still count a process close() had already reaped.
+  private final Set<BoundedProcess> inflight = Collections.synchronizedSet(new HashSet<>());
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread shutdownHook = new Thread(this::reap, "helios-exec-shutdown");
   private final boolean shutdownHookRegistered;
