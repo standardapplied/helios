@@ -662,6 +662,33 @@ class ProcessTransportTest {
     assertTrue(closed.get());
   }
 
+  @Test
+  void aReaderThatFailsToCloseStillReleasesTheWriter() {
+    var closed = new AtomicBoolean();
+    var transport =
+        new ProcessTransport(
+            new ByteArrayInputStream(new byte[0]) {
+              @Override
+              public void close() throws IOException {
+                throw new IOException("synthetic close failure");
+              }
+            },
+            new OutputStream() {
+              @Override
+              public void write(int b) {}
+
+              @Override
+              public void close() {
+                closed.set(true);
+              }
+            });
+
+    var thrown = assertThrows(IOException.class, transport::close);
+
+    assertEquals("synthetic close failure", thrown.getMessage());
+    assertTrue(closed.get());
+  }
+
   private static ProcessTransport transportOver(String fed) {
     return new ProcessTransport(
         new ByteArrayInputStream(fed.getBytes(StandardCharsets.UTF_8)),

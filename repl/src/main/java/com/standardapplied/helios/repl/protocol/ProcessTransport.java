@@ -123,12 +123,18 @@ public final class ProcessTransport implements RpcTransport {
     return open.get();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The input closes first: on a socket that releases a {@link #send} blocked on a peer that
+   * stopped reading, whose lock {@code writer.close()} would otherwise wait for without end.
+   */
   @Override
   public void close() throws IOException {
     open.set(false);
     if (released.compareAndSet(false, true)) {
-      try (reader) {
-        writer.close();
+      try (writer) {
+        reader.close();
       }
     }
   }
