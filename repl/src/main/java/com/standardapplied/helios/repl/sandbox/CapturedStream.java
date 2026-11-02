@@ -7,6 +7,7 @@ import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_FRAM
 import com.standardapplied.helios.repl.protocol.CapturedOutput;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -41,6 +42,12 @@ final class CapturedStream extends OutputStream {
         && kept.size() < MAX_CAPTURED_OUTPUT_CHARS * MAX_UTF8_BYTES_PER_CHAR) {
       kept.write(value);
     }
+  }
+
+  /** One lock across the buffer, so a thread still printing is never cut inside a character. */
+  @Override
+  public synchronized void write(byte[] bytes, int offset, int length) throws IOException {
+    super.write(bytes, offset, length);
   }
 
   /** How many chars the first byte of a character of {@code units} chars takes in a JSON string. */

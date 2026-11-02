@@ -3,8 +3,10 @@ package com.standardapplied.helios.repl.sandbox;
 
 import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.protocol.CapturedOutput;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import com.standardapplied.helios.repl.protocol.RpcMessage;
@@ -108,6 +110,29 @@ class CapturedStreamTest {
         "\uFFFD".repeat(MAX_CAPTURED_OUTPUT_CHARS)
             + "\n[output truncated: 2000000 more chars discarded]",
         CapturedStream.cut(stream).text());
+  }
+
+  @Test
+  void aCutWhileAThreadStillWritesFallsBetweenCharacters() {
+    var stream = new CapturedStream();
+    var out = new PrintStream(stream, true, StandardCharsets.UTF_8);
+    var writer =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  while (!Thread.currentThread().isInterrupted()) {
+                    out.print("€");
+                  }
+                });
+
+    CapturedOutput.Cut cut;
+    do {
+      cut = CapturedStream.cut(stream);
+      assertFalse(cut.kept().contains("\uFFFD"), "a character was split");
+    } while (cut.discarded() == 0);
+
+    writer.interrupt();
+    Await.termination("the writer", writer);
   }
 
   @Test
