@@ -9,16 +9,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplException;
 import com.standardapplied.helios.repl.ReplSession;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
+import com.standardapplied.helios.repl.host.HostParameter;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -172,6 +176,50 @@ class SandboxOutputCapTest {
       var next = sandbox.execute(ExecutionRequest.java("1 + 1"));
       assertFalse(next.succeeded());
       assertEquals("Sandbox is not alive: its RPC channel closed", next.stderr());
+    }
+  }
+
+  /**
+   * The subprocess exits on its own once the channel ends, so its child must go before it does:
+   * {@link JvmSandbox#close()} finds a descendant only by walking from a live subprocess.
+   */
+  @Test
+  void aSandboxEndedByAnOversizedFrameEndsItsChildrenWithoutWaitingForClose() {
+    var childPid = new AtomicReference<Long>();
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new HostFunction(
+            "reportPid",
+            "records the child's pid",
+            List.of(HostParameter.required("pid", ParameterType.STRING, "the child's pid")),
+            params -> {
+              childPid.set(Long.parseLong(params.get("pid").toString()));
+              return null;
+            }));
+    registry.register(
+        new HostFunction(
+            "sink",
+            "takes a value",
+            List.of(HostParameter.required("value", ParameterType.STRING, "the value")),
+            params -> null));
+    try (var sandbox = JvmSandbox.create(CONFIG, registry)) {
+      var started =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "var child = new ProcessBuilder(\"sleep\", \"600\").start();\n"
+                      + "reportPid(String.valueOf(child.pid()));"));
+      assertEquals(0, started.exitCode(), started.stderr());
+      var child = ProcessHandle.of(childPid.get()).orElseThrow();
+      try {
+        var oversized =
+            sandbox.execute(
+                ExecutionRequest.java("sink(\"x\".repeat(%d));".formatted(MAX_FRAME_CHARS)));
+
+        assertEquals("Channel closed", oversized.stderr());
+        Await.value("the child to end with the sandbox", child.onExit());
+      } finally {
+        child.destroyForcibly();
+      }
     }
   }
 
