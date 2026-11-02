@@ -54,8 +54,9 @@ import org.junit.jupiter.api.io.TempDir;
  * the session reaches a clean terminal (which is only possible if Gemini accepted the
  * post-compaction request body). The session's model is forced to call a tool on every turn, so the
  * history grows by a tool round per turn whatever the model would have chosen, and the run always
- * ends at the turn limit. The token count is a fixed cost per message and the summary is a fixed
- * text, so when compaction fires does not depend on the model's tool arguments or summary wording.
+ * ends at the turn limit. The token count is a fixed cost per message, far above what these short
+ * requests report, and the summary is a fixed text, so when compaction fires does not depend on the
+ * model's tool arguments or summary wording.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
 final class CompactionIntegrationTest {
@@ -154,7 +155,7 @@ final class CompactionIntegrationTest {
 
   /**
    * Run {@link #NOTES_TASK} over a seeded workspace with a compactor that fires mid-run: each tool
-   * round adds two messages, and three messages cross the watermark.
+   * round adds two messages, and those two messages cross the watermark on top of any report.
    */
   private static Run runNotesTask(Path tmp) throws IOException {
     seedFiles(tmp);
@@ -165,15 +166,16 @@ final class CompactionIntegrationTest {
 
     var compactor = SummarizingCompactor.newBuilder(SUMMARY_MODEL).build();
 
-    // The provider's report of any request passes the 285-token watermark, so the first tool
-    // round's user, assistant and tool messages become one summary as soon as the round closes.
-    var limits = SessionLimits.newBuilder().withMaxContextTokens(300L).withMaxTurns(8).build();
+    // The two messages a tool round adds reach the 285,000-token watermark by themselves, so the
+    // first round's user, assistant and tool messages become one summary as soon as it closes. The
+    // estimate stays above what the provider reports, or the compactor would be skipped.
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(300_000L).withMaxTurns(8).build();
 
     var options =
         SessionOptions.newBuilder()
             .withModel(forced)
             .withTools(tools)
-            .withTokenCounter(history -> 100L * history.size())
+            .withTokenCounter(history -> 150_000L * history.size())
             .withContextCompactor(compactor)
             .withLimits(limits)
             .build();

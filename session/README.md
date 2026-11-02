@@ -276,7 +276,10 @@ watermarks:
 - **0.95** — invokes the configured `ContextCompactor`, swaps the returned history in if the
   `TokenCounter` estimates it below the history it was given, and emits
   `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being
-  those estimates. The warning flag resets so a future re-climb fires the watermark again.
+  those estimates. The warning flag resets so a future re-climb fires the watermark again. The
+  compactor is skipped while what the estimate cannot see, such as inline files and tool
+  definitions, reaches 0.95 by itself: no result could help, so a request that truly overflows
+  ends with the provider's error.
 
 The default compactor — `SummarizingCompactor` — keeps every leading system message and the
 pending user turn (the user messages after the last assistant turn), and replaces the rest of the
