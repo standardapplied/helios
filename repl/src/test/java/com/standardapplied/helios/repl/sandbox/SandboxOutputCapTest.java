@@ -144,6 +144,22 @@ class SandboxOutputCapTest {
   }
 
   @Test
+  void rawStderrPastThePipeBufferLeavesTheSnippetRunning() {
+    try (var sandbox = JvmSandbox.create(CONFIG, new HostFunctionRegistry())) {
+      var printed =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  """
+                  new java.io.FileOutputStream(java.io.FileDescriptor.err).write(new byte[1 << 20]);
+                  System.out.print("done");
+                  """));
+
+      assertEquals(0, printed.exitCode(), printed.stderr());
+      assertEquals("done", printed.stdout());
+    }
+  }
+
+  @Test
   void anOversizedFrameEndsTheSandboxAndTheNextExecuteTakesTheNotAlivePath() throws IOException {
     try (var fake = new FakeSandboxProcess()) {
       var sandbox = fake.sandbox();

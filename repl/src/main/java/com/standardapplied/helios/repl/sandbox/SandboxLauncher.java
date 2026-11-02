@@ -27,7 +27,8 @@ final class SandboxLauncher {
    * Start the subprocess in {@code workingDirectory}, told to connect to {@code socketPath}. The
    * environment holds only {@code PATH} and {@code JAVA_HOME}. The host never writes to the
    * subprocess's stdin, so it is closed at once: a read in the subprocess hits end-of-stream rather
-   * than blocking.
+   * than blocking. Its stderr is discarded: nothing reads it, and an unread pipe blocks whoever
+   * writes to it once full.
    */
   static Process start(JvmSandboxConfig config, Path socketPath, Path workingDirectory)
       throws IOException {
@@ -36,7 +37,7 @@ final class SandboxLauncher {
         new ProcessBuilder(
             buildLaunchCommand(javaHome + "/bin/java", config, socketPath.toString()));
     pb.directory(workingDirectory.toFile());
-    pb.redirectErrorStream(false);
+    pb.redirectError(ProcessBuilder.Redirect.DISCARD);
     var env = pb.environment();
     env.clear();
     env.put("PATH", System.getenv().getOrDefault("PATH", ""));
