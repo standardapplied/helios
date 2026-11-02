@@ -95,13 +95,12 @@ final class BoundedTask<T> {
   }
 
   /**
-   * As {@link #settlesBy(long)}, a cancellation of {@code token} also ending the wait and
-   * outweighing a value the task returned, unless the task threw: {@code failures} may be what
-   * cancelled {@code token}, and the wait then goes on until {@link #outcome()} holds what the task
-   * threw. The registration on {@code token} is removed on every exit.
+   * As {@link #settlesBy(long)}, a cancellation of {@code token} also ending the wait, unless the
+   * task threw: {@code failures} may be what cancelled {@code token}, and the wait then goes on
+   * until {@link #outcome()} holds what the task threw. The registration on {@code token} is
+   * removed on every exit.
    *
-   * @return {@code true} if the task settled with a failure, or with a value and {@code token} not
-   *     cancelled, when the wait ended
+   * @return {@code true} if the task settled, with a value or a failure, when the wait ended
    */
   boolean settlesBy(long deadlineNanos, CancellationToken token) {
     var cancelled = new CompletableFuture<Void>();
@@ -111,7 +110,7 @@ final class BoundedTask<T> {
     } finally {
       registration.remove();
     }
-    return outcome.isDone() && !token.isCancelled() || threw.get() && settlesBy(deadlineNanos);
+    return outcome.isDone() || threw.get() && settlesBy(deadlineNanos);
   }
 
   /** Interrupt the task's thread, asking a task the session stopped waiting for to stop. */
