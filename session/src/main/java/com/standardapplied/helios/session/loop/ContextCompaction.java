@@ -31,10 +31,9 @@ final class ContextCompaction {
    * when the caller left it at the auto sentinel). The numerator is the input size the provider
    * reported for the last request, system prompt and tool definitions included, plus the {@link
    * TokenCounter}'s estimate of the messages appended since; with no such report, the estimate of
-   * <em>every message currently in the conversation history</em>. Either way it is cumulative
-   * across all turns since the session started, never the size of a single turn. The watermark
-   * check runs both before and after every turn so the trigger fires as soon as the cumulative
-   * history crosses the threshold.
+   * <em>every message currently in the conversation history</em>. Either way it is the size of the
+   * whole next request, never just what one turn added. The watermark check runs both before and
+   * after every turn so the trigger fires as soon as the cumulative history crosses the threshold.
    */
   static final double CONTEXT_WARNING_WATERMARK = 0.85;
 
@@ -90,7 +89,10 @@ final class ContextCompaction {
    * Count the tokens of the next request, fire {@link QueryEvent.ContextWarning} on the first
    * crossing of {@link #CONTEXT_WARNING_WATERMARK}, and invoke the {@link ContextCompactor} on
    * crossings of {@link #CONTEXT_COMPACT_WATERMARK}. Successful compaction replaces the history,
-   * which re-arms the warning so a future re-climb fires it again.
+   * which re-arms the warning so a future re-climb fires it again. No compactor runs while what it
+   * cannot see, such as inline files, tool definitions and the system prompt, reaches {@link
+   * #CONTEXT_COMPACT_WATERMARK} by itself: no result could bring the request under it, so a request
+   * that truly overflows ends with the provider's own error.
    */
   void check(SessionState state, SessionLimits limits) {
     var maxTokens = effectiveMaxContextTokens(limits);
@@ -107,7 +109,7 @@ final class ContextCompaction {
               usagePct));
     }
     if (usagePct >= CONTEXT_COMPACT_WATERMARK) {
-      compact(state);
+      compact(state, tokens, maxTokens);
     }
   }
 
@@ -123,7 +125,7 @@ final class ContextCompaction {
    *   <li>User cap only → honour it as-is. Trusting the deployer is the contract.
    *   <li>Model window only → use the window's limit: {@code window - min(
    *       AUTO_RESERVED_OUTPUT_TOKENS, window / 4)}, leaving headroom for the next response. The
-   *       limit of any known window is positive and below it, however small the window.
+   *       limit of any known window is positive, however small the window.
    *   <li>Neither known → fall back to {@link #AUTO_FALLBACK_MAX_CONTEXT_TOKENS}. Last-resort path
    *       for providers that don't yet implement {@code contextWindow()}.
    * </ul>
@@ -155,8 +157,13 @@ final class ContextCompaction {
    * loop continues, unless what it threw carries an {@link Error} ({@link SessionEnding#failWith}),
    * which ends the session.
    */
-  private void compact(SessionState state) {
+  private void compact(SessionState state, long tokens, long maxTokens) {
     var historyBefore = state.history().snapshot();
+    var tokensBefore = tokenCounter.count(historyBefore);
+    var outOfReach = tokens - tokensBefore;
+    if ((double) outOfReach / (double) maxTokens >= CONTEXT_COMPACT_WATERMARK) {
+      return;
+    }
     var started = collaborators.clock().instant();
     CompactionResult result;
     try {
@@ -184,7 +191,6 @@ final class ContextCompaction {
     if (historyAfter == historyBefore) {
       return;
     }
-    var tokensBefore = tokenCounter.count(historyBefore);
     var tokensAfter = tokenCounter.count(historyAfter);
     if (tokensAfter >= tokensBefore) {
       return;

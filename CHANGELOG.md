@@ -1242,10 +1242,14 @@ DROP TABLE IF EXISTS helios_agent_runs;
   turn of the session's model `ConversationHistory` records the request's message count and its
   `Usage.promptTokens()`. A history replacement, or a turn reporting no input, clears the anchor, and
   the check then estimates the whole history as before. A compaction's summary call never sets it.
+  No compactor runs while what the estimate cannot see, such as inline files and tool definitions,
+  reaches the 0.95 watermark by itself; a request that truly overflows ends with the provider's
+  error. An Anthropic `pause_turn` turn reports the sum of its segments, so it can compact early.
 - **A known window of 20,000 tokens or less now yields a limit below that window.** The output
   reserve is 20,000 tokens or a quarter of the window, whichever is smaller, so a window of 8,000
   gives a limit of 6,000 instead of the 180,000-token fallback, and a user cap of 50,000 next to it
-  gives 6,000 instead of 50,000.
+  gives 6,000 instead of 50,000. Windows up to 80,000 keep more than before: 30,000 gives 22,500,
+  not 10,000.
 - **Cancelling a run stops a `SummarizingCompactor` summary call.** A cancel ends the wait as the
   timeout does: the worker is interrupted, no summary is returned and the history is unchanged. A
   run already cancelled starts no summary call.

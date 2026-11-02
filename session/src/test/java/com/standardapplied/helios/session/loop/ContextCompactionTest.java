@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -54,6 +55,12 @@ final class ContextCompactionTest {
   private static final long TOKENS_PER_MESSAGE = 10L;
   private static final Usage FIRST_TURN = Usage.of(1_000, 7, 500, 4_000);
   private static final long FIRST_TURN_INPUT = 5_500L;
+
+  /**
+   * After the first turn the count is the report plus one message, and two messages are in reach.
+   */
+  private static final long LIMIT_OF_THE_LAST_REACHABLE_REPORT = 5_779L;
+
   private static final Duration NOT_REACHED = Duration.ofMinutes(10);
 
   private record Answer(String field) {}
@@ -205,7 +212,7 @@ final class ContextCompactionTest {
 
     assertEquals(before, state.history().snapshot());
     assertEquals(List.of(), edits());
-    assertEquals(List.of(before), counted);
+    assertEquals(List.of(before, before), counted);
   }
 
   @Test
@@ -217,7 +224,7 @@ final class ContextCompactionTest {
 
     assertEquals(before, state.history().snapshot());
     assertEquals(List.of(), edits());
-    assertEquals(List.of(before), counted);
+    assertEquals(List.of(before, before), counted);
   }
 
   @Test
@@ -271,7 +278,7 @@ final class ContextCompactionTest {
         (history, context) ->
             new CompactionResult(List.of(history.getLast()), Usage.of(9_000, 1), "summary");
 
-    run(loop(twoTurns(Usage.of(50, 7)), toLastMessage), 1_000L);
+    run(loop(twoTurns(Usage.of(50, 7)), toLastMessage), LIMIT_OF_THE_LAST_REACHABLE_REPORT);
 
     var history = state.history().snapshot();
     assertEquals(
@@ -286,12 +293,35 @@ final class ContextCompactionTest {
   @Test
   void aSummaryCallsUsageOnARejectedResultLeavesTheModelsAnchor() {
     var script = ScriptedModel.newBuilder().withTextTurn("one", FIRST_TURN).build();
+    var compactions = new AtomicInteger();
     ContextCompactor reporting =
-        (history, context) -> new CompactionResult(history, Usage.of(9_000, 1), "summary");
+        (history, context) -> {
+          compactions.incrementAndGet();
+          return new CompactionResult(history, Usage.of(9_000, 1), "summary");
+        };
 
-    run(loop(script, reporting), 1_000L);
+    run(loop(script, reporting), LIMIT_OF_THE_LAST_REACHABLE_REPORT);
 
+    assertEquals(1, compactions.get());
     assertEquals(FIRST_TURN_INPUT + TOKENS_PER_MESSAGE, state.history().tokens(recording));
+  }
+
+  @Test
+  void noCompactorRunsWhileWhatItCannotSeeReachesTheWatermarkByItself() {
+    var script = ScriptedModel.newBuilder().withTextTurn("one", FIRST_TURN).build();
+    var compactions = new AtomicInteger();
+    ContextCompactor counting =
+        (history, context) -> {
+          compactions.incrementAndGet();
+          return CompactionResult.noOp(history);
+        };
+
+    run(loop(script, counting), LIMIT_OF_THE_LAST_REACHABLE_REPORT - 1);
+
+    assertEquals(0, compactions.get());
+    assertEquals(
+        List.of("first", "one"),
+        state.history().snapshot().stream().map(Message::content).toList());
   }
 
   @Test
