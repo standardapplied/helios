@@ -165,8 +165,8 @@ final class CompactionIntegrationTest {
 
     var compactor = SummarizingCompactor.newBuilder(SUMMARY_MODEL).build();
 
-    // At 100 tokens a message the 285-token watermark trips from three messages on: the first tool
-    // round's user, assistant and tool messages become one summary.
+    // The provider's report of any request passes the 285-token watermark, so the first tool
+    // round's user, assistant and tool messages become one summary as soon as the round closes.
     var limits = SessionLimits.newBuilder().withMaxContextTokens(300L).withMaxTurns(8).build();
 
     var options =

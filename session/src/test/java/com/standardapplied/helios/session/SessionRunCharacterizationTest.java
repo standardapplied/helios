@@ -170,7 +170,7 @@ class SessionRunCharacterizationTest {
           "ToolBlocked turn=2 c2 SessionRunCharacterizationTest$Run not allowed",
           "ToolResult turn=2 c2 Rejected blocked by SessionRunCharacterizationTest$Run: not allowed",
           "TurnEnded turn=2 TOOL_CALLS",
-          "ContextWarning turn=2 0.96",
+          "ContextWarning turn=2 1.06",
           "ModelCallEnded turn=2 attempt=1 STOP tokens=7 error=false",
           "ContextEdited turn=2 removed=3 96->10",
           "AssistantText turn=3 not json",

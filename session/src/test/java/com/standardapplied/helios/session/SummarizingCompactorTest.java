@@ -346,6 +346,45 @@ final class SummarizingCompactorTest {
   }
 
   @Test
+  void aCancelledContextMakesNoSummaryCall() {
+    var state = freshState();
+    state.cancellation().cancel("stop");
+    var summarizer = summaryModel("never");
+
+    var out =
+        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, contextOf(state));
+
+    assertSame(CONVERSATION, out.history());
+    assertTrue(summarizer.calls().isEmpty());
+  }
+
+  @Test
+  void aCancellationInterruptsTheSummaryCallAndIsLoggedAsACancellationNotATimeout() {
+    var state = freshState();
+    var interrupted = new CountDownLatch(1);
+    var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();
+    var logged = new ArrayList<LogRecord>();
+    var compacted =
+        CompletableFuture.supplyAsync(
+            () -> compactor.compact(CONVERSATION, contextOf(state)), Thread.ofVirtual()::start);
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      Await.until(
+          "the summary wait to register",
+          () -> state.cancellation().activeCallbackCountForTests() == 1);
+      state.cancellation().cancel("stop");
+      assertSame(CONVERSATION, Await.value("the cancelled compaction", compacted).history());
+    }
+
+    Await.latch("the cancelled summary call to be interrupted", interrupted);
+    assertEquals(
+        List.of(
+            "Context compaction summary cancelled; leaving history unchanged."
+                + " Session sess-1 turn 0"),
+        logged.stream().map(LogRecord::getMessage).toList());
+  }
+
+  @Test
   void anInterruptedCompactionLeavesTheHistoryKeepsTheInterruptAndInterruptsTheSummaryCall() {
     var interrupted = new CountDownLatch(1);
     var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();

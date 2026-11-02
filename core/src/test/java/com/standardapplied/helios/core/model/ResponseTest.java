@@ -112,6 +112,18 @@ class ResponseTest {
   }
 
   @Test
+  void promptTokensSumEveryInputClassAndNotTheOutput() {
+    assertEquals(5_500L, Response.Usage.of(1_000, 7, 500, 4_000).promptTokens());
+  }
+
+  @Test
+  void promptTokensPassAnInt() {
+    var huge = new Response.Usage(Integer.MAX_VALUE, 0, Integer.MAX_VALUE, 1, 0);
+
+    assertEquals(2L * Integer.MAX_VALUE + 1L, huge.promptTokens());
+  }
+
+  @Test
   void usagePlusSumsClassWise() {
     var sum = Response.Usage.of(100, 50, 20, 10).plus(Response.Usage.of(1, 2, 3, 4));
 

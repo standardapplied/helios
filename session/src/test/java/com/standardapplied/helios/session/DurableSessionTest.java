@@ -477,7 +477,7 @@ final class DurableSessionTest {
       SessionOptions.Builder options, ContextCompactor compactor) {
     return options
         .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100).build())
-        .withTokenCounter(messages -> 1_000)
+        .withTokenCounter(messages -> 1_000L * messages.size())
         .withContextCompactor(compactor);
   }
 

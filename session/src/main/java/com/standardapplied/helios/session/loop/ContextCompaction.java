@@ -13,9 +13,9 @@ import java.util.logging.Logger;
 
 /**
  * The context watermark and compaction step the {@link AgentLoop} runs before and after every turn:
- * counts the tokens in the history, fires {@link QueryEvent.ContextWarning} on the first crossing
- * of {@link #CONTEXT_WARNING_WATERMARK}, and on crossings of {@link #CONTEXT_COMPACT_WATERMARK}
- * runs the {@link ContextCompactor}.
+ * counts the tokens of the next request ({@link ConversationHistory#tokens(TokenCounter)}), fires
+ * {@link QueryEvent.ContextWarning} on the first crossing of {@link #CONTEXT_WARNING_WATERMARK},
+ * and on crossings of {@link #CONTEXT_COMPACT_WATERMARK} runs the {@link ContextCompactor}.
  */
 final class ContextCompaction {
 
@@ -28,11 +28,13 @@ final class ContextCompaction {
    * window to react before the model errors out.
    *
    * <p>The denominator is the configured {@code maxContextTokens} (or its model-aware resolution
-   * when the caller left it at the auto sentinel). The numerator is the {@link TokenCounter}'s
-   * estimate of <em>total tokens across every message currently in the conversation history</em> —
-   * cumulative across all turns since the session started, never the size of a single turn. The
-   * watermark check runs both before and after every turn so the trigger fires as soon as the
-   * cumulative history crosses the threshold.
+   * when the caller left it at the auto sentinel). The numerator is the input size the provider
+   * reported for the last request, system prompt and tool definitions included, plus the {@link
+   * TokenCounter}'s estimate of the messages appended since; with no such report, the estimate of
+   * <em>every message currently in the conversation history</em>. Either way it is cumulative
+   * across all turns since the session started, never the size of a single turn. The watermark
+   * check runs both before and after every turn so the trigger fires as soon as the cumulative
+   * history crosses the threshold.
    */
   static final double CONTEXT_WARNING_WATERMARK = 0.85;
 
@@ -47,13 +49,12 @@ final class ContextCompaction {
   static final double CONTEXT_COMPACT_WATERMARK = 0.95;
 
   /**
-   * Output-token headroom subtracted from {@link
-   * com.standardapplied.helios.core.model.Model#contextWindow()} when {@link
-   * SessionLimits#maxContextTokens()} is left in its sentinel "auto" state. Mirrors Claude Code's
-   * {@code nAK = 20000} output reservation — leaves enough budget for the next response after a
-   * full-context input, so the watermark check trips before the provider rejects an oversized
-   * request. Library users that need a tighter or looser headroom set an explicit {@link
-   * SessionLimits.Builder#withMaxContextTokens(long)} cap.
+   * Most output-token headroom subtracted from a known {@link
+   * com.standardapplied.helios.core.model.Model#contextWindow()}; a window under 80,000 tokens
+   * gives up a quarter instead. Mirrors Claude Code's {@code nAK = 20000} output reservation —
+   * leaves enough budget for the next response after a full-context input, so the watermark check
+   * trips before the provider rejects an oversized request. Library users that need a tighter
+   * headroom set an explicit {@link SessionLimits.Builder#withMaxContextTokens(long)} cap.
    */
   static final long AUTO_RESERVED_OUTPUT_TOKENS = 20_000L;
 
@@ -86,14 +87,14 @@ final class ContextCompaction {
   }
 
   /**
-   * Count tokens in the current history, fire {@link QueryEvent.ContextWarning} on the first
+   * Count the tokens of the next request, fire {@link QueryEvent.ContextWarning} on the first
    * crossing of {@link #CONTEXT_WARNING_WATERMARK}, and invoke the {@link ContextCompactor} on
    * crossings of {@link #CONTEXT_COMPACT_WATERMARK}. Successful compaction replaces the history,
    * which re-arms the warning so a future re-climb fires it again.
    */
   void check(SessionState state, SessionLimits limits) {
     var maxTokens = effectiveMaxContextTokens(limits);
-    var tokens = tokenCounter.count(state.history().snapshot());
+    var tokens = state.history().tokens(tokenCounter);
     var usagePct = (double) tokens / (double) maxTokens;
     if (usagePct >= CONTEXT_WARNING_WATERMARK && state.history().tryFireContextWarning()) {
       emitter.emit(
@@ -106,7 +107,7 @@ final class ContextCompaction {
               usagePct));
     }
     if (usagePct >= CONTEXT_COMPACT_WATERMARK) {
-      compact(state, tokens);
+      compact(state);
     }
   }
 
@@ -117,11 +118,12 @@ final class ContextCompaction {
    * wc()} resolver:
    *
    * <ul>
-   *   <li>Both known → take the smaller (user cap never permits more than the model actually
-   *       supports).
+   *   <li>Both known → take the smaller of the cap and the window's limit, so a user cap never
+   *       permits more than the model actually supports.
    *   <li>User cap only → honour it as-is. Trusting the deployer is the contract.
-   *   <li>Model window only → use {@code window - AUTO_RESERVED_OUTPUT_TOKENS}, leaving headroom
-   *       for the next response.
+   *   <li>Model window only → use the window's limit: {@code window - min(
+   *       AUTO_RESERVED_OUTPUT_TOKENS, window / 4)}, leaving headroom for the next response. The
+   *       limit of any known window is positive and below it, however small the window.
    *   <li>Neither known → fall back to {@link #AUTO_FALLBACK_MAX_CONTEXT_TOKENS}. Last-resort path
    *       for providers that don't yet implement {@code contextWindow()}.
    * </ul>
@@ -133,18 +135,11 @@ final class ContextCompaction {
   long effectiveMaxContextTokens(SessionLimits limits) {
     var userCap = limits.maxContextTokens();
     var modelWindow = (long) turnRunner.modelContextWindow();
-    var modelEffective =
-        modelWindow > AUTO_RESERVED_OUTPUT_TOKENS ? modelWindow - AUTO_RESERVED_OUTPUT_TOKENS : 0L;
-    if (userCap > 0L && modelEffective > 0L) {
-      return Math.min(userCap, modelEffective);
+    if (modelWindow <= 0L) {
+      return userCap > 0L ? userCap : AUTO_FALLBACK_MAX_CONTEXT_TOKENS;
     }
-    if (userCap > 0L) {
-      return userCap;
-    }
-    if (modelEffective > 0L) {
-      return modelEffective;
-    }
-    return AUTO_FALLBACK_MAX_CONTEXT_TOKENS;
+    var modelLimit = modelWindow - Math.min(AUTO_RESERVED_OUTPUT_TOKENS, modelWindow / 4L);
+    return userCap > 0L ? Math.min(userCap, modelLimit) : modelLimit;
   }
 
   /**
@@ -152,12 +147,15 @@ final class ContextCompaction {
    * that names a model (e.g. a summary call, even one reporting zero usage) as one model call timed
    * across the compactor's call — priced against the compactor's own {@link
    * CompactionResult#modelId()} so a cheap summary model isn't billed at the main loop's rate — and
-   * emit {@link QueryEvent.ContextEdited} after a successful shrink. A returned identity (same
-   * instance) or no-shrink result is treated as a no-op — the compactor opted out for this turn and
-   * the warning flag stays set. A throwing compactor is swallowed; the loop continues, unless what
-   * it threw carries an {@link Error} ({@link SessionEnding#failWith}), which ends the session.
+   * emit {@link QueryEvent.ContextEdited} after a successful shrink. A result shrinks the history
+   * when the {@link TokenCounter}'s estimate of it is below the estimate of the history the
+   * compactor was given: both sides are the same measure, whatever the provider reported. A
+   * returned identity (same instance) or no-shrink result is treated as a no-op — the compactor
+   * opted out for this turn and the warning flag stays set. A throwing compactor is swallowed; the
+   * loop continues, unless what it threw carries an {@link Error} ({@link SessionEnding#failWith}),
+   * which ends the session.
    */
-  private void compact(SessionState state, long tokensBefore) {
+  private void compact(SessionState state) {
     var historyBefore = state.history().snapshot();
     var started = collaborators.clock().instant();
     CompactionResult result;
@@ -183,12 +181,16 @@ final class ContextCompaction {
               state, result.modelId(), compactionUsage, started, collaborators.clock().instant());
     }
     var historyAfter = result.history();
-    if (historyAfter == historyBefore || historyAfter.size() >= historyBefore.size()) {
+    if (historyAfter == historyBefore) {
+      return;
+    }
+    var tokensBefore = tokenCounter.count(historyBefore);
+    var tokensAfter = tokenCounter.count(historyAfter);
+    if (tokensAfter >= tokensBefore) {
       return;
     }
     state.history().replace(historyAfter);
-    var tokensAfter = tokenCounter.count(state.history().snapshot());
-    var removedBlocks = historyBefore.size() - historyAfter.size();
+    var removedBlocks = Math.max(0, historyBefore.size() - historyAfter.size());
     emitter.emit(
         state,
         new QueryEvent.ContextEdited(
