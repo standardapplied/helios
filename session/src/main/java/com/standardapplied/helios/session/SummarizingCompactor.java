@@ -50,8 +50,8 @@ import java.util.logging.Logger;
  * Error} is rethrown as itself; called by the session, the compactor first records it in the
  * session's {@code Error} sink, so one thrown after the timeout still ends the session. Called
  * directly with any other {@link HookContext}, it only rethrows. An answered summary call, a blank
- * one included, reports its usage and the summary model's id on the {@link CompactionResult}, so
- * the loop reports it as a model call, prices it and gates it through {@code
+ * or cancelled one included, reports its usage and the summary model's id on the {@link
+ * CompactionResult}, so the loop reports it as a model call, prices it and gates it through {@code
  * SessionLimits.maxBudgetMicroUsd}.
  */
 public final class SummarizingCompactor implements ContextCompactor {
@@ -121,6 +121,10 @@ public final class SummarizingCompactor implements ContextCompactor {
     }
     var response = answer.get();
     var usage = response.usage() != null ? response.usage() : Usage.of(0, 0);
+    if (context.cancellation().isCancelled()) {
+      LOG.warning(() -> unchanged("summary cancelled", context));
+      return new CompactionResult(history, usage, summaryModel.id());
+    }
     if (Strings.isBlank(response.content())) {
       LOG.warning(() -> unchanged("summary returned blank", context));
       return new CompactionResult(history, usage, summaryModel.id());

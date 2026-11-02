@@ -87,7 +87,7 @@ final class BoundedTaskTest {
   }
 
   @Test
-  void aValueReturnedAfterACancellationDoesNotSettleTheWait() {
+  void aValueReturnedAfterACancellationSettlesTheWait() {
     var token = new CancellationToken();
     var task =
         BoundedTask.start(
@@ -99,7 +99,7 @@ final class BoundedTaskTest {
             state.ending()::failWith);
     Await.value("the task's value", task.outcome());
 
-    assertFalse(task.settlesBy(Await.hangGuardDeadline(), token));
+    assertTrue(task.settlesBy(Await.hangGuardDeadline(), token));
   }
 
   @Test
