@@ -136,6 +136,33 @@ final class BoundedTaskTest {
     assertSame(thrown, task.outcome().exceptionNow());
   }
 
+  @Test
+  void aFailureStillBeingReportedDoesNotExtendTheDeadline() {
+    var token = new CancellationToken();
+    var thrown = new AssertionError("host failure");
+    var reporting = new CountDownLatch(1);
+    var task =
+        BoundedTask.<String>start(
+            "helios-test-pending-failure",
+            () -> {
+              throw thrown;
+            },
+            failure -> {
+              token.cancel("host error");
+              reporting.countDown();
+              Await.latch("the test to release the report", release);
+            });
+    Await.latch("the failure to be reported", reporting);
+
+    assertFalse(task.settlesBy(Await.passedDeadline(), token));
+    assertFalse(task.outcome().isDone());
+    assertEquals(0, token.activeCallbackCountForTests());
+
+    release.countDown();
+    var settled = task.outcome().handle((value, failure) -> failure);
+    assertSame(thrown, Await.value("the reported failure", settled));
+  }
+
   private BoundedTask<String> heldTask() {
     return BoundedTask.start(
         "helios-test-held",
