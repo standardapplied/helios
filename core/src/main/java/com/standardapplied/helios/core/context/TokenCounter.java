@@ -15,7 +15,8 @@ import java.util.List;
  * interface stays provider-agnostic on purpose: the default {@link #charBased() char-based} impl is
  * a cheap heuristic that runs every turn; provider-specific tokenizers (tiktoken for OpenAI, the
  * Anthropic tokenizer for Claude) can be wired in when accuracy matters more than the per-turn
- * cost.
+ * cost. Once a model turn reported its input size the loop only asks for an estimate of the
+ * messages added since, so the report, not this estimate, carries the rest of the count.
  *
  * <p>Implementations must be safe to call from the single-virtual-thread agent loop. They should
  * never block on I/O — the loop calls {@code count} after every model turn.

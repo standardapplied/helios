@@ -162,6 +162,17 @@ public record Response<T>(
     }
 
     /**
+     * The size of the whole prompt: input, cache-creation and cache-read tokens are disjoint, so
+     * their sum is every token the request sent, for every provider.
+     *
+     * @return the prompt's tokens; a {@code long}, since the sum of three counts can pass an {@code
+     *     int}
+     */
+    public long promptTokens() {
+      return (long) inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+    }
+
+    /**
      * Build a {@link Usage} including prompt-cache token counts.
      *
      * @param input uncached prompt tokens

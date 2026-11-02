@@ -39,17 +39,19 @@ import java.util.logging.Logger;
  * for the goal, the facts found, the decisions made, the open questions and the work left.
  *
  * <p>It never compacts in the middle of a tool round: while the last assistant turn with tool calls
- * has a call without a later {@code TOOL} answer, and when fewer than two messages would be
- * summarised, it returns {@link CompactionResult#noOp(List)} without calling the model.
+ * has a call without a later {@code TOOL} answer, when fewer than two messages would be summarised,
+ * and once {@link HookContext#cancellation()} is cancelled, it returns {@link
+ * CompactionResult#noOp(List)} without calling the model.
  *
  * <p>The summary call runs on a virtual thread under a timeout (default {@value
- * #DEFAULT_SUMMARY_TIMEOUT_SECONDS}s). A call that throws, times out or returns a blank summary is
- * logged as a WARNING and leaves the history unchanged; the watermark fires again on the next
- * check. An {@link Error} is rethrown as itself; called by the session, the compactor first records
- * it in the session's {@code Error} sink, so one thrown after the timeout still ends the session.
- * Called directly with any other {@link HookContext}, it only rethrows. An answered summary call, a
- * blank one included, reports its usage and the summary model's id on the {@link CompactionResult},
- * so the loop reports it as a model call, prices it and gates it through {@code
+ * #DEFAULT_SUMMARY_TIMEOUT_SECONDS}s) and stops waiting when {@link HookContext#cancellation()} is
+ * cancelled. A call that throws, times out, is cancelled or returns a blank summary is logged as a
+ * WARNING and leaves the history unchanged; the watermark fires again on the next check. An {@link
+ * Error} is rethrown as itself; called by the session, the compactor first records it in the
+ * session's {@code Error} sink, so one thrown after the timeout still ends the session. Called
+ * directly with any other {@link HookContext}, it only rethrows. An answered summary call, a blank
+ * one included, reports its usage and the summary model's id on the {@link CompactionResult}, so
+ * the loop reports it as a model call, prices it and gates it through {@code
  * SessionLimits.maxBudgetMicroUsd}.
  */
 public final class SummarizingCompactor implements ContextCompactor {
@@ -99,7 +101,9 @@ public final class SummarizingCompactor implements ContextCompactor {
     Objects.requireNonNull(context, "context must not be null");
     var summarisedFrom = leadingSystemMessages(history);
     var summarisedTo = pendingUserTurnStart(history);
-    if (summarisedTo - summarisedFrom < MIN_SUMMARISED_MESSAGES || inToolRound(history)) {
+    if (summarisedTo - summarisedFrom < MIN_SUMMARISED_MESSAGES
+        || inToolRound(history)
+        || context.cancellation().isCancelled()) {
       return CompactionResult.noOp(history);
     }
     var summarised = history.subList(summarisedFrom, summarisedTo);
@@ -128,13 +132,13 @@ public final class SummarizingCompactor implements ContextCompactor {
   }
 
   /**
-   * Run the summary call on a virtual thread under the configured timeout. On timeout the worker
-   * thread is interrupted (best effort) and this returns empty. What the call throws is rethrown as
-   * itself, an {@link Error} included, an {@code Error} it carries as a joined future's cause as
-   * that {@code Error}, and a checked exception it throws undeclared wrapped in a {@link
-   * RuntimeException}; an {@code Error}, or one it carries as a joined future's cause, is first
-   * recorded by the session's ending when {@code context} is the session's, so one thrown after the
-   * timeout still ends the session.
+   * Run the summary call on a virtual thread under the configured timeout. On timeout, or a
+   * cancellation of {@code context}, the worker thread is interrupted (best effort) and this
+   * returns empty. What the call throws is rethrown as itself, an {@link Error} included, an {@code
+   * Error} it carries as a joined future's cause as that {@code Error}, and a checked exception it
+   * throws undeclared wrapped in a {@link RuntimeException}; an {@code Error}, or one it carries as
+   * a joined future's cause, is first recorded by the session's ending when {@code context} is the
+   * session's, so one thrown after the timeout still ends the session.
    */
   private Optional<Response<Void>> invokeSummary(HookContext context, List<Message> request) {
     Consumer<Throwable> failures =
@@ -142,7 +146,8 @@ public final class SummarizingCompactor implements ContextCompactor {
     var summary =
         BoundedTask.start(
             "helios-compaction-summary", () -> summaryModel.chat(request, List.of()), failures);
-    if (summary.settlesBy(BoundedTask.deadlineAfter(summaryTimeout))) {
+    var cancellation = context.cancellation();
+    if (summary.settlesBy(BoundedTask.deadlineAfter(summaryTimeout), cancellation)) {
       return Optional.of(valueOf(summary.outcome()));
     }
     summary.interrupt();
@@ -150,7 +155,9 @@ public final class SummarizingCompactor implements ContextCompactor {
       throw new RuntimeException(
           new InterruptedException("interrupted while waiting for the summary call"));
     }
-    LOG.warning(() -> unchanged("summary timed out after " + summaryTimeout, context));
+    var timedOut = "summary timed out after " + summaryTimeout;
+    var reason = cancellation.isCancelled() ? "summary cancelled" : timedOut;
+    LOG.warning(() -> unchanged(reason, context));
     return Optional.empty();
   }
 

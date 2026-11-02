@@ -10,15 +10,17 @@ import java.util.List;
 
 /**
  * Shrinks a long conversation history so the next model turn fits inside the provider's context
- * window. Invoked by the agent loop after a model turn when {@code TokenCounter.count(history) /
- * SessionLimits.maxContextTokens() >= 0.95} (the {@code QueryEvent.ContextWarning} watermark at
- * 0.85 fires earlier as a heads-up).
+ * window. Invoked by the agent loop before and after a model turn when the next request's tokens,
+ * counted from the provider's last report, reach 0.95 of the session's limit (the {@code
+ * QueryEvent.ContextWarning} watermark at 0.85 fires earlier as a heads-up).
  *
  * <p>Implementations are free to drop, merge, summarise, or vector-recall. The contract is minimal:
  *
  * <ul>
  *   <li>The returned list MUST be non-null.
  *   <li>The returned list MAY be the same instance as {@code history} (no-op).
+ *   <li>Any other list is accepted only when the session's {@code TokenCounter} estimates it below
+ *       {@code history}. Its message count does not matter.
  *   <li>The returned list MUST be self-consistent against the provider's tool-call invariants —
  *       e.g. don't drop a tool-result row while keeping its preceding assistant tool-call row, or
  *       the next model turn will refuse the malformed history.
@@ -61,7 +63,7 @@ public interface ContextCompactor {
    *     them at this turn; non-null
    * @return the result carrying the new history + usage consumed; non-null. The result's history
    *     may be the supplied {@code history} unchanged when nothing was dropped — the loop detects
-   *     the no-shrink and does not emit {@code ContextEdited}
+   *     the no-shrink, by token estimate, and does not emit {@code ContextEdited}
    */
   CompactionResult compact(List<Message> history, HookContext context);
 
