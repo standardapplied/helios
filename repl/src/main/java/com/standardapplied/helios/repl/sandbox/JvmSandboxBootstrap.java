@@ -135,6 +135,8 @@ public final class JvmSandboxBootstrap {
 
     new BootstrapRpc(rpcIn, bridge, evaluator, Runtime.getRuntime()::halt).readLoop();
 
+    // Once this JVM has exited, JvmSandbox.close can no longer walk from it to what it started.
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
     jshell.close();
     try {
       rpcSocket.close();
