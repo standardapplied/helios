@@ -27,8 +27,9 @@ import java.util.Objects;
  * #noOp(List)} (empty {@code modelId} and zero usage); the loop then has no cost to attribute.
  *
  * @param history the new conversation history; non-null. May be the supplied {@code history}
- *     unchanged when nothing was dropped — the loop detects the no-shrink and does not emit {@code
- *     ContextEdited}
+ *     unchanged when nothing was dropped. The loop accepts it only when the session's {@code
+ *     TokenCounter} estimates it below the supplied history, whatever its message count; otherwise
+ *     it keeps the supplied history and does not emit {@code ContextEdited}
  * @param usage tokens consumed by the compaction step itself; non-null. {@link Usage#of(int, int)
  *     Usage.of(0, 0)} for compactors that don't invoke a model
  * @param modelId identifier of the model the compactor spent {@code usage} on; non-null. Must be

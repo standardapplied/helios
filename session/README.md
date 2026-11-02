@@ -257,7 +257,7 @@ Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
 - `withMaxBudgetMicroUsd(long)` — USD spend cap per run (default unset; opt-in)
 - `withMaxWallClock(Duration)` — wall-clock ceiling per run (default 1h)
 - `withToolTimeoutDefault(Duration)` — per-tool execution timeout (default 2 min)
-- `withMaxContextTokens(long)` — soft trigger for compaction (default 0 = auto: the model's window minus the output reserve)
+- `withMaxContextTokens(long)` — soft trigger for compaction (default 0 = auto: the model's window minus the output reserve, 20,000 tokens or a quarter of the window, whichever is smaller)
 
 Each cap maps to its own terminal `ResultMessage` subtype (`ErrorMaxTurns`,
 `ErrorMaxBudgetUsd`, `ErrorMaxWallClock`, etc.) that ends the run; the next `send` starts a new run
@@ -265,15 +265,21 @@ with fresh limits.
 
 ## Context compaction
 
-Long sessions outgrow the model's context window. The session loop estimates running history
-fill via a pluggable `TokenCounter` (default: `TokenCounter.charBased()`, a cheap
-~4-chars-per-token heuristic) and reacts at two watermarks:
+Long sessions outgrow the model's context window. The session loop counts context fill from the
+input size the provider reported for the last request plus a pluggable `TokenCounter`'s estimate
+(default: `TokenCounter.charBased()`, a cheap ~4-chars-per-token heuristic) of the messages added
+since; with no report to start from, the estimate covers the whole history. It reacts at two
+watermarks:
 
 - **0.85** — emits `QueryEvent.ContextWarning(usagePct)` once, so UIs and audit consumers can
   log or pause the session for SME review before the model hits a hard overflow.
-- **0.95** — invokes the configured `ContextCompactor`, swaps the returned history in, and
-  emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`. The warning flag
-  resets so a future re-climb fires the watermark again.
+- **0.95** — invokes the configured `ContextCompactor`, swaps the returned history in if the
+  `TokenCounter` estimates it below the history it was given, and emits
+  `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being
+  those estimates. The warning flag resets so a future re-climb fires the watermark again. The
+  compactor is skipped while what the estimate cannot see, such as inline files and tool
+  definitions, reaches 0.95 by itself: no result could help, so a request that truly overflows
+  ends with the provider's error.
 
 The default compactor — `SummarizingCompactor` — keeps every leading system message and the
 pending user turn (the user messages after the last assistant turn), and replaces the rest of the
@@ -284,8 +290,8 @@ thinking block to its exact request prefix) is replayed, and no `tool_call` or `
 left to pair: the result is valid for every provider. The agent continues from the summary alone,
 so the default prompt asks for the user's goal, the facts found, the decisions made, the open
 questions and the work left. It never compacts in the middle of a tool round. When the summary
-call throws, times out (default 60 s) or returns blank, the compactor returns the history
-unchanged — compaction failure never crashes the loop.
+call throws, times out (default 60 s), is cancelled with the run or returns blank, the compactor
+returns the history unchanged — compaction failure never crashes the loop.
 
 Three library-user tiers of control:
 

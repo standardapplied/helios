@@ -6,6 +6,17 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**A compaction is accepted when it lowers the token estimate, not the message count.** The
+`TokenCounter` estimate of the result must be below the estimate of the history the compactor was
+given; the same instance and `null` stay no-ops. A third-party `ContextCompactor` whose result used
+to be accepted on count alone is now judged on tokens.
+
+| Before | 3.0 |
+|---|---|
+| Fewer messages were accepted even when they held more text | fewer but longer messages are rejected: the history is unchanged and no `ContextEdited` fires |
+| The same or a higher message count was rejected even with less text | a same-count, shorter result is accepted, with `removedBlocks` 0 |
+| `ContextEdited.tokensBefore` was the count the check compared with the limit | it is the estimate of the history the compactor was given, the number `tokensAfter` was judged against |
+
 **Sandbox output and RPC frames are capped, and a dead channel is a dead sandbox.** A snippet's
 stdout and stderr are each cut at 1,000,000 chars per execute, on both paths: what `System.out` and
 `System.err` capture during the execute, and what reaches the subprocess's raw stdout. Stdout from
@@ -1226,6 +1237,22 @@ DROP TABLE IF EXISTS helios_agent_runs;
 
 ### Changed
 
+- **The context check counts from the provider's reported input tokens** plus an estimate of the
+  messages added since, so inline files, the system prompt and tool definitions count. After each
+  turn of the session's model `ConversationHistory` records the request's message count and its
+  `Usage.promptTokens()`. A history replacement, or a turn reporting no input, clears the anchor, and
+  the check then estimates the whole history as before. A compaction's summary call never sets it.
+  No compactor runs while what the estimate cannot see, such as inline files and tool definitions,
+  reaches the 0.95 watermark by itself; a request that truly overflows ends with the provider's
+  error. An Anthropic `pause_turn` turn reports the sum of its segments, so it can compact early.
+- **A known window of 20,000 tokens or less now yields a limit below that window.** The output
+  reserve is 20,000 tokens or a quarter of the window, whichever is smaller, so a window of 8,000
+  gives a limit of 6,000 instead of the 180,000-token fallback, and a user cap of 50,000 next to it
+  gives 6,000 instead of 50,000. Windows up to 80,000 keep more than before: 30,000 gives 22,500,
+  not 10,000.
+- **Cancelling a run stops a `SummarizingCompactor` summary call.** A cancel ends the wait as the
+  timeout does: the worker is interrupted, no summary is returned and the history is unchanged. A
+  run already cancelled starts no summary call.
 - **`helios-persistence` now depends on `helios-session`**, for `PgSessionStore`; its module
   requires `com.standardapplied.helios.session`.
 - **A session no longer holds a platform thread.** Its wall-clock deadline was a

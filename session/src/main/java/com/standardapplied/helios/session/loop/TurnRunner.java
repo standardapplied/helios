@@ -93,7 +93,9 @@ public final class TurnRunner {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", Usage.of(0, 0)));
     }
 
+    var requestMessages = state.history().size();
     var streamed = modelCall.stream(state, limits, visibleTools(state));
+    state.history().anchor(requestMessages, streamed.usage());
     if (modelCall.selfCorrectSchema(state, streamed)) {
       return turnEnded(state, new TurnOutcome(FinishReason.TOOL_CALLS, "", state.totals().usage()));
     }

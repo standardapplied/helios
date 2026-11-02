@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.loop.SessionState;
@@ -43,6 +44,138 @@ final class BoundedTaskTest {
     assertTrue(task.settlesBy(Await.hangGuardDeadline()));
     assertEquals("done", task.outcome().resultNow());
     assertEquals(Optional.empty(), state.ending().seal());
+  }
+
+  @Test
+  void aTaskThatSettlesLeavesNoCallbackOnTheToken() {
+    var token = new CancellationToken();
+    var task = BoundedTask.start("helios-test-settled", () -> "done", state.ending()::failWith);
+
+    assertTrue(Await.value("the settled wait", waiting(task, token)));
+    assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void aWaitPastItsDeadlineLeavesNoCallbackOnTheToken() {
+    var token = new CancellationToken();
+
+    assertFalse(heldTask().settlesBy(Await.passedDeadline(), token));
+    assertEquals(0, token.activeCallbackCountForTests());
+  }
+
+  @Test
+  void aCancellationEndsTheWaitWithTheTaskStillRunning() {
+    var token = new CancellationToken();
+    var task = heldTask();
+
+    var waited = waiting(task, token);
+    Await.until("the wait to register", () -> token.activeCallbackCountForTests() == 1);
+    token.cancel("stop");
+
+    assertFalse(Await.value("the cancelled wait", waited));
+    assertFalse(task.outcome().isDone());
+  }
+
+  @Test
+  void aTokenAlreadyCancelledEndsTheWaitAtOnce() {
+    var token = new CancellationToken();
+    token.cancel("stop");
+
+    assertFalse(Await.value("the cancelled wait", waiting(heldTask(), token)));
+  }
+
+  @Test
+  void aValueReturnedAfterACancellationSettlesTheWait() {
+    var token = new CancellationToken();
+    var task =
+        BoundedTask.start(
+            "helios-test-cancelled-value",
+            () -> {
+              token.cancel("stop");
+              return "done";
+            },
+            state.ending()::failWith);
+    Await.value("the task's value", task.outcome());
+
+    assertTrue(task.settlesBy(Await.hangGuardDeadline(), token));
+  }
+
+  @Test
+  void aFailureThatCancelsTheTokenEndsTheWaitWithThatFailure() {
+    var token = new CancellationToken();
+    var thrown = new AssertionError("host failure");
+    var waiting = new CompletableFuture<Thread>();
+    var task =
+        BoundedTask.<String>start(
+            "helios-test-host-failure",
+            () -> {
+              release.await();
+              throw thrown;
+            },
+            failure -> {
+              token.cancel("host error");
+              var waiter = Await.value("the waiting thread", waiting);
+              Await.until(
+                  "the waiter to act on the cancellation",
+                  () -> waiter.getState() != Thread.State.RUNNABLE);
+            });
+
+    var waited =
+        CompletableFuture.supplyAsync(
+            () -> {
+              waiting.complete(Thread.currentThread());
+              return task.settlesBy(Await.hangGuardDeadline(), token);
+            },
+            Thread.ofVirtual()::start);
+    Await.until("the wait to register", () -> token.activeCallbackCountForTests() == 1);
+    release.countDown();
+
+    assertTrue(Await.value("the wait", waited));
+    assertSame(thrown, task.outcome().exceptionNow());
+  }
+
+  @Test
+  void aFailureStillBeingReportedDoesNotExtendTheDeadline() {
+    var token = new CancellationToken();
+    var thrown = new AssertionError("host failure");
+    var reporting = new CountDownLatch(1);
+    var task =
+        BoundedTask.<String>start(
+            "helios-test-pending-failure",
+            () -> {
+              throw thrown;
+            },
+            failure -> {
+              token.cancel("host error");
+              reporting.countDown();
+              Await.latch("the test to release the report", release);
+            });
+    Await.latch("the failure to be reported", reporting);
+
+    assertFalse(task.settlesBy(Await.passedDeadline(), token));
+    assertFalse(task.outcome().isDone());
+    assertEquals(0, token.activeCallbackCountForTests());
+
+    release.countDown();
+    var settled = task.outcome().handle((value, failure) -> failure);
+    assertSame(thrown, Await.value("the reported failure", settled));
+  }
+
+  private static CompletableFuture<Boolean> waiting(
+      BoundedTask<String> task, CancellationToken token) {
+    var deadline = BoundedTask.deadlineAfter(EndingSessions.NOT_REACHED);
+    return CompletableFuture.supplyAsync(
+        () -> task.settlesBy(deadline, token), Thread.ofVirtual()::start);
+  }
+
+  private BoundedTask<String> heldTask() {
+    return BoundedTask.start(
+        "helios-test-held",
+        () -> {
+          release.await();
+          return "released";
+        },
+        state.ending()::failWith);
   }
 
   @Test

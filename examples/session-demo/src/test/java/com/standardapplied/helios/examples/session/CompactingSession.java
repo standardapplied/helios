@@ -74,7 +74,7 @@ final class CompactingSession {
             .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
             .withTokenCounter(CompactingSession::tokens)
             .withLimits(
-                SessionLimits.newBuilder().withMaxContextTokens(100L).withMaxTurns(2).build())
+                SessionLimits.newBuilder().withMaxContextTokens(100_000L).withMaxTurns(2).build())
             .withContextCompactor(recording)
             .build();
     try (var session = AgentSession.open(options)) {
@@ -91,7 +91,10 @@ final class CompactingSession {
     }
   }
 
-  /** Over the watermark from the first tool result on, until the history holds a summary. */
+  /**
+   * Over the watermark from the first tool result on, until the history holds a summary. The limit
+   * sits far above what these short requests report, so this estimate alone crosses it.
+   */
   private static long tokens(List<Message> history) {
     var summarised =
         history.stream()
@@ -100,7 +103,7 @@ final class CompactingSession {
                     m.content() != null
                         && m.content().startsWith(SummarizingCompactor.SUMMARY_PREFIX));
     var toolRound = history.stream().anyMatch(m -> m.role() == Role.TOOL);
-    return toolRound && !summarised ? 96L : 10L;
+    return toolRound && !summarised ? 96_000L : 10L;
   }
 
   private static ToolBinding getProfile() {
