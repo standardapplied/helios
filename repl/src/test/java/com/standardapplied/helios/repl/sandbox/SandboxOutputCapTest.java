@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.repl.ReplConfig;
 import com.standardapplied.helios.repl.ReplException;
 import com.standardapplied.helios.repl.ReplSession;
+import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
 import java.io.IOException;
@@ -116,6 +117,29 @@ class SandboxOutputCapTest {
           "x".repeat(MAX_CAPTURED_OUTPUT_CHARS - 1)
               + "€\n[output truncated: 1 more chars discarded]",
           printed.stdout());
+    }
+  }
+
+  @Test
+  void aHostCallTooLongForAFrameFailsTheSnippetAndTheSessionGoesOnWithItsState() {
+    var registry = new HostFunctionRegistry();
+    registry.register(new HostFunction("ping", "answers", params -> "pong"));
+    try (var sandbox = JvmSandbox.create(CONFIG, registry)) {
+      sandbox.execute(ExecutionRequest.java("int kept = 41;"));
+
+      var refused =
+          sandbox.execute(
+              ExecutionRequest.java(
+                  "HostBridge.__call(\"ping\", Map.of(\"text\", \"x\".repeat(%d)));"
+                      .formatted(MAX_FRAME_CHARS)));
+
+      assertEquals(1, refused.exitCode());
+      assertTrue(refused.stderr().contains("exceeds the limit"), refused.stderr());
+      assertTrue(sandbox.isAlive());
+
+      var after = sandbox.execute(ExecutionRequest.java("System.out.print(kept + 1);"));
+
+      assertEquals("42", after.stdout());
     }
   }
 
