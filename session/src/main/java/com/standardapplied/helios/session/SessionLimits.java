@@ -54,11 +54,12 @@ import java.util.OptionalLong;
  *       </ul>
  *   <li>{@code maxContextTokens}: {@code 0} — sentinel meaning "auto, resolve from {@code
  *       Model.contextWindow()}". The agent loop picks an effective ceiling by reading the
- *       provider's documented window and subtracting a small output-token reservation; library
- *       users override with an explicit cap via {@link Builder#withMaxContextTokens(long)} when
- *       they want to compact earlier (or use a tighter cost ceiling). Any positive value is treated
- *       as a hard cap and clamped against the model's actual window to avoid requesting more
- *       context than the provider supports.
+ *       provider's documented window and subtracting an output-token reservation of 20,000 tokens
+ *       or a quarter of the window, whichever is smaller; library users override with an explicit
+ *       cap via {@link Builder#withMaxContextTokens(long)} when they want to compact earlier (or
+ *       use a tighter cost ceiling). Any positive value is treated as a hard cap and clamped
+ *       against the model's actual window to avoid requesting more context than the provider
+ *       supports.
  *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
  *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
  *       with {@link com.standardapplied.helios.core.model.TransientStreamException}: a transport
@@ -92,12 +93,14 @@ import java.util.OptionalLong;
  *     positive
  * @param stopGrace how long anything the session cancels is given to stop; must be non-null and
  *     strictly positive
- * @param maxContextTokens soft trigger for context compaction, measured as the {@link
- *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the <em>total tokens
- *     across every message in the conversation history so far</em> — cumulative, never per-turn.
- *     Must be non-negative. {@code 0} signals "auto" — the agent loop resolves an effective ceiling
- *     from {@link com.standardapplied.helios.core.model.Model#contextWindow()}. Any positive value
- *     is an explicit cap clamped against the model's actual window
+ * @param maxContextTokens soft trigger for context compaction, measured as the input size the
+ *     provider reported for the last request plus the {@link
+ *     com.standardapplied.helios.core.context.TokenCounter}'s estimate of the messages appended
+ *     since, or with no report the estimate of <em>every message in the conversation history so
+ *     far</em> — cumulative, never per-turn. Must be non-negative. {@code 0} signals "auto" — the
+ *     agent loop resolves an effective ceiling from {@link
+ *     com.standardapplied.helios.core.model.Model#contextWindow()}. Any positive value is an
+ *     explicit cap clamped against the model's actual window
  * @param streamRetryPolicy how the loop retries a turn that failed with {@link
  *     com.standardapplied.helios.core.model.TransientStreamException}; non-null
  * @param startTimeout how long {@code onSessionStart} is waited for; must be non-null and strictly

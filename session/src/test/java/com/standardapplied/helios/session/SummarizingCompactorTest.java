@@ -23,6 +23,7 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.loop.SessionHookContext;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -38,6 +39,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -343,6 +345,112 @@ final class SummarizingCompactorTest {
     assertSame(CONVERSATION, out.history());
     assertEquals(Usage.of(0, 0), out.usage());
     Await.latch("the timed-out summary call to be interrupted", interrupted);
+  }
+
+  @Test
+  void aCancelledContextMakesNoSummaryCall() {
+    var state = freshState();
+    state.cancellation().cancel("stop");
+    var summarizer = summaryModel("never");
+    var logged = new ArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      var compactor = SummarizingCompactor.newBuilder(summarizer).build();
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, contextOf(state)).history());
+    }
+
+    assertEquals(List.of(), logged, "a started call would log its cancellation");
+    assertTrue(summarizer.calls().isEmpty());
+  }
+
+  @Test
+  void aCancellationInterruptsTheSummaryCallAndIsLoggedAsACancellationNotATimeout() {
+    var state = freshState();
+    var interrupted = new CountDownLatch(1);
+    var compactor =
+        SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted))
+            .withSummaryTimeout(EndingSessions.NOT_REACHED)
+            .build();
+    var logged = new ArrayList<LogRecord>();
+    var compacted =
+        CompletableFuture.supplyAsync(
+            () -> compactor.compact(CONVERSATION, contextOf(state)), Thread.ofVirtual()::start);
+
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      Await.until(
+          "the summary wait to register",
+          () -> state.cancellation().activeCallbackCountForTests() == 1);
+      state.cancellation().cancel("stop");
+      assertSame(CONVERSATION, Await.value("the cancelled compaction", compacted).history());
+    }
+
+    Await.latch("the cancelled summary call to be interrupted", interrupted);
+    assertEquals(
+        List.of(
+            "Context compaction summary cancelled; leaving history unchanged."
+                + " Session sess-1 turn 0"),
+        logged.stream().map(LogRecord::getMessage).toList());
+  }
+
+  @Test
+  void aSummaryReturnedAfterACancellationLeavesTheHistoryUnchanged() {
+    var state = freshState();
+    var compactor = compactorSummarizingWith(() -> state.cancellation().cancel("stop"));
+
+    assertSame(CONVERSATION, compactor.compact(CONVERSATION, contextOf(state)).history());
+  }
+
+  @Test
+  void aSummaryAnsweredBeforeTheWaitSawACancellationReportsItsUsageAndLeavesTheHistoryUnchanged() {
+    var token = new CancellationToken();
+    var usage = Usage.of(100, 50);
+    var answering = new CompletableFuture<Thread>();
+    var compactor =
+        SummarizingCompactor.newBuilder(
+                modelAnswering(
+                    () -> {
+                      token.cancel("stop");
+                      answering.complete(Thread.currentThread());
+                      return Response.newBuilder().withContent("summary").withUsage(usage).build();
+                    }))
+            .build();
+    var cancellationReads = new AtomicInteger();
+    var waitingOnlyOnceAnswered =
+        new HookContext() {
+          @Override
+          public String sessionId() {
+            return "sess-1";
+          }
+
+          @Override
+          public String runId() {
+            return "run-1";
+          }
+
+          @Override
+          public long turnIndex() {
+            return 0;
+          }
+
+          @Override
+          public CancellationToken cancellation() {
+            if (cancellationReads.incrementAndGet() == 2) {
+              Await.termination("the summary call", Await.value("its thread", answering));
+            }
+            return token;
+          }
+
+          @Override
+          public Model model() {
+            return summaryModel("unused");
+          }
+        };
+
+    var out = compactor.compact(CONVERSATION, waitingOnlyOnceAnswered);
+
+    assertSame(CONVERSATION, out.history());
+    assertEquals(usage, out.usage());
+    assertEquals("summary", out.modelId());
   }
 
   @Test

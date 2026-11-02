@@ -79,11 +79,12 @@ import java.util.Optional;
  * @param systemPrompt optional system-role message prepended to the conversation history before the
  *     first user message. Presets supply their strategy text here so the agent loop carries it to
  *     every model turn through the standard system-role channel
- * @param tokenCounter estimates running history's token footprint after each model turn. When usage
- *     crosses {@code 0.85} of {@link SessionLimits#maxContextTokens()}, the loop emits a {@link
- *     QueryEvent.ContextWarning ContextWarning}; the same counter is used to detect the 0.95
- *     compaction watermark. Defaults to {@link TokenCounter#charBased()} — wire a provider-specific
- *     tokenizer when accuracy matters more than the per-turn cost. Non-null
+ * @param tokenCounter estimates what the provider has not reported yet: the messages added since
+ *     its last report, or the whole history with no report. When the count crosses {@code 0.85} of
+ *     {@link SessionLimits#maxContextTokens()}, the loop emits a {@link QueryEvent.ContextWarning
+ *     ContextWarning}; the same count is used to detect the 0.95 compaction watermark. Defaults to
+ *     {@link TokenCounter#charBased()} — wire a provider-specific tokenizer when accuracy matters
+ *     more than the per-turn cost. Non-null
  * @param contextCompactor shrinks the conversation history when usage crosses {@code 0.95} of
  *     {@link SessionLimits#maxContextTokens()}. Defaults to a {@link SummarizingCompactor} bound to
  *     {@code model} — keeps the system prompt and the pending user turn and replaces the rest with

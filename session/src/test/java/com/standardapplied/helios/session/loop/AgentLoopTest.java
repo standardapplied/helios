@@ -415,7 +415,7 @@ final class AgentLoopTest {
           compactorCalled.incrementAndGet();
           return CompactionResult.noOp(List.of(history.get(history.size() - 1)));
         };
-    buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, perMessage, shrinking)
+    buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(0, 1)), queue, perMessage, shrinking)
         .run(freshState(), limits, natural -> true);
     assertEquals(1, compactorCalled.get(), "compactor must be invoked at 0.95");
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).toList();
@@ -463,19 +463,19 @@ final class AgentLoopTest {
   }
 
   @Test
-  void contextCompactorReturningSameSizeListIsTreatedAsNoOp() {
+  void contextCompactorReturningACopyOfTheHistoryIsTreatedAsNoOp() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
     TokenCounter loud = msgs -> 96L;
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor swap =
         (history, state) ->
-            CompactionResult.noOp(new ArrayList<>(history)); // same size — must be ignored
+            CompactionResult.noOp(new ArrayList<>(history)); // same estimate — must be ignored
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(1, 1)), queue, loud, swap)
         .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().noneMatch(e -> e instanceof QueryEvent.ContextEdited),
-        "same-size result must not emit ContextEdited");
+        "a result of the same estimate must not emit ContextEdited");
   }
 
   @Test
@@ -531,12 +531,12 @@ final class AgentLoopTest {
                 queue.offer(UserMessage.text("turn-" + n));
               }
             });
-    TokenCounter loud = msgs -> 96L;
+    TokenCounter perMessage = msgs -> 96L * msgs.size();
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
     ContextCompactor shrinking =
         (history, state) ->
             CompactionResult.noOp(history.subList(history.size() - 1, history.size()));
-    buildLoopWith(multi, queue, loud, shrinking).run(freshState(), limits, natural -> true);
+    buildLoopWith(multi, queue, perMessage, shrinking).run(freshState(), limits, natural -> true);
     var warnings = events.stream().filter(e -> e instanceof QueryEvent.ContextWarning).count();
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).count();
     assertTrue(warnings >= 2, "warning flag must reset after compaction (got " + warnings + ")");

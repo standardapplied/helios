@@ -176,6 +176,10 @@ public final class AgentLoop {
     }
     state.beginTurn();
     compaction.check(state, limits);
+    if (state.cancellation().isCancelled()) {
+      var cancelled = classifier.imposed(state, limits).orElseThrow();
+      return Optional.of(decided(state, limits, boundary, cancelled));
+    }
     var outcome = turnRunner.runTurn(state, limits);
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));

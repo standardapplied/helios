@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.core.model.CancellationToken;
 import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -10,6 +11,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -25,16 +27,19 @@ final class BoundedTask<T> {
 
   private final Thread thread;
   private final CompletableFuture<T> outcome;
+  private final AtomicBoolean threw;
 
-  private BoundedTask(Thread thread, CompletableFuture<T> outcome) {
+  private BoundedTask(Thread thread, CompletableFuture<T> outcome, AtomicBoolean threw) {
     this.thread = thread;
     this.outcome = outcome;
+    this.threw = threw;
   }
 
   /** Start {@code task} on a new virtual thread named {@code threadName}. */
   static <T> BoundedTask<T> start(
       String threadName, Callable<T> task, Consumer<Throwable> failures) {
     var outcome = new CompletableFuture<T>();
+    var threw = new AtomicBoolean();
     var thread =
         Thread.ofVirtual()
             .name(threadName)
@@ -43,11 +48,12 @@ final class BoundedTask<T> {
                   try {
                     outcome.complete(task.call());
                   } catch (Throwable t) {
+                    threw.set(true);
                     failures.accept(t);
                     outcome.completeExceptionally(t);
                   }
                 });
-    return new BoundedTask<>(thread, outcome);
+    return new BoundedTask<>(thread, outcome, threw);
   }
 
   /**
@@ -86,6 +92,25 @@ final class BoundedTask<T> {
   /** As {@link #settlesBy(Future, long)} for this task's {@link #outcome()}. */
   boolean settlesBy(long deadlineNanos) {
     return settlesBy(outcome, deadlineNanos);
+  }
+
+  /**
+   * As {@link #settlesBy(long)}, a cancellation of {@code token} also ending the wait, unless the
+   * task threw: {@code failures} may be what cancelled {@code token}, and the wait then goes on
+   * until {@link #outcome()} holds what the task threw. The registration on {@code token} is
+   * removed on every exit.
+   *
+   * @return {@code true} if the task settled, with a value or a failure, when the wait ended
+   */
+  boolean settlesBy(long deadlineNanos, CancellationToken token) {
+    var cancelled = new CompletableFuture<Void>();
+    var registration = token.onCancel(() -> cancelled.complete(null));
+    try {
+      settlesBy(CompletableFuture.anyOf(outcome, cancelled), deadlineNanos);
+    } finally {
+      registration.remove();
+    }
+    return outcome.isDone() || threw.get() && settlesBy(deadlineNanos);
   }
 
   /** Interrupt the task's thread, asking a task the session stopped waiting for to stop. */
