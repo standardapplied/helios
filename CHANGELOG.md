@@ -25,6 +25,8 @@ call too long for a frame fails in the snippet with the session intact. The caps
 | `JvmSandbox.isAlive` was the subprocess's liveness, so a sandbox whose channel had ended failed every execute with `Channel is closed` | it is `false` once the channel ended: `ReplSession.isOpen` is `false`, `ReplSession.execute` throws `ReplException("Sandbox is no longer alive")`, and `JvmSandbox.execute` returns a failure saying `its RPC channel closed` |
 | A disconnected `RpcChannel` and `ProcessTransport` never released their executor and streams | the channel disposes once, on the end of its transport or on `close()`, whichever comes first; a handler still running on that end is interrupted |
 | Subprocess stdout was read line by line, so a bare `\r` split a line and an unfinished line waited for its newline | it is read in chunks: a `\r` stays as printed, and a drain returns what has arrived so far |
+| Nothing read the subprocess's raw stderr, so a snippet that filled the pipe through `FileDescriptor.err` blocked until its timeout | raw stderr is discarded; `System.err` during an execute is still captured |
+| A sandbox that exited because its channel ended could leave a process it started running | the sandbox ends its descendants before it exits |
 
 **The Gemini catalogue keeps 3.6, 3.7 and 3.8 Flash and adds 4 Argon.** A removed id is rejected
 like any unknown id: `GeminiProvider.create` throws `IllegalArgumentException` naming it and the
