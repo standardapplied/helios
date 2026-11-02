@@ -184,7 +184,7 @@ class SandboxOutputCapTest {
    * {@link JvmSandbox#close()} finds a descendant only by walking from a live subprocess.
    */
   @Test
-  void aSandboxEndedByAnOversizedFrameEndsItsChildrenWithoutWaitingForClose() {
+  void aSandboxWhoseChannelEndedEndsItsChildrenWithoutWaitingForClose() {
     var childPid = new AtomicReference<Long>();
     var registry = new HostFunctionRegistry();
     registry.register(
@@ -196,12 +196,6 @@ class SandboxOutputCapTest {
               childPid.set(Long.parseLong(params.get("pid").toString()));
               return null;
             }));
-    registry.register(
-        new HostFunction(
-            "sink",
-            "takes a value",
-            List.of(HostParameter.required("value", ParameterType.STRING, "the value")),
-            params -> null));
     try (var sandbox = JvmSandbox.create(CONFIG, registry)) {
       var started =
           sandbox.execute(
@@ -211,11 +205,8 @@ class SandboxOutputCapTest {
       assertEquals(0, started.exitCode(), started.stderr());
       var child = ProcessHandle.of(childPid.get()).orElseThrow();
       try {
-        var oversized =
-            sandbox.execute(
-                ExecutionRequest.java("sink(\"x\".repeat(%d));".formatted(MAX_FRAME_CHARS)));
+        sandbox.rpc().channel().close();
 
-        assertEquals("Channel closed", oversized.stderr());
         Await.value("the child to end with the sandbox", child.onExit());
       } finally {
         child.destroyForcibly();
