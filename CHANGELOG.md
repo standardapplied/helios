@@ -14,8 +14,9 @@ the two paths is joined and cut as one output. Each stream ends in one
 on with its state. Output that JSON escapes heavily is cut earlier during an execute, because the
 reply carries it escaped: a stream of control characters keeps about 444,000 chars. Timeout
 diagnostics share stderr's cap. An RPC frame over 8,000,000 chars closes the channel and ends the
-sandbox; printing does not reach that limit, only code that writes the socket itself. The caps are
-constants, `ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS` and `MAX_FRAME_CHARS`.
+sandbox; printing does not reach that limit, only code that writes the socket itself, and a host
+call too long for a frame fails in the snippet with the session intact. The caps are constants,
+`ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS` and `MAX_FRAME_CHARS`.
 
 | Before | 3.0 |
 |---|---|
