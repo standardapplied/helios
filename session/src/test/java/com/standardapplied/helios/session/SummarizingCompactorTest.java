@@ -385,6 +385,14 @@ final class SummarizingCompactorTest {
   }
 
   @Test
+  void aSummaryReturnedAfterACancellationLeavesTheHistoryUnchanged() {
+    var state = freshState();
+    var compactor = compactorSummarizingWith(() -> state.cancellation().cancel("stop"));
+
+    assertSame(CONVERSATION, compactor.compact(CONVERSATION, contextOf(state)).history());
+  }
+
+  @Test
   void anInterruptedCompactionLeavesTheHistoryKeepsTheInterruptAndInterruptsTheSummaryCall() {
     var interrupted = new CountDownLatch(1);
     var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();

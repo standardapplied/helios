@@ -87,6 +87,22 @@ final class BoundedTaskTest {
   }
 
   @Test
+  void aValueReturnedAfterACancellationDoesNotSettleTheWait() {
+    var token = new CancellationToken();
+    var task =
+        BoundedTask.start(
+            "helios-test-cancelled-value",
+            () -> {
+              token.cancel("stop");
+              return "done";
+            },
+            state.ending()::failWith);
+    Await.value("the task's value", task.outcome());
+
+    assertFalse(task.settlesBy(Await.hangGuardDeadline(), token));
+  }
+
+  @Test
   void aFailureThatCancelsTheTokenEndsTheWaitWithThatFailure() {
     var token = new CancellationToken();
     var thrown = new AssertionError("host failure");
