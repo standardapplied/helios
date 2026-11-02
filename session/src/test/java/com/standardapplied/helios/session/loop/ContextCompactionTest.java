@@ -342,7 +342,8 @@ final class ContextCompactionTest {
           callbacks.add(token.activeCallbackCountForTests());
           return result;
         };
-    var loop = loop(ScriptedModel.newBuilder().build(), observed);
+    var model = ScriptedModel.newBuilder().withTextTurn("never used").build();
+    var loop = loop(model, observed);
 
     var run =
         CompletableFuture.supplyAsync(
@@ -358,5 +359,6 @@ final class ContextCompactionTest {
     assertEquals("earlier", cancellable.history().snapshot().getFirst().content());
     assertEquals(callbacks.get(0), callbacks.get(1));
     assertEquals(List.of(), edits());
+    assertEquals(List.of(), model.calls());
   }
 }
