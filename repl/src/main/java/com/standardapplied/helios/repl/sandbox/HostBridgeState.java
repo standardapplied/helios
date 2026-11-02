@@ -53,11 +53,19 @@ final class HostBridgeState {
    * drains as a side channel since C1). The prefix is not strictly necessary on this dedicated
    * socket — both peers know every byte is RPC — but the parser's contract still requires it. Do
    * not remove it without changing {@code ProcessTransport.receive} in lockstep.
+   *
+   * @throws IOException if the frame is too long for the host, which would end the channel on it;
+   *     refused here, it costs the one call and not the session
    */
   void sendRpc(RpcMessage message) throws IOException {
-    var json = ProcessTransport.serializeMessage(message);
+    var frame = ProcessTransport.RPC_PREFIX + ProcessTransport.serializeMessage(message);
+    if (frame.length() > ProcessTransport.MAX_FRAME_CHARS) {
+      throw new IOException(
+          "Frame of %d chars exceeds the limit of %d chars"
+              .formatted(frame.length(), ProcessTransport.MAX_FRAME_CHARS));
+    }
     synchronized (realOut) {
-      realOut.print(ProcessTransport.RPC_PREFIX + json + "\n");
+      realOut.print(frame + "\n");
       realOut.flush();
     }
   }

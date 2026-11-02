@@ -16,13 +16,18 @@ import com.standardapplied.helios.core.test.Await;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class ProcessTransportTest {
+
+  private static final String RESPONSE_FRAME =
+      ProcessTransport.RPC_PREFIX + "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":\"ok\"}";
 
   @Test
   void nullInputThrows() {
@@ -544,5 +549,162 @@ class ProcessTransportTest {
     assertThrows(IOException.class, transport::receive);
 
     assertFalse(transport.isOpen(), "IOException from read side must mark the transport closed");
+  }
+
+  @Test
+  void takeStdoutHoldsTheKeptLinesAndTheCountApart() throws Exception {
+    var line = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS + 2);
+    var transport = transportOver(line + "\n" + RESPONSE_FRAME + "\n");
+
+    assertInstanceOf(RpcMessage.Response.class, transport.receive());
+
+    var cut = transport.takeStdout();
+    assertEquals(line.substring(2), cut.kept());
+    assertEquals(2, cut.discarded());
+    assertEquals("", transport.drainStdout());
+  }
+
+  @Test
+  void drainStdoutKeepsTheFirstCharsOfNonRpcLinesAndCountsTheRest() throws Exception {
+    var joined = "x".repeat(99) + ("\n" + "x".repeat(99)).repeat(29_999) + "x";
+    assertEquals(3_000_000, joined.length());
+    var fed = joined + "\n" + RESPONSE_FRAME + "\n";
+    var transport = transportOver(fed);
+
+    assertInstanceOf(RpcMessage.Response.class, transport.receive());
+
+    assertEquals(
+        joined.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS)
+            + "\n[output truncated: 2000000 more chars discarded]",
+        transport.drainStdout());
+    assertEquals("", transport.drainStdout());
+  }
+
+  @Test
+  void aLineOverTheFrameLimitFailsReceiveNamingTheLimit() {
+    var frame = ProcessTransport.RPC_PREFIX;
+    var transport =
+        transportOver(frame + "x".repeat(ProcessTransport.MAX_FRAME_CHARS + 1 - frame.length()));
+
+    var thrown = assertThrows(IOException.class, transport::receive);
+
+    assertEquals("Line exceeds the limit of 8000000 chars", thrown.getMessage());
+    assertFalse(transport.isOpen());
+  }
+
+  @Test
+  void aFrameOfExactlyTheLimitIsReadAndParsed() throws Exception {
+    var open = ProcessTransport.RPC_PREFIX + "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":\"";
+    var close = "\"}";
+    var value = "x".repeat(ProcessTransport.MAX_FRAME_CHARS - open.length() - close.length());
+    var transport = transportOver(open + value + close + "\n");
+
+    assertEquals(new RpcMessage.Response("1", value), transport.receive());
+  }
+
+  @Test
+  void aFinalLineWithoutANewlineIsStillALine() throws Exception {
+    var transport = transportOver("no newline");
+
+    assertNull(transport.receive());
+
+    assertEquals("no newline", transport.drainStdout());
+  }
+
+  @Test
+  void aLineTerminatedOnlyByItsNewlineMayBeEmpty() throws Exception {
+    var transport = transportOver("first\n\nthird\n");
+
+    assertNull(transport.receive());
+
+    assertEquals("first\n\nthird", transport.drainStdout());
+  }
+
+  @Test
+  void closeAfterEofReleasesBothStreamsOnce() throws Exception {
+    var streams = new CountedStreams();
+    var transport = streams.transport();
+    streams.fromPeer.end();
+
+    assertNull(transport.receive());
+    transport.close();
+    transport.close();
+
+    assertEquals(1, streams.inputCloses.get());
+    assertEquals(1, streams.outputCloses.get());
+  }
+
+  @Test
+  void closeAfterAReadFailureReleasesBothStreamsOnce() throws Exception {
+    var streams = new CountedStreams();
+    var transport = streams.transport();
+    streams.fromPeer.fail(new IOException("synthetic read failure"));
+
+    assertThrows(IOException.class, transport::receive);
+    assertFalse(transport.isOpen());
+    transport.close();
+
+    assertEquals(1, streams.inputCloses.get());
+    assertEquals(1, streams.outputCloses.get());
+  }
+
+  @Test
+  void aWriterThatFailsToCloseStillReleasesTheReader() {
+    var closed = new AtomicBoolean();
+    var transport =
+        new ProcessTransport(
+            new ByteArrayInputStream(new byte[0]) {
+              @Override
+              public void close() {
+                closed.set(true);
+              }
+            },
+            new OutputStream() {
+              @Override
+              public void write(int b) {}
+
+              @Override
+              public void close() throws IOException {
+                throw new IOException("synthetic close failure");
+              }
+            });
+
+    var thrown = assertThrows(IOException.class, transport::close);
+
+    assertEquals("synthetic close failure", thrown.getMessage());
+    assertTrue(closed.get());
+  }
+
+  @Test
+  void aReaderThatFailsToCloseStillReleasesTheWriter() {
+    var closed = new AtomicBoolean();
+    var transport =
+        new ProcessTransport(
+            new ByteArrayInputStream(new byte[0]) {
+              @Override
+              public void close() throws IOException {
+                throw new IOException("synthetic close failure");
+              }
+            },
+            new OutputStream() {
+              @Override
+              public void write(int b) {}
+
+              @Override
+              public void close() {
+                closed.set(true);
+              }
+            });
+
+    var thrown = assertThrows(IOException.class, transport::close);
+
+    assertEquals("synthetic close failure", thrown.getMessage());
+    assertTrue(closed.get());
+  }
+
+  private static ProcessTransport transportOver(String fed) {
+    return new ProcessTransport(
+        new ByteArrayInputStream(fed.getBytes(StandardCharsets.UTF_8)),
+        new ByteArrayOutputStream());
   }
 }

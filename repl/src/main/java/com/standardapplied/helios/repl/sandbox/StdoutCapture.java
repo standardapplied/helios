@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.repl.sandbox;
 
+import com.standardapplied.helios.repl.protocol.CapturedOutput;
+import com.standardapplied.helios.repl.protocol.CapturedOutput.Cut;
 import com.standardapplied.helios.repl.protocol.ProcessTransport;
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -11,38 +12,47 @@ import java.util.function.Supplier;
 
 /**
  * What the sandbox subprocess printed since the last execute. A launched sandbox reads its
- * subprocess's stdout on a virtual thread of its own, joining lines with {@code \n}; RPC travels
+ * subprocess's stdout in chunks on a virtual thread of its own, so output with no newline is
+ * bounded by the {@link ProcessTransport#MAX_CAPTURED_OUTPUT_CHARS} cap of {@link CapturedOutput}
+ * too, and the stream is read to its end so the subprocess never blocks on a full pipe; RPC travels
  * over the socket and never through this stream. A sandbox wired directly to a {@link
  * ProcessTransport} drains the lines that transport set aside as not being RPC.
  */
 final class StdoutCapture {
 
-  private final Supplier<String> drain;
+  private static final int CHUNK_CHARS = 8192;
+
+  private final Supplier<Cut> take;
   private final Thread reader;
 
-  private StdoutCapture(Supplier<String> drain, Thread reader) {
-    this.drain = drain;
+  private StdoutCapture(Supplier<Cut> take, Thread reader) {
+    this.take = take;
     this.reader = reader;
   }
 
   /** Start reading {@code process}'s stdout until the stream ends. */
   static StdoutCapture start(Process process) {
-    var buffer = new StringBuilder();
+    var buffer = new CapturedOutput();
     var reader =
         Thread.ofVirtual()
             .name("helios-sandbox-stdout-reader")
-            .start(() -> readLines(process, buffer));
-    return new StdoutCapture(() -> drainBuffer(buffer), reader);
+            .start(() -> readChunks(process, buffer));
+    return new StdoutCapture(() -> withoutFinalNewline(buffer.take()), reader);
   }
 
   /** The output {@code transport} set aside, for a sandbox with no reader of its own. */
   static StdoutCapture of(ProcessTransport transport) {
-    return new StdoutCapture(transport::drainStdout, null);
+    return new StdoutCapture(transport::takeStdout, null);
   }
 
   /** The output captured since the last drain; the buffer is cleared for the next execute. */
   String drain() {
-    return drain.get();
+    return take().text();
+  }
+
+  /** As {@link #drain()}, for a caller that adds output of its own to what was captured. */
+  Cut take() {
+    return take.get();
   }
 
   /** Stop the reader of a launch that failed. */
@@ -68,28 +78,21 @@ final class StdoutCapture {
     }
   }
 
-  private static void readLines(Process process, StringBuilder buffer) {
-    try (var lines =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = lines.readLine()) != null) {
-        synchronized (buffer) {
-          if (!buffer.isEmpty()) {
-            buffer.append('\n');
-          }
-          buffer.append(line);
-        }
+  private static void readChunks(Process process, CapturedOutput buffer) {
+    try (var output = new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8)) {
+      var chunk = new char[CHUNK_CHARS];
+      int count;
+      while ((count = output.read(chunk)) != -1) {
+        buffer.append(new String(chunk, 0, count));
       }
     } catch (IOException ignored) {
     }
   }
 
-  private static String drainBuffer(StringBuilder buffer) {
-    synchronized (buffer) {
-      var captured = buffer.toString();
-      buffer.setLength(0);
-      return captured;
-    }
+  private static Cut withoutFinalNewline(Cut cut) {
+    var kept = cut.kept();
+    return cut.discarded() == 0 && kept.endsWith("\n")
+        ? new Cut(kept.substring(0, kept.length() - 1), cut.discarded())
+        : cut;
   }
 }

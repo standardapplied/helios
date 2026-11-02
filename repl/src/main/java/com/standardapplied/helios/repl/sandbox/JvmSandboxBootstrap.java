@@ -48,9 +48,9 @@ public final class JvmSandboxBootstrap {
    * Subprocess entry point. Expects exactly one argument, {@code --rpc-socket=<path>}, identifying
    * the Unix domain socket the host bound for this sandbox. Connects on startup; the host accepts
    * exactly one connection and closes its listener immediately, so this connection is the only RPC
-   * channel for the sandbox's lifetime. Subprocess stdin is unused (closed by the host) and
-   * subprocess stdout/stderr stay attached to the OS pipes for incidental capture only — they are
-   * never parsed as RPC.
+   * channel for the sandbox's lifetime. Subprocess stdin is unused (closed by the host), subprocess
+   * stderr is discarded, and subprocess stdout stays attached to its OS pipe for incidental capture
+   * only — it is never parsed as RPC.
    *
    * <p><strong>What C1 closes.</strong> The stdout-RPC forgery path: a snippet writing a {@code
    * \0RPC:} frame to raw {@code FileDescriptor.out} can no longer reach the host's dispatcher,
@@ -135,6 +135,8 @@ public final class JvmSandboxBootstrap {
 
     new BootstrapRpc(rpcIn, bridge, evaluator, Runtime.getRuntime()::halt).readLoop();
 
+    // Once this JVM has exited, JvmSandbox.close can no longer walk from it to what it started.
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
     jshell.close();
     try {
       rpcSocket.close();
