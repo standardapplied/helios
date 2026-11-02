@@ -14,7 +14,10 @@ import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.schema.OutputSchema;
+import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.session.CompactionResult;
@@ -27,10 +30,13 @@ import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.AfterEach;
@@ -48,6 +54,9 @@ final class ContextCompactionTest {
   private static final long TOKENS_PER_MESSAGE = 10L;
   private static final Usage FIRST_TURN = Usage.of(1_000, 7, 500, 4_000);
   private static final long FIRST_TURN_INPUT = 5_500L;
+  private static final Duration NOT_REACHED = Duration.ofMinutes(10);
+
+  private record Answer(String field) {}
 
   private final LoopFixture fixture =
       new LoopFixture("sess-context", Instant.parse("2026-10-30T09:00:00Z"));
@@ -125,6 +134,7 @@ final class ContextCompactionTest {
     "80000, 0, 60000",
     "200000, 0, 180000",
     "3, 0, 3",
+    "1, 0, 1",
     "0, 0, 180000",
     "8000, 50000, 6000",
     "200000, 50000, 50000",
@@ -312,6 +322,56 @@ final class ContextCompactionTest {
   }
 
   @Test
+  void aTurnAfterAMutateHistoryHookAnchorsOnTheRewrittenHistory() {
+    var rewritten = List.of(Message.user("rewritten"));
+    PreModelTurnHook rewriteSecondTurn =
+        (history, context) ->
+            context.turnIndex() == 2 ? HookOutcome.mutateHistory(rewritten) : HookOutcome.cont();
+    var loop =
+        loop(
+            twoTurns(Usage.of(6_000, 7)),
+            new HookRegistry(List.of(rewriteSecondTurn), new SecretRegistry()),
+            CostCalculator.ZERO,
+            ContextCompactor.disabled());
+
+    run(loop, 1_000_000L);
+
+    var history = state.history().snapshot();
+    assertEquals(2, history.size());
+    assertEquals(history.subList(1, 2), counted.getLast());
+    assertEquals(6_000L + TOKENS_PER_MESSAGE, state.history().tokens(recording));
+  }
+
+  @Test
+  void aTurnThatSelfCorrectsItsSchemaStillAnchors() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new StructuredOutputParseException(List.of("field is missing"), "{}"),
+                    new ModelChunk.MessageStop("STOP", FIRST_TURN, Map.of())))
+            .withTextTurn("{\"field\":\"recovered\"}", Usage.of(6_000, 7))
+            .build();
+    var collaborators =
+        fixture.collaborators(HookRegistry.empty(), fixture.dispatch(ToolRegistry.empty()), queue);
+    var runner =
+        fixture.runner(collaborators, model, CostCalculator.ZERO, OutputSchema.of(Answer.class));
+
+    run(fixture.loop(collaborators, runner, recording, ContextCompactor.disabled()), 1_000_000L);
+
+    assertEquals(state.history().snapshot().subList(1, 2), counted.get(1));
+  }
+
+  @Test
+  void aReportOfOneInputTokenAnchors() {
+    state.history().append(Message.user("a"));
+
+    state.history().anchor(1, Usage.of(1, 0));
+
+    assertEquals(1L, state.history().tokens(recording));
+  }
+
+  @Test
   void aTurnReportingNoInputClearsTheAnchor() {
     run(loop(twoTurns(Usage.of(0, 7)), ContextCompactor.disabled()), 1_000_000L);
 
@@ -333,7 +393,8 @@ final class ContextCompactionTest {
               entered.countDown();
               Uninterruptible.await(held);
             });
-    var summarizing = SummarizingCompactor.newBuilder(summaryModel).build();
+    var summarizing =
+        SummarizingCompactor.newBuilder(summaryModel).withSummaryTimeout(NOT_REACHED).build();
     var callbacks = new ArrayList<Integer>();
     ContextCompactor observed =
         (history, context) -> {

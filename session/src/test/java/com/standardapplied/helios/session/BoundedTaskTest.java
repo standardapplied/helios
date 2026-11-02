@@ -51,7 +51,7 @@ final class BoundedTaskTest {
     var token = new CancellationToken();
     var task = BoundedTask.start("helios-test-settled", () -> "done", state.ending()::failWith);
 
-    assertTrue(task.settlesBy(Await.hangGuardDeadline(), token));
+    assertTrue(Await.value("the settled wait", waiting(task, token)));
     assertEquals(0, token.activeCallbackCountForTests());
   }
 
@@ -68,9 +68,7 @@ final class BoundedTaskTest {
     var token = new CancellationToken();
     var task = heldTask();
 
-    var waited =
-        CompletableFuture.supplyAsync(
-            () -> task.settlesBy(Await.hangGuardDeadline(), token), Thread.ofVirtual()::start);
+    var waited = waiting(task, token);
     Await.until("the wait to register", () -> token.activeCallbackCountForTests() == 1);
     token.cancel("stop");
 
@@ -83,7 +81,7 @@ final class BoundedTaskTest {
     var token = new CancellationToken();
     token.cancel("stop");
 
-    assertFalse(heldTask().settlesBy(Await.hangGuardDeadline(), token));
+    assertFalse(Await.value("the cancelled wait", waiting(heldTask(), token)));
   }
 
   @Test
@@ -161,6 +159,13 @@ final class BoundedTaskTest {
     release.countDown();
     var settled = task.outcome().handle((value, failure) -> failure);
     assertSame(thrown, Await.value("the reported failure", settled));
+  }
+
+  private static CompletableFuture<Boolean> waiting(
+      BoundedTask<String> task, CancellationToken token) {
+    var deadline = BoundedTask.deadlineAfter(EndingSessions.NOT_REACHED);
+    return CompletableFuture.supplyAsync(
+        () -> task.settlesBy(deadline, token), Thread.ofVirtual()::start);
   }
 
   private BoundedTask<String> heldTask() {
