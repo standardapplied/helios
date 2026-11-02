@@ -2,6 +2,7 @@
 package com.standardapplied.helios.repl.sandbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
@@ -14,6 +15,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,6 +63,86 @@ class StdoutCaptureTest {
     capture.awaitEnd(Await.HANG_GUARD);
 
     assertEquals("partial", capture.drain());
+  }
+
+  @Test
+  void aNewlineAtTheCutStaysInTheKeptTextAndEveryCharIsAccountedFor() {
+    var printed = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1) + "\nab";
+    var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    var cut = capture.take();
+    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS), cut.kept());
+    assertEquals(2, cut.discarded());
+  }
+
+  @Test
+  void theFinalNewlineOfOutputThatFitsIsLeftOut() {
+    var printed = "x".repeat(ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1) + "\n";
+    var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    var cut = capture.take();
+    assertEquals(printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS - 1), cut.kept());
+    assertEquals(0, cut.discarded());
+  }
+
+  @Test
+  void outputWithNoNewlineIsCutAtTheCapAndTheStreamIsReadToItsEnd() {
+    var printed = "x".repeat(3_000_000);
+    var stdout = new ByteArrayInputStream(printed.getBytes(StandardCharsets.UTF_8));
+    var process = new ReadRecordingProcess(stdout);
+    var capture = StdoutCapture.start(process);
+
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    assertFalse(process.reader.isAlive());
+    assertEquals(0, stdout.available());
+    assertEquals(
+        printed.substring(0, ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS)
+            + "\n[output truncated: 2000000 more chars discarded]",
+        capture.drain());
+    assertEquals("", capture.drain());
+  }
+
+  @Test
+  void outputIsDrainedWithoutWaitingForANewlineAndOnlyItsFinalNewlineIsDropped() {
+    var stdout = new FeedableInputStream();
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+
+    stdout.feed("no newline yet");
+    var drained = new AtomicReference<>("");
+    Await.until(
+        "the reader to capture the output",
+        () -> {
+          drained.set(capture.drain());
+          return !drained.get().isEmpty();
+        });
+    assertEquals("no newline yet", drained.get());
+    stdout.feed("blank line follows\n\n");
+    stdout.end();
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    assertEquals("blank line follows\n", capture.drain());
+  }
+
+  @Test
+  void aCharacterSplitAcrossReadsIsDecodedWhole() {
+    var stdout = new FeedableInputStream();
+    var capture = StdoutCapture.start(new ReadRecordingProcess(stdout));
+    var euro = "\u20AC".getBytes(StandardCharsets.UTF_8);
+
+    stdout.feed(new byte[] {euro[0]});
+    stdout.awaitBlockedRead();
+    stdout.feed(new byte[] {euro[1], euro[2]});
+    stdout.end();
+    capture.awaitEnd(Await.HANG_GUARD);
+
+    assertEquals("\u20AC", capture.drain());
   }
 
   @Test

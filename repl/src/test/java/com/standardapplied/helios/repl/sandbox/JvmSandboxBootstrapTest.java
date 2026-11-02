@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.repl.sandbox;
 
+import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_CAPTURED_OUTPUT_CHARS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -724,6 +725,48 @@ class JvmSandboxBootstrapTest {
         "Concurrent execution rejected — only one execute may run at a time", result.get("stderr"));
     rpc.dispatch(new RpcMessage.Response(heldBy.id(), Map.of("output", "released")));
     assertEquals(0, Await.value("the first execute", first).get("exitCode"));
+  }
+
+  @Test
+  void aReplyHoldsTheKeptStdoutAndTheCountDroppedApart() {
+    var result =
+        evaluator.handleExecute(
+            Map.of(
+                "code",
+                "System.out.print(\"x\".repeat(%d));".formatted(MAX_CAPTURED_OUTPUT_CHARS + 2),
+                "timeoutMs",
+                BEYOND_HANG_GUARD_MS));
+
+    assertEquals("x".repeat(MAX_CAPTURED_OUTPUT_CHARS), result.get("stdout"));
+    assertEquals(2L, result.get("stdoutDiscarded"));
+  }
+
+  @Test
+  void aTimeoutAfterStderrFilledLeavesTheMarkerLast() {
+    timeoutsFiredByTheTest();
+    var fillStderr = "System.err.print(\"x\".repeat(%d));\n".formatted(MAX_CAPTURED_OUTPUT_CHARS);
+
+    rpc.dispatch(
+        new RpcMessage.Request(
+            "1",
+            "execute",
+            Map.of(
+                "code",
+                fillStderr + runningThen(BLOCK_UNTIL_INTERRUPTED),
+                "timeoutMs",
+                BEYOND_HANG_GUARD_MS)));
+    answer(env.nextRequest());
+    env.timeOut();
+
+    var result = responseResult(env.nextMessage());
+    assertEquals(true, result.get("timedOut"));
+    var stderr = (String) result.get("stderr");
+    assertEquals(
+        "x".repeat(MAX_CAPTURED_OUTPUT_CHARS), stderr.substring(0, MAX_CAPTURED_OUTPUT_CHARS));
+    var afterTheKeptText = stderr.substring(MAX_CAPTURED_OUTPUT_CHARS);
+    assertTrue(
+        afterTheKeptText.matches("\\n\\[output truncated: \\d+ more chars discarded]"),
+        "after the kept text: " + afterTheKeptText);
   }
 
   /**
