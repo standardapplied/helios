@@ -352,11 +352,14 @@ final class SummarizingCompactorTest {
     var state = freshState();
     state.cancellation().cancel("stop");
     var summarizer = summaryModel("never");
+    var logged = new ArrayList<LogRecord>();
 
-    var out =
-        SummarizingCompactor.newBuilder(summarizer).build().compact(CONVERSATION, contextOf(state));
+    try (var ignored = LogCapture.of(SummarizingCompactor.class, logged)) {
+      var compactor = SummarizingCompactor.newBuilder(summarizer).build();
+      assertSame(CONVERSATION, compactor.compact(CONVERSATION, contextOf(state)).history());
+    }
 
-    assertSame(CONVERSATION, out.history());
+    assertEquals(List.of(), logged, "a started call would log its cancellation");
     assertTrue(summarizer.calls().isEmpty());
   }
 
@@ -364,7 +367,10 @@ final class SummarizingCompactorTest {
   void aCancellationInterruptsTheSummaryCallAndIsLoggedAsACancellationNotATimeout() {
     var state = freshState();
     var interrupted = new CountDownLatch(1);
-    var compactor = SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted)).build();
+    var compactor =
+        SummarizingCompactor.newBuilder(blockingUntilInterrupted(interrupted))
+            .withSummaryTimeout(EndingSessions.NOT_REACHED)
+            .build();
     var logged = new ArrayList<LogRecord>();
     var compacted =
         CompletableFuture.supplyAsync(
