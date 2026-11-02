@@ -4,9 +4,11 @@ package com.standardapplied.helios.repl.protocol;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.FeedableInputStream;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import java.io.FilterInputStream;
@@ -164,17 +166,55 @@ class RpcChannelDisposalTest {
     assertEquals(1, ended.outputCloses.get());
   }
 
+  /**
+   * A read loop can finish before the constructor's next statement. Nothing can hold the
+   * constructor there, so many channels give that order its chance.
+   */
+  @Test
+  void everyChannelOverAnEndedTransportIsDisposed() {
+    var channels = 5_000;
+    var disposed = new CountDownLatch(channels);
+    var ended = endedTransport(disposed::countDown);
+    var registry = new HostFunctionRegistry();
+
+    for (var i = 0; i < channels; i++) {
+      new RpcChannel(ended, registry, Await.HANG_GUARD);
+    }
+
+    Await.latch("every read loop to dispose its channel", disposed);
+  }
+
   /** {@link ProcessTransport} forgives a second close; a channel must not rely on that. */
   @Test
   void theTransportIsClosedOnceThoughBothPathsRun() {
     var transportCloses = new AtomicInteger();
-    var endedTransport =
+    var channelOverEnded =
+        new RpcChannel(
+            endedTransport(transportCloses::incrementAndGet),
+            new HostFunctionRegistry(),
+            Await.HANG_GUARD);
+
+    Await.until("the read loop to close the channel", () -> transportCloses.get() > 0);
+    channelOverEnded.close();
+
+    assertEquals(1, transportCloses.get());
+  }
+
+  /** Whatever holds up the transport's close, a call waiting on the channel is told first. */
+  @Test
+  void aTransportStuckClosingDoesNotHoldUpAPendingCall() {
+    var sent = new CountDownLatch(1);
+    var closeReleased = new CountDownLatch(1);
+    var stuck =
         new RpcTransport() {
           @Override
-          public void send(RpcMessage message) {}
+          public void send(RpcMessage message) {
+            sent.countDown();
+          }
 
           @Override
           public RpcMessage receive() {
+            Uninterruptible.await(closeReleased);
             return null;
           }
 
@@ -185,16 +225,87 @@ class RpcChannelDisposalTest {
 
           @Override
           public void close() {
-            transportCloses.incrementAndGet();
+            Uninterruptible.await(closeReleased);
           }
         };
-    var channelOverEnded =
-        new RpcChannel(endedTransport, new HostFunctionRegistry(), Await.HANG_GUARD);
+    var stuckChannel =
+        new RpcChannel(stuck, new HostFunctionRegistry(), Await.HANG_GUARD.multipliedBy(5));
+    var pending =
+        CompletableFuture.supplyAsync(
+            () -> stuckChannel.call("never-answered", null), Thread.ofVirtual()::start);
+    Await.latch("the call to be sent", sent);
 
-    Await.until("the read loop to close the channel", () -> transportCloses.get() > 0);
-    channelOverEnded.close();
+    var closing = CompletableFuture.runAsync(stuckChannel::close, Thread.ofVirtual()::start);
 
-    assertEquals(1, transportCloses.get());
+    assertChannelClosed(Await.failure("the pending call", pending));
+    closeReleased.countDown();
+    Await.value("the close to return", closing);
+  }
+
+  /**
+   * A call checks the channel while a close sweeps its pending calls. Nothing can hold either at
+   * that point, so many rounds give that order its chance. A call the sweep missed would wait out
+   * its whole timeout.
+   */
+  @Test
+  void aCallRacingACloseNeverWaitsOutItsTimeout() {
+    var transport =
+        new RpcTransport() {
+          @Override
+          public void send(RpcMessage message) {}
+
+          @Override
+          public RpcMessage receive() {
+            try {
+              new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            return null;
+          }
+
+          @Override
+          public boolean isOpen() {
+            return true;
+          }
+
+          @Override
+          public void close() {}
+        };
+    var registry = new HostFunctionRegistry();
+
+    for (var round = 0; round < 10_000; round++) {
+      var racing = new RpcChannel(transport, registry, Await.HANG_GUARD);
+      var closer = Thread.ofVirtual().start(racing::close);
+
+      var failure =
+          assertThrows(RpcChannel.RpcException.class, () -> racing.call("never-answered", null));
+
+      assertFalse(failure instanceof RpcChannel.RpcTimeoutException, "round " + round);
+      Await.termination("the close", closer);
+    }
+  }
+
+  private static RpcTransport endedTransport(Runnable onClose) {
+    return new RpcTransport() {
+      @Override
+      public void send(RpcMessage message) {}
+
+      @Override
+      public RpcMessage receive() {
+        return null;
+      }
+
+      @Override
+      public boolean isOpen() {
+        return true;
+      }
+
+      @Override
+      public void close() {
+        onClose.run();
+      }
+    };
   }
 
   private void assertClosedOnce() {
