@@ -5,6 +5,9 @@
 
 package com.standardapplied.helios.onnx;
 
+import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 
@@ -15,7 +18,8 @@ import java.util.Optional;
  * @param onnxSubfolder subfolder within the HuggingFace repo containing the ONNX file
  * @param onnxFilenamePrefix stem of the desired ONNX variant (e.g. "model" picks "model.onnx" +
  *     "model.onnx_data" and skips "model_fp16.onnx", "model_quantized.onnx", etc.)
- * @param sequenceLength maximum input token count for this model
+ * @param sequenceLength maximum input token count for this model; the tokenizer truncates longer
+ *     input to this many tokens, keeping the model's special tokens
  * @param embeddingDimension output vector dimensionality for this model
  * @param queryPrefix prefix for query embeddings
  * @param documentPrefix prefix for document embeddings
@@ -74,5 +78,11 @@ record OnnxModelSpec(
 
   static boolean isKnown(String modelName) {
     return KNOWN_MODELS.containsKey(modelName);
+  }
+
+  HuggingFaceTokenizer tokenizer(Path tokenizerPath) throws IOException {
+    var limit = String.valueOf(sequenceLength);
+    return HuggingFaceTokenizer.newInstance(
+        tokenizerPath, Map.of("maxLength", limit, "modelMaxLength", limit));
   }
 }

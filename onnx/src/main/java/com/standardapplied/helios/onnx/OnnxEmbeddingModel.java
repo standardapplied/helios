@@ -65,7 +65,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
       }
 
       LOGGER.info("Loading tokenizer from: %s".formatted(tokenizerPath));
-      var tokenizer = HuggingFaceTokenizer.newInstance(tokenizerPath);
+      var tokenizer = spec.tokenizer(tokenizerPath);
 
       LOGGER.info("Loading ONNX model from: %s".formatted(modelPath));
       var ortEnvironment = OrtEnvironment.getEnvironment();
@@ -165,18 +165,14 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
   private Result<float[]> embedInternal(String text) {
     try {
       var encoding = tokenizer.encode(text);
+      if (encoding.exceedMaxLength()) {
+        LOGGER.warning(
+            "Text exceeds max sequence length (%d tokens), truncated to fit"
+                .formatted(spec.sequenceLength()));
+      }
       var tokens = encoding.getIds();
       var attentionMaskArr = encoding.getAttentionMask();
       var tokenTypeArr = encoding.getTypeIds();
-
-      if (tokens.length > spec.sequenceLength()) {
-        LOGGER.warning(
-            "Text exceeds max sequence length (%d), truncating to %d tokens"
-                .formatted(tokens.length, spec.sequenceLength()));
-        tokens = EmbeddingMath.truncate(tokens, spec.sequenceLength());
-        attentionMaskArr = EmbeddingMath.truncate(attentionMaskArr, spec.sequenceLength());
-        tokenTypeArr = EmbeddingMath.truncate(tokenTypeArr, spec.sequenceLength());
-      }
 
       var inputIds = new long[1][tokens.length];
       var attentionMask = new long[1][tokens.length];
