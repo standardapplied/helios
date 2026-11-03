@@ -57,11 +57,11 @@ record NativeModel(
   }
 
   /** Closes each resource in order, handing every failure to close to {@code onFailure}. */
-  static void release(Consumer<Exception> onFailure, AutoCloseable... resources) {
+  static void release(Consumer<Throwable> onFailure, AutoCloseable... resources) {
     for (var resource : resources) {
       try {
         resource.close();
-      } catch (Exception e) {
+      } catch (Exception | Error e) {
         onFailure.accept(e);
       }
     }
