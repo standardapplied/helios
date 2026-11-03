@@ -1255,6 +1255,9 @@ DROP TABLE IF EXISTS helios_agent_runs;
   run already cancelled starts no summary call.
 - **`helios-persistence` now depends on `helios-session`**, for `PgSessionStore`; its module
   requires `com.standardapplied.helios.session`.
+- **`helios-runtime` and `helios-persistence` move to Helidon 4.5.6** (was 4.5.5), and
+  `helios-persistence` pins `org.slf4j:slf4j-api` 2.0.17; it resolved the pre-release
+  2.0.0-alpha1 through HikariCP 5.0.1.
 - **A session no longer holds a platform thread.** Its wall-clock deadline was a
   `ScheduledThreadPoolExecutor` with one platform thread per session (`helios-deadline-<id>`); it
   is now a virtual thread, `helios-wall-clock-<id>`, that waits on the session's token for
