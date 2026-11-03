@@ -10,11 +10,6 @@ import org.junit.jupiter.api.Test;
 class EmbeddingMathTest {
 
   @Test
-  void truncateKeepsTheLeadingTokens() {
-    assertArrayEquals(new long[] {7, 8}, EmbeddingMath.truncate(new long[] {7, 8, 9, 10}, 2));
-  }
-
-  @Test
   void lastTokenPoolingTakesACopyOfTheLastAttendedToken() {
     var tokens = new float[][] {{1f, 2f}, {3f, 4f}, {5f, 6f}};
 

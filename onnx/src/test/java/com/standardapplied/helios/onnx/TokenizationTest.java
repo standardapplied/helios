@@ -22,7 +22,7 @@ class TokenizationTest {
     var config = EmbeddingConfig.defaults();
     var spec = OnnxModelSpec.lookup("nomic-ai/nomic-embed-text-v1.5").orElseThrow();
     var downloader = new OnnxModelDownloader("nomic-ai/nomic-embed-text-v1.5", config, spec);
-    tokenizer = HuggingFaceTokenizer.newInstance(downloader.downloadModel().tokenizer());
+    tokenizer = spec.tokenizer(downloader.downloadModel().tokenizer());
   }
 
   @Test
