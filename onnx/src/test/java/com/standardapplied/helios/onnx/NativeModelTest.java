@@ -2,15 +2,18 @@
 
 package com.standardapplied.helios.onnx;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.onnxruntime.OrtException;
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -20,9 +23,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * How the native resources of a model are released: a resource that fails to close is logged and
- * the rest are still closed, and a model releases them on its first {@code close} only, so its
- * second {@code close} finds nothing to fail on.
+ * How the native resources of a model are released: a resource that fails to close, even with an
+ * {@link Error}, is reported and the rest are still closed, and a model releases them on its first
+ * {@code close} only, so its second {@code close} finds nothing to fail on.
  */
 class NativeModelTest {
 
@@ -56,6 +59,23 @@ class NativeModelTest {
     assertEquals(1, recorder.records.size());
     assertEquals("Error closing an ONNX native resource", failure.getMessage());
     assertInstanceOf(IllegalStateException.class, failure.getThrown());
+  }
+
+  @Test
+  void anErrorClosingAResourceIsHandedOnAndClosingGoesOn() {
+    var original = new OrtException("could not create the session");
+    var linkError = new UnsatisfiedLinkError("native library gone");
+    var nextClosed = new AtomicBoolean();
+
+    NativeModel.release(
+        original::addSuppressed,
+        () -> {
+          throw linkError;
+        },
+        () -> nextClosed.set(true));
+
+    assertArrayEquals(new Throwable[] {linkError}, original.getSuppressed());
+    assertTrue(nextClosed.get());
   }
 
   @Test
