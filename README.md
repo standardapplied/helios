@@ -46,7 +46,7 @@ Helios is used in production but has documented limitations that you should unde
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **One secret registry per session, applied where tool output enters it.** `SessionOptions.withSecretRegistry(registry)` gives the session its `SecretRegistry`. The session redacts every tool result's text once, before its `ToolResult` event, a `PostToolUse` hook or the history sees it, and the messages of every error it reports. Output cut at a size cap first loses any trailing start of a registered secret. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials. See [Secret redaction](#secret-redaction-secretregistry--redactor) for the promise and what it does not cover.
 - **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
-- **Test coverage.** JaCoCo gates at 95% instruction / 90% branch on `helios-core`, `helios-session`, `helios-runtime`. Tests across the project: ~3,200 unit tests. Provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) are gated by environment variables for live-API integration tests; CI runs unit tests without those keys.
+- **Test coverage.** One JaCoCo gate in the root `pom.xml` holds every library module (`helios-core`, `-session`, `-runtime`, `-gemini`, `-anthropic`, `-openai`, `-persistence`, `-onnx`, `-repl`, `-testing`) at 95% instruction / 90% branch. Tests across the project: ~3,200 unit tests. The provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) run their live-API tests only when a provider key is set; CI runs everything else, and gates coverage, without those keys.
 
 ### Known limitations
 
@@ -768,7 +768,7 @@ Then no body byte is ever parsed as a request, which a client sending `Expect: 1
 - **Records everywhere** — immutable data, pattern matching, sealed types (`Result<T>`, `QueryEvent`, `ResultMessage`, `HookOutcome`).
 - **Builder pattern** — `with` prefix, static `newBuilder()` factory.
 - **JPMS modules** — proper encapsulation, ServiceLoader SPI for providers.
-- **Production from day 1** — fault tolerance, tracing, JaCoCo coverage gates on `helios-core` and `helios-session` at 95% instruction / 90% branch.
+- **Production from day 1** — fault tolerance, tracing, one JaCoCo coverage gate holding every library module at 95% instruction / 90% branch.
 - **Currency is integer micro-USD** — `long microUsd` (Stripe-style fixed-precision). `BigDecimal` only at the display boundary.
 
 ## Building
@@ -776,7 +776,7 @@ Then no body byte is ever parsed as a request, which a client sending `Expect: 1
 ```bash
 mvn package
 mvn spotless:apply                # auto-format (Google Java Format, 2-space indent)
-mvn -B clean verify javadoc:jar   # what CI runs: tests, coverage and the quality gate
+./mvnw -B clean verify javadoc:jar   # what CI runs: tests, coverage and the quality gate
 ```
 
 ### Contributing

@@ -10,13 +10,16 @@ concurrency:
   group: maven-central-release
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -29,7 +32,7 @@ jobs:
 
       - name: Resolve project version
         id: version
-        run: echo "version=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(./mvnw -q help:evaluate -Dexpression=project.version -DforceStdout)" >> "$GITHUB_OUTPUT"
 
       - name: Refuse to deploy an already-published version
         run: |
@@ -42,7 +45,7 @@ jobs:
           echo "helios ${V} is not on Maven Central yet; proceeding."
 
       - name: Deploy to Maven Central
-        run: mvn clean deploy -Prelease --batch-mode -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
+        run: ./mvnw clean deploy -Prelease --batch-mode -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
