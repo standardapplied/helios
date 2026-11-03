@@ -3,19 +3,13 @@
 package com.standardapplied.helios.onnx;
 
 /**
- * The arithmetic between a tokenizer and an embedding vector: truncating token arrays to a model's
- * sequence length, pooling per-token embeddings into one vector (mean pooling for encoders,
- * last-token pooling for decoders) and normalizing that vector to unit length.
+ * The arithmetic between a tokenizer and an embedding vector: pooling per-token embeddings into one
+ * vector (mean pooling for encoders, last-token pooling for decoders) and normalizing that vector
+ * to unit length.
  */
 final class EmbeddingMath {
 
   private EmbeddingMath() {}
-
-  static long[] truncate(long[] arr, int maxLength) {
-    var truncated = new long[maxLength];
-    System.arraycopy(arr, 0, truncated, 0, maxLength);
-    return truncated;
-  }
 
   static float[] lastTokenPooling(float[][] tokenEmbeddings, long[] attentionMask) {
     var lastTokenIndex = 0;
