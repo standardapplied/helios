@@ -1460,6 +1460,12 @@ DROP TABLE IF EXISTS helios_agent_runs;
   before any event is resent once with the whole conversation, logged at INFO with the interaction
   id; a turn produced under another system instruction or tool set is never continued, since an
   interaction keeps the ones it was created with.
+- **ONNX embedding models read only the first 512 tokens of their input.** The tokenizer was built
+  with DJL's defaults, which cut every input at 512 tokens with no warning, so the rest of a long
+  document never reached the model. Each model now reads up to its declared limit: 8,192 tokens
+  for `nomic-embed-text-v1.5`, 2,048 for `embeddinggemma-300m`, and 32,768 for both Harrier
+  models. Longer input is cut by the tokenizer, which keeps the model's special tokens, and a
+  WARNING is logged.
 
 ### Security
 
