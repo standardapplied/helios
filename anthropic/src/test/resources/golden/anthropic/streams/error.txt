@@ -5,3 +5,4 @@ TextDelta[text=Partial]
 onError TransientStreamException(API stream error: overloaded_error: Overloaded) provider=anthropic
 == chat
 threw TransientStreamException(API stream error: overloaded_error: Overloaded) provider=anthropic
+hand-edited line the build must rewrite
