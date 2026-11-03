@@ -32,8 +32,8 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.helios/models
-          key: onnx-models-${{ hashFiles('onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelId.java', 'onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelSpec.java') }}
-          restore-keys: onnx-models-
+          key: onnx-models-pinned-${{ hashFiles('onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelId.java', 'onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelSpec.java') }}
+          restore-keys: onnx-models-pinned-
 
       - name: Build, test, gate coverage
         run: ./mvnw -B clean verify javadoc:jar

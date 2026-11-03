@@ -90,7 +90,8 @@ class OnnxEmbeddingProviderTest {
   }
 
   private Path finishedModelDirectory() throws IOException {
-    var modelDir = Files.createDirectories(cache.resolve(NOMIC));
+    var revision = OnnxModelSpec.lookup(NOMIC).orElseThrow().revision();
+    var modelDir = Files.createDirectories(cache.resolve(NOMIC).resolve(revision));
     Files.createFile(modelDir.resolve(".finished"));
     return modelDir;
   }
