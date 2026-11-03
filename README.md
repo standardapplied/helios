@@ -776,7 +776,7 @@ Then no body byte is ever parsed as a request, which a client sending `Expect: 1
 ```bash
 mvn package
 mvn spotless:apply                # auto-format (Google Java Format, 2-space indent)
-mvn -B clean verify javadoc:jar   # what CI runs: tests, coverage and the quality gate
+./mvnw -B clean verify javadoc:jar   # what CI runs: tests, coverage and the quality gate
 ```
 
 ### Contributing

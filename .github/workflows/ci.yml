@@ -36,7 +36,7 @@ jobs:
           restore-keys: onnx-models-
 
       - name: Build, test, gate coverage
-        run: mvn -B clean verify javadoc:jar
+        run: ./mvnw -B clean verify javadoc:jar
 
       - name: Upload dependency inventory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
