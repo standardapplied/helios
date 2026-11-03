@@ -24,8 +24,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * How the native resources of a model are released: a resource that fails to close, even with an
- * {@link Error}, is reported and the rest are still closed, and a model releases them on its first
- * {@code close} only, so its second {@code close} finds nothing to fail on.
+ * {@link Error}, is reported and the rest are still closed, an {@link Error} from closing a model
+ * is thrown once everything was closed, and a model releases them on its first {@code close} only,
+ * so its second {@code close} finds nothing to fail on.
  */
 class NativeModelTest {
 
@@ -76,6 +77,35 @@ class NativeModelTest {
 
     assertArrayEquals(new Throwable[] {linkError}, original.getSuppressed());
     assertTrue(nextClosed.get());
+  }
+
+  @Test
+  void anErrorClosingAModelIsThrownOnceEveryResourceIsClosed() {
+    var linkError = new UnsatisfiedLinkError("native library gone");
+    var laterError = new OutOfMemoryError("no room to free");
+    var lastClosed = new AtomicBoolean();
+
+    var thrown =
+        assertThrows(
+            UnsatisfiedLinkError.class,
+            () ->
+                NativeModel.closeAll(
+                    () -> {
+                      throw linkError;
+                    },
+                    () -> {
+                      throw new IllegalStateException("already closed");
+                    },
+                    () -> {
+                      throw laterError;
+                    },
+                    () -> lastClosed.set(true)));
+
+    assertEquals(linkError, thrown);
+    assertArrayEquals(new Throwable[] {laterError}, thrown.getSuppressed());
+    assertTrue(lastClosed.get());
+    assertEquals(1, recorder.records.size());
+    assertInstanceOf(IllegalStateException.class, recorder.records.getFirst().getThrown());
   }
 
   @Test
