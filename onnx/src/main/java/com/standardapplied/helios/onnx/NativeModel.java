@@ -37,11 +37,11 @@ record NativeModel(
         LOGGER.info("Loading ONNX model from: %s".formatted(modelPath));
         var session = OrtEnvironment.getEnvironment().createSession(modelPath.toString(), options);
         return new NativeModel(tokenizer, options, session);
-      } catch (OrtException | RuntimeException e) {
+      } catch (OrtException | RuntimeException | Error e) {
         release(e::addSuppressed, options);
         throw e;
       }
-    } catch (OrtException | RuntimeException e) {
+    } catch (OrtException | RuntimeException | Error e) {
       release(e::addSuppressed, tokenizer);
       throw e;
     }

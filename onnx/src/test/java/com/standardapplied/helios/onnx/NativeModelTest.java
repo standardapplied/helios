@@ -4,6 +4,8 @@ package com.standardapplied.helios.onnx;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import java.io.IOException;
@@ -48,6 +50,8 @@ class NativeModelTest {
 
     nativeModel.close();
 
+    assertTrue(nativeModel.tokenizer().isReleased());
+    assertThrows(IllegalStateException.class, nativeModel.options()::close);
     var failure = recorder.records.getFirst();
     assertEquals(1, recorder.records.size());
     assertEquals("Error closing an ONNX native resource", failure.getMessage());
