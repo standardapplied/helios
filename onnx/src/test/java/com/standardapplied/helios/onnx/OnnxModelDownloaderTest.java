@@ -4,20 +4,25 @@ package com.standardapplied.helios.onnx;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.StubHttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
+import java.net.http.HttpTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -25,17 +30,22 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Hermetic tests for {@link OnnxModelDownloader#downloadModel()} against a stub hub: which files it
- * lists, chooses, requests and writes, in which order, and the finished marker that ends a run.
+ * lists, chooses, requests and writes at the spec's pinned revision, in which order, how a request
+ * fails, and the finished marker that ends a run.
  */
 class OnnxModelDownloaderTest {
 
   private static final String MODEL = "acme/tiny";
+  private static final String REVISION = "0123456789abcdef0123456789abcdef01234567";
+  private static final String LISTING = REVISION;
+  private static final String SUBFOLDER_LISTING = REVISION + "/onnx";
   private static final String TREE = "/api/models/acme/tiny/tree/";
-  private static final String RESOLVE = "/acme/tiny/resolve/main/";
+  private static final String RESOLVE = "/acme/tiny/resolve/" + REVISION + "/";
+  private static final String MODEL_DIR = "acme/tiny/" + REVISION;
   private static final OnnxModelSpec SUBFOLDER_SPEC =
-      new OnnxModelSpec(OnnxModelSpec.ModelType.ENCODER, "onnx", "model", 512, 8, "", "");
+      new OnnxModelSpec(REVISION, OnnxModelSpec.ModelType.ENCODER, "onnx", "model", 512, 8, "", "");
   private static final OnnxModelSpec ROOT_SPEC =
-      new OnnxModelSpec(OnnxModelSpec.ModelType.ENCODER, "", "model", 512, 8, "", "");
+      new OnnxModelSpec(REVISION, OnnxModelSpec.ModelType.ENCODER, "", "model", 512, 8, "", "");
 
   @TempDir Path cache;
 
@@ -43,14 +53,14 @@ class OnnxModelDownloaderTest {
   void subfolderLayoutDownloadsTheSelectedOnnxFilesThenTheTokenizerFiles() throws IOException {
     var hub = new Hub();
     hub.listing(
-        "main/onnx",
+        SUBFOLDER_LISTING,
         "onnx/model.onnx",
         "onnx/model.onnx_data",
         "onnx/model.onnx_data_1",
         "onnx/model_quantized.onnx",
         "onnx/model_fp16.onnx_data");
     hub.listing(
-        "main",
+        LISTING,
         "onnx",
         ".gitattributes",
         "README.md",
@@ -67,8 +77,8 @@ class OnnxModelDownloaderTest {
 
     assertEquals(
         List.of(
-            "GET " + TREE + "main/onnx",
-            "GET " + TREE + "main",
+            "GET " + TREE + SUBFOLDER_LISTING,
+            "GET " + TREE + LISTING,
             "GET " + RESOLVE + "onnx/model.onnx",
             "GET /cdn/model.onnx",
             "GET " + RESOLVE + "onnx/model.onnx_data",
@@ -79,7 +89,7 @@ class OnnxModelDownloaderTest {
             "GET " + RESOLVE + "special_tokens_map.json",
             "GET " + RESOLVE + "vocab.txt"),
         requests);
-    var modelDir = cache.resolve("acme/tiny");
+    var modelDir = cache.resolve(MODEL_DIR);
     assertEquals(
         Set.of(
             ".finished",
@@ -106,7 +116,7 @@ class OnnxModelDownloaderTest {
   void rootLayoutChoosesOnnxAndTokenizerFilesFromOneListing() throws IOException {
     var hub = new Hub();
     hub.listing(
-        "main",
+        LISTING,
         "config.json",
         "model.onnx",
         "tokenizer.json",
@@ -118,14 +128,14 @@ class OnnxModelDownloaderTest {
 
     assertEquals(
         List.of(
-            "GET " + TREE + "main",
+            "GET " + TREE + LISTING,
             "GET " + RESOLVE + "model.onnx",
             "GET " + RESOLVE + "onnx/model.onnx",
             "GET " + RESOLVE + "model.onnx_data",
             "GET " + RESOLVE + "config.json",
             "GET " + RESOLVE + "tokenizer.json"),
         requests);
-    var modelDir = cache.resolve("acme/tiny");
+    var modelDir = cache.resolve(MODEL_DIR);
     assertEquals(
         Set.of(
             ".finished", "config.json", "model.onnx", "model.onnx_data", "onnx", "tokenizer.json"),
@@ -138,32 +148,80 @@ class OnnxModelDownloaderTest {
   @Test
   void modelWithoutAnOnnxFileFailsBeforeCreatingTheModelDirectory() {
     var hub = new Hub();
-    hub.listing("main/onnx", "onnx/model.onnx_data", "onnx/model_quantized.onnx");
-    hub.listing("main", "tokenizer.json");
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx_data", "onnx/model_quantized.onnx");
+    hub.listing(LISTING, "tokenizer.json");
 
     var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
 
     assertEquals("Model is not available in ONNX format", error.getMessage());
-    assertEquals(List.of("GET " + TREE + "main/onnx", "GET " + TREE + "main"), hub.requests());
-    assertFalse(Files.exists(cache.resolve("acme/tiny")));
+    assertEquals(
+        List.of("GET " + TREE + SUBFOLDER_LISTING, "GET " + TREE + LISTING), hub.requests());
+    assertFalse(Files.exists(cache.resolve(MODEL_DIR)));
   }
 
   @Test
-  void anUnavailableListingCountsAsEmpty() {
+  void aFailedListingReportsItsUrlAndStatusAndCreatesNothing() {
     var hub = new Hub();
-    hub.listing("main", "tokenizer.json");
+    hub.status(TREE + SUBFOLDER_LISTING, 503);
 
     var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
 
-    assertEquals("Model is not available in ONNX format", error.getMessage());
-    assertEquals(List.of("GET " + TREE + "main/onnx", "GET " + TREE + "main"), hub.requests());
+    assertEquals(
+        "Failed to list files " + hub.uri() + TREE + SUBFOLDER_LISTING + ": HTTP 503",
+        error.getMessage());
+    assertEquals(List.of("GET " + TREE + SUBFOLDER_LISTING), hub.requests());
+    assertFalse(Files.exists(cache.resolve("acme")));
+  }
+
+  @Test
+  void aListingThatNeverAnswersFailsAtTheRequestTimeout() {
+    var release = new CountDownLatch(1);
+    var hub = new Hub();
+    hub.onFetch(TREE + SUBFOLDER_LISTING, () -> Await.latch("the test's release", release));
+
+    var error =
+        assertThrows(
+            IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache, Duration.ofMillis(200)));
+    release.countDown();
+
+    assertInstanceOf(HttpTimeoutException.class, error.getCause());
+    assertEquals(
+        "Failed to list files " + hub.uri() + TREE + SUBFOLDER_LISTING + ": request timed out",
+        error.getMessage());
+    assertFalse(Files.exists(cache.resolve("acme")));
+  }
+
+  @Test
+  void aCacheWithoutARevisionIsNotReused() throws IOException {
+    var unpinned = Files.createDirectories(cache.resolve("acme/tiny"));
+    Files.writeString(unpinned.resolve("model.onnx"), "unpinned weights");
+    Files.writeString(unpinned.resolve("tokenizer.json"), "unpinned tokenizer");
+    Files.createFile(unpinned.resolve(".finished"));
+    var hub = new Hub();
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx");
+    hub.listing(LISTING, "tokenizer.json");
+
+    var requests = hub.download(SUBFOLDER_SPEC, cache);
+
+    assertEquals(
+        List.of(
+            "GET " + TREE + SUBFOLDER_LISTING,
+            "GET " + TREE + LISTING,
+            "GET " + RESOLVE + "onnx/model.onnx",
+            "GET " + RESOLVE + "tokenizer.json"),
+        requests);
+    var modelDir = cache.resolve(MODEL_DIR);
+    assertEquals(Set.of(".finished", "model.onnx", "tokenizer.json"), entriesOf(modelDir));
+    assertEquals(
+        "body of " + RESOLVE + "onnx/model.onnx", Files.readString(modelDir.resolve("model.onnx")));
+    assertEquals("unpinned weights", Files.readString(unpinned.resolve("model.onnx")));
   }
 
   @Test
   void aFailedFileDownloadReportsItsUrlAndStatusAndWritesNoMarker() {
     var hub = new Hub();
-    hub.listing("main/onnx", "onnx/model.onnx");
-    hub.listing("main", "tokenizer.json");
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx");
+    hub.listing(LISTING, "tokenizer.json");
     hub.status(RESOLVE + "tokenizer.json", 500);
 
     var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
@@ -171,7 +229,7 @@ class OnnxModelDownloaderTest {
     assertEquals(
         "Failed to download file " + hub.uri() + RESOLVE + "tokenizer.json: HTTP 500",
         error.getMessage());
-    var modelDir = cache.resolve("acme/tiny");
+    var modelDir = cache.resolve(MODEL_DIR);
     assertTrue(Files.exists(modelDir.resolve("model.onnx")));
     assertFalse(Files.exists(modelDir.resolve(".finished")));
   }
@@ -179,8 +237,8 @@ class OnnxModelDownloaderTest {
   @Test
   void aListedPathOutsideTheCacheFailsAfterTheFilesBeforeIt() {
     var hub = new Hub();
-    hub.listing("main/onnx", "onnx/model.onnx");
-    hub.listing("main", "config.json", "../tokenizer.json", "vocab.txt");
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx");
+    hub.listing(LISTING, "config.json", "../tokenizer.json", "vocab.txt");
 
     var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
 
@@ -190,13 +248,13 @@ class OnnxModelDownloaderTest {
         error.getMessage());
     assertEquals(
         List.of(
-            "GET " + TREE + "main/onnx",
-            "GET " + TREE + "main",
+            "GET " + TREE + SUBFOLDER_LISTING,
+            "GET " + TREE + LISTING,
             "GET " + RESOLVE + "onnx/model.onnx",
             "GET " + RESOLVE + "config.json"),
         hub.requests());
-    assertFalse(Files.exists(cache.resolve("acme/tokenizer.json")));
-    assertFalse(Files.exists(cache.resolve("acme/tiny/.finished")));
+    assertFalse(Files.exists(cache.resolve("acme/tiny/tokenizer.json")));
+    assertFalse(Files.exists(cache.resolve(MODEL_DIR).resolve(".finished")));
   }
 
   @Test
@@ -207,14 +265,16 @@ class OnnxModelDownloaderTest {
     var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
 
     assertTrue(Thread.interrupted());
-    assertEquals("Interrupted while fetching file list", error.getMessage());
-    assertFalse(Files.exists(cache.resolve("acme/tiny")));
+    assertEquals(
+        "Failed to list files " + hub.uri() + TREE + SUBFOLDER_LISTING + ": interrupted",
+        error.getMessage());
+    assertFalse(Files.exists(cache.resolve(MODEL_DIR)));
   }
 
   @Test
   void aFinishedMarkerSkipsTheHub() throws IOException {
-    Files.createDirectories(cache.resolve("acme/tiny"));
-    Files.createFile(cache.resolve("acme/tiny/.finished"));
+    Files.createDirectories(cache.resolve(MODEL_DIR));
+    Files.createFile(cache.resolve(MODEL_DIR).resolve(".finished"));
     var hub = new Hub();
 
     assertEquals(List.of(), hub.download(SUBFOLDER_SPEC, cache));
@@ -222,19 +282,19 @@ class OnnxModelDownloaderTest {
 
   @Test
   void aPresentFileIsKeptAndAnEmptyOneIsDownloadedAgain() throws IOException {
-    var modelDir = Files.createDirectories(cache.resolve("acme/tiny"));
+    var modelDir = Files.createDirectories(cache.resolve(MODEL_DIR));
     Files.writeString(modelDir.resolve("model.onnx"), "kept");
     Files.createFile(modelDir.resolve("tokenizer.json"));
     var hub = new Hub();
-    hub.listing("main/onnx", "onnx/model.onnx");
-    hub.listing("main", "tokenizer.json");
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx");
+    hub.listing(LISTING, "tokenizer.json");
 
     var requests = hub.download(SUBFOLDER_SPEC, cache);
 
     assertEquals(
         List.of(
-            "GET " + TREE + "main/onnx",
-            "GET " + TREE + "main",
+            "GET " + TREE + SUBFOLDER_LISTING,
+            "GET " + TREE + LISTING,
             "GET " + RESOLVE + "tokenizer.json"),
         requests);
     assertEquals("kept", Files.readString(modelDir.resolve("model.onnx")));
@@ -247,26 +307,26 @@ class OnnxModelDownloaderTest {
   @Test
   void anOnnxFileListedOutsideTheSubfolderKeepsItsPath() throws IOException {
     var hub = new Hub();
-    hub.listing("main/onnx", "onnxfoo/model.onnx");
-    hub.listing("main");
+    hub.listing(SUBFOLDER_LISTING, "onnxfoo/model.onnx");
+    hub.listing(LISTING);
 
     var requests = hub.download(SUBFOLDER_SPEC, cache);
 
     assertEquals(
         List.of(
-            "GET " + TREE + "main/onnx",
-            "GET " + TREE + "main",
+            "GET " + TREE + SUBFOLDER_LISTING,
+            "GET " + TREE + LISTING,
             "GET " + RESOLVE + "onnxfoo/model.onnx"),
         requests);
-    assertTrue(Files.exists(cache.resolve("acme/tiny/onnxfoo/model.onnx")));
+    assertTrue(Files.exists(cache.resolve(MODEL_DIR).resolve("onnxfoo/model.onnx")));
   }
 
   @Test
   void aMarkerAConcurrentDownloaderWroteIsKept() throws IOException {
-    var marker = cache.resolve("acme/tiny/.finished");
+    var marker = cache.resolve(MODEL_DIR).resolve(".finished");
     var hub = new Hub();
-    hub.listing("main/onnx", "onnx/model.onnx");
-    hub.listing("main");
+    hub.listing(SUBFOLDER_LISTING, "onnx/model.onnx");
+    hub.listing(LISTING);
     hub.onFetch(RESOLVE + "onnx/model.onnx", () -> Files.writeString(marker, "theirs"));
 
     hub.download(SUBFOLDER_SPEC, cache);
@@ -276,14 +336,14 @@ class OnnxModelDownloaderTest {
 
   @Test
   void modelAndTokenizerPathsSitInTheModelDirectory() throws IOException {
-    Files.createDirectories(cache.resolve("acme/tiny"));
-    Files.createFile(cache.resolve("acme/tiny/.finished"));
+    Files.createDirectories(cache.resolve(MODEL_DIR));
+    Files.createFile(cache.resolve(MODEL_DIR).resolve(".finished"));
     var config = EmbeddingConfig.newBuilder().withWorkingDirectory(cache.toString()).build();
     try (var downloader = new OnnxModelDownloader(MODEL, config, SUBFOLDER_SPEC)) {
       var files = downloader.downloadModel();
 
-      assertEquals(cache.resolve("acme/tiny/model.onnx"), files.model());
-      assertEquals(cache.resolve("acme/tiny/tokenizer.json"), files.tokenizer());
+      assertEquals(cache.resolve(MODEL_DIR).resolve("model.onnx"), files.model());
+      assertEquals(cache.resolve(MODEL_DIR).resolve("tokenizer.json"), files.tokenizer());
     }
   }
 
@@ -329,9 +389,15 @@ class OnnxModelDownloaderTest {
     }
 
     List<String> download(OnnxModelSpec spec, Path cache) throws IOException {
+      return download(spec, cache, Await.HANG_GUARD);
+    }
+
+    List<String> download(OnnxModelSpec spec, Path cache, Duration requestTimeout)
+        throws IOException {
       var config = EmbeddingConfig.newBuilder().withWorkingDirectory(cache.toString()).build();
       try (server;
-          var downloader = new OnnxModelDownloader(MODEL, config, spec, server.uri())) {
+          var downloader =
+              new OnnxModelDownloader(MODEL, config, spec, server.uri(), requestTimeout)) {
         downloader.downloadModel();
       }
       return requests();
