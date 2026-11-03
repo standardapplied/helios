@@ -21,7 +21,15 @@ class OnnxEmbeddingModelTest {
 
   private static final String NOMIC = OnnxModelId.NOMIC_EMBED_V1_5.id();
   private static final OnnxModelSpec EIGHT_TOKENS =
-      new OnnxModelSpec(OnnxModelSpec.ModelType.ENCODER, "onnx", "model", 8, 768, "", "");
+      new OnnxModelSpec(
+          OnnxModelSpec.lookup(NOMIC).orElseThrow().revision(),
+          OnnxModelSpec.ModelType.ENCODER,
+          "onnx",
+          "model",
+          8,
+          768,
+          "",
+          "");
 
   private static OnnxEmbeddingModel model;
 

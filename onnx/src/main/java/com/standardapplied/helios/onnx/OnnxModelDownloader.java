@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -28,8 +29,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Downloads ONNX models and tokenizer files from HuggingFace. Caches downloaded models locally and
- * skips re-download if a finished marker exists.
+ * Downloads ONNX models and tokenizer files from HuggingFace at the revision their spec pins.
+ * Caches downloaded models locally, one directory per revision, and skips re-download if a finished
+ * marker exists. Each request waits at most its timeout for the response headers; reading a body is
+ * not time-bounded.
  */
 final class OnnxModelDownloader implements AutoCloseable {
 
@@ -37,20 +40,33 @@ final class OnnxModelDownloader implements AutoCloseable {
   private static final String FINISHED_MARKER = ".finished";
   private static final URI HUGGING_FACE = URI.create("https://huggingface.co");
   private static final String TOKENIZER_FILE = "tokenizer.json";
+  private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(60);
+  private static final String LIST = "list files";
+  private static final String DOWNLOAD = "download file";
+  private static final String FAILED = "Failed to %s %s: %s";
 
   private final String modelName;
   private final OnnxModelSpec spec;
   private final HttpClient httpClient;
   private final Path localModelDir;
   private final URI hub;
+  private final Duration requestTimeout;
 
   OnnxModelDownloader(String modelName, EmbeddingConfig config, OnnxModelSpec spec) {
-    this(modelName, config, spec, HUGGING_FACE);
+    this(modelName, config, spec, HUGGING_FACE, REQUEST_TIMEOUT);
   }
 
-  /** Downloads from {@code hub} instead of Hugging Face. Visible for tests. */
-  OnnxModelDownloader(String modelName, EmbeddingConfig config, OnnxModelSpec spec, URI hub) {
+  /**
+   * Downloads from {@code hub} instead of Hugging Face, under its own timeout. Visible for tests.
+   */
+  OnnxModelDownloader(
+      String modelName,
+      EmbeddingConfig config,
+      OnnxModelSpec spec,
+      URI hub,
+      Duration requestTimeout) {
     this.hub = hub;
+    this.requestTimeout = requestTimeout;
     this.modelName = modelName;
     this.spec = spec;
     this.httpClient = HttpClientFactory.createForDownloads();
@@ -58,7 +74,7 @@ final class OnnxModelDownloader implements AutoCloseable {
     var parts = modelName.split("/");
     var owner = parts.length == 2 ? parts[0] : modelName;
     var shortName = parts.length == 2 ? parts[1] : modelName;
-    this.localModelDir = Paths.get(config.workingDirectory(), owner, shortName);
+    this.localModelDir = Paths.get(config.workingDirectory(), owner, shortName, spec.revision());
   }
 
   /**
@@ -89,12 +105,14 @@ final class OnnxModelDownloader implements AutoCloseable {
   }
 
   private Listing listFiles() throws IOException {
+    var revision = spec.revision();
     var subfolder = spec.onnxSubfolder();
     if (Strings.isBlank(subfolder)) {
-      var files = fetchFileList("main");
+      var files = fetchFileList(revision);
       return new Listing(files, files.stream().filter(not(this::isSelectedOnnxFile)).toList(), "");
     }
-    return new Listing(fetchFileList("main/" + subfolder), fetchFileList("main"), subfolder + "/");
+    return new Listing(
+        fetchFileList(revision + "/" + subfolder), fetchFileList(revision), subfolder + "/");
   }
 
   private List<ModelFile> chooseFiles(Listing listing) throws IOException {
@@ -164,20 +182,11 @@ final class OnnxModelDownloader implements AutoCloseable {
 
   private List<String> fetchFileList(String treePath) throws IOException {
     var url = hub + "/api/models/" + modelName + "/tree/" + treePath;
-    var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-
-    try {
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() != 200) {
-        LOGGER.warning(
-            "Failed to fetch file list from %s: %d".formatted(url, response.statusCode()));
-        return List.of();
-      }
-      return parseFileList(response.body());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while fetching file list", e);
+    var response = get(LIST, url, HttpResponse.BodyHandlers.ofString());
+    if (response.statusCode() != 200) {
+      throw new IOException(FAILED.formatted(LIST, url, "HTTP " + response.statusCode()));
     }
+    return parseFileList(response.body());
   }
 
   private void downloadFile(String filePath, Path destination) throws IOException {
@@ -185,21 +194,26 @@ final class OnnxModelDownloader implements AutoCloseable {
       LOGGER.info("Skipping (already present): %s".formatted(destination.getFileName()));
       return;
     }
-    var url = "%s/%s/resolve/main/%s".formatted(hub, modelName, filePath);
-    var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-
-    try {
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var url = "%s/%s/resolve/%s/%s".formatted(hub, modelName, spec.revision(), filePath);
+    var response = get(DOWNLOAD, url, HttpResponse.BodyHandlers.ofInputStream());
+    try (InputStream body = response.body()) {
       if (response.statusCode() != 200) {
-        throw new IOException(
-            "Failed to download file %s: HTTP %d".formatted(url, response.statusCode()));
+        throw new IOException(FAILED.formatted(DOWNLOAD, url, "HTTP " + response.statusCode()));
       }
-      try (InputStream inputStream = response.body()) {
-        writeAtomically(inputStream, destination);
-      }
+      writeAtomically(body, destination);
+    }
+  }
+
+  private <T> HttpResponse<T> get(String action, String url, HttpResponse.BodyHandler<T> body)
+      throws IOException {
+    var request = HttpRequest.newBuilder(URI.create(url)).timeout(requestTimeout).GET().build();
+    try {
+      return httpClient.send(request, body);
+    } catch (IOException e) {
+      throw new IOException(FAILED.formatted(action, url, e.getMessage()), e);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while downloading file", e);
+      throw new IOException(FAILED.formatted(action, url, "interrupted"), e);
     }
   }
 
