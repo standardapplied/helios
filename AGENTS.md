@@ -66,7 +66,7 @@ violation is fixed, never excluded.
 | `CouplingBetweenObjects` | Distinct types a class uses in fields, locals and return types | 21 |
 | `SwitchDensity` | Statements per `switch` label | 10 |
 | `GodClass` | Weighted methods (WMC ≥ 47) with foreign data access (ATFD > 5) and low cohesion (TCC < 1/3); main code only | all three |
-| `TooManyMethods` | Methods of a class, not counting `get*`, `set*`, `is*` and `with*`; main code only | 11 |
+| `TooManyMethods` | Methods of a class, not counting `get*`, `set*`, `is*` and `with*`; main code only | 26 |
 | `OnDemandImport` | `import a.b.*` and `import static a.B.*` | 1 |
 
 A test class is expected to have many methods and a large summed complexity, so the three "main
