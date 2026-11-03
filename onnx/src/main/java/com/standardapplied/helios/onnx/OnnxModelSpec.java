@@ -10,10 +10,13 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
- * Internal metadata for known ONNX models — architecture, dimensions, and prefixes.
+ * Internal metadata for known ONNX models — revision, architecture, dimensions, and prefixes.
  *
+ * @param revision the full commit SHA of the model's Hugging Face repository every file is
+ *     downloaded from, so every user of a Helios release gets the same files
  * @param modelType encoder (mean pooling) or decoder (last-token pooling)
  * @param onnxSubfolder subfolder within the HuggingFace repo containing the ONNX file
  * @param onnxFilenamePrefix stem of the desired ONNX variant (e.g. "model" picks "model.onnx" +
@@ -25,6 +28,7 @@ import java.util.Optional;
  * @param documentPrefix prefix for document embeddings
  */
 record OnnxModelSpec(
+    String revision,
     ModelType modelType,
     String onnxSubfolder,
     String onnxFilenamePrefix,
@@ -38,12 +42,23 @@ record OnnxModelSpec(
     DECODER
   }
 
+  private static final Pattern COMMIT_SHA = Pattern.compile("[0-9a-f]{40}");
+
   private static final Map<String, OnnxModelSpec> KNOWN_MODELS =
       Map.of(
           "nomic-ai/nomic-embed-text-v1.5",
-          new OnnxModelSpec(ModelType.ENCODER, "onnx", "model", 8192, 768, "", ""),
+          new OnnxModelSpec(
+              "e9b6763023c676ca8431644204f50c2b100d9aab",
+              ModelType.ENCODER,
+              "onnx",
+              "model",
+              8192,
+              768,
+              "",
+              ""),
           "onnx-community/embeddinggemma-300m-ONNX",
           new OnnxModelSpec(
+              "5090578d9565bb06545b4552f76e6bc2c93e4a66",
               ModelType.DECODER,
               "onnx",
               "model",
@@ -53,6 +68,7 @@ record OnnxModelSpec(
               "title: none | text: "),
           "onnx-community/harrier-oss-v1-270m-ONNX",
           new OnnxModelSpec(
+              "d59c919d0159aea2c19ed7d04288fcdd048d0f9c",
               ModelType.DECODER,
               "onnx",
               "model",
@@ -63,6 +79,7 @@ record OnnxModelSpec(
               ""),
           "onnx-community/harrier-oss-v1-0.6b-ONNX",
           new OnnxModelSpec(
+              "e4daffa011e666dcd2ff2a3c6c05084090ac314d",
               ModelType.DECODER,
               "onnx",
               "model",
@@ -71,6 +88,13 @@ record OnnxModelSpec(
               "Instruct: Given a web search query, retrieve relevant passages that answer the query"
                   + "\nQuery: ",
               ""));
+
+  OnnxModelSpec {
+    if (revision == null || !COMMIT_SHA.matcher(revision).matches()) {
+      throw new IllegalArgumentException(
+          "revision must be a 40-character lowercase hex commit SHA, got: " + revision);
+    }
+  }
 
   static Optional<OnnxModelSpec> lookup(String modelName) {
     return Optional.ofNullable(KNOWN_MODELS.get(modelName));

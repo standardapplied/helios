@@ -1061,6 +1061,18 @@ DROP TABLE IF EXISTS helios_agent_runs;
 | `PgConfig.agentId()`, `PgConfig.Builder.withAgentId(String)` and the canonical constructor's `agentId` component | removed: only `PgRunStore` read it. `PgConfig(dbClient, schema, redactor)` |
 | `JsonbMapper.argumentsFromJsonb(String)` | removed: only the journal read it |
 
+**ONNX models are downloaded at a pinned revision, into a directory named for it.** Each catalogued
+model's files come from one commit of its Hugging Face repository instead of the moving `main`
+branch, so every user of a release gets the same weights and a resumed or day-spanning download
+never mixes two commits. The cache moved from `<workingDirectory>/<owner>/<name>` to
+`<workingDirectory>/<owner>/<name>/<revision>`: the first run after the upgrade downloads each model
+again. The files left directly in `<owner>/<name>` are no longer read and can be deleted; keep the
+revision directory beside them.
+
+| 2.x | 3.0 |
+|---|---|
+| `~/.helios/models/nomic-ai/nomic-embed-text-v1.5/model.onnx`, from `main` | `~/.helios/models/nomic-ai/nomic-embed-text-v1.5/e9b6763023c676ca8431644204f50c2b100d9aab/model.onnx`, from that commit |
+
 ### Added
 
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
@@ -1466,6 +1478,15 @@ DROP TABLE IF EXISTS helios_agent_runs;
   for `nomic-embed-text-v1.5`, 2,048 for `embeddinggemma-300m`, and 32,768 for both Harrier
   models. Longer input is cut by the tokenizer, which keeps the model's special tokens, and a
   WARNING is logged.
+- **An ONNX embedding model leaked native memory, and a second `close` threw.** Its session options
+  were never closed, a model file the runtime refused left the tokenizer open, and closing a model
+  twice threw `IllegalStateException`. `close` now releases the tokenizer, the session and its
+  options on the first call only, and a failed `create` closes what it opened before throwing.
+- **ONNX model downloads hid their failures and could wait forever.** A failed listing showed up as
+  "Model is not available in ONNX format"; it now fails with
+  `Failed to list files <url>: HTTP <status>`. A request that gets no response headers within 60
+  seconds fails naming its URL, where a hub that accepted the connection and never answered used to
+  hang `create`. A failed file download now closes its response body.
 
 ### Security
 

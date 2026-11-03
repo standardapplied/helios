@@ -5,23 +5,25 @@
 
 package com.standardapplied.helios.onnx;
 
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
-import ai.onnxruntime.OrtSession;
 import com.standardapplied.helios.core.common.Result;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.embedding.EmbeddingConfig;
 import com.standardapplied.helios.core.embedding.EmbeddingModel;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * ONNX Runtime-based embedding model. Downloads models from HuggingFace and runs inference locally.
  * Supports encoder models (mean pooling) and decoder models (last-token pooling).
+ *
+ * <p>{@link #close()} releases the model's native resources once; later calls do nothing. It must
+ * not be called while an {@code embed*} call is running: Helios does not enforce this.
  */
 public final class OnnxEmbeddingModel implements EmbeddingModel {
 
@@ -29,21 +31,14 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   private final String modelName;
   private final OnnxModelSpec spec;
-  private final HuggingFaceTokenizer tokenizer;
-  private final OrtEnvironment ortEnvironment;
-  private final OrtSession ortSession;
+  private final NativeModel nativeModel;
+  private final OrtEnvironment ortEnvironment = OrtEnvironment.getEnvironment();
+  private final AtomicBoolean closed = new AtomicBoolean();
 
-  private OnnxEmbeddingModel(
-      String modelName,
-      OnnxModelSpec spec,
-      HuggingFaceTokenizer tokenizer,
-      OrtEnvironment ortEnvironment,
-      OrtSession ortSession) {
+  private OnnxEmbeddingModel(String modelName, OnnxModelSpec spec, NativeModel nativeModel) {
     this.modelName = modelName;
     this.spec = spec;
-    this.tokenizer = tokenizer;
-    this.ortEnvironment = ortEnvironment;
-    this.ortSession = ortSession;
+    this.nativeModel = nativeModel;
   }
 
   static OnnxEmbeddingModel create(String modelName, EmbeddingConfig config, OnnxModelSpec spec) {
@@ -64,19 +59,13 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
         throw new OnnxEmbeddingException("Tokenizer file not found: %s".formatted(tokenizerPath));
       }
 
-      LOGGER.info("Loading tokenizer from: %s".formatted(tokenizerPath));
-      var tokenizer = spec.tokenizer(tokenizerPath);
-
-      LOGGER.info("Loading ONNX model from: %s".formatted(modelPath));
-      var ortEnvironment = OrtEnvironment.getEnvironment();
-      var ortSession =
-          ortEnvironment.createSession(modelPath.toString(), new OrtSession.SessionOptions());
+      var nativeModel = NativeModel.open(spec, tokenizerPath, modelPath);
 
       LOGGER.info(
           "ONNX model loaded successfully. Embedding dimension: %d"
               .formatted(spec.embeddingDimension()));
 
-      return new OnnxEmbeddingModel(modelName, spec, tokenizer, ortEnvironment, ortSession);
+      return new OnnxEmbeddingModel(modelName, spec, nativeModel);
     } catch (OnnxEmbeddingException e) {
       throw e;
     } catch (IOException | OrtException e) {
@@ -146,25 +135,14 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
 
   @Override
   public void close() {
-    if (tokenizer != null) {
-      try {
-        tokenizer.close();
-      } catch (Exception e) {
-        LOGGER.log(Level.WARNING, "Error closing HuggingFace tokenizer", e);
-      }
-    }
-    if (ortSession != null) {
-      try {
-        ortSession.close();
-      } catch (OrtException e) {
-        LOGGER.log(Level.WARNING, "Error closing ONNX session", e);
-      }
+    if (closed.compareAndSet(false, true)) {
+      nativeModel.close();
     }
   }
 
   private Result<float[]> embedInternal(String text) {
     try {
-      var encoding = tokenizer.encode(text);
+      var encoding = nativeModel.tokenizer().encode(text);
       if (encoding.exceedMaxLength()) {
         LOGGER.warning(
             "Text exceeds max sequence length (%d tokens), truncated to fit"
@@ -197,7 +175,7 @@ public final class OnnxEmbeddingModel implements EmbeddingModel {
           inputs.put("token_type_ids", OnnxTensor.createTensor(ortEnvironment, tokenTypeIds));
         }
 
-        try (var result = ortSession.run(inputs)) {
+        try (var result = nativeModel.session().run(inputs)) {
           float[] embedding;
 
           if (spec.modelType() == OnnxModelSpec.ModelType.DECODER && result.size() > 1) {
