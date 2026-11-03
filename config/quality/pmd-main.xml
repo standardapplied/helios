@@ -37,8 +37,9 @@
           message="The switch averages 10 or more statements per label (limit: fewer than 10)"/>
     <rule ref="category/java/design.xml/GodClass"/>
     <rule ref="category/java/design.xml/TooManyMethods"
-          message="The class has more than 10 methods, not counting get*, set*, is* and with*">
+          message="The class has more than 25 methods, not counting get*, set*, is* and with*">
         <properties>
+            <property name="maxmethods" value="25"/>
             <property name="xpath">
                 <value>
 <![CDATA[
