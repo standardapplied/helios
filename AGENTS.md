@@ -202,10 +202,15 @@ different one.
 ### Running it
 
 ```bash
-./mvnw -B clean verify javadoc:jar                                                   # everything, as CI does
+mvn -B clean verify javadoc:jar                                                      # everything, as CI does
 mvn -B verify -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false   # the gate, without the test suite
 mvn -B verify -DskipTests                                                            # PMD and CPD only
 ```
+
+CI runs the same build through `./mvnw`, which downloads Maven 3.9.14 and checks its SHA-256. The
+wrapper needs `unzip`: without it, the script fetches the `.tar.gz` and refuses it because the
+checksum is the `.zip`'s. Where Maven 3.9.14 is installed, `mvn` is the same build, since the
+enforcer refuses any other version. Never remove `distributionSha256Sum` to make `./mvnw` run.
 
 Never add `-q`: the lines that say what to fix (`PMD Failure: <class>:<line> Rule:<rule> <message>`,
 `CPD Failure: Found N lines of duplicated code at locations: ...`) are logged as warnings and
