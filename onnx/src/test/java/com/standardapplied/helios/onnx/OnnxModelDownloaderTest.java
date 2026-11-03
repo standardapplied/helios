@@ -200,6 +200,18 @@ class OnnxModelDownloaderTest {
   }
 
   @Test
+  void anInterruptedListingFailsAndKeepsTheInterrupt() {
+    var hub = new Hub();
+    Thread.currentThread().interrupt();
+
+    var error = assertThrows(IOException.class, () -> hub.download(SUBFOLDER_SPEC, cache));
+
+    assertTrue(Thread.interrupted());
+    assertEquals("Interrupted while fetching file list", error.getMessage());
+    assertFalse(Files.exists(cache.resolve("acme/tiny")));
+  }
+
+  @Test
   void aFinishedMarkerSkipsTheHub() throws IOException {
     Files.createDirectories(cache.resolve("acme/tiny"));
     Files.createFile(cache.resolve("acme/tiny/.finished"));
