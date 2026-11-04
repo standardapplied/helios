@@ -299,7 +299,13 @@ final class SessionSpanEndingsTest {
   void anErrorEndingAToolsOpenSpanStillEndsTheRunSpan() {
     var failure = new HostFailure();
     var ending = new AssertionError("span processor failed");
-    var failing = new SpanCapture(new FailingOnEnd("execute_tool fatal", ending));
+    var failing =
+        new SpanCapture(
+            new FailingOnEnd(
+                "execute_tool fatal",
+                () -> {
+                  throw ending;
+                }));
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call("fatal", Map.of())).build();
     var fatal =
         EndingSessions.binding(
@@ -365,6 +371,28 @@ final class SessionSpanEndingsTest {
   }
 
   @Test
+  void aRuntimeExceptionEndingTheRunsSpanFailsTheRunAsItself() {
+    var failure = new IllegalStateException("span processor failed");
+    var failing =
+        new SpanCapture(
+            new FailingOnEnd(
+                "invoke_agent helios",
+                () -> {
+                  throw failure;
+                }));
+    var options =
+        EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
+            .withOpenTelemetry(failing.openTelemetry());
+
+    try (var session = AgentSession.open(options.build())) {
+      assertSame(failure, Await.failure("the result to fail", session.send("go")));
+    }
+
+    failing.run();
+    assertEquals(Set.of(), failing.unended());
+  }
+
+  @Test
   void runsOfASessionEachEndTheirOwnSpan() {
     var model = ScriptedModel.newBuilder().withTextTurn("a").withTextTurn("b").build();
     try (var session = AgentSession.open(traced(model).build())) {
@@ -377,8 +405,8 @@ final class SessionSpanEndingsTest {
     assertEquals(List.of("chat scripted", "invoke_agent helios"), capture.names().subList(0, 2));
   }
 
-  /** A span processor that throws {@code error} once the span named {@code name} has ended. */
-  private record FailingOnEnd(String name, Error error) implements SpanProcessor {
+  /** A span processor that runs {@code failing} once the span named {@code name} has ended. */
+  private record FailingOnEnd(String name, Runnable failing) implements SpanProcessor {
 
     @Override
     public void onStart(Context parentContext, ReadWriteSpan span) {}
@@ -391,7 +419,7 @@ final class SessionSpanEndingsTest {
     @Override
     public void onEnd(ReadableSpan span) {
       if (span.getName().equals(name)) {
-        throw error;
+        failing.run();
       }
     }
 
