@@ -450,8 +450,14 @@ final class PgSpanExporterTest {
     }
 
     assertEquals(1, rollbacks.get());
-    var thrown = logged.getFirst().getThrown();
-    assertEquals("java.lang.IllegalStateException: dml failed", thrown.getMessage());
+    var thrown = logged.stream().map(record -> record.getThrown().getMessage()).toList();
+    assertEquals(
+        rollbackFails
+            ? List.of(
+                "java.lang.IllegalStateException: dml failed",
+                "java.lang.IllegalStateException: rollback failed")
+            : List.of("java.lang.IllegalStateException: dml failed"),
+        thrown);
   }
 
   @Test
