@@ -59,7 +59,7 @@ import java.util.logging.Logger;
 final class RunSpans implements StepSpans {
 
   /** The instrumentation scope of every span a session emits. */
-  static final String SCOPE = "com.standardapplied.helios";
+  private static final String SCOPE = "com.standardapplied.helios";
 
   private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
 
