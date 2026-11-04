@@ -500,6 +500,7 @@ final class SessionSpansTest {
     assertEquals("ErrorMaxTurns", runs.get(1).getAttributes().get(TERMINAL));
     assertTotalsEqual(first, runs.get(0));
     assertTotalsEqual(second, runs.get(1));
+    assertEquals(Set.of(), capture.unended());
   }
 
   @Test

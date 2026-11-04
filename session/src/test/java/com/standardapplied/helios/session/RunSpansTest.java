@@ -29,8 +29,10 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * A hook span names the hook, its phase and its outcome, and only a verbose run adds the reason or
- * text the outcome carries, as its event shows it; what reaches no run in progress starts no span.
+ * {@link RunSpans} on its own: a hook span names the hook, its phase and its outcome, and only a
+ * verbose run adds the reason or text the outcome carries; a step's span is a child of its run's
+ * span whatever context is current; an event of no run in progress starts no span; and a run's
+ * error is the first host {@link Error} its session recorded.
  */
 final class RunSpansTest {
 
