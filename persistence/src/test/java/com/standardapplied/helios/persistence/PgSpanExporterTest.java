@@ -250,6 +250,31 @@ final class PgSpanExporterTest {
   }
 
   @Test
+  void aRunAndAStepWithNamesLongerThan255CharactersAreStored() {
+    var agent = "a".repeat(300);
+    var toolName = "execute_tool " + "t".repeat(300);
+    var tool =
+        span(
+                "7000000000000001",
+                toolName,
+                1,
+                Attributes.builder()
+                    .put("helios.run.id", RUN)
+                    .put("gen_ai.operation.name", "execute_tool")
+                    .build())
+            .build();
+
+    assertTrue(
+        exporter
+            .export(List.of(tool, run(RUN, "00f067aa0ba902b7", agent, 0, Attributes.empty())))
+            .isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals(agent, found.name());
+    assertEquals(toolName, found.spans().getFirst().name());
+  }
+
+  @Test
   void onlyHeliosSpansThatNameTheirRunAreWritten() {
     var application =
         span(
