@@ -79,8 +79,8 @@ public final class TraceRollupSql {
    * @return the SQL and its positional bind parameters
    */
   public static RollupQuery build(TraceRollupKey key, TraceFilter filter) {
-    var dims = dimension(key).column();
-    var where = new StringBuilder(dims).append(" IS NOT NULL");
+    var column = dimension(key).column();
+    var where = new StringBuilder(column).append(" IS NOT NULL");
     var params = new ArrayList<Object>();
     if (filter.name() != null) {
       where.append(" AND name = ?");
@@ -96,15 +96,15 @@ public final class TraceRollupSql {
     }
     var sql =
         "SELECT "
-            + dims
+            + column
             + ",\n"
             + AGGREGATES
             + "FROM %s.helios_traces\nWHERE "
             + where
             + "\nGROUP BY "
-            + dims
+            + column
             + "\nORDER BY "
-            + dims;
+            + column;
     return new RollupQuery(sql, params);
   }
 }
