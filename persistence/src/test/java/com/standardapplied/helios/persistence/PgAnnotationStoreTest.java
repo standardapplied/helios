@@ -685,10 +685,13 @@ class PgAnnotationStoreTest {
 
   private void assertCounts(String runId, int up, int down) {
     var found = traces.findById(runId);
-    var listed = traces.list(Paginate.of(), "id eq \"" + runId + "\"").items();
+    var byCounts = "thumbs_up_count eq " + up + " and thumbs_down_count eq " + down;
+    var listed = traces.list(Paginate.of(), byCounts).items();
+    var otherCounts = "thumbs_up_count ne " + up + " or thumbs_down_count ne " + down;
     assertEquals(List.of(up, down), List.of(found.thumbsUpCount(), found.thumbsDownCount()));
     assertEquals(
-        List.of(List.of(up, down)),
-        listed.stream().map(t -> List.of(t.thumbsUpCount(), t.thumbsDownCount())).toList());
+        List.of(List.of(runId, up, down)),
+        listed.stream().map(t -> List.of(t.id(), t.thumbsUpCount(), t.thumbsDownCount())).toList());
+    assertEquals(List.of(), traces.list(Paginate.of(), otherCounts).items());
   }
 }
