@@ -28,14 +28,6 @@ import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
-import io.opentelemetry.sdk.common.CompletableResultCode;
-import io.opentelemetry.sdk.trace.ReadWriteSpan;
-import io.opentelemetry.sdk.trace.ReadableSpan;
-import io.opentelemetry.sdk.trace.SpanProcessor;
-import io.opentelemetry.sdk.trace.data.SpanData;
-import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
-import io.opentelemetry.sdk.trace.export.SpanExporter;
-import java.util.Collection;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
@@ -44,8 +36,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A run's span is a child of the span current where its {@code send} was called, and each step's
- * span is current while the step runs, so the application's own spans nest under it; what the
- * tracing pipeline does never changes a run's result.
+ * span is current while the step runs, so the application's own spans nest under it.
  */
 final class SessionSpanContextTest {
 
@@ -336,41 +327,6 @@ final class SessionSpanContextTest {
   }
 
   @Test
-  void anExporterThatThrowsLeavesTheRunsResultAsWithoutTracing() {
-    var plain =
-        assertInstanceOf(
-            ResultMessage.Success.class,
-            runOnce(EndingSessions.options(twoTurns()), new CountDownLatch(0)));
-    var exported = new CountDownLatch(1);
-    var sdk = new SpanCapture(SimpleSpanProcessor.create(new Throwing(exported))).openTelemetry();
-
-    var traced =
-        assertInstanceOf(
-            ResultMessage.Success.class,
-            runOnce(EndingSessions.options(twoTurns()).withOpenTelemetry(sdk), exported));
-
-    assertEquals(plain.result(), traced.result());
-    assertEquals(plain.usage(), traced.usage());
-    assertEquals(plain.cost(), traced.cost());
-  }
-
-  private static ScriptedModel twoTurns() {
-    return ScriptedModel.newBuilder()
-        .withToolCallsTurn(call("noop", Map.of()))
-        .withTextTurn("done")
-        .build();
-  }
-
-  private static ResultMessage runOnce(SessionOptions.Builder options, CountDownLatch exported) {
-    try (var session =
-        AgentSession.open(options.withTool(SessionSpansTest.tool("noop", "ok")).build())) {
-      var result = Await.value("the result", session.send("go"));
-      Await.latch("the exporter to have thrown", exported);
-      return result;
-    }
-  }
-
-  @Test
   void withoutAnSdkASessionRunsWithNoSpanCurrentInItsTools() {
     var current = new CompletableFuture<Span>();
     var model =
@@ -393,130 +349,10 @@ final class SessionSpanContextTest {
     assertFalse(Await.value("the tool's current span", current).getSpanContext().isValid());
   }
 
-  @Test
-  void anErrorASpanProcessorThrowsEndingTheRunsSpanFailsTheRunWithThatError() {
-    var failure = new SessionSpanEndingsTest.HostFailure();
-    var sdk = new SpanCapture(new FailingRunEnd(failure)).openTelemetry();
-    var options =
-        EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
-            .withOpenTelemetry(sdk);
-
-    try (var session = AgentSession.open(options.build())) {
-      assertSame(failure, Await.failure("the result to fail", session.send("go")));
-    }
-  }
-
-  @Test
-  void anErrorASpanProcessorThrowsAfterACloseReturnedStillFailsTheRunWithThatError() {
-    var failure = new SessionSpanEndingsTest.HostFailure();
-    var entered = new CountDownLatch(1);
-    var released = new CountDownLatch(1);
-    var sdk = new SpanCapture(new FailingRunEnd(failure, entered, released)).openTelemetry();
-    var options =
-        EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
-            .withLimits(EndingSessions.grace())
-            .withOpenTelemetry(sdk);
-    var session = AgentSession.open(options.build());
-    var result = session.send("go");
-    Await.latch("the run's span to end", entered);
-
-    session.close();
-    assertFalse(result.isDone(), "the close returned before the run's span ended");
-    released.countDown();
-
-    assertSame(failure, Await.failure("the result to fail", result));
-  }
-
-  @Test
-  void anErrorStartingTheRunsSpanFailsTheRunWithThatError() {
-    var failure = new SessionSpanEndingsTest.HostFailure();
-    var sdk = new SpanCapture(new FailingRunStart(failure)).openTelemetry();
-    PreStopHook never =
-        (response, ctx) -> {
-          throw new AssertionError("the loop ran");
-        };
-    var options =
-        EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
-            .withHook(never)
-            .withOpenTelemetry(sdk);
-
-    try (var session = AgentSession.open(options.build())) {
-      assertSame(failure, Await.failure("the result to fail", session.send("go")));
-    }
-  }
-
-  /** An exporter that throws from every export, counting down {@code exported} first. */
-  private record Throwing(CountDownLatch exported) implements SpanExporter {
-
-    @Override
-    public CompletableResultCode export(Collection<SpanData> spans) {
-      exported.countDown();
-      throw new IllegalStateException("export failed");
-    }
-
-    @Override
-    public CompletableResultCode flush() {
-      return CompletableResultCode.ofSuccess();
-    }
-
-    @Override
-    public CompletableResultCode shutdown() {
-      return CompletableResultCode.ofSuccess();
-    }
-  }
-
-  /** Throws {@code failure} when a run's span ends, once {@code released} opens. */
-  private record FailingRunEnd(Error failure, CountDownLatch entered, CountDownLatch released)
-      implements SpanProcessor {
-
-    FailingRunEnd(Error failure) {
-      this(failure, new CountDownLatch(1), new CountDownLatch(0));
-    }
-
-    @Override
-    public void onStart(Context parentContext, ReadWriteSpan span) {}
-
-    @Override
-    public boolean isStartRequired() {
-      return false;
-    }
-
-    @Override
-    public void onEnd(ReadableSpan span) {
-      if (span.getName().startsWith("invoke_agent ")) {
-        entered.countDown();
-        Uninterruptible.await(released);
-        throw failure;
-      }
-    }
-
-    @Override
-    public boolean isEndRequired() {
-      return true;
-    }
-  }
-
-  /** Throws {@code failure} when a run's span starts. */
-  private record FailingRunStart(Error failure) implements SpanProcessor {
-
-    @Override
-    public void onStart(Context parentContext, ReadWriteSpan span) {
-      if (span.getName().startsWith("invoke_agent ")) {
-        throw failure;
-      }
-    }
-
-    @Override
-    public boolean isStartRequired() {
-      return true;
-    }
-
-    @Override
-    public void onEnd(ReadableSpan span) {}
-
-    @Override
-    public boolean isEndRequired() {
-      return false;
-    }
+  static ScriptedModel twoTurns() {
+    return ScriptedModel.newBuilder()
+        .withToolCallsTurn(call("noop", Map.of()))
+        .withTextTurn("done")
+        .build();
   }
 }
