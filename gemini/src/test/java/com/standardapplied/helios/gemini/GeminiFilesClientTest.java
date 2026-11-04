@@ -7,6 +7,7 @@ package com.standardapplied.helios.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Flow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,7 +61,7 @@ class GeminiFilesClientTest {
   }
 
   @Test
-  void uploadStreamsFileAndWaitsUntilActive() throws Exception {
+  void uploadReturnsTheHandleBeforeProcessingAndAwaitActivePollsUntilActive() throws Exception {
     var video = tempDir.resolve("sample.mp4");
     Files.write(video, new byte[] {1, 2, 3, 4});
     var http = new StubExchanges();
@@ -78,11 +80,18 @@ class GeminiFilesClientTest {
         "{\"name\":\"files/video-1\",\"mimeType\":\"video/mp4\","
             + "\"uri\":\"https://api.example/v1beta/files/video-1\",\"state\":\"ACTIVE\"}");
 
-    var client = client(http, PROCESSING_NEVER_TIMES_OUT);
-    var reference = client.upload(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+
+    assertEquals("files/video-1", managed.resourceName());
+    assertEquals(2, http.requests.size());
+    assertTrue(http.requests.stream().noneMatch(request -> request.method().equals("GET")));
+
+    var reference = managed.awaitActive();
 
     assertEquals("https://api.example/v1beta/files/video-1", reference.uri());
     assertEquals("video/mp4", reference.mimeType());
+    assertEquals(3, http.requests.size());
+    assertEquals(reference, managed.awaitActive());
     assertEquals(3, http.requests.size());
 
     var start = http.requests.get(0);
@@ -123,8 +132,10 @@ class GeminiFilesClientTest {
         "{\"file\":{\"name\":\"files/video-2\",\"mimeType\":\"video/mp4\","
             + "\"uri\":\"https://api.example/v1beta/files/video-2\",\"state\":\"ACTIVE\"}}");
 
-    client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+    var reference =
+        client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4").awaitActive();
 
+    assertEquals("https://api.example/v1beta/files/video-2", reference.uri());
     assertEquals(2, http.requests.size());
   }
 
@@ -142,11 +153,11 @@ class GeminiFilesClientTest {
             + "\"uri\":\"https://provider-supplied.example/private/video\",\"state\":\"ACTIVE\"}}");
     http.enqueue(204, Map.of(), "");
 
-    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     assertEquals("files/managed-1", managed.resourceName());
-    assertEquals("https://provider-supplied.example/private/video", managed.reference().uri());
-    assertEquals("video/mp4", managed.reference().mimeType());
+    assertEquals("https://provider-supplied.example/private/video", managed.awaitActive().uri());
+    assertEquals("video/mp4", managed.awaitActive().mimeType());
 
     managed.delete();
     managed.delete();
@@ -167,7 +178,7 @@ class GeminiFilesClientTest {
         managedUpload(stubExchanges(), "files/already-absent", "https://files.example/private");
     http.enqueue(404, Map.of(), "{\"error\":{\"message\":\"not found\"}}");
 
-    try (var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4")) {
+    try (var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4")) {
       managed.delete();
     }
 
@@ -185,8 +196,7 @@ class GeminiFilesClientTest {
         500, Map.of(), "{\"error\":{\"message\":\"failed " + apiKey + " " + fileUri + "\"}}");
     var config =
         ModelConfig.newBuilder().withApiKey(apiKey).withBaseUrl("https://api.example/v1").build();
-    var managed =
-        client(config, http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var managed = client(config, http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     var error = assertThrows(GeminiException.class, managed::delete);
 
@@ -204,7 +214,7 @@ class GeminiFilesClientTest {
     var http = managedUpload(stubExchanges(), "files/retry-delete", "https://files.example/retry");
     http.enqueue(503, Map.of(), "temporary");
     http.enqueue(204, Map.of(), "");
-    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     assertThrows(GeminiException.class, managed::delete);
     managed.delete();
@@ -221,7 +231,7 @@ class GeminiFilesClientTest {
         managedUpload(stubExchanges(), "files/redirect-delete", "https://files.example/private");
     http.enqueue(
         302, Map.of("location", List.of("https://attacker.example/collect")), "redirecting");
-    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
     var error = assertThrows(GeminiException.class, managed::delete);
 
@@ -241,7 +251,7 @@ class GeminiFilesClientTest {
     var error =
         assertThrows(
             GeminiException.class,
-            () -> client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4"));
+            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
 
     assertTrue(error.getMessage().contains("invalid file name"));
     assertEquals(2, http.requests.size());
@@ -266,12 +276,12 @@ class GeminiFilesClientTest {
             + "\"uri\":\"https://api.example/v1beta/files/video-3\",\"state\":\"FAILED\","
             + "\"error\":{\"code\":13,\"message\":\"codec rejected\"}}");
 
-    var error =
-        assertThrows(
-            GeminiException.class,
-            () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+
+    var error = assertThrows(GeminiException.class, managed::awaitActive);
 
     assertTrue(error.getMessage().contains("codec rejected"));
+    assertDeletesAfterTheFailedWait(http, managed);
   }
 
   @Test
@@ -355,6 +365,83 @@ class GeminiFilesClientTest {
     assertEquals(429, error.statusCode());
     assertTrue(error.getMessage().contains("quota exceeded"));
     assertTrue(error.isRetryable());
+    assertEquals(1, http.requests.size());
+  }
+
+  @Test
+  void anInterruptedWaitKeepsTheInterruptAndLeavesTheFileDeletable() throws Exception {
+    var video = tempDir.resolve("interrupted-wait.mp4");
+    Files.write(video, new byte[] {1});
+    var http =
+        uploadClient("{\"file\":{\"name\":\"files/interrupted-wait\",\"state\":\"PROCESSING\"}}");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+    http.interruptOnSend = true;
+
+    var error = assertThrows(GeminiException.class, managed::awaitActive);
+
+    assertTrue(Thread.interrupted());
+    assertEquals("Gemini file processing wait interrupted", error.getMessage());
+    assertEquals("GET", http.requests.getLast().method());
+    http.interruptOnSend = false;
+    assertDeletesAfterTheFailedWait(http, managed);
+  }
+
+  @Test
+  void aDeletedHandleRefusesToWaitWithoutARequest() throws Exception {
+    var video = tempDir.resolve("deleted.mp4");
+    Files.write(video, new byte[] {1});
+    var http = managedUpload(stubExchanges(), "files/deleted", "https://files.example/deleted");
+    http.enqueue(204, Map.of(), "");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+    managed.delete();
+
+    var error = assertThrows(IllegalStateException.class, managed::awaitActive);
+
+    assertEquals("Gemini file files/deleted was deleted", error.getMessage());
+    assertEquals(3, http.requests.size());
+  }
+
+  @Test
+  void tryWithResourcesDeletesTheFileAfterAFailedWait() throws Exception {
+    var video = tempDir.resolve("closed.mp4");
+    Files.write(video, new byte[] {1});
+    var http = uploadClient("{\"file\":{\"name\":\"files/closed\",\"state\":\"FAILED\"}}");
+    http.enqueue(204, Map.of(), "");
+    var client = client(http, PROCESSING_NEVER_TIMES_OUT);
+
+    assertThrows(
+        GeminiException.class,
+        () -> {
+          try (var managed = client.upload(video, "video/mp4")) {
+            managed.awaitActive();
+          }
+        });
+
+    assertEquals(1, http.deletes());
+    assertEquals(
+        "https://api.example/v1beta/files/closed", http.requests.getLast().uri().toString());
+  }
+
+  @Test
+  void deleteIsNotHeldUpByAWaitInProgress() throws Exception {
+    var video = tempDir.resolve("held.mp4");
+    Files.write(video, new byte[] {1});
+    var http = uploadClient("{\"file\":{\"name\":\"files/held\",\"state\":\"PROCESSING\"}}");
+    http.enqueue(204, Map.of(), "");
+    http.enqueue(404, Map.of(), "{\"error\":{\"message\":\"not found\"}}");
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+    http.pollReached = new CountDownLatch(1);
+    http.pollReleased = new CountDownLatch(1);
+    var wait = CompletableFuture.supplyAsync(managed::awaitActive);
+    Await.latch("the poll to start", http.pollReached);
+
+    managed.delete();
+
+    assertEquals(1, http.deletes());
+    assertFalse(wait.isDone());
+    http.pollReleased.countDown();
+    var error = assertInstanceOf(GeminiException.class, Await.failure("the wait", wait));
+    assertEquals(404, error.statusCode());
   }
 
   @Test
@@ -370,14 +457,13 @@ class GeminiFilesClientTest {
         "{\"file\":{\"name\":\"files/video-4\",\"mimeType\":\"video/mp4\","
             + "\"uri\":\"https://api.example/v1beta/files/video-4\",\"state\":\"PROCESSING\"}}");
 
-    var error =
-        assertThrows(
-            GeminiException.class,
-            () ->
-                client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4", Duration.ZERO));
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
 
-    assertTrue(error.getMessage().contains("timed out"));
+    var error = assertThrows(GeminiException.class, () -> managed.awaitActive(Duration.ZERO));
+
+    assertEquals("Gemini file processing timed out after 0 seconds", error.getMessage());
     assertEquals(2, http.requests.size());
+    assertDeletesAfterTheFailedWait(http, managed);
   }
 
   @Test
@@ -401,9 +487,16 @@ class GeminiFilesClientTest {
 
     assertTrue(uploadError(malformed, video).getMessage().contains("parse"));
     assertTrue(uploadError(missingFile, video).getMessage().contains("file resource"));
-    assertTrue(uploadError(unknownState, video).getMessage().contains("unknown"));
-    assertTrue(uploadError(incompleteActive, video).getMessage().contains("URI"));
     assertTrue(uploadError(invalidName, video).getMessage().contains("file name"));
+    assertEquals(
+        "Gemini file entered unknown processing state: PAUSED",
+        awaitError(unknownState, video).getMessage());
+    assertEquals(
+        "Active Gemini file is missing its URI or MIME type",
+        awaitError(incompleteActive, video).getMessage());
+    for (var http : List.of(malformed, missingFile, invalidName)) {
+      assertEquals(2, http.requests.size());
+    }
   }
 
   @Test
@@ -457,7 +550,7 @@ class GeminiFilesClientTest {
             + "\"state\":\"ACTIVE\"}}");
     var config = ModelConfig.newBuilder().withApiKey("g-key").build();
 
-    var reference = client(config, http, PROCESSING_NEVER_TIMES_OUT).upload(video);
+    var reference = client(config, http, PROCESSING_NEVER_TIMES_OUT).upload(video).awaitActive();
 
     assertEquals("video/mp4", reference.mimeType());
     assertEquals(
@@ -524,13 +617,16 @@ class GeminiFilesClientTest {
         assertThrows(GeminiException.class, () -> client.upload(video, "video/mp4"));
 
     assertTrue(responseError.getMessage().contains("exceeded 1 MB"));
+    var managed =
+        client(
+                managedUpload(stubExchanges(), "files/durations", "https://files.example/d"),
+                PROCESSING_NEVER_TIMES_OUT)
+            .upload(video, "video/mp4");
     assertThrows(
         IllegalArgumentException.class,
-        () -> client.upload(video, "video/mp4", Duration.ofSeconds(Long.MAX_VALUE)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> client.upload(video, "video/mp4", Duration.ofSeconds(-1)));
-    assertThrows(NullPointerException.class, () -> client.upload(video, "video/mp4", null));
+        () -> managed.awaitActive(Duration.ofSeconds(Long.MAX_VALUE)));
+    assertThrows(IllegalArgumentException.class, () -> managed.awaitActive(Duration.ofSeconds(-1)));
+    assertThrows(NullPointerException.class, () -> managed.awaitActive(null));
 
     var jsonHttp = new StubExchanges();
     jsonHttp.enqueue(
@@ -594,6 +690,27 @@ class GeminiFilesClientTest {
         () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
   }
 
+  private GeminiException awaitError(StubExchanges http, Path video) {
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+    var error = assertThrows(GeminiException.class, managed::awaitActive);
+    assertDeletesAfterTheFailedWait(http, managed);
+    return error;
+  }
+
+  private static void assertDeletesAfterTheFailedWait(
+      StubExchanges http, GeminiFilesClient.ManagedFile managed) {
+    assertEquals(0, http.deletes());
+    http.enqueue(204, Map.of(), "");
+
+    managed.delete();
+    managed.delete();
+
+    assertEquals(1, http.deletes());
+    assertEquals(
+        "https://api.example/v1beta/" + managed.resourceName(),
+        http.requests.getLast().uri().toString());
+  }
+
   private static StubExchanges stubExchanges() {
     return new StubExchanges();
   }
@@ -604,9 +721,9 @@ class GeminiFilesClientTest {
     Files.write(video, new byte[] {1});
     var http = managedUpload(stubExchanges(), "files/inferred-managed", "https://files.example/x");
 
-    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video);
+    var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video);
 
-    assertEquals("video/mp4", managed.reference().mimeType());
+    assertEquals("video/mp4", managed.awaitActive().mimeType());
   }
 
   @Test
@@ -625,7 +742,8 @@ class GeminiFilesClientTest {
     var reference =
         new GeminiFilesClient(
                 config, http.client(), Duration.ofMillis(1), PROCESSING_NEVER_TIMES_OUT, false)
-            .upload(video, "video/mp4");
+            .upload(video, "video/mp4")
+            .awaitActive();
 
     assertEquals("https://api.example/v1beta/files/stateless", reference.uri());
     assertEquals(3, http.requests.size());
@@ -643,11 +761,10 @@ class GeminiFilesClientTest {
             "{\"file\":{\"name\":\"files/b\",\"uri\":\"https://x\",\"state\":\"ACTIVE\"}}");
 
     for (var http : List.of(noUri, noMimeType)) {
-      var error =
-          assertThrows(
-              GeminiException.class,
-              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+      var managed = client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
+      var error = assertThrows(GeminiException.class, managed::awaitActive);
       assertEquals("Active Gemini file is missing its URI or MIME type", error.getMessage());
+      assertDeletesAfterTheFailedWait(http, managed);
     }
   }
 
@@ -661,10 +778,7 @@ class GeminiFilesClientTest {
             "{\"file\":{\"name\":\"files/d\",\"state\":\"FAILED\",\"error\":{\"message\":\" \"}}}");
 
     for (var http : List.of(noError, blankMessage)) {
-      var error =
-          assertThrows(
-              GeminiException.class,
-              () -> client(http, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
+      var error = awaitError(http, video);
       assertEquals("Gemini file processing failed", error.getMessage());
     }
   }
@@ -676,9 +790,9 @@ class GeminiFilesClientTest {
     var ioHttp = managedUpload(stubExchanges(), "files/io-delete", "https://files.example/io");
     var interruptedHttp =
         managedUpload(stubExchanges(), "files/interrupted-delete", "https://files.example/int");
-    var ioManaged = client(ioHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var ioManaged = client(ioHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
     var interruptedManaged =
-        client(interruptedHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+        client(interruptedHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
     ioHttp.sendFailure = new IOException("network down");
     interruptedHttp.interruptOnSend = true;
 
@@ -738,7 +852,7 @@ class GeminiFilesClientTest {
         assertThrows(
             GeminiException.class,
             () -> client(startHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4"));
-    var managed = client(deleteHttp, PROCESSING_NEVER_TIMES_OUT).uploadManaged(video, "video/mp4");
+    var managed = client(deleteHttp, PROCESSING_NEVER_TIMES_OUT).upload(video, "video/mp4");
     var deleteError = assertThrows(GeminiException.class, managed::delete);
 
     assertEquals("Files API error (status 199): early", startError.getMessage());
@@ -876,6 +990,12 @@ class GeminiFilesClientTest {
     private final List<HttpRequest> requests = new ArrayList<>();
     private IOException sendFailure;
     private boolean interruptOnSend;
+    private CountDownLatch pollReached;
+    private CountDownLatch pollReleased;
+
+    long deletes() {
+      return requests.stream().filter(request -> request.method().equals("DELETE")).count();
+    }
 
     void enqueue(int status, Map<String, List<String>> headers, String body) {
       responses.addLast(new StubResponse(status, headers, body));
@@ -886,6 +1006,10 @@ class GeminiFilesClientTest {
     }
 
     HttpResponse<InputStream> answer(HttpRequest request) throws IOException, InterruptedException {
+      if (pollReached != null && request.method().equals("GET")) {
+        pollReached.countDown();
+        pollReleased.await();
+      }
       requests.add(request);
       if (sendFailure != null) {
         throw sendFailure;

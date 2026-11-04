@@ -16,7 +16,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Client for streaming files to the Gemini Files API and waiting for processing to complete. */
+/**
+ * Client for streaming files to the Gemini Files API. An upload returns the caller's {@link
+ * ManagedFile} once the bytes land; {@link ManagedFile#awaitActive()} waits for Gemini's
+ * processing, and {@link ManagedFile#close()} or {@link ManagedFile#delete()} removes the file,
+ * including after a failed wait. Helios never deletes a file on its own.
+ */
 public final class GeminiFilesClient implements AutoCloseable {
 
   private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(2);
@@ -64,68 +69,35 @@ public final class GeminiFilesClient implements AutoCloseable {
   }
 
   /**
-   * Streams a file to Gemini and waits until it is ready for use in an interaction.
+   * Streams a file to Gemini and returns its handle as soon as the bytes land, before Gemini has
+   * processed it. The MIME type is probed from the file.
    *
    * @param path readable, non-empty file of at most 2 GB
-   * @return the provider file reference for a model message
+   * @return the caller's handle; {@link ManagedFile#awaitActive()} waits for processing and {@link
+   *     ManagedFile#close()} deletes the file
    * @throws IllegalArgumentException if the file is invalid or its MIME type cannot be detected
-   * @throws GeminiException if upload or processing fails
+   * @throws GeminiException if the upload fails, in which case no file is left to delete
    */
-  public FileReference upload(Path path) {
+  public ManagedFile upload(Path path) {
     return upload(path, inferMimeType(path));
   }
 
   /**
-   * Streams a file to Gemini and returns a managed reference whose {@link ManagedFile#close()}
-   * deletes the provider resource.
-   */
-  public ManagedFile uploadManaged(Path path) {
-    return uploadManaged(path, inferMimeType(path));
-  }
-
-  /**
-   * Streams a file with an explicit MIME type and waits for Gemini's processing to finish.
+   * Streams a file with an explicit MIME type and returns its handle as soon as the bytes land,
+   * before Gemini has processed it.
    *
    * @param path readable, non-empty file of at most 2 GB
    * @param mimeType valid media type such as {@code video/mp4}
-   * @return the provider file reference for a model message
+   * @return the caller's handle; {@link ManagedFile#awaitActive()} waits for processing and {@link
+   *     ManagedFile#close()} deletes the file
    * @throws IllegalArgumentException if the file or MIME type is invalid
-   * @throws GeminiException if upload or processing fails
+   * @throws GeminiException if the upload fails, in which case no file is left to delete
    */
-  public FileReference upload(Path path, String mimeType) {
-    return upload(path, mimeType, processingTimeout);
-  }
-
-  /**
-   * Streams a file and waits up to the supplied duration for provider-side processing. The timeout
-   * starts after the streamed upload completes.
-   *
-   * @param path readable, non-empty file of at most 2 GB
-   * @param mimeType valid media type such as {@code video/mp4}
-   * @param timeout maximum provider-side processing wait
-   * @return the provider file reference for a model message
-   * @throws IllegalArgumentException if an input is invalid
-   * @throws GeminiException if upload or processing fails
-   */
-  public FileReference upload(Path path, String mimeType, Duration timeout) {
-    return uploadResource(path, mimeType, timeout).reference();
-  }
-
-  /**
-   * Streams a file with an explicit MIME type and returns a managed provider resource.
-   *
-   * @param path readable, non-empty file of at most 2 GB
-   * @param mimeType valid media type such as {@code video/mp4}
-   * @return managed file reference; close it to delete the provider resource
-   */
-  public ManagedFile uploadManaged(Path path, String mimeType) {
-    return uploadManaged(path, mimeType, processingTimeout);
-  }
-
-  /** Streams a file, waits up to the supplied duration, and returns a managed provider resource. */
-  public ManagedFile uploadManaged(Path path, String mimeType, Duration timeout) {
-    var uploaded = uploadResource(path, mimeType, timeout);
-    return new ManagedFile(http, uploaded.reference(), uploaded.resourceName());
+  public ManagedFile upload(Path path, String mimeType) {
+    var file = UploadFile.of(path, mimeType);
+    var uploaded =
+        exchange(() -> ResumableUpload.upload(http, endpoint, file), "File upload interrupted");
+    return new ManagedFile(http, activation, uploaded, processingTimeout);
   }
 
   @Override
@@ -150,36 +122,47 @@ public final class GeminiFilesClient implements AutoCloseable {
     return mimeType;
   }
 
-  private FileActivation.ReadyFile uploadResource(Path path, String mimeType, Duration timeout) {
-    var file = UploadFile.of(path, mimeType);
-    var validatedTimeout = FileActivation.requireNonNegative(timeout, "timeout");
+  private static <T> T exchange(FilesExchange<T> call, String interrupted) {
     try {
-      return activation.await(ResumableUpload.upload(http, endpoint, file), validatedTimeout);
+      return call.run();
     } catch (IOException e) {
       throw new GeminiException("Failed to communicate with the Gemini Files API", e);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new GeminiException("File upload interrupted", e);
+      throw new GeminiException(interrupted, e);
     }
   }
 
-  /** A provider file reference with deterministic, idempotent lifecycle management. */
+  @FunctionalInterface
+  private interface FilesExchange<T> {
+    T run() throws IOException, InterruptedException;
+  }
+
+  /**
+   * The caller's handle on an uploaded file: it waits for Gemini's processing and deletes the file.
+   * The file is the caller's until {@link #delete()} or {@link #close()} removes it, whether or not
+   * processing succeeded; Helios never deletes it on its own.
+   */
   public static final class ManagedFile implements AutoCloseable {
 
     private final FilesHttp http;
-    private final FileReference reference;
+    private final FileActivation activation;
+    private final GeminiFileResource uploaded;
     private final String resourceName;
-    private boolean deleted;
+    private final Duration processingTimeout;
+    private volatile FileReference reference;
+    private volatile boolean deleted;
 
-    private ManagedFile(FilesHttp http, FileReference reference, String resourceName) {
+    private ManagedFile(
+        FilesHttp http,
+        FileActivation activation,
+        GeminiFileResource uploaded,
+        Duration processingTimeout) {
       this.http = http;
-      this.reference = reference;
-      this.resourceName = resourceName;
-    }
-
-    /** Model-facing file reference. */
-    public FileReference reference() {
-      return reference;
+      this.activation = activation;
+      this.uploaded = uploaded;
+      this.resourceName = GeminiFileResource.requireName(uploaded.name());
+      this.processingTimeout = processingTimeout;
     }
 
     /** Validated Gemini resource name in {@code files/{id}} form. */
@@ -187,7 +170,52 @@ public final class GeminiFilesClient implements AutoCloseable {
       return resourceName;
     }
 
-    /** Deletes the provider resource. Repeated successful calls perform no additional request. */
+    /**
+     * Waits up to the client's processing timeout for Gemini to finish processing the file.
+     *
+     * @return the model-facing reference
+     * @see #awaitActive(Duration)
+     */
+    public FileReference awaitActive() {
+      return awaitActive(processingTimeout);
+    }
+
+    /**
+     * Waits up to {@code timeout} for Gemini to finish processing the file, starting from the state
+     * the upload reported, so a file already active needs no request. Once active, the reference is
+     * kept and later calls return it with no request. When the wait fails the file still exists:
+     * {@link #delete()} removes it, or this method waits again. A {@link #delete()} from another
+     * thread is not blocked by a wait in progress.
+     *
+     * @param timeout maximum processing wait
+     * @return the model-facing reference
+     * @throws IllegalArgumentException if {@code timeout} is negative or too large
+     * @throws IllegalStateException if the file was deleted
+     * @throws GeminiException if processing fails, enters an unknown state, times out or is active
+     *     without a URI or MIME type, if a poll fails, or if the waiting thread is interrupted
+     */
+    public FileReference awaitActive(Duration timeout) {
+      var validated = FileActivation.requireNonNegative(timeout, "timeout");
+      if (deleted) {
+        throw new IllegalStateException("Gemini file " + resourceName + " was deleted");
+      }
+      var active = reference;
+      if (active == null) {
+        active =
+            exchange(
+                () -> activation.await(resourceName, uploaded, validated),
+                "Gemini file processing wait interrupted");
+        reference = active;
+      }
+      return active;
+    }
+
+    /**
+     * Deletes the file. Repeated calls after a success perform no request; a failed call can be
+     * retried.
+     *
+     * @throws GeminiException if the API refuses or cannot be reached
+     */
     public synchronized void delete() {
       if (deleted) {
         return;
@@ -196,7 +224,7 @@ public final class GeminiFilesClient implements AutoCloseable {
       deleted = true;
     }
 
-    /** Deletes the provider resource. */
+    /** Deletes the file, as {@link #delete()} does. */
     @Override
     public void close() {
       delete();
