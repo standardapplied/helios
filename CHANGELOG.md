@@ -1160,6 +1160,18 @@ not hold.
 | `storeAnnotation(a)` returned `a` | the row as stored, read back through `RETURNING` |
 | `upsertAnnotation(a)` on an existing `(subjectId, facet, label, authorId)` returned `a`, with its own `id` and `createdAt` | the stored row: the existing `id` and `createdAt`, the new values and `updatedAt` |
 
+**`Usage`, `RetryPolicy` and dollar amounts are validated when they are built.** Each used to
+accept a value that failed later or never: a `RetryPolicy` with a `null` backoff threw only after
+its first failed attempt, `CostEstimate.ofUsd(Double.NaN)` was a valid zero, and a `Usage` could
+carry a total that disagreed with its own counts.
+
+| 2.x | 3.0 |
+|---|---|
+| `new Usage(in, out, cacheWrite, cacheRead, total)` accepted any `total` and negative counts; `plus` summed the totals | throws `IllegalArgumentException` for a negative count or a `total` that is not the sum of the four counts, and `ArithmeticException` when that sum overflows an `int`; use `Usage.of(in, out, cacheWrite, cacheRead)`. `plus` recomputes the total. The serialized form keeps `totalTokens` |
+| `PgTraceStore` read a `Usage` total from `total_tokens`; `PgSpanExporter` from `helios.usage.total_tokens` | both use the four counts' sum, so a stored or reported total that disagrees is ignored; the exporter writes `total_tokens` as that sum |
+| `new RetryPolicy(...)` accepted any value; `RetryPolicy.Builder.build()` threw `IllegalStateException` for `maxAttempts < 1` | the record throws `IllegalArgumentException` for `maxAttempts < 1` or a `jitter` outside `0.0`–`1.0` (`NaN` included) and `NullPointerException` for a `null` `backoff` or `retryOn`; the builder throws the same, and `withRetryOn((Predicate) null)` throws at once |
+| `CostEstimate.ofUsd` and `Pricing.ofUsdPerMillion` turned `NaN` into zero, an infinity into `Long.MAX_VALUE` and a small negative into zero | they throw `IllegalArgumentException` for `NaN`, an infinity, any negative value, and an amount whose micro-USD does not fit in a `long` |
+
 ### Added
 
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never

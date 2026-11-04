@@ -144,11 +144,13 @@ public interface CostCalculator {
      * @param inputUsdPerMillion USD per million input tokens; non-negative
      * @param outputUsdPerMillion USD per million output tokens; non-negative
      * @return a {@code Pricing} with cache rates defaulting to the input rate
+     * @throws IllegalArgumentException if a rate is {@code NaN}, infinite, negative, or its
+     *     micro-USD amount does not fit in a {@code long}
      */
     public static Pricing ofUsdPerMillion(double inputUsdPerMillion, double outputUsdPerMillion) {
-      var inputMicro = Math.round(inputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD);
-      var outputMicro = Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD);
-      return new Pricing(inputMicro, outputMicro, inputMicro, inputMicro);
+      return new Pricing(
+          CostEstimate.toMicroUsd(inputUsdPerMillion),
+          CostEstimate.toMicroUsd(outputUsdPerMillion));
     }
 
     /**
@@ -159,6 +161,8 @@ public interface CostCalculator {
      * @param cacheWriteUsdPerMillion USD per million cache-write tokens; non-negative
      * @param cacheReadUsdPerMillion USD per million cache-read tokens; non-negative
      * @return a {@code Pricing}
+     * @throws IllegalArgumentException if a rate is {@code NaN}, infinite, negative, or its
+     *     micro-USD amount does not fit in a {@code long}
      */
     public static Pricing ofUsdPerMillion(
         double inputUsdPerMillion,
@@ -166,10 +170,10 @@ public interface CostCalculator {
         double cacheWriteUsdPerMillion,
         double cacheReadUsdPerMillion) {
       return new Pricing(
-          Math.round(inputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
-          Math.round(outputUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
-          Math.round(cacheWriteUsdPerMillion * CostEstimate.MICRO_USD_PER_USD),
-          Math.round(cacheReadUsdPerMillion * CostEstimate.MICRO_USD_PER_USD));
+          CostEstimate.toMicroUsd(inputUsdPerMillion),
+          CostEstimate.toMicroUsd(outputUsdPerMillion),
+          CostEstimate.toMicroUsd(cacheWriteUsdPerMillion),
+          CostEstimate.toMicroUsd(cacheReadUsdPerMillion));
     }
 
     /**

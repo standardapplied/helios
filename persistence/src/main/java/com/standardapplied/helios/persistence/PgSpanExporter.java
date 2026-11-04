@@ -224,7 +224,7 @@ public final class PgSpanExporter implements SpanExporter {
 
   /**
    * The usage the session's attributes describe, its input count without the cached tokens
-   * OpenTelemetry's includes; null when the span carries none.
+   * OpenTelemetry's includes and its total the four counts' sum; null when the span carries none.
    */
   private static Usage usage(Attributes attributes) {
     var input = attributes.get(INPUT_TOKENS);
@@ -233,12 +233,11 @@ public final class PgSpanExporter implements SpanExporter {
     }
     var cacheWrite = count(attributes, CACHE_WRITE);
     var cacheRead = count(attributes, CACHE_READ);
-    return new Usage(
+    return Usage.of(
         Math.toIntExact(input - cacheWrite - cacheRead),
         count(attributes, OUTPUT_TOKENS),
         cacheWrite,
-        cacheRead,
-        count(attributes, TOTAL_TOKENS));
+        cacheRead);
   }
 
   private static int count(Attributes attributes, AttributeKey<Long> key) {

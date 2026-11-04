@@ -116,6 +116,30 @@ public record Response<T>(
       int cacheReadInputTokens,
       int totalTokens) {
     /**
+     * Canonical constructor.
+     *
+     * @throws IllegalArgumentException if a count is negative or {@code totalTokens} is not the sum
+     *     of the four counts
+     * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
+     */
+    public Usage {
+      if (inputTokens < 0
+          || outputTokens < 0
+          || cacheCreationInputTokens < 0
+          || cacheReadInputTokens < 0) {
+        throw new IllegalArgumentException(
+            "token counts must be non-negative, got "
+                + List.of(
+                    inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens));
+      }
+      var sum = sum(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens);
+      if (totalTokens != sum) {
+        throw new IllegalArgumentException(
+            "totalTokens must be the sum of the four counts, " + sum + ", got " + totalTokens);
+      }
+    }
+
+    /**
      * Build a {@link Usage} from input and output token counts. Cache counts default to zero — use
      * {@link #of(int, int, int, int)} when the provider reported prompt-caching activity.
      *
@@ -124,41 +148,32 @@ public record Response<T>(
      * @return a usage record with cache fields zero and {@code totalTokens = input + output}
      */
     public static Usage of(int input, int output) {
-      return new Usage(input, output, 0, 0, input + output);
+      return of(input, output, 0, 0);
     }
 
     /**
-     * Sum this usage with another, component-wise. All five components are added independently —
-     * including {@code totalTokens} — so a provider-reported total that covers token classes the
-     * four canonical counts don't model is preserved through accumulation rather than recomputed
-     * away.
+     * Sum this usage with another, count by count; the total is recomputed from the summed counts.
      *
      * @param other the usage to add; non-null
-     * @return a usage record with every component summed
-     * @throws ArithmeticException on overflow of any component
+     * @return a usage record with every count summed
+     * @throws ArithmeticException on overflow of any count or of the total
      */
     public Usage plus(Usage other) {
       Objects.requireNonNull(other, "other must not be null");
-      return new Usage(
+      return of(
           Math.addExact(inputTokens, other.inputTokens),
           Math.addExact(outputTokens, other.outputTokens),
           Math.addExact(cacheCreationInputTokens, other.cacheCreationInputTokens),
-          Math.addExact(cacheReadInputTokens, other.cacheReadInputTokens),
-          Math.addExact(totalTokens, other.totalTokens));
+          Math.addExact(cacheReadInputTokens, other.cacheReadInputTokens));
     }
 
     /**
-     * Whether any of the four billable token counts is positive. {@code totalTokens} is not
-     * consulted: a provider total covering token classes the four counts don't model has no rate to
-     * price it against.
+     * Whether any of the four billable token counts is positive.
      *
      * @return {@code true} if input, output, cache-creation or cache-read tokens are positive
      */
     public boolean reportsTokens() {
-      return inputTokens > 0
-          || outputTokens > 0
-          || cacheCreationInputTokens > 0
-          || cacheReadInputTokens > 0;
+      return totalTokens > 0;
     }
 
     /**
@@ -166,8 +181,7 @@ public record Response<T>(
      * their sum is every token the request sent, for every provider. Usage summed over several
      * requests, such as the segments of an Anthropic {@code pause_turn}, gives their total instead.
      *
-     * @return the prompt's tokens; a {@code long}, since the sum of three counts can pass an {@code
-     *     int}
+     * @return the prompt's tokens
      */
     public long promptTokens() {
       return (long) inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
@@ -181,11 +195,16 @@ public record Response<T>(
      * @param cacheCreation tokens written to the provider's prompt cache
      * @param cacheRead tokens read from the provider's prompt cache
      * @return a usage record with {@code totalTokens} summing all four counts
+     * @throws IllegalArgumentException if a count is negative
+     * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
     public static Usage of(int input, int output, int cacheCreation, int cacheRead) {
-      var total =
-          Math.addExact(Math.addExact(input, output), Math.addExact(cacheCreation, cacheRead));
-      return new Usage(input, output, cacheCreation, cacheRead, total);
+      return new Usage(
+          input, output, cacheCreation, cacheRead, sum(input, output, cacheCreation, cacheRead));
+    }
+
+    private static int sum(int input, int output, int cacheCreation, int cacheRead) {
+      return Math.addExact(Math.addExact(input, output), Math.addExact(cacheCreation, cacheRead));
     }
   }
 

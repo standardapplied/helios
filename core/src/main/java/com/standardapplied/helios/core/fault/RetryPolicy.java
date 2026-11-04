@@ -7,6 +7,7 @@ package com.standardapplied.helios.core.fault;
 
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Predicate;
@@ -23,6 +24,24 @@ import java.util.function.Predicate;
  */
 public record RetryPolicy(
     int maxAttempts, Backoff backoff, double jitter, Predicate<Throwable> retryOn) {
+
+  /**
+   * Canonical constructor.
+   *
+   * @throws IllegalArgumentException if {@code maxAttempts} is below 1 or {@code jitter} is not a
+   *     finite value within {@code 0.0}–{@code 1.0}
+   * @throws NullPointerException if {@code backoff} or {@code retryOn} is null
+   */
+  public RetryPolicy {
+    if (maxAttempts < 1) {
+      throw new IllegalArgumentException("maxAttempts must be >= 1, got " + maxAttempts);
+    }
+    Objects.requireNonNull(backoff, "backoff must not be null");
+    if (!(jitter >= 0.0 && jitter <= 1.0)) {
+      throw new IllegalArgumentException("jitter must be within 0.0-1.0, got " + jitter);
+    }
+    Objects.requireNonNull(retryOn, "retryOn must not be null");
+  }
 
   public static Builder newBuilder() {
     return new Builder();
@@ -125,16 +144,12 @@ public record RetryPolicy(
     }
 
     public Builder withRetryOn(Predicate<Throwable> predicate) {
-      this.customRetryOn = predicate;
+      this.customRetryOn = Objects.requireNonNull(predicate, "retryOn must not be null");
       return this;
     }
 
     public RetryPolicy build() {
-      if (maxAttempts < 1) {
-        throw new IllegalStateException("maxAttempts must be >= 1");
-      }
-      Predicate<Throwable> retryPredicate = buildRetryPredicate();
-      return new RetryPolicy(maxAttempts, backoff, jitter, retryPredicate);
+      return new RetryPolicy(maxAttempts, backoff, jitter, buildRetryPredicate());
     }
 
     private Predicate<Throwable> buildRetryPredicate() {

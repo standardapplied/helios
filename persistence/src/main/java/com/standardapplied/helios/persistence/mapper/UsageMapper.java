@@ -23,8 +23,7 @@ public final class UsageMapper {
   /**
    * Reads the token columns into a {@link Usage}, or {@code null} when none of the four token
    * classes was recorded. A row with any non-null class treats the absent counts as zero. The total
-   * is the stored {@code total_tokens}, so a provider-reported total that differs from the four
-   * classes' sum round-trips.
+   * is the four classes' sum; the stored {@code total_tokens} is not read.
    */
   public static Usage usage(DbRow row) {
     var input = intOrNull(row, "input_tokens");
@@ -34,13 +33,11 @@ public final class UsageMapper {
     if (input == null && output == null && cacheCreation == null && cacheRead == null) {
       return null;
     }
-    var total = intOrNull(row, "total_tokens");
-    return new Usage(
+    return Usage.of(
         input != null ? input : 0,
         output != null ? output : 0,
         cacheCreation != null ? cacheCreation : 0,
-        cacheRead != null ? cacheRead : 0,
-        total != null ? total : 0);
+        cacheRead != null ? cacheRead : 0);
   }
 
   /**

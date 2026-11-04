@@ -13,7 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class RetryPolicyTest {
 
@@ -274,16 +278,65 @@ class RetryPolicyTest {
     assertTrue(Thread.interrupted());
   }
 
-  @Test
-  void zeroMaxAttemptsRejectedAtBuild() {
-    assertThrows(
-        IllegalStateException.class, () -> RetryPolicy.newBuilder().withMaxAttempts(0).build());
+  private static final Backoff BACKOFF = Backoff.fixed(Duration.ofMillis(1));
+  private static final Predicate<Throwable> ANY = t -> true;
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, -1})
+  void maxAttemptsBelowOneIsRejected(int maxAttempts) {
+    var message = "maxAttempts must be >= 1, got " + maxAttempts;
+    assertRejected(
+        IllegalArgumentException.class,
+        message,
+        () -> new RetryPolicy(maxAttempts, BACKOFF, 0.1, ANY));
+    assertRejected(
+        IllegalArgumentException.class,
+        message,
+        () -> RetryPolicy.newBuilder().withMaxAttempts(maxAttempts).build());
   }
 
   @Test
-  void negativeMaxAttemptsRejectedAtBuild() {
-    assertThrows(
-        IllegalStateException.class, () -> RetryPolicy.newBuilder().withMaxAttempts(-1).build());
+  void nullBackoffIsRejected() {
+    var message = "backoff must not be null";
+    assertRejected(NullPointerException.class, message, () -> new RetryPolicy(3, null, 0.1, ANY));
+    assertRejected(
+        NullPointerException.class,
+        message,
+        () -> RetryPolicy.newBuilder().withBackoff(null).build());
+  }
+
+  @Test
+  void nullRetryPredicateIsRejected() {
+    var message = "retryOn must not be null";
+    assertRejected(
+        NullPointerException.class, message, () -> new RetryPolicy(3, BACKOFF, 0.1, null));
+    assertRejected(
+        NullPointerException.class,
+        message,
+        () -> RetryPolicy.newBuilder().withRetryOn((Predicate<Throwable>) null).build());
+  }
+
+  @ParameterizedTest
+  @ValueSource(doubles = {Double.NaN, -0.1, 1.1, Double.POSITIVE_INFINITY})
+  void jitterThatIsNotAFiniteFractionIsRejected(double jitter) {
+    var message = "jitter must be within 0.0-1.0, got " + jitter;
+    assertRejected(
+        IllegalArgumentException.class, message, () -> new RetryPolicy(3, BACKOFF, jitter, ANY));
+    assertRejected(
+        IllegalArgumentException.class,
+        message,
+        () -> RetryPolicy.newBuilder().withJitter(jitter).build());
+  }
+
+  @ParameterizedTest
+  @ValueSource(doubles = {0.0, 1.0})
+  void jitterAtEitherBoundIsAccepted(double jitter) {
+    assertEquals(jitter, new RetryPolicy(1, BACKOFF, jitter, ANY).jitter());
+  }
+
+  private static void assertRejected(
+      Class<? extends RuntimeException> type, String message, Supplier<RetryPolicy> construction) {
+    assertEquals(message, assertThrows(type, construction::get).getMessage());
   }
 
   @Test
