@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ResponseTest {
 
@@ -116,11 +118,39 @@ class ResponseTest {
     assertEquals(5_500L, Response.Usage.of(1_000, 7, 500, 4_000).promptTokens());
   }
 
-  @Test
-  void promptTokensPassAnInt() {
-    var huge = new Response.Usage(Integer.MAX_VALUE, 0, Integer.MAX_VALUE, 1, 0);
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1, 2, 3})
+  void usageRejectsANegativeCountInAnyPosition(int position) {
+    var counts = new int[] {1, 2, 3, 4};
+    counts[position] = -1;
+    var total = counts[0] + counts[1] + counts[2] + counts[3];
 
-    assertEquals(2L * Integer.MAX_VALUE + 1L, huge.promptTokens());
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new Response.Usage(counts[0], counts[1], counts[2], counts[3], total));
+    assertTrue(ex.getMessage().startsWith("token counts must be non-negative, got ["));
+  }
+
+  @Test
+  void usageRejectsCountsWhoseSumOverflowsAnInt() {
+    var quarter = Integer.MAX_VALUE / 2 + 1;
+
+    assertThrows(
+        ArithmeticException.class,
+        () -> new Response.Usage(quarter, quarter, quarter, quarter, Integer.MAX_VALUE));
+  }
+
+  @Test
+  void usageRejectsATotalThatIsNotTheSumOfItsCounts() {
+    var ex = assertThrows(IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 11));
+    assertEquals("totalTokens must be the sum of the four counts, 10, got 11", ex.getMessage());
+  }
+
+  @Test
+  void usageAcceptsATotalThatIsTheSumOfItsCounts() {
+    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10));
+    assertEquals(10, Response.Usage.of(1, 2, 3, 4).totalTokens());
   }
 
   @Test
@@ -131,12 +161,10 @@ class ResponseTest {
   }
 
   @Test
-  void usagePlusPreservesExplicitTotal() {
-    var explicit = new Response.Usage(2, 3, 0, 0, 99);
+  void usagePlusRecomputesTheTotal() {
+    var sum = Response.Usage.of(1, 2, 3, 4).plus(Response.Usage.of(10, 20, 30, 40));
 
-    var sum = explicit.plus(Response.Usage.of(1, 1));
-
-    assertEquals(101, sum.totalTokens(), "provider-reported total carries through accumulation");
+    assertEquals(110, sum.totalTokens());
   }
 
   @Test
@@ -149,7 +177,6 @@ class ResponseTest {
   @Test
   void usageReportsTokensWhenAnyBillableCountIsPositive() {
     assertFalse(Response.Usage.of(0, 0).reportsTokens());
-    assertFalse(new Response.Usage(0, 0, 0, 0, 7).reportsTokens());
     assertTrue(Response.Usage.of(1, 0).reportsTokens());
     assertTrue(Response.Usage.of(0, 1).reportsTokens());
     assertTrue(Response.Usage.of(0, 0, 1, 0).reportsTokens());

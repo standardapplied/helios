@@ -213,7 +213,7 @@ final class SessionSpansTest {
   void usageCountsTheCachedTokensAsInputAndNamesEachCacheClassOnlyWhenItHasTokens() {
     var model =
         ScriptedModel.newBuilder()
-            .withToolCallsTurn(new Usage(100, 20, 30, 50, 200), call("noop", Map.of()))
+            .withToolCallsTurn(Usage.of(100, 20, 30, 50), call("noop", Map.of()))
             .withTextTurn("done", Usage.of(10, 2))
             .build();
 
