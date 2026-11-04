@@ -25,6 +25,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.ContextKey;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -99,6 +100,7 @@ final class RunSpans implements StepSpans {
   private final SecretRegistry secrets;
   private final SessionEnding ending;
   private final Map<String, RunSpan> runs = new ConcurrentHashMap<>();
+  private final ContextKey<Context> runParent = ContextKey.named("helios.run.parent");
 
   /**
    * @throws NullPointerException if the options' model reports no id or provider
@@ -117,11 +119,14 @@ final class RunSpans implements StepSpans {
   }
 
   /**
-   * Start {@code run}'s span as a child of {@code parent}.
+   * Start {@code run}'s span as a child of {@code current}, or, when {@code current} is a context
+   * of one of this session's runs, of that run's parent, so a run never becomes the parent of a
+   * later one.
    *
-   * @return the context the run runs in: {@code parent} with the run's span
+   * @return the context the run runs in: its parent with the run's span
    */
-  Context start(SessionState run, Context parent) {
+  Context start(SessionState run, Context current) {
+    var parent = Objects.requireNonNullElse(current.get(runParent), current);
     var span =
         tracer
             .spanBuilder("invoke_agent " + agentName)
@@ -134,7 +139,7 @@ final class RunSpans implements StepSpans {
             .setAttribute(PROVIDER, provider)
             .setAttribute(REQUEST_MODEL, modelId)
             .startSpan();
-    var context = parent.with(span);
+    var context = parent.with(span).with(runParent, parent);
     runs.put(run.runId(), new RunSpan(run.runId(), span, context));
     return context;
   }
