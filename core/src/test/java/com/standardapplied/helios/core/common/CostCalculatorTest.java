@@ -105,9 +105,13 @@ final class CostCalculatorTest {
   // ── staticTable factory ──────────────────────────────────────────────────
 
   @Test
-  void staticTableEmptyMapReturnsZeroForAnyModel() {
+  void staticTableEmptyMapRefusesAnyModel() {
     var calc = CostCalculator.staticTable(Map.of());
-    assertSame(CostEstimate.zero(), calc.cost("any-model", Usage.of(1_000, 1_000)));
+    var usage = Usage.of(1_000, 1_000);
+
+    var ex = assertThrows(IllegalArgumentException.class, () -> calc.cost("any-model", usage));
+
+    assertEquals("no price for model 'any-model'; add it to the pricing table", ex.getMessage());
   }
 
   @Test
@@ -124,9 +128,14 @@ final class CostCalculatorTest {
   }
 
   @Test
-  void staticTableMissingModelReturnsZero() {
+  void staticTableRefusesAModelItDoesNotHold() {
     var calc = CostCalculator.staticTable(Map.of("known", Pricing.ofUsdPerMillion(1.0, 1.0)));
-    assertSame(CostEstimate.zero(), calc.cost("unknown", Usage.of(1_000_000, 1_000_000)));
+    var usage = Usage.of(1_000_000, 1_000_000);
+
+    var ex = assertThrows(IllegalArgumentException.class, () -> calc.cost("unknown", usage));
+
+    assertEquals("no price for model 'unknown'; add it to the pricing table", ex.getMessage());
+    assertEquals(2_000_000L, calc.cost("known", usage).microUsd());
   }
 
   @Test

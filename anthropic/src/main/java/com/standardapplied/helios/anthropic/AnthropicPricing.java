@@ -7,7 +7,6 @@ package com.standardapplied.helios.anthropic;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostCalculator.Pricing;
-import com.standardapplied.helios.core.common.CostEstimate;
 import java.time.LocalDate;
 import java.util.EnumMap;
 import java.util.Objects;
@@ -37,13 +36,15 @@ public final class AnthropicPricing {
 
   /**
    * A calculator pricing every catalogued model, including its dated snapshots, at list price. A
-   * model id outside the catalogue costs {@link CostEstimate#zero()}, matching {@link
-   * CostCalculator#staticTable(java.util.Map)}: an unknown rate is a configuration gap, not
-   * something to guess at.
+   * model id outside the catalogue throws, matching {@link
+   * CostCalculator#staticTable(java.util.Map)}: an unknown rate is a configuration gap, never a
+   * price of zero.
    *
    * @param cachePolicy the policy the session's model was created with through {@link
    *     AnthropicProvider}; selects the five-minute or one-hour cache-write rate. Non-null
-   * @return a calculator backed by an immutable snapshot of the rate card
+   * @return a calculator backed by an immutable snapshot of the rate card, whose {@code cost}
+   *     throws {@link IllegalArgumentException} for an id {@link AnthropicModelId#fromWireId} does
+   *     not resolve
    * @throws NullPointerException if {@code cachePolicy} is null
    */
   public static CostCalculator calculator(CachePolicy cachePolicy) {
@@ -55,7 +56,11 @@ public final class AnthropicPricing {
       Objects.requireNonNull(modelId, "modelId must not be null");
       Objects.requireNonNull(usage, "usage must not be null");
       var model = AnthropicModelId.fromWireId(modelId);
-      return model == null ? CostEstimate.zero() : rateCard.get(model).cost(usage);
+      if (model == null) {
+        throw new IllegalArgumentException(
+            "no price for model '" + modelId + "'; add it to the pricing table");
+      }
+      return rateCard.get(model).cost(usage);
     };
   }
 
