@@ -129,6 +129,18 @@ supported ids. Live tests and `SessionDemoMain` run on Gemini 3.8 Flash.
 | `GEMINI_3_5_FLASH` (`gemini-3.5-flash`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
 | `GEMINI_3_5_FLASH_LITE` (`gemini-3.5-flash-lite`) | `GEMINI_3_8_FLASH` (`gemini-3.8-flash`), or `GEMINI_3_6_FLASH` (`gemini-3.6-flash`) where a caller needs `MINIMAL` thinking |
 
+**A Gemini upload returns its handle before processing; the caller owns the file.** An upload
+returns a `GeminiFilesClient.ManagedFile` as soon as the bytes land, and waiting for Gemini's
+processing is a call on that handle, as in Google's own SDKs. A wait that fails leaves the handle
+valid, so `close()` or `delete()` still removes the file. Helios never deletes a file on its own.
+
+| 2.x | 3.0 |
+|---|---|
+| `GeminiFilesClient.upload(path)` / `upload(path, mimeType)` returned a `FileReference` once the file was processed | they return a `ManagedFile` once the bytes land; call `awaitActive()` for the `FileReference` |
+| `uploadManaged(path)`, `uploadManaged(path, mimeType)`, `uploadManaged(path, mimeType, timeout)` | `upload(path)`, `upload(path, mimeType)`, `upload(path, mimeType).awaitActive(timeout)` |
+| `upload(path, mimeType, timeout)` | `upload(path, mimeType).awaitActive(timeout)` |
+| `ManagedFile.reference()` | the value `ManagedFile.awaitActive()` returns |
+
 **The redactor is a plain scan, cached by its registry; overlapping secrets become one marker.**
 `AhoCorasick` and the byte path are gone. `SecretRegistry.redactor()` returns the same instance
 until the next `register`. With `A = xxxxxxxxYY` and `B = YYzzzzzzzz`, `xxxxxxxxYYzzzzzzzz` used to
@@ -1399,6 +1411,10 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Fixed
 
+- **A Gemini upload whose processing failed left a file nobody could delete.** The caller got an
+  exception and no handle, so the file stayed in the project's Files storage until Gemini's
+  retention expired; a plain `upload(...)` never gave a handle at all. Every upload now returns
+  the handle before processing, and `delete()` works after a failed wait.
 - **A spending limit could never fire.** A budget with no cost calculator counted every call as
   free; a price table counted any model it did not know as free.
 - **Feedback counts were always 0 outside the tests.** `Trace.thumbsUpCount` / `thumbsDownCount`
