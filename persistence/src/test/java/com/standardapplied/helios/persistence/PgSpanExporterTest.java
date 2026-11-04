@@ -26,6 +26,7 @@ import io.opentelemetry.sdk.trace.data.StatusData;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +56,19 @@ final class PgSpanExporterTest {
     return PgTestSupport.dbClient()
         .execute()
         .query("SELECT COUNT(*) AS n FROM " + table)
+        .findFirst()
+        .orElseThrow()
+        .column("n")
+        .getLong();
+  }
+
+  /** Connections other than this query's that hold a transaction open. */
+  private static long openTransactions() {
+    return PgTestSupport.dbClient()
+        .execute()
+        .query(
+            "SELECT COUNT(*) AS n FROM pg_stat_activity"
+                + " WHERE state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()")
         .findFirst()
         .orElseThrow()
         .column("n")
@@ -154,6 +168,8 @@ final class PgSpanExporterTest {
         List.of("chat", "execute_tool", "hook"), found.spans().stream().map(Span::kind).toList());
     var chatRow = found.spans().getFirst();
     assertEquals("1000000000000001", chatRow.id());
+    assertEquals(START.plusSeconds(1), chatRow.startTime());
+    assertEquals(START.plusSeconds(2), chatRow.endTime());
     assertEquals(new Usage(100, 22, 30, 50, 260), chatRow.usage());
     assertEquals(CostEstimate.ofMicroUsd(42), chatRow.cost());
     assertEquals(
@@ -164,6 +180,72 @@ final class PgSpanExporterTest {
     assertNull(toolRow.cost());
     assertEquals(Map.of("gen_ai.tool.name", "noop"), toolRow.attributes());
     assertEquals(Map.of("helios.hook.phase", "PRE_STOP"), found.spans().get(2).attributes());
+  }
+
+  @Test
+  void aStepWithAnOkStatusAndNoUsageStoresNoErrorAndNoTokenColumn() {
+    var ok =
+        span(
+                "6000000000000001",
+                "execute_tool noop",
+                1,
+                Attributes.builder()
+                    .put("helios.run.id", RUN)
+                    .put("gen_ai.operation.name", "execute_tool")
+                    .build())
+            .setStatus(StatusData.ok())
+            .build();
+
+    assertTrue(exporter.export(List.of(ok, runSpan(RUN))).isSuccess());
+
+    var tool = store.findById(RUN).spans().getFirst();
+    assertNull(tool.error());
+    assertNull(
+        PgTestSupport.dbClient()
+            .execute()
+            .query("SELECT total_tokens FROM helios_spans WHERE id = ?", "6000000000000001")
+            .findFirst()
+            .orElseThrow()
+            .column("total_tokens")
+            .get(Object.class));
+  }
+
+  @Test
+  void aFailedRunStoresItsStatusDescription() {
+    var failed =
+        span(
+                "00f067aa0ba902b7",
+                "invoke_agent helios",
+                0,
+                Attributes.builder()
+                    .put("gen_ai.operation.name", "invoke_agent")
+                    .put("gen_ai.agent.name", "helios")
+                    .put("helios.run.id", RUN)
+                    .build())
+            .setStatus(StatusData.create(StatusCode.ERROR, "Cancelled"))
+            .build();
+
+    assertTrue(exporter.export(List.of(failed)).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals("Cancelled", found.error());
+    assertFalse(found.success());
+  }
+
+  @Test
+  void everyRowIsWrittenToTheConfiguredSchema() {
+    var elsewhere =
+        new PgSpanExporter(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withSchema("no_such_schema")
+                .build());
+    var chat = step(RUN, "7000000000000001", "chat scripted", "chat", 1, Attributes.empty());
+
+    assertFalse(elsewhere.export(List.of(runSpan(RUN))).isSuccess());
+    assertFalse(elsewhere.export(List.of(chat)).isSuccess());
+    assertEquals(0, rows("helios_traces"));
+    assertEquals(0, rows("helios_spans"));
   }
 
   @Test
@@ -196,7 +278,7 @@ final class PgSpanExporterTest {
     var found = store.findById(RUN);
     assertEquals("hello \"there\"", found.inputText());
     assertEquals("done", found.outputText());
-    assertFalse(found.attributes().containsKey("gen_ai.input.messages"));
+    assertEquals(Map.of("gen_ai.operation.name", "invoke_agent"), found.attributes());
     assertEquals(0, found.totalTokens());
     assertNull(found.usage());
     assertEquals("IllegalStateException: broken", found.spans().getFirst().error());
@@ -295,6 +377,18 @@ final class PgSpanExporterTest {
   }
 
   @Test
+  void aBatchWithNoHeliosSpanSucceedsWithoutTouchingTheDatabase() {
+    var unavailable =
+        new PgSpanExporter(new PgConfig(PgTestSupport.unavailable("database down"), null, null));
+    var application =
+        span("2000000000000003", "database query", 1, Attributes.empty())
+            .setInstrumentationScopeInfo(InstrumentationScopeInfo.create("application"))
+            .build();
+
+    assertTrue(unavailable.export(List.of(application)).isSuccess());
+  }
+
+  @Test
   void stepsArriveBeforeTheirRunAndTheRunIsNotFoundUntilItsSpanDoes() {
     var chat = step(RUN, "3000000000000001", "chat scripted", "chat", 1, Attributes.empty());
 
@@ -334,6 +428,7 @@ final class PgSpanExporterTest {
 
     assertEquals(0, rows("helios_spans"));
     assertEquals(0, rows("helios_traces"));
+    assertEquals(0, openTransactions());
     var warning = logged.getFirst();
     assertEquals(Level.WARNING, warning.getLevel());
     assertTrue(warning.getMessage().contains(RUN), warning.getMessage());
@@ -343,15 +438,18 @@ final class PgSpanExporterTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
-  void aFailedWriteIsLoggedWhetherOrNotItsRollbackFails(boolean rollbackFails) {
+  void aFailedWriteIsRolledBackAndLoggedWhetherOrNotItsRollbackFails(boolean rollbackFails) {
     var logged = new CopyOnWriteArrayList<LogRecord>();
+    var rollbacks = new AtomicInteger();
     var failing =
-        new PgSpanExporter(new PgConfig(PgTestSupport.failingWrites(rollbackFails), null, null));
+        new PgSpanExporter(
+            new PgConfig(PgTestSupport.failingWrites(rollbackFails, rollbacks), null, null));
 
     try (var ignored = LogCapture.of(PgSpanExporter.class, logged)) {
       assertFalse(failing.export(List.of(runSpan(RUN))).isSuccess());
     }
 
+    assertEquals(1, rollbacks.get());
     var thrown = logged.getFirst().getThrown();
     assertEquals("java.lang.IllegalStateException: dml failed", thrown.getMessage());
   }

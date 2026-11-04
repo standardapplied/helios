@@ -83,7 +83,8 @@ class PgTraceRollupTest {
   }
 
   @Test
-  void filterRestrictsByNameAndTimeWindow() {
+  void filterRestrictsByNameAndAWindowFromSinceUpToUntil() {
+    seed("analytics", "model-x", BASE.minusNanos(1000), 1000, null, Usage.of(1, 1), 1L);
     seed("analytics", "model-x", BASE, 1000, null, Usage.of(10, 5), 100L);
     seed("analytics", "model-x", BASE.plusDays(7), 1000, null, Usage.of(90, 45), 900L);
     seed("matchmaking", "model-x", BASE, 1000, null, Usage.of(5, 5), 50L);
@@ -93,8 +94,8 @@ class PgTraceRollupTest {
             TraceRollupKey.MODEL_ID,
             TraceFilter.newBuilder()
                 .withName("analytics")
-                .withSince(BASE.minusHours(1))
-                .withUntil(BASE.plusDays(1))
+                .withSince(BASE)
+                .withUntil(BASE.plusDays(7))
                 .build());
 
     assertEquals(1, windowed.size());
