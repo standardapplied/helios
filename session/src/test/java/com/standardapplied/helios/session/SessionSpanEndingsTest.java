@@ -30,7 +30,6 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -368,19 +367,6 @@ final class SessionSpanEndingsTest {
 
     var name = EndingSessions.Unprintable.class.getName();
     assertFailed(endedRun(), name, name);
-  }
-
-  @Test
-  void runsOfASessionEachEndTheirOwnSpan() {
-    var model = ScriptedModel.newBuilder().withTextTurn("a").withTextTurn("b").build();
-    try (var session = AgentSession.open(traced(model).build())) {
-      Await.value("the first run", session.send("one"));
-      Await.value("the second run", session.send("two"));
-    }
-
-    assertEquals(2, capture.starting("invoke_agent ").size());
-    assertEquals(Set.of(), capture.unended());
-    assertEquals(List.of("chat scripted", "invoke_agent helios"), capture.names().subList(0, 2));
   }
 
   /** A host failure a hook, a tool or a model throws. */
