@@ -39,12 +39,17 @@ class PgAnnotationStoreTest {
 
   /** Store a run with one step through the exporter; its run id. */
   private static String storedRun() {
+    return storedRun("00f067aa0ba902b7", STEP_SPAN_ID);
+  }
+
+  /** Store a run with one step under the given span ids; its run id. */
+  private static String storedRun(String runSpanId, String stepSpanId) {
     var runId = subject();
     var exporter = new PgSpanExporter(PgTestSupport.pgConfig());
     var spans =
         List.of(
-            ExportedSpans.step(runId, STEP_SPAN_ID, "chat scripted", "chat", 1, Attributes.empty()),
-            ExportedSpans.run(runId, "00f067aa0ba902b7", "feedback-test", 0, Attributes.empty()));
+            ExportedSpans.step(runId, stepSpanId, "chat scripted", "chat", 1, Attributes.empty()),
+            ExportedSpans.run(runId, runSpanId, "feedback-test", 0, Attributes.empty()));
     assertTrue(exporter.export(spans).isSuccess());
     return runId;
   }
@@ -466,9 +471,9 @@ class PgAnnotationStoreTest {
     assertEquals(2, found.size());
   }
 
-  // --- Feedback trigger tests ---
+  // --- Feedback count tests ---
   @Test
-  void feedbackTriggerIncrementsThumbsUp() {
+  void feedbackCountIncrementsThumbsUp() {
     var runId = storedRun();
 
     store.storeAnnotation(
@@ -485,7 +490,7 @@ class PgAnnotationStoreTest {
   }
 
   @Test
-  void feedbackTriggerIncrementsThumbsDown() {
+  void feedbackCountIncrementsThumbsDown() {
     var runId = storedRun();
 
     store.storeAnnotation(
@@ -502,7 +507,7 @@ class PgAnnotationStoreTest {
   }
 
   @Test
-  void feedbackTriggerIgnoresZeroRating() {
+  void feedbackCountIgnoresZeroRating() {
     var runId = storedRun();
 
     store.storeAnnotation(
@@ -519,7 +524,7 @@ class PgAnnotationStoreTest {
   }
 
   @Test
-  void feedbackTriggerIgnoresNullRating() {
+  void feedbackCountIgnoresNullRating() {
     var runId = storedRun();
 
     store.storeAnnotation(
@@ -535,7 +540,7 @@ class PgAnnotationStoreTest {
   }
 
   @Test
-  void feedbackTriggerSpanAnnotationIsNoOp() {
+  void feedbackCountSpanAnnotationIsNoOp() {
     var runId = storedRun();
 
     // Annotate the span, not the trace
@@ -554,7 +559,7 @@ class PgAnnotationStoreTest {
   }
 
   @Test
-  void feedbackTriggerMultipleAnnotationsAccumulate() {
+  void feedbackCountMultipleAnnotationsAccumulate() {
     var runId = storedRun();
 
     store.storeAnnotation(
@@ -582,5 +587,111 @@ class PgAnnotationStoreTest {
     var found = traces.findById(runId);
     assertEquals(2, found.thumbsUpCount());
     assertEquals(1, found.thumbsDownCount());
+  }
+
+  @Test
+  void feedbackCountsFollowInsertsUpdatesAndDeletes() {
+    var runId = storedRun();
+    store.upsertAnnotation(rating(runId, 1).withAuthorId("reviewer-1").build());
+    rate(runId, 1, -1, 0, null);
+    rate(STEP_SPAN_ID, 1);
+    assertCounts(runId, 2, 1);
+
+    store.upsertAnnotation(rating(runId, -1).withAuthorId("reviewer-1").build());
+    assertCounts(runId, 1, 2);
+
+    PgTestSupport.dbClient()
+        .execute()
+        .dml("DELETE FROM helios_annotations WHERE subject_id = ? AND rating > 0", runId);
+    assertCounts(runId, 0, 2);
+  }
+
+  @Test
+  void summarizeSumsEachRunsFeedbackCounts() {
+    var first = storedRun("00f067aa0ba902b7", STEP_SPAN_ID);
+    var second = storedRun("00f067aa0ba902b8", "1000000000000002");
+    rate(first, 1, 1, -1, 0, null);
+    rate(second, 1, -1, -1);
+    rate(STEP_SPAN_ID, 1);
+
+    var rollup = traces.summarize(TraceRollupKey.NAME, TraceFilter.none()).getFirst();
+
+    assertEquals(2, rollup.runCount());
+    assertEquals(3, rollup.thumbsUpCount());
+    assertEquals(3, rollup.thumbsDownCount());
+  }
+
+  // --- Returned row tests ---
+  @Test
+  void storeAnnotationReturnsTheStoredRow() {
+    var subjectId = subject();
+
+    var stored =
+        store.storeAnnotation(
+            rating(subjectId, 1).withFacet("relevance").withMetadata(Map.of("weight", 3)).build());
+
+    assertEquals(List.of(stored), store.findAnnotationsBySubject(subjectId));
+  }
+
+  @Test
+  void upsertOnAnExistingKeyReturnsTheStoredIdentityWithTheNewValues() {
+    var subjectId = subject();
+    var createdAt = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+    var first =
+        store.storeAnnotation(
+            rating(subjectId, 1)
+                .withAuthorId("reviewer-1")
+                .withComment("Good")
+                .withCreatedAt(createdAt)
+                .build());
+    var update =
+        rating(subjectId, -1)
+            .withAuthorId("reviewer-1")
+            .withComment("Actually not great")
+            .withCreatedAt(createdAt.plusDays(1))
+            .build();
+
+    var upserted = store.upsertAnnotation(update);
+
+    assertEquals(first.id(), upserted.id());
+    assertEquals(createdAt, upserted.createdAt());
+    assertEquals(-1, upserted.rating());
+    assertEquals("Actually not great", upserted.comment());
+    assertEquals(createdAt.plusDays(1), upserted.updatedAt());
+    assertEquals(List.of(upserted), store.findAnnotationsBySubject(subjectId));
+  }
+
+  @Test
+  void upsertWithoutAuthorReturnsItsOwnId() {
+    var subjectId = subject();
+    var annotation = rating(subjectId, 1).build();
+
+    assertEquals(annotation.id(), store.upsertAnnotation(annotation).id());
+  }
+
+  private static Annotation.Builder rating(String subjectId, Integer rating) {
+    return Annotation.newBuilder()
+        .withSubjectId(subjectId)
+        .withLabel("quality")
+        .withAuthorKind(AuthorKind.HUMAN)
+        .withRating(rating);
+  }
+
+  private void rate(String subjectId, Integer... ratings) {
+    for (var rating : ratings) {
+      store.storeAnnotation(rating(subjectId, rating).build());
+    }
+  }
+
+  private void assertCounts(String runId, int up, int down) {
+    var found = traces.findById(runId);
+    var byCounts = "thumbs_up_count eq " + up + " and thumbs_down_count eq " + down;
+    var listed = traces.list(Paginate.of(), byCounts).items();
+    var otherCounts = "thumbs_up_count ne " + up + " or thumbs_down_count ne " + down;
+    assertEquals(List.of(up, down), List.of(found.thumbsUpCount(), found.thumbsDownCount()));
+    assertEquals(
+        List.of(List.of(runId, up, down)),
+        listed.stream().map(t -> List.of(t.id(), t.thumbsUpCount(), t.thumbsDownCount())).toList());
+    assertEquals(List.of(), traces.list(Paginate.of(), otherCounts).items());
   }
 }

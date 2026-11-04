@@ -1151,6 +1151,15 @@ revision directory beside them.
 |---|---|
 | `~/.helios/models/nomic-ai/nomic-embed-text-v1.5/model.onnx`, from `main` | `~/.helios/models/nomic-ai/nomic-embed-text-v1.5/e9b6763023c676ca8431644204f50c2b100d9aab/model.onnx`, from that commit |
 
+**`PgAnnotationStore.storeAnnotation` and `upsertAnnotation` return the stored row.** Both used to
+return their argument, so an upsert that updated an existing row returned an id the database did
+not hold.
+
+| 2.x | 3.0 |
+|---|---|
+| `storeAnnotation(a)` returned `a` | the row as stored, read back through `RETURNING` |
+| `upsertAnnotation(a)` on an existing `(subjectId, facet, label, authorId)` returned `a`, with its own `id` and `createdAt` | the stored row: the existing `id` and `createdAt`, the new values and `updatedAt` |
+
 ### Added
 
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
@@ -1370,6 +1379,11 @@ revision directory beside them.
 
 ### Fixed
 
+- **Feedback counts were always 0 outside the tests.** `Trace.thumbsUpCount` / `thumbsDownCount`
+  and their `TraceRollup` sums read two `helios_traces` columns that only a test trigger wrote.
+  They are now counted when read, from the run's annotations with a positive or a negative
+  rating, so they follow every insert, update and delete, and a `PgTraceStore.list` filter on
+  `thumbs_up_count` or `thumbs_down_count` matches them. The two columns stay in the DDL, unread.
 - **A web search run from code execution broke the next request.** Helios blanked its `input` and
   dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
   send failed.

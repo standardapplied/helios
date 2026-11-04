@@ -35,8 +35,8 @@ import java.util.Map;
  * @param totalTokens the run's total token count
  * @param usage the run's token usage, or null if none was recorded
  * @param cost the run's cost, or null if none was recorded
- * @param thumbsUpCount denormalized positive feedback count (DB-managed)
- * @param thumbsDownCount denormalized negative feedback count (DB-managed)
+ * @param thumbsUpCount the run's annotations with a positive rating, counted when read
+ * @param thumbsDownCount the run's annotations with a negative rating, counted when read
  */
 public record Trace(
     String id,
