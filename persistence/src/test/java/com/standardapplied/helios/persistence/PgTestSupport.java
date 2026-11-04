@@ -139,6 +139,17 @@ final class PgTestSupport {
             (proxy, method, args) -> tx);
   }
 
+  /** A client that cannot open a transaction, failing with {@code message}. */
+  static DbClient unavailable(String message) {
+    return (DbClient)
+        Proxy.newProxyInstance(
+            DbClient.class.getClassLoader(),
+            new Class<?>[] {DbClient.class},
+            (proxy, method, args) -> {
+              throw new IllegalStateException(message);
+            });
+  }
+
   static DbClient dbClient(String url, String username, String password) {
     var config =
         Config.builder()

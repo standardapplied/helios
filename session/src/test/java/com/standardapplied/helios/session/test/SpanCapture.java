@@ -32,12 +32,18 @@ public final class SpanCapture {
   private final OpenTelemetrySdk sdk;
 
   public SpanCapture() {
+    this(SpanProcessor.composite());
+  }
+
+  /** A capture whose SDK runs {@code after} once each span is tracked and exported. */
+  public SpanCapture(SpanProcessor after) {
     sdk =
         OpenTelemetrySdk.builder()
             .setTracerProvider(
                 SdkTracerProvider.builder()
                     .addSpanProcessor(new OpenSpans())
                     .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+                    .addSpanProcessor(after)
                     .build())
             .build();
   }
