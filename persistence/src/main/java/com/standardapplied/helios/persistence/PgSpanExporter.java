@@ -47,9 +47,9 @@ import java.util.logging.Logger;
  * last; a span row needs no other row to exist. One {@link #export} call writes its batch in one
  * transaction; a failure rolls it back, is logged as a warning naming the batch's run ids, and is
  * returned as {@link CompletableResultCode#ofFailure()}. Text and attribute values pass through the
- * {@link PgConfig}'s redactor, and every statement is parameterized and qualified by its schema.
- * The exporter neither owns nor closes the {@code DbClient}; after {@link #shutdown()} it writes
- * nothing. Thread-safe.
+ * {@link PgConfig}'s redactor, and each U+0000, which Postgres cannot store as text, becomes
+ * U+FFFD. Every statement is parameterized and qualified by its schema. The exporter neither owns
+ * nor closes the {@code DbClient}; after {@link #shutdown()} it writes nothing. Thread-safe.
  */
 public final class PgSpanExporter implements SpanExporter {
 
@@ -145,11 +145,15 @@ public final class PgSpanExporter implements SpanExporter {
   }
 
   private void write(DbTransaction tx, SpanData span) {
-    if ("invoke_agent".equals(span.getAttributes().get(OPERATION))) {
-      tx.dml(config.qualify(TraceSql.INSERT), runRow(span).toArray());
-    } else {
-      tx.dml(config.qualify(SpanSql.INSERT), stepRow(span).toArray());
-    }
+    var run = "invoke_agent".equals(span.getAttributes().get(OPERATION));
+    var params = run ? runRow(span) : stepRow(span);
+    params.replaceAll(value -> value instanceof String text ? storable(text) : value);
+    tx.dml(config.qualify(run ? TraceSql.INSERT : SpanSql.INSERT), params.toArray());
+  }
+
+  /** {@code text} with each U+0000, which Postgres text and JSONB refuse, as U+FFFD. */
+  private static String storable(String text) {
+    return text.replace('\u0000', '\uFFFD');
   }
 
   private List<Object> runRow(SpanData span) {
@@ -204,7 +208,7 @@ public final class PgSpanExporter implements SpanExporter {
     attributes.forEach(
         (key, value) -> {
           if (!SHARED_COLUMNS.contains(key) && !columns.contains(key)) {
-            others.put(key.getKey(), String.valueOf(value));
+            others.put(key.getKey(), storable(String.valueOf(value)));
           }
         });
     return JsonbMapper.toJsonb(config.redactValues(others));

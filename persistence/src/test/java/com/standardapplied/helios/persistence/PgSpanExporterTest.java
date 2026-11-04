@@ -213,6 +213,43 @@ final class PgSpanExporterTest {
   }
 
   @Test
+  void aNulCharacterIsStoredAsTheReplacementCharacterWithoutFailingTheBatch() {
+    var failed =
+        span(
+                "6000000000000001",
+                "execute_tool cat\u0000",
+                1,
+                Attributes.builder()
+                    .put("helios.run.id", RUN)
+                    .put("gen_ai.operation.name", "execute_tool")
+                    .put("gen_ai.tool.call.result", "ELF\u0000\u0001")
+                    .build())
+            .setStatus(StatusData.create(StatusCode.ERROR, "Threw: bad\u0000path"))
+            .build();
+    var run =
+        run(
+            RUN,
+            "00f067aa0ba902b7",
+            "helios",
+            0,
+            Attributes.builder()
+                .put("gen_ai.input.messages", messages("user", "a\\u0000b"))
+                .put("gen_ai.output.messages", messages("assistant", "done\\u0000"))
+                .build());
+
+    assertTrue(exporter.export(List.of(failed, run, runSpan("run-2"))).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals("a\uFFFDb", found.inputText());
+    assertEquals("done\uFFFD", found.outputText());
+    var tool = found.spans().getFirst();
+    assertEquals("execute_tool cat\uFFFD", tool.name());
+    assertEquals("Threw: bad\uFFFDpath", tool.error());
+    assertEquals("ELF\uFFFD\u0001", tool.attributes().get("gen_ai.tool.call.result"));
+    assertEquals("run-2", store.findById("run-2").id());
+  }
+
+  @Test
   void onlyHeliosSpansThatNameTheirRunAreWritten() {
     var application =
         span(
