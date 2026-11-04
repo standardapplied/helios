@@ -48,7 +48,7 @@ final class RunSpansTest {
             .withOpenTelemetry(capture.openTelemetry())
             .withTraceDetail(detail)
             .build();
-    return new RunSpans(options, run.ending());
+    return new RunSpans(options);
   }
 
   static Stream<Arguments> outcomes() {

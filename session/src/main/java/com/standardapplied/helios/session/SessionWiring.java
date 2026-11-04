@@ -48,7 +48,7 @@ final class SessionWiring {
       SessionEventPublisher events,
       SessionEnding ending,
       StoredHistory storedHistory) {
-    this.spans = new RunSpans(options, ending);
+    this.spans = new RunSpans(options);
     var tools = registry(options, pendingQuestions);
     var model = options.model();
     var evaluator =

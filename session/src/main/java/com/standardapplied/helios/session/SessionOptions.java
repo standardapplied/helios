@@ -546,7 +546,9 @@ public record SessionOptions(
      * Emit the session's spans through {@code openTelemetry}, whose tracer is fetched once per
      * session under the scope {@code com.standardapplied.helios}. A run's span is a child of the
      * span current where {@code send} was called, and a tool's span is current while the tool runs,
-     * so what the tool's own instrumentation records nests under it. Unset by default: the session
+     * so what the tool's own instrumentation records nests under it. A {@link RuntimeException} a
+     * span call throws, such as a span processor's, is logged and changes no run's result; an
+     * {@link Error} fails the run as any host {@code Error} does. Unset by default: the session
      * uses {@link GlobalOpenTelemetry#get()} when it opens, which, with no SDK installed, installs
      * the no-op as the global, so install a global SDK before opening such a session.
      *

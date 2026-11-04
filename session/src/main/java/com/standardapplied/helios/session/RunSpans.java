@@ -13,7 +13,6 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.hooks.HookOutcome;
-import com.standardapplied.helios.session.loop.SessionEnding;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.SessionTotals;
 import com.standardapplied.helios.session.loop.StepSpans;
@@ -36,6 +35,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * The OpenTelemetry spans of a session's runs, and the one owner of their names, attributes and
@@ -48,13 +50,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * result; and a zero-length {@code hook} span per {@link QueryEvent.HookFired}. A span still open
  * when its run ends ends then, with the run's error. Content is added only under {@link
  * TraceDetail#VERBOSE}, each string redacted against the session's secrets. It reads every event
- * the loop emits before the session's publisher does. Thread-safe: each run's spans are guarded by
- * a lock of their own.
+ * the loop emits before the session's publisher does. A {@link RuntimeException} the application's
+ * OpenTelemetry SDK throws from a span call, such as a span processor's, is logged and changes no
+ * run: a run whose span did not start runs untraced in its parent's context, and a span that did
+ * not start or end is not traced; an {@link Error} propagates. Thread-safe: each run's spans are
+ * guarded by a lock of their own.
  */
 final class RunSpans implements StepSpans {
 
   /** The instrumentation scope of every span a session emits. */
   static final String SCOPE = "com.standardapplied.helios";
+
+  private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
 
   private static final AttributeKey<String> OPERATION = stringKey("gen_ai.operation.name");
   private static final AttributeKey<String> AGENT_NAME = stringKey("gen_ai.agent.name");
@@ -98,14 +105,13 @@ final class RunSpans implements StepSpans {
   private final String provider;
   private final boolean verbose;
   private final SecretRegistry secrets;
-  private final SessionEnding ending;
   private final Map<String, RunSpan> runs = new ConcurrentHashMap<>();
   private final ContextKey<Context> runParent = ContextKey.named("helios.run.parent");
 
   /**
    * @throws NullPointerException if the options' model reports no id or provider
    */
-  RunSpans(SessionOptions options, SessionEnding ending) {
+  RunSpans(SessionOptions options) {
     this.tracer = options.openTelemetry().orElseGet(GlobalOpenTelemetry::get).getTracer(SCOPE);
     this.sessionId = options.sessionId();
     this.agentName = options.agentName();
@@ -115,7 +121,6 @@ final class RunSpans implements StepSpans {
             Objects.requireNonNull(options.model().provider(), "model provider must not be null"));
     this.verbose = options.traceDetail() == TraceDetail.VERBOSE;
     this.secrets = options.secretRegistry();
-    this.ending = ending;
   }
 
   /**
@@ -123,10 +128,15 @@ final class RunSpans implements StepSpans {
    * of one of this session's runs, of that run's parent, so a run never becomes the parent of a
    * later one.
    *
-   * @return the context the run runs in: its parent with the run's span
+   * @return the context the run runs in: its parent with the run's span, or its parent alone when
+   *     the span did not start
    */
   Context start(SessionState run, Context current) {
     var parent = Objects.requireNonNullElse(current.get(runParent), current);
+    return traced(run.runId(), () -> started(run, parent), parent);
+  }
+
+  private Context started(SessionState run, Context parent) {
     var span =
         tracer
             .spanBuilder("invoke_agent " + agentName)
@@ -148,18 +158,22 @@ final class RunSpans implements StepSpans {
   void accept(QueryEvent event) {
     var run = runs.get(event.runId());
     if (run != null) {
-      run.accept(event);
+      traced(event.runId(), () -> run.accept(event));
     }
   }
 
+  /** The context the attempt runs in: the current one, untraced, when the run has no span. */
   @Override
   public Context modelAttempt(SessionState state) {
-    return spansOf(state).modelAttempt();
+    var run = runs.get(state.runId());
+    return run == null ? Context.current() : traced(state.runId(), run::modelAttempt, run.context);
   }
 
+  /** The context the call runs in: the current one, untraced, when the run has no span. */
   @Override
   public Context toolCall(SessionState state, ToolCall call) {
-    return spansOf(state).toolCall(call);
+    var run = runs.get(state.runId());
+    return run == null ? Context.current() : run.toolCall(call);
   }
 
   /**
@@ -175,13 +189,47 @@ final class RunSpans implements StepSpans {
     if (spans == null) {
       return;
     }
-    var failure = Failure.of(ending.first(), crash, terminal, secrets);
+    var failure = Failure.of(run.ending().first(), crash, terminal, secrets);
     var output = terminal instanceof ResultMessage.Success success ? success.result() : null;
-    spans.end(run.totals(), terminal, failure, output);
+    traced(run.runId(), () -> spans.end(run.totals(), terminal, failure, output));
   }
 
-  private RunSpan spansOf(SessionState state) {
-    return Objects.requireNonNull(runs.get(state.runId()), "no span of run " + state.runId());
+  private void traced(String runId, Runnable call) {
+    traced(
+        runId,
+        () -> {
+          call.run();
+          return Context.root();
+        },
+        Context.root());
+  }
+
+  /**
+   * What {@code call} returns, or {@code fallback} once the {@link RuntimeException} it threw is
+   * logged, redacted, or only its class name when it cannot be read.
+   */
+  private Context traced(String runId, Supplier<Context> call, Context fallback) {
+    try {
+      return call.get();
+    } catch (RuntimeException e) {
+      LOGGER.log(
+          Level.WARNING,
+          "a span of run "
+              + runId
+              + " of session "
+              + sessionId
+              + " failed; the run's result is unchanged",
+          forLog(e));
+      return fallback;
+    }
+  }
+
+  private Throwable forLog(RuntimeException failure) {
+    try {
+      return SerializedError.redactedForLog(failure, secrets.redactor());
+    } catch (RuntimeException unreadable) {
+      return new Throwable(failure.getClass().getName());
+    }
   }
 
   private String redacted(String text) {
