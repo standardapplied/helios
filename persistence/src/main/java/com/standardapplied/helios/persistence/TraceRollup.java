@@ -15,7 +15,7 @@ import java.util.Map;
  * {modelId: "gemini-3.8-flash"}}). Token and cost sums cover only runs that recorded usage and
  * cost; {@code totalTokens} sums the run-level total, which every run carries.
  *
- * @param key grouping dimension values for this group, in dimension order
+ * @param key the grouping dimension and its value for this group
  * @param runCount number of traces in the group
  * @param errorCount number of traces that failed
  * @param durationP50Millis median wall-clock duration in milliseconds
