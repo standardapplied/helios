@@ -1382,7 +1382,8 @@ not hold.
 - **Feedback counts were always 0 outside the tests.** `Trace.thumbsUpCount` / `thumbsDownCount`
   and their `TraceRollup` sums read two `helios_traces` columns that only a test trigger wrote.
   They are now counted when read, from the run's annotations with a positive or a negative
-  rating, so they follow every insert, update and delete. The two columns stay in the DDL, unread.
+  rating, so they follow every insert, update and delete, and a `PgTraceStore.list` filter on
+  `thumbs_up_count` or `thumbs_down_count` matches them. The two columns stay in the DDL, unread.
 - **A web search run from code execution broke the next request.** Helios blanked its `input` and
   dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
   send failed.
