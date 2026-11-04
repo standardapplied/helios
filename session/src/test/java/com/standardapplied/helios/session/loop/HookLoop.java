@@ -93,7 +93,8 @@ final class HookLoop {
             queue,
             fixture.events::add,
             fixture::hookContext,
-            fixture.clock);
+            fixture.clock,
+            NoSpans.INSTANCE);
     return fixture
         .loop(collaborators, model, TokenCounter.charBased(), ContextCompactor.disabled())
         .run(state, SessionLimits.defaults(), natural -> true);

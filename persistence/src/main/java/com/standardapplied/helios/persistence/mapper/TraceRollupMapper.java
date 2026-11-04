@@ -5,15 +5,15 @@
 
 package com.standardapplied.helios.persistence.mapper;
 
-import com.standardapplied.helios.core.trace.TraceRollup;
-import com.standardapplied.helios.core.trace.TraceRollupKey;
+import com.standardapplied.helios.persistence.TraceRollup;
+import com.standardapplied.helios.persistence.TraceRollupKey;
 import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import io.helidon.dbclient.DbRow;
 
 /**
- * Maps Helidon {@link DbRow} results of a rollup query to {@link TraceRollup} records. Dimension
- * columns and key names come from {@link TraceRollupSql#dimensions(TraceRollupKey)} — the single
- * definition the query builder also uses.
+ * Maps Helidon {@link DbRow} results of a rollup query to {@link TraceRollup} records. The
+ * dimension's column and key name come from {@link TraceRollupSql#dimension(TraceRollupKey)} — the
+ * single definition the query builder also uses.
  */
 public final class TraceRollupMapper {
 
@@ -27,12 +27,9 @@ public final class TraceRollupMapper {
    * @return the mapped rollup
    */
   public static TraceRollup map(DbRow row, TraceRollupKey key) {
-    var builder = TraceRollup.newBuilder();
-    for (var dimension : TraceRollupSql.dimensions(key)) {
-      builder.withKeyValue(
-          dimension.mapKey(), String.valueOf(row.column(dimension.column()).get(Object.class)));
-    }
-    return builder
+    var dimension = TraceRollupSql.dimension(key);
+    return TraceRollup.newBuilder()
+        .withKeyValue(dimension.mapKey(), row.column(dimension.column()).getString())
         .withRunCount(row.column("run_count").getLong())
         .withErrorCount(row.column("error_count").getLong())
         .withDurationP50Millis(row.column("duration_p50_millis").getLong())

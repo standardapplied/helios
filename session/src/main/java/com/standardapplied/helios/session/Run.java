@@ -4,6 +4,7 @@ package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.session.loop.SessionState;
+import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -13,11 +14,12 @@ import java.util.function.Consumer;
 
 /**
  * One run of a session: its {@link SessionState}, on a token of its own that follows the session's
- * token from creation until {@link #unlink}, the future {@code send} returned for it, and its wall
- * clock, a virtual thread that waits on the run's token for {@code maxWallClock} and cancels the
- * run when it passes. Without it, {@code maxWallClock} would only be checked at turn boundaries, so
- * a turn blocked in a model stream, a tool, a permission prompt or a back-off would hold the run
- * indefinitely; the cancellation cuts the turn and the classifier reports {@link
+ * token from creation until {@link #unlink}, the future {@code send} returned for it, the
+ * OpenTelemetry {@link Context} of the {@code send} that started it, its span's parent, and its
+ * wall clock, a virtual thread that waits on the run's token for {@code maxWallClock} and cancels
+ * the run when it passes. Without it, {@code maxWallClock} would only be checked at turn
+ * boundaries, so a turn blocked in a model stream, a tool, a permission prompt or a back-off would
+ * hold the run indefinitely; the cancellation cuts the turn and the classifier reports {@link
  * ResultMessage.ErrorMaxWallClock}. Every end of a run cancels its token, so the wait always ends.
  */
 final class Run {
@@ -28,6 +30,7 @@ final class Run {
   private final CancellationToken sessionToken;
   private final SessionState state;
   private final CompletableFuture<ResultMessage> result;
+  private final Context parent;
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
   private final Thread thread;
@@ -36,17 +39,19 @@ final class Run {
   /**
    * The next run of {@code session}, its token cancelled with the session's reason as soon as the
    * session is cancelled, at once if it already is. {@link #start} starts the run's own virtual
-   * thread, which binds itself, and every thread it starts, to this run, starts the wall clock on a
-   * virtual thread of its own, then runs {@code body}.
+   * thread, which binds itself, and every thread it starts, to this run, then runs {@code body},
+   * which starts the wall clock ({@link #startWallClock}).
    */
   Run(
       SessionState session,
       CompletableFuture<ResultMessage> result,
+      Context parent,
       Duration maxWallClock,
       Consumer<Run> body) {
     this.sessionToken = session.cancellation();
     this.state = new SessionState(session, new CancellationToken());
     this.result = result;
+    this.parent = parent;
     this.maxWallClock = maxWallClock;
     this.link = sessionToken.onCancel(this::followSession);
     this.thread =
@@ -55,12 +60,17 @@ final class Run {
             .unstarted(
                 () -> {
                   CURRENT.set(state);
-                  BoundedTask.start(
-                      "helios-wall-clock-" + state.sessionId(),
-                      this::awaitWallClock,
-                      state.ending()::failWith);
                   body.accept(this);
                 });
+  }
+
+  /**
+   * Start the wall clock on a virtual thread of its own, in the context current on the run's
+   * thread; called by the run's body.
+   */
+  void startWallClock() {
+    BoundedTask.start(
+        "helios-wall-clock-" + state.sessionId(), this::awaitWallClock, state.ending()::failWith);
   }
 
   SessionState state() {
@@ -69,6 +79,11 @@ final class Run {
 
   CompletableFuture<ResultMessage> result() {
     return result;
+  }
+
+  /** The context current on the thread whose {@code send} started the run. */
+  Context parent() {
+    return parent;
   }
 
   void start() {

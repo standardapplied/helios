@@ -15,7 +15,7 @@ public final class AnnotationSql {
           + "created_at, updated_at";
 
   private static final String VALUES =
-      "CAST(? AS UUID), CAST(? AS UUID), ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?";
+      "CAST(? AS UUID), ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?";
 
   public static final String INSERT =
       "INSERT INTO %s.helios_annotations (" + COLUMNS + ")\nVALUES (" + VALUES + ")";
@@ -39,7 +39,7 @@ public final class AnnotationSql {
   public static final String FIND_BY_SUBJECT =
       "SELECT "
           + COLUMNS
-          + "\nFROM %s.helios_annotations\nWHERE subject_id = CAST(? AS UUID)\n"
+          + "\nFROM %s.helios_annotations\nWHERE subject_id = ?\n"
           + "ORDER BY created_at ASC";
 
   public static final String FIND_BY_SUBJECTS_PREFIX =

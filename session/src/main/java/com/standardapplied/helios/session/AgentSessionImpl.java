@@ -111,7 +111,7 @@ public final class AgentSessionImpl implements AgentSession {
       lifecycle.abandon();
       throw e;
     }
-    lifecycle.open(wiring.loop(), wiring.recorder());
+    lifecycle.open(wiring.loop(), wiring.spans());
   }
 
   @Override

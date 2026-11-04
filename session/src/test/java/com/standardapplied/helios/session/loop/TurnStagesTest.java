@@ -61,7 +61,8 @@ final class TurnStagesTest {
             queue,
             events::add,
             TurnStagesTest::context,
-            CLOCK);
+            CLOCK,
+            NoSpans.INSTANCE);
     state.history().append(Message.user("hello"));
     state.beginTurn();
     return new TurnRunner(collaborators, model, CostCalculator.ZERO, null);

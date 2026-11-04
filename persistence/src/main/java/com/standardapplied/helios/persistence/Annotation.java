@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package com.standardapplied.helios.core.trace;
+package com.standardapplied.helios.persistence;
 
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Strings;
@@ -14,9 +14,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * A structured note attached to a trace or span.
+ * A structured note attached to a stored run or span.
  *
- * <p>An annotation always targets a real Helios {@code subjectId} (a trace or span id). The
+ * <p>An annotation always targets a real Helios {@code subjectId}: a run id or a span id. The
  * optional {@code facet} addresses a named sub-coordinate within that subject, so a single author
  * can hold several judgments about one subject (for example one rating per evaluation dimension)
  * without inventing synthetic target ids. The {@code label} categorizes the judgment; together
@@ -27,7 +27,7 @@ import java.util.UUID;
  * without interpretation. {@code metadata} is always a non-null immutable map (empty when unset).
  *
  * @param id unique identifier
- * @param subjectId the trace or span id this annotation is attached to
+ * @param subjectId the run id or span id this annotation is attached to, at most 64 characters
  * @param facet optional named sub-coordinate within the subject (opaque, nullable)
  * @param label category label for the judgment (e.g. "quality", "relevance", "accuracy")
  * @param authorKind the generic class of author that produced this annotation
@@ -40,7 +40,7 @@ import java.util.UUID;
  */
 public record Annotation(
     UUID id,
-    UUID subjectId,
+    String subjectId,
     String facet,
     String label,
     AuthorKind authorKind,
@@ -72,7 +72,7 @@ public record Annotation(
   public static class Builder {
 
     private UUID id;
-    private UUID subjectId;
+    private String subjectId;
     private String facet;
     private String label;
     private AuthorKind authorKind;
@@ -104,7 +104,7 @@ public record Annotation(
       return this;
     }
 
-    public Builder withSubjectId(UUID subjectId) {
+    public Builder withSubjectId(String subjectId) {
       this.subjectId = subjectId;
       return this;
     }
@@ -162,7 +162,7 @@ public record Annotation(
      *     not set
      */
     public Annotation build() {
-      if (subjectId == null) {
+      if (Strings.isBlank(subjectId)) {
         throw new IllegalStateException("subjectId is required");
       }
       if (Strings.isBlank(label)) {

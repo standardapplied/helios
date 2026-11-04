@@ -6,6 +6,84 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Runs are traced with OpenTelemetry; the Postgres trace store is an exporter.** A session emits
+live spans through the OpenTelemetry API, and `PgSpanExporter` writes Helios's spans to the trace
+tables. Helios's own trace pipeline is gone, so the other entries in this section that name
+`TraceListener`, `TraceBuilder`, `SpanBuilder`, `SpanContainer` or `core.trace` describe 3.0 work
+this entry replaces. Old trace rows are not migrated.
+
+| Before | 3.0 |
+|---|---|
+| `SessionOptions.Builder.withTraceListener(listener)`, `SessionOptions.traceListener()`; `withTraceListener(new PgTraceStore(pgConfig))` stored runs in Postgres | `withOpenTelemetry(openTelemetry)` (default `GlobalOpenTelemetry.get()` at open) and `withAgentName(name)`; store runs by adding `new PgSpanExporter(pgConfig)` to the SDK's span processors. `PgTraceStore` only reads. `core.trace.TraceDetail` is `session.TraceDetail` |
+| `core.trace`: `Trace`, `Span`, `Annotation`, `AuthorKind`, `TraceRollup`, `TraceRollupKey`, `TraceFilter`; `TraceBuilder`, `SpanBuilder`, `SpanContainer`, `TraceListener`, `SpanKind` | the read model moves to `persistence`: `Trace.id` is the run id `String`, with `otelTraceId` and `otelSpanId`; `Span.id` is the span id `String`, `Span.kind` a `String` (`chat`, `execute_tool`, `hook`) and `Span` has no `children`; `Annotation.subjectId` is a `String`, a run id or a span id; `PgTraceStore.findById(String runId)`, `PgAnnotationStore.findAnnotationsBySubject(String)` and `findAnnotationsBySubjects(List<String>)`. The write side is removed |
+| `Trace.userId`, `promptName`, `promptVersion`, `groupId`, `labels`; `TraceFilter.groupId`, `promptName`, `promptVersion`; `TraceRollupKey.GROUP_ID`, `PROMPT` | removed: nothing set them. Name runs with `withAgentName`; roll up by `NAME` or `MODEL_ID` |
+| span names `model.call`, `tool.<name>`, `hook.<name>` and attributes `model`, `tool.callId`, `run.id`, ... | `invoke_agent <agent>`, `chat <model>`, `execute_tool <tool>`, `hook <hook>` with the GenAI conventions' attributes and `helios.*`; see the README's Tracing section |
+| `helios_traces.id UUID`, `helios_spans.trace_id` / `parent_id`, `helios_annotations.subject_id UUID` | the DDL below: `helios_traces` keyed by the run id with the OpenTelemetry ids, `helios_spans` keyed by the span id with an indexed `run_id` and no foreign key, `subject_id VARCHAR(64)` |
+
+On an existing database, drop and recreate the trace tables, then widen the annotation subject:
+
+```sql
+DROP TABLE IF EXISTS helios_spans;
+DROP TABLE IF EXISTS helios_traces;
+
+CREATE TABLE helios_traces (
+    id                VARCHAR(64)     PRIMARY KEY,
+    otel_trace_id     CHAR(32)        NOT NULL,
+    otel_span_id      CHAR(16)        NOT NULL,
+    name              TEXT            NOT NULL,
+    start_time        TIMESTAMPTZ     NOT NULL,
+    end_time          TIMESTAMPTZ,
+    error             TEXT,
+    attributes        JSONB           NOT NULL DEFAULT '{}',
+    input_text        TEXT,
+    output_text       TEXT,
+    session_id        VARCHAR(128),
+    model_id          VARCHAR(255),
+    total_tokens      INT             NOT NULL DEFAULT 0,
+    input_tokens      INT,
+    output_tokens     INT,
+    cache_creation_tokens INT,
+    cache_read_tokens INT,
+    cost_micro_usd    BIGINT,
+    thumbs_up_count   INT             NOT NULL DEFAULT 0,
+    thumbs_down_count INT             NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_helios_traces_name
+    ON helios_traces (name);
+
+CREATE INDEX idx_helios_traces_start_time
+    ON helios_traces (start_time DESC);
+
+CREATE INDEX idx_helios_traces_session_id
+    ON helios_traces (session_id);
+
+CREATE INDEX idx_helios_traces_model_id
+    ON helios_traces (model_id);
+
+CREATE TABLE helios_spans (
+    id          CHAR(16)        PRIMARY KEY,
+    run_id      VARCHAR(64)     NOT NULL,
+    name        TEXT            NOT NULL,
+    kind        VARCHAR(50)     NOT NULL,
+    start_time  TIMESTAMPTZ     NOT NULL,
+    end_time    TIMESTAMPTZ,
+    error       TEXT,
+    attributes  JSONB           NOT NULL DEFAULT '{}',
+    total_tokens INT,
+    input_tokens INT,
+    output_tokens INT,
+    cache_creation_tokens INT,
+    cache_read_tokens INT,
+    cost_micro_usd BIGINT
+);
+
+CREATE INDEX idx_helios_spans_run_id
+    ON helios_spans(run_id);
+
+ALTER TABLE helios_annotations ALTER COLUMN subject_id TYPE VARCHAR(64) USING subject_id::text;
+```
+
 **A compaction is accepted when it lowers the token estimate, not the message count.** The
 `TokenCounter` estimate of the result must be below the estimate of the history the compactor was
 given; the same instance and `null` stay no-ops. A third-party `ContextCompactor` whose result used
@@ -1079,15 +1157,15 @@ revision directory beside them.
   off; 65,536 output tokens per request.
 - **`SessionLimits.maxToolResultChars()`**, set with `Builder.withMaxToolResultChars(int)`, and
   `Strings.truncatedMiddle(text, maxChars, note)`, which keeps a text's start and end.
-- **Every run records a trace.** `SessionOptions.Builder.withTraceListener(listener)` hands the
-  listener one `Trace` per run, on every ending (a terminal, a host `Error`, a crash, a close or
-  an interrupt), before the run's result completes: a `model.call` span per model attempt with its
-  usage, cost and duration, a `tool.<name>` span per tool call and a `hook.<name>` span per hook
-  decision, totals equal to the run's result and `sessionId` the session's id, so a
-  conversation's runs are found together. `withTraceDetail(TraceDetail.VERBOSE)` also stores the
-  prompt, answer, tool arguments and results, redacted by the session; the default `STANDARD`
-  stores no content. A listener's `Exception` is logged; its `Error` fails the run's result.
-  `.withTraceListener(pgTraceStore)` stores them in Postgres.
+- **Every run is an OpenTelemetry span.** A session emits live spans through
+  `SessionOptions.Builder.withOpenTelemetry(openTelemetry)`, or `GlobalOpenTelemetry` when unset:
+  an `invoke_agent <agent>` span per run, a child of the span current where `send` was called and
+  ended once however the run ends, with a `chat` span per model attempt, an `execute_tool` span
+  per tool call and a `hook` span per hook decision under it, its totals the run's result. A
+  step's span is current while it runs, so the application's own spans nest under it.
+  `withAgentName(name)` names the runs (default `helios`); `withTraceDetail(TraceDetail.VERBOSE)`
+  adds the prompt, answer, tool arguments and results and hook texts, redacted by the session.
+  `PgSpanExporter` stores Helios's spans in Postgres for `PgTraceStore`.
 - **`QueryEvent.ModelCallEnded` reports each model attempt**, a compactor's summary call
   included: the model id it was priced at, its attempt number, finish reason, usage, cost,
   duration and redacted error. An accounted call's event carries exactly the usage it added to

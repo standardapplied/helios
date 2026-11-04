@@ -221,7 +221,7 @@ final class ToolRound {
   }
 
   private ToolResult dispatch(SessionState state, PlannedCall planned, SessionLimits limits) {
-    try {
+    try (var scope = collaborators.spans().toolCall(state, planned.call()).makeCurrent()) {
       return collaborators
           .toolDispatch()
           .dispatch(

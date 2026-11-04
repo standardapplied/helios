@@ -84,52 +84,26 @@ class JsonbMapperTest {
     assertTrue(error.getMessage().contains("not json"));
   }
 
-  // --- listToJsonb / listFromJsonb tests ---
+  // --- messageText tests ---
 
   @Test
-  void listToJsonbWithNull() {
-    assertEquals("[]", JsonbMapper.listToJsonb(null));
+  void messageTextIsTheContentOfTheFirstPartOfTheFirstMessage() {
+    assertEquals(
+        "hello",
+        JsonbMapper.messageText(
+            "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"hello\"}]}]"));
   }
 
   @Test
-  void listToJsonbWithEmptyList() {
-    assertEquals("[]", JsonbMapper.listToJsonb(List.of()));
+  void messageTextOfMessagesWithNoTextContentIsNull() {
+    assertEquals(null, JsonbMapper.messageText("[]"));
+    assertEquals(
+        null, JsonbMapper.messageText("[{\"role\":\"user\",\"parts\":[{\"content\":7}]}]"));
   }
 
   @Test
-  void listToJsonbWithValues() {
-    var json = JsonbMapper.listToJsonb(List.of("alpha", "beta"));
-    assertTrue(json.contains("\"alpha\""));
-    assertTrue(json.contains("\"beta\""));
-  }
-
-  @Test
-  void listFromJsonbWithNull() {
-    assertEquals(List.of(), JsonbMapper.listFromJsonb(null));
-  }
-
-  @Test
-  void listFromJsonbWithBlank() {
-    assertEquals(List.of(), JsonbMapper.listFromJsonb(""));
-    assertEquals(List.of(), JsonbMapper.listFromJsonb("  "));
-  }
-
-  @Test
-  void listFromJsonbWithEmptyArray() {
-    assertEquals(List.of(), JsonbMapper.listFromJsonb("[]"));
-  }
-
-  @Test
-  void listFromJsonbRoundTrip() {
-    var original = List.of("production", "v2", "experiment");
-    var json = JsonbMapper.listToJsonb(original);
-    var parsed = JsonbMapper.listFromJsonb(json);
-    assertEquals(original, parsed);
-  }
-
-  @Test
-  void listFromJsonbWithInvalidJsonThrows() {
-    assertThrows(IllegalArgumentException.class, () -> JsonbMapper.listFromJsonb("not json"));
+  void messageTextOfInvalidJsonIsRejected() {
+    assertThrows(IllegalArgumentException.class, () -> JsonbMapper.messageText("not json"));
   }
 
   // --- objectToJsonb cap tests ---
