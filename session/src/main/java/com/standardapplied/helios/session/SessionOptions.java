@@ -62,7 +62,7 @@ import java.util.Optional;
  * @param costCalculator per-model {@code Usage → CostEstimate} lookup. Each completed model turn's
  *     usage flows through this calculator; the result accumulates on the session and gates {@link
  *     SessionLimits#maxBudgetMicroUsd()}. Defaults to {@link CostCalculator#ZERO} — cost tracking
- *     is opt-in
+ *     is opt-in — which a session with a budget refuses; non-null
  * @param executionProvider optional provider that runs {@code Execute} scripts behind an isolation
  *     boundary (subprocess, JShell sandbox, Incus instance, …); when present, the session registers
  *     {@code Execute} over it and runs its {@code onSessionStart} and {@code onSessionEnd} with the
@@ -139,7 +139,8 @@ public record SessionOptions(
    * @throws NullPointerException if any argument is null or {@code tools} or {@code hooks} holds a
    *     null element
    * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule, {@code
-   *     maxQueuedUserMessages} is not positive or {@code agentName} is blank
+   *     maxQueuedUserMessages} is not positive, {@code limits} sets a budget while {@code
+   *     costCalculator} is {@link CostCalculator#ZERO}, or {@code agentName} is blank
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -153,6 +154,7 @@ public record SessionOptions(
     Objects.requireNonNull(permission, "permission must not be null");
     Objects.requireNonNull(memoryBackend, "memoryBackend must not be null");
     Objects.requireNonNull(costCalculator, "costCalculator must not be null");
+    requireCalculatorForBudget(limits, costCalculator);
     Objects.requireNonNull(executionProvider, "executionProvider must not be null");
     Objects.requireNonNull(outputSchema, "outputSchema must not be null");
     Objects.requireNonNull(systemPrompt, "systemPrompt must not be null");
@@ -163,6 +165,16 @@ public record SessionOptions(
     Objects.requireNonNull(openTelemetry, "openTelemetry must not be null");
     Validate.notBlank("agentName", agentName);
     Objects.requireNonNull(traceDetail, "traceDetail must not be null");
+  }
+
+  private static void requireCalculatorForBudget(
+      SessionLimits limits, CostCalculator costCalculator) {
+    if (limits.maxBudgetMicroUsd().isPresent() && costCalculator == CostCalculator.ZERO) {
+      throw new IllegalArgumentException(
+          "maxBudgetMicroUsd is set but no cost calculator is: every model call would cost zero"
+              + " and the budget would never stop the session; set"
+              + " SessionOptions.Builder.withCostCalculator");
+    }
   }
 
   private static int requirePositiveQueue(int maxQueuedUserMessages) {
@@ -397,7 +409,8 @@ public record SessionOptions(
 
     /**
      * Set the cost calculator. Defaults to {@link CostCalculator#ZERO}, which means cost tracking
-     * is disabled and {@link SessionLimits#maxBudgetMicroUsd()} never fires. Wire a {@link
+     * is disabled; a session with {@link SessionLimits#maxBudgetMicroUsd()} set needs a calculator,
+     * and {@link #build()} refuses {@code ZERO} with a budget. Wire a {@link
      * CostCalculator#staticTable(java.util.Map)} (or your own implementation) to enable per-turn
      * cost accumulation.
      *
@@ -594,6 +607,7 @@ public record SessionOptions(
      *
      * @return the options
      * @throws IllegalStateException if {@code model} was never set
+     * @throws IllegalArgumentException if the limits set a budget and no cost calculator is set
      */
     public SessionOptions build() {
       if (model == null) {

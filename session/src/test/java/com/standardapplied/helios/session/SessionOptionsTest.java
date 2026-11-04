@@ -40,6 +40,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -323,6 +324,37 @@ final class SessionOptionsTest {
   void builderDefaultsCostCalculatorToZero() {
     var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
     assertSame(CostCalculator.ZERO, opts.costCalculator());
+  }
+
+  @Test
+  void budgetWithoutCostCalculatorIsRefused() {
+    var budget = SessionLimits.newBuilder().withMaxBudgetMicroUsd(10_000L).build();
+    var b = SessionOptions.newBuilder().withModel(stubModel()).withLimits(budget);
+
+    var ex = assertThrows(IllegalArgumentException.class, b::build);
+
+    assertEquals(
+        "maxBudgetMicroUsd is set but no cost calculator is: every model call would cost zero and"
+            + " the budget would never stop the session; set"
+            + " SessionOptions.Builder.withCostCalculator",
+        ex.getMessage());
+  }
+
+  @Test
+  void budgetWithCostCalculatorBuilds() {
+    var budget = SessionLimits.newBuilder().withMaxBudgetMicroUsd(10_000L).build();
+    var calculator =
+        CostCalculator.staticTable(Map.of("stub", CostCalculator.Pricing.ofUsdPerMillion(1, 1)));
+
+    var opts =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withLimits(budget)
+            .withCostCalculator(calculator)
+            .build();
+
+    assertSame(calculator, opts.costCalculator());
+    assertEquals(budget, opts.toBuilder().build().limits());
   }
 
   @Test

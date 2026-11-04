@@ -1172,6 +1172,14 @@ carry a total that disagreed with its own counts.
 | `new RetryPolicy(...)` accepted any value; `RetryPolicy.Builder.build()` threw `IllegalStateException` for `maxAttempts < 1` | the record throws `IllegalArgumentException` for `maxAttempts < 1` or a `jitter` outside `0.0`–`1.0` (`NaN` included) and `NullPointerException` for a `null` `backoff` or `retryOn`; the builder throws the same, and `withRetryOn((Predicate) null)` throws at once |
 | `CostEstimate.ofUsd` and `Pricing.ofUsdPerMillion` turned `NaN` into zero, an infinity into `Long.MAX_VALUE` and a small negative into zero | they throw `IllegalArgumentException` for `NaN`, an infinity, any negative value, and an amount whose micro-USD does not fit in a `long` |
 
+**A spending limit never runs on a made-up zero price.** A budget with no cost calculator, and a
+price table asked for a model it does not hold, both used to count the call as free.
+
+| 2.x | 3.0 |
+|---|---|
+| `SessionLimits.maxBudgetMicroUsd` with the default `CostCalculator.ZERO` was accepted and never fired | `SessionOptions` throws `IllegalArgumentException`; set `withCostCalculator` |
+| `CostCalculator.staticTable(...)` and `AnthropicPricing.calculator(...)` priced an unknown model at zero | they throw `IllegalArgumentException` naming the model id; in a session the run ends in `ErrorDuringExecution` |
+
 ### Added
 
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
@@ -1391,6 +1399,8 @@ carry a total that disagreed with its own counts.
 
 ### Fixed
 
+- **A spending limit could never fire.** A budget with no cost calculator counted every call as
+  free; a price table counted any model it did not know as free.
 - **Feedback counts were always 0 outside the tests.** `Trace.thumbsUpCount` / `thumbsDownCount`
   and their `TraceRollup` sums read two `helios_traces` columns that only a test trigger wrote.
   They are now counted when read, from the run's annotations with a positive or a negative

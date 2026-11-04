@@ -28,8 +28,9 @@ import java.util.Objects;
 public interface CostCalculator {
 
   /**
-   * No-op calculator that always returns {@link CostEstimate#zero()}. The default for sessions that
-   * have not wired a calculator — cost tracking is opt-in.
+   * No-op calculator that always returns {@link CostEstimate#zero()}. The default only for a
+   * session without a budget: a session with {@code SessionLimits.maxBudgetMicroUsd} set refuses
+   * it, since every call would cost zero and the budget would never stop the session.
    */
   CostCalculator ZERO = (modelId, usage) -> CostEstimate.zero();
 
@@ -43,15 +44,16 @@ public interface CostCalculator {
   CostEstimate cost(String modelId, Usage usage);
 
   /**
-   * Build a calculator from a fixed pricing table keyed by {@code Model.id()}. Models absent from
-   * the table contribute {@link CostEstimate#zero()} — there is no fallback rate, since a missing
-   * entry is more likely a configuration gap than something the framework should guess at.
+   * Build a calculator from a fixed pricing table keyed by {@code Model.id()}. A model absent from
+   * the table is never priced at zero: its lookup throws, since a missing entry, a typo in an id or
+   * a summary model left out, is a configuration gap that would turn real spend into nothing.
    *
    * <p>The table is defensively copied; later mutations to {@code pricing} do not affect the
    * returned calculator.
    *
    * @param pricing model id → pricing; non-null, may be empty
-   * @return a {@code CostCalculator} backed by the snapshot
+   * @return a {@code CostCalculator} backed by the snapshot, whose {@code cost} throws {@link
+   *     IllegalArgumentException} for a model id the table does not hold
    * @throws NullPointerException if {@code pricing} is null or contains a null key/value
    */
   static CostCalculator staticTable(Map<String, Pricing> pricing) {
@@ -61,7 +63,11 @@ public interface CostCalculator {
       Objects.requireNonNull(modelId, "modelId must not be null");
       Objects.requireNonNull(usage, "usage must not be null");
       var rate = snapshot.get(modelId);
-      return rate == null ? CostEstimate.zero() : rate.cost(usage);
+      if (rate == null) {
+        throw new IllegalArgumentException(
+            "no price for model '" + modelId + "'; add it to the pricing table");
+      }
+      return rate.cost(usage);
     };
   }
 

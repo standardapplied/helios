@@ -12,6 +12,8 @@ import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AnthropicPricingTest {
 
@@ -105,13 +107,28 @@ class AnthropicPricingTest {
   }
 
   @Test
-  void calculatorChargesNothingForModelsOutsideTheCatalogue() {
+  void calculatorPricesEveryCataloguedModelAtItsListPrice() {
+    var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
+    var usage = usage(1_000_000, 1_000_000, 1_000_000, 1_000_000);
+
+    for (var model : AnthropicModelId.values()) {
+      assertEquals(
+          AnthropicPricing.pricing(model, CachePolicy.shortLived()).cost(usage),
+          calculator.cost(model.id(), usage),
+          model.name());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"gpt-6-sol", "claude-opus-5-7", "anthropic.claude-opus-5-5"})
+  void calculatorRefusesModelsOutsideTheCatalogue(String modelId) {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
     var usage = usage(1_000_000, 0, 0, 1_000_000);
 
-    assertEquals(CostEstimate.zero(), calculator.cost("claude-opus-5-7", usage));
-    assertEquals(CostEstimate.zero(), calculator.cost("anthropic.claude-opus-5-5", usage));
-    assertEquals(CostEstimate.zero(), calculator.cost("gpt-6-astra", usage));
+    var ex = assertThrows(IllegalArgumentException.class, () -> calculator.cost(modelId, usage));
+
+    assertEquals(
+        "no price for model '" + modelId + "'; add it to the pricing table", ex.getMessage());
   }
 
   @Test

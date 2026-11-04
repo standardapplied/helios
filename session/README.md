@@ -164,7 +164,10 @@ try (var session =
 ```
 
 Currency is integer micro-USD (Stripe-style fixed-precision) — no `BigDecimal` allocation per
-turn, no FP drift. `CostCalculator.ZERO` is the default; cost tracking is opt-in.
+turn, no FP drift. `CostCalculator.ZERO` is the default; cost tracking is opt-in, and a budget
+needs a calculator: `build()` throws when `maxBudgetMicroUsd` is set without one. A price table
+never prices a model it does not hold at zero: the call throws, naming the id, and the run ends in
+`ErrorDuringExecution`, so list every model the session calls, a compaction summary model included.
 
 ## Permissions
 
