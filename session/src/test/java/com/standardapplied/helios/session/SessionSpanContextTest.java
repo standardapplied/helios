@@ -17,6 +17,7 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -118,6 +119,57 @@ final class SessionSpanContextTest {
     assertEquals(first.getSpanContext().getSpanId(), runs.get(0).getParentSpanId());
     assertEquals(second.getSpanContext().getSpanId(), runs.get(1).getParentSpanId());
     assertNotEquals(runs.get(0).getSpanId(), runs.get(1).getParentSpanId());
+  }
+
+  @Test
+  void aRunSentFromTheLastRunOfItsSessionIsAChildOfThatRunsParentNotOfTheRun() {
+    var model = ScriptedModel.newBuilder().withTextTurn("a").withTextTurn("b").build();
+    var opened = new CompletableFuture<AgentSession>();
+    var followUp = new CompletableFuture<CompletableFuture<ResultMessage>>();
+    OnStreamEventHook sending =
+        (event, ctx) -> {
+          if (event instanceof QueryEvent.RunEnded && !followUp.isDone()) {
+            followUp.complete(opened.join().send("two"));
+          }
+        };
+    var request = capture.tracer().spanBuilder("request").startSpan();
+    try (var session = AgentSession.open(traced(model).withHook(sending).build())) {
+      opened.complete(session);
+      Await.value("the first run", sendUnder(request, session, "one"));
+      Await.value("the follow-up run", Await.value("the follow-up's send", followUp));
+    }
+
+    var runs = capture.starting("invoke_agent ");
+    assertEquals(2, runs.size());
+    assertEquals(request.getSpanContext().getSpanId(), runs.get(1).getParentSpanId());
+  }
+
+  @Test
+  void aRunAToolSendsToAnotherSessionIsAChildOfTheToolSpan() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(call("delegate", Map.of()))
+            .withTextTurn("done")
+            .build();
+    var delegate =
+        EndingSessions.binding(
+            "delegate",
+            (arguments, context) -> {
+              var inner = ScriptedModel.newBuilder().withTextTurn("delegated").build();
+              try (var session = AgentSession.open(traced(inner).build())) {
+                Await.value("the delegated run", session.send("help"));
+              }
+              return ToolResult.success("delegated");
+            });
+
+    try (var session = AgentSession.open(traced(model).withTool(delegate).build())) {
+      Await.value("the result", session.send("go"));
+    }
+
+    var tool = capture.only("execute_tool delegate");
+    var runs = capture.starting("invoke_agent ");
+    assertEquals(2, runs.size());
+    assertEquals(tool.getSpanId(), runs.getFirst().getParentSpanId());
   }
 
   @Test
