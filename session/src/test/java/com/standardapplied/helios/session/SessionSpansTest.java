@@ -114,7 +114,10 @@ final class SessionSpansTest {
     return span.getAttributes().get(longKey(key));
   }
 
-  /** The run span carries the run's totals, never re-summed from its children. */
+  /**
+   * The run span carries the run's totals, never re-summed from its children, and its cost only
+   * when there is one.
+   */
   static void assertTotalsEqual(ResultMessage result, SpanData run) {
     var usage = result.usage();
     var input =
@@ -124,7 +127,8 @@ final class SessionSpansTest {
     assertEquals(input, run.getAttributes().get(INPUT_TOKENS));
     assertEquals(usage.outputTokens(), run.getAttributes().get(OUTPUT_TOKENS));
     assertEquals(usage.totalTokens(), run.getAttributes().get(TOTAL_TOKENS));
-    assertEquals(result.cost().microUsd(), run.getAttributes().get(COST));
+    var cost = result.cost().microUsd();
+    assertEquals(cost == 0 ? null : cost, run.getAttributes().get(COST));
   }
 
   @Test
@@ -400,8 +404,10 @@ final class SessionSpansTest {
     assertEquals(
         List.of("error"),
         retried.getAttributes().get(stringArrayKey("gen_ai.response.finish_reasons")));
-    assertEquals(0L, retried.getAttributes().get(INPUT_TOKENS));
-    assertEquals(0L, retried.getAttributes().get(COST));
+    for (var usage :
+        List.of(INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, TOTAL_TOKENS, COST)) {
+      assertNull(retried.getAttributes().get(usage));
+    }
     assertEquals(2L, number(chats.get(1), "helios.attempt"));
     assertEquals(StatusCode.UNSET, chats.get(1).getStatus().getStatusCode());
     assertTotalsEqual(result, capture.run());
@@ -449,7 +455,7 @@ final class SessionSpansTest {
   }
 
   @Test
-  void aPricingFailureKeepsTheAttemptsUsageAtZeroCost() {
+  void aPricingFailureKeepsTheAttemptsUsageWithNoCost() {
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(100, 10)).build();
     CostCalculator unpriced =
         (modelId, usage) -> {
@@ -461,7 +467,7 @@ final class SessionSpansTest {
     assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result);
     var chat = capture.only("chat scripted");
     assertEquals(100L, chat.getAttributes().get(INPUT_TOKENS));
-    assertEquals(0L, chat.getAttributes().get(COST));
+    assertNull(chat.getAttributes().get(COST));
     assertTotalsEqual(result, capture.run());
   }
 

@@ -241,22 +241,29 @@ final class RunSpans implements StepSpans {
     return "gemini".equals(provider) ? "gcp.gemini" : provider;
   }
 
-  /** Set the usage attributes: OpenTelemetry's input count includes the cached tokens. */
+  /**
+   * Set the usage attributes when {@code usage} reports tokens, OpenTelemetry's input count
+   * including the cached tokens, and the cost when there is one.
+   */
   private static void usage(Span span, Usage usage, CostEstimate cost) {
-    span.setAttribute(
-        INPUT_TOKENS,
-        (long) usage.inputTokens()
-            + usage.cacheCreationInputTokens()
-            + usage.cacheReadInputTokens());
-    span.setAttribute(OUTPUT_TOKENS, (long) usage.outputTokens());
-    if (usage.cacheReadInputTokens() != 0) {
-      span.setAttribute(CACHE_READ, (long) usage.cacheReadInputTokens());
+    if (usage.reportsTokens()) {
+      span.setAttribute(
+          INPUT_TOKENS,
+          (long) usage.inputTokens()
+              + usage.cacheCreationInputTokens()
+              + usage.cacheReadInputTokens());
+      span.setAttribute(OUTPUT_TOKENS, (long) usage.outputTokens());
+      if (usage.cacheReadInputTokens() != 0) {
+        span.setAttribute(CACHE_READ, (long) usage.cacheReadInputTokens());
+      }
+      if (usage.cacheCreationInputTokens() != 0) {
+        span.setAttribute(CACHE_WRITE, (long) usage.cacheCreationInputTokens());
+      }
+      span.setAttribute(TOTAL_TOKENS, (long) usage.totalTokens());
     }
-    if (usage.cacheCreationInputTokens() != 0) {
-      span.setAttribute(CACHE_WRITE, (long) usage.cacheCreationInputTokens());
+    if (cost.microUsd() != 0) {
+      span.setAttribute(COST, cost.microUsd());
     }
-    span.setAttribute(TOTAL_TOKENS, (long) usage.totalTokens());
-    span.setAttribute(COST, cost.microUsd());
   }
 
   private static void fail(Span span, String description, String type) {
