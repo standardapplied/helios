@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class CostEstimateTest {
 
@@ -66,9 +68,27 @@ final class CostEstimateTest {
     assertEquals("microUsd must be non-negative, got -1", ex.getMessage());
   }
 
+  @ParameterizedTest
+  @ValueSource(
+      doubles = {
+        Double.NaN,
+        Double.POSITIVE_INFINITY,
+        Double.NEGATIVE_INFINITY,
+        -1.0,
+        -1e-7,
+        1e300,
+        0x1p63 / 1e6
+      })
+  void ofUsdRejectsAnAmountThatIsNotAFiniteNonNegativeLongOfMicroUsd(double usd) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> CostEstimate.ofUsd(usd));
+    assertEquals(
+        "USD amount must be finite, non-negative and fit in a long of micro-USD, got " + usd,
+        ex.getMessage());
+  }
+
   @Test
-  void ofUsdNegativeRejectedTransitively() {
-    assertThrows(IllegalArgumentException.class, () -> CostEstimate.ofUsd(-1.0));
+  void ofUsdAcceptsAnAmountNearTheLongBound() {
+    assertEquals(9_200_000_000_000_000_000L, CostEstimate.ofUsd(9.2e12).microUsd());
   }
 
   @Test

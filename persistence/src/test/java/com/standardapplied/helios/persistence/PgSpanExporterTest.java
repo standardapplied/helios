@@ -150,8 +150,8 @@ final class PgSpanExporterTest {
     assertEquals(START, found.startTime());
     assertEquals(START.plusSeconds(1), found.endTime());
     assertTrue(found.success());
-    assertEquals(new Usage(100, 22, 30, 50, 250), found.usage());
-    assertEquals(250, found.totalTokens());
+    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
+    assertEquals(202, found.totalTokens());
     assertEquals(CostEstimate.ofMicroUsd(42), found.cost());
     assertEquals(
         Map.of(
@@ -170,7 +170,7 @@ final class PgSpanExporterTest {
     assertEquals("1000000000000001", chatRow.id());
     assertEquals(START.plusSeconds(1), chatRow.startTime());
     assertEquals(START.plusSeconds(2), chatRow.endTime());
-    assertEquals(new Usage(100, 22, 30, 50, 260), chatRow.usage());
+    assertEquals(Usage.of(100, 22, 30, 50), chatRow.usage());
     assertEquals(CostEstimate.ofMicroUsd(42), chatRow.cost());
     assertEquals(
         Map.of("gen_ai.response.finish_reasons", "[stop]", "helios.attempt", "1"),

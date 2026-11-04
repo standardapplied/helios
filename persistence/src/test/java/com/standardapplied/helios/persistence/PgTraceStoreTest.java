@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Paginate;
+import com.standardapplied.helios.core.model.Response.Usage;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import java.util.List;
@@ -61,6 +62,24 @@ class PgTraceStoreTest {
     assertEquals(
         List.of("chat first", "chat tied", "hook tied", "hook late"),
         store.findById("run-0").spans().stream().map(Span::name).toList());
+  }
+
+  @Test
+  void aStoredTotalThatDisagreesWithTheCountsIsNotReadIntoTheUsage() {
+    var attributes =
+        Attributes.builder()
+            .put("gen_ai.usage.input_tokens", 10L)
+            .put("gen_ai.usage.output_tokens", 2L)
+            .build();
+    assertTrue(
+        exporter
+            .export(List.of(run("run-0", "0000000000000001", "agent", 0, attributes)))
+            .isSuccess());
+    PgTestSupport.dbClient()
+        .execute()
+        .dml("UPDATE helios_traces SET total_tokens = 99 WHERE id = ?", "run-0");
+
+    assertEquals(Usage.of(10, 2), store.findById("run-0").usage());
   }
 
   @Test
