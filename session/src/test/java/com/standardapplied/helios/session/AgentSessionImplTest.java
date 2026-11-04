@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
-import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -507,21 +506,26 @@ final class AgentSessionImplTest {
   }
 
   @Test
-  void defaultCostCalculatorIsZeroSoBudgetNeverFires() {
-    // No withCostCalculator(...) call. Even with a tight budget, cost stays $0 and the session
-    // completes normally — this is the opt-in contract.
-    var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(10_000L).build();
+  void aModelThePriceTableDoesNotHoldEndsTheRunWithAnErrorNamingIt() {
+    var calc =
+        CostCalculator.staticTable(
+            Map.of("priced", CostCalculator.Pricing.ofUsdPerMillion(1.0, 1.0)));
+    var unpriced =
+        ScriptedModel.newBuilder()
+            .withId("unpriced")
+            .withTextTurn("here", Usage.of(10, 10))
+            .build();
     try (var s =
         AgentSession.open(
             SessionOptions.newBuilder()
-                .withModel(textOnceModel("hello", FinishReason.STOP))
+                .withModel(unpriced)
                 .withSessionId(SID)
                 .withClock(CLOCK)
-                .withLimits(limits)
+                .withCostCalculator(calc)
                 .build())) {
       var terminal = s.runBlocking(UserMessage.text("hi"));
-      assertInstanceOf(ResultMessage.Success.class, terminal);
-      assertEquals(CostEstimate.zero(), terminal.cost());
+      var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal);
+      assertTrue(error.error().message().contains("unpriced"), error.error().message());
     }
   }
 
