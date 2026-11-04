@@ -49,12 +49,12 @@ import java.util.logging.Logger;
  * QueryEvent.ToolUse}, or its first {@link QueryEvent.ToolResult} when it had none, to that first
  * result; and a zero-length {@code hook} span per {@link QueryEvent.HookFired}. A span still open
  * when its run ends ends then, with the run's error. Content is added only under {@link
- * TraceDetail#VERBOSE}, each string redacted against the session's secrets. It reads every event
- * the loop emits before the session's publisher does. A {@link RuntimeException} the application's
- * OpenTelemetry SDK throws from a span call, such as a span processor's, is logged and changes no
- * run: a run whose span did not start runs untraced in its parent's context, and a span that did
- * not start or end is not traced; an {@link Error} propagates. Thread-safe: each run's spans are
- * guarded by a lock of their own.
+ * TraceDetail#VERBOSE}, each string redacted against the session's secrets, the tool and hook texts
+ * already by their events. It reads every event the loop emits before the session's publisher does.
+ * A {@link RuntimeException} the application's OpenTelemetry SDK throws from a span call, such as a
+ * span processor's, is logged and changes no run: a run whose span did not start runs untraced in
+ * its parent's context, and a span that did not start or end is not traced; an {@link Error}
+ * propagates. Thread-safe: each run's spans are guarded by a lock of their own.
  */
 final class RunSpans implements StepSpans {
 
@@ -393,7 +393,7 @@ final class RunSpans implements StepSpans {
                     .setAttribute(TOOL_TYPE, "function")
                     .setAttribute(ARGUMENTS_CHARS, (long) arguments.length());
             if (verbose) {
-              tool.setAttribute(TOOL_ARGUMENTS, redacted(arguments));
+              tool.setAttribute(TOOL_ARGUMENTS, arguments);
             }
             return tool.startSpan();
           });
@@ -411,7 +411,7 @@ final class RunSpans implements StepSpans {
       var output = event.result().output();
       tool.setAttribute(RESULT_CHARS, (long) output.length());
       if (verbose) {
-        tool.setAttribute(TOOL_RESULT, redacted(output));
+        tool.setAttribute(TOOL_RESULT, output);
       }
       var outcome = event.result().outcome();
       var name = outcome.getClass().getSimpleName();
