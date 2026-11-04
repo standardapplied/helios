@@ -28,10 +28,6 @@ import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.opentelemetry.api.trace.StatusCode;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.sdk.trace.ReadWriteSpan;
-import io.opentelemetry.sdk.trace.ReadableSpan;
-import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import java.time.Instant;
 import java.util.List;
@@ -308,7 +304,8 @@ final class SessionSpanEndingsTest {
             : () -> {
               throw new IllegalStateException("span processor failed");
             };
-    var failing = new SpanCapture(new FailingOnEnd("execute_tool fatal", ending));
+    var failing =
+        new SpanCapture(new SessionSpanFailuresTest.Failing("execute_tool fatal", false, ending));
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call("fatal", Map.of())).build();
     var fatal =
         EndingSessions.binding(
@@ -384,30 +381,6 @@ final class SessionSpanEndingsTest {
     assertEquals(2, capture.starting("invoke_agent ").size());
     assertEquals(Set.of(), capture.unended());
     assertEquals(List.of("chat scripted", "invoke_agent helios"), capture.names().subList(0, 2));
-  }
-
-  /** A span processor that runs {@code failing} once the span named {@code name} has ended. */
-  private record FailingOnEnd(String name, Runnable failing) implements SpanProcessor {
-
-    @Override
-    public void onStart(Context parentContext, ReadWriteSpan span) {}
-
-    @Override
-    public boolean isStartRequired() {
-      return false;
-    }
-
-    @Override
-    public void onEnd(ReadableSpan span) {
-      if (span.getName().equals(name)) {
-        failing.run();
-      }
-    }
-
-    @Override
-    public boolean isEndRequired() {
-      return true;
-    }
   }
 
   /** A host failure a hook, a tool or a model throws. */
