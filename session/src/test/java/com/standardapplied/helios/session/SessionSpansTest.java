@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -157,6 +158,7 @@ final class SessionSpansTest {
     for (var span : capture.spans()) {
       assertEquals(run.getTraceId(), span.getTraceId());
       assertEquals(result.runId(), span.getAttributes().get(RUN_ID));
+      assertEquals("com.standardapplied.helios", span.getInstrumentationScopeInfo().getName());
     }
     for (var child : List.of(chats.get(0), chats.get(1), tool, hook)) {
       assertEquals(run.getSpanId(), child.getParentSpanId());
@@ -195,6 +197,7 @@ final class SessionSpansTest {
     assertEquals(StatusCode.UNSET, tool.getStatus().getStatusCode());
     assertNull(tool.getAttributes().get(INPUT_TOKENS));
 
+    assertEquals(SpanKind.INTERNAL, hook.getKind());
     assertEquals(rewrite.name(), string(hook, "helios.hook.name"));
     assertEquals("POST_TOOL_USE", string(hook, "helios.hook.phase"));
     assertEquals("MutateResult", string(hook, "helios.hook.outcome"));
@@ -264,7 +267,7 @@ final class SessionSpansTest {
         "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"PROMPT-<redacted:key>\"}]}]",
         string(run, "gen_ai.input.messages"));
     assertEquals(
-        "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"ANSWER-done\"}]}]",
+        "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"ANSWER-<redacted:key>\"}]}]",
         string(run, "gen_ai.output.messages"));
     var echo = capture.only("execute_tool echo");
     assertEquals(
@@ -282,12 +285,43 @@ final class SessionSpansTest {
     var model =
         ScriptedModel.newBuilder()
             .withToolCallsTurn(call("echo", Map.of("q", SENTINEL + " " + SECRET)))
-            .withTextTurn("ANSWER-done")
+            .withTextTurn("ANSWER-" + SECRET)
             .build();
     return traced(model)
         .withTool(tool("echo", "result " + SECRET))
         .withHook(new Noting())
         .withSecretRegistry(secrets);
+  }
+
+  @Test
+  void aVerboseRunsInputIsItsFirstUserMessageNotOneSteeredInLater() {
+    var opened = new AtomicReference<AgentSession>();
+    var steer =
+        EndingSessions.binding(
+            "steer",
+            (arguments, context) -> {
+              opened.get().send("STEERED");
+              return ToolResult.success("ok");
+            });
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(call("steer", Map.of()))
+            .withTextTurn("done")
+            .build();
+    var events = new EventCollector();
+    try (var session =
+        AgentSession.open(
+            traced(model).withTool(steer).withTraceDetail(TraceDetail.VERBOSE).build())) {
+      opened.set(session);
+      events.read(session.events());
+      Await.value("the result", session.send("FIRST"));
+      events.awaitRunEnded();
+    }
+
+    assertEquals(2, events.eventsOf(QueryEvent.UserMessageReceived.class).size());
+    assertEquals(
+        "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"FIRST\"}]}]",
+        string(capture.run(), "gen_ai.input.messages"));
   }
 
   @Test

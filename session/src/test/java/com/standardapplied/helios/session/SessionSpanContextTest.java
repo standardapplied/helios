@@ -14,21 +14,23 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.sdk.common.CompletableResultCode;
 import io.opentelemetry.sdk.trace.ReadWriteSpan;
 import io.opentelemetry.sdk.trace.ReadableSpan;
-import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
@@ -49,6 +51,7 @@ final class SessionSpanContextTest {
 
   private static final Response<Void> DONE =
       Response.newBuilder().withContent("done").withFinishReason(FinishReason.STOP).build();
+  private static final ContextKey<String> REQUEST = ContextKey.named("request");
 
   private final SpanCapture capture = new SpanCapture();
 
@@ -173,6 +176,96 @@ final class SessionSpanContextTest {
   }
 
   @Test
+  void theRunsThreadRunsInTheCallersContextWithTheRunsSpanCurrent() {
+    var seen = new CompletableFuture<String>();
+    PreStopHook auditing =
+        (response, ctx) -> {
+          seen.complete(Context.current().get(REQUEST));
+          capture.tracer().spanBuilder("audit").startSpan().end();
+          return HookOutcome.cont();
+        };
+    var options =
+        traced(ScriptedModel.newBuilder().withTextTurn("done").build()).withHook(auditing).build();
+    try (var session = AgentSession.open(options);
+        var scope = Context.root().with(REQUEST, "request-7").makeCurrent()) {
+      Await.value("the result", session.send("go"));
+    }
+
+    assertEquals("request-7", Await.value("the hook's context value", seen));
+    assertEquals(capture.run().getSpanId(), capture.only("audit").getParentSpanId());
+  }
+
+  @Test
+  void spansTheSummaryModelStartsAreChildrenOfTheRunsSpan() {
+    var summaryModel =
+        EndingSessions.model(
+            () -> {
+              capture.tracer().spanBuilder("summary request").startSpan().end();
+              return ModelStreams.of(ModelChunk.MessageStop.of(DONE));
+            });
+    var options =
+        traced(twoTurns())
+            .withTool(SessionSpansTest.tool("noop", "ok"))
+            .withContextCompactor(SummarizingCompactor.newBuilder(summaryModel).build())
+            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100L).build())
+            .withTokenCounter(
+                messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L);
+
+    try (var session = AgentSession.open(options.build())) {
+      Await.value("the result", session.send("go"));
+    }
+
+    var summaries = capture.named("summary request");
+    assertFalse(summaries.isEmpty());
+    for (var summary : summaries) {
+      assertEquals(capture.run().getSpanId(), summary.getParentSpanId());
+    }
+  }
+
+  @Test
+  void aSpanClosingTheStreamOfAnInterruptedAttemptIsAChildOfTheChatSpan() {
+    var closed = new CountDownLatch(1);
+    var model =
+        EndingSessions.model(
+            () -> {
+              Thread.currentThread().interrupt();
+              return EndingSessions.stream(
+                  () -> {
+                    Uninterruptible.await(closed);
+                    return false;
+                  },
+                  () -> {
+                    capture.tracer().spanBuilder("http close").startSpan().end();
+                    closed.countDown();
+                  });
+            });
+
+    try (var session = AgentSession.open(traced(model).build())) {
+      Await.value("the result", session.send("go"));
+    }
+
+    assertEquals(
+        capture.only("chat scripted-stream").getSpanId(),
+        capture.only("http close").getParentSpanId());
+  }
+
+  @Test
+  void aSessionWithoutItsOwnOpenTelemetryEmitsThroughTheGlobalOne() {
+    GlobalOpenTelemetry.resetForTest();
+    GlobalOpenTelemetry.set(capture.openTelemetry());
+    try (var session =
+        AgentSession.open(
+            EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
+                .build())) {
+      Await.value("the result", session.send("go"));
+    } finally {
+      GlobalOpenTelemetry.resetForTest();
+    }
+
+    assertEquals("invoke_agent helios", capture.run().getName());
+  }
+
+  @Test
   void aSpanTheToolStartsIsAChildOfItsToolSpan() {
     var model =
         ScriptedModel.newBuilder()
@@ -249,13 +342,7 @@ final class SessionSpanContextTest {
             ResultMessage.Success.class,
             runOnce(EndingSessions.options(twoTurns()), new CountDownLatch(0)));
     var exported = new CountDownLatch(1);
-    var sdk =
-        OpenTelemetrySdk.builder()
-            .setTracerProvider(
-                SdkTracerProvider.builder()
-                    .addSpanProcessor(SimpleSpanProcessor.create(new Throwing(exported)))
-                    .build())
-            .build();
+    var sdk = new SpanCapture(SimpleSpanProcessor.create(new Throwing(exported))).openTelemetry();
 
     var traced =
         assertInstanceOf(
@@ -309,11 +396,7 @@ final class SessionSpanContextTest {
   @Test
   void anErrorASpanProcessorThrowsEndingTheRunsSpanFailsTheRunWithThatError() {
     var failure = new SessionSpanEndingsTest.HostFailure();
-    var sdk =
-        OpenTelemetrySdk.builder()
-            .setTracerProvider(
-                SdkTracerProvider.builder().addSpanProcessor(new FailingRunEnd(failure)).build())
-            .build();
+    var sdk = new SpanCapture(new FailingRunEnd(failure)).openTelemetry();
     var options =
         EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
             .withOpenTelemetry(sdk);
@@ -328,13 +411,7 @@ final class SessionSpanContextTest {
     var failure = new SessionSpanEndingsTest.HostFailure();
     var entered = new CountDownLatch(1);
     var released = new CountDownLatch(1);
-    var sdk =
-        OpenTelemetrySdk.builder()
-            .setTracerProvider(
-                SdkTracerProvider.builder()
-                    .addSpanProcessor(new FailingRunEnd(failure, entered, released))
-                    .build())
-            .build();
+    var sdk = new SpanCapture(new FailingRunEnd(failure, entered, released)).openTelemetry();
     var options =
         EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
             .withLimits(EndingSessions.grace())
@@ -353,11 +430,7 @@ final class SessionSpanContextTest {
   @Test
   void anErrorStartingTheRunsSpanFailsTheRunWithThatError() {
     var failure = new SessionSpanEndingsTest.HostFailure();
-    var sdk =
-        OpenTelemetrySdk.builder()
-            .setTracerProvider(
-                SdkTracerProvider.builder().addSpanProcessor(new FailingRunStart(failure)).build())
-            .build();
+    var sdk = new SpanCapture(new FailingRunStart(failure)).openTelemetry();
     PreStopHook never =
         (response, ctx) -> {
           throw new AssertionError("the loop ran");

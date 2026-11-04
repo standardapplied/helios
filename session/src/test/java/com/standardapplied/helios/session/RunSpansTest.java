@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ToolCall;
@@ -35,18 +36,24 @@ final class RunSpansTest {
 
   private static final Instant AT = Instant.parse("2026-11-03T10:00:00Z");
   private static final RuntimeException CRASH = new IllegalStateException("crashed");
+  private static final String SECRET = "sk-span-secret-0123456789";
 
   private final SpanCapture capture = new SpanCapture();
   private final SessionState run =
       new SessionState("sess-spans", new CancellationToken(), Clock.systemUTC());
 
   private RunSpans spans(TraceDetail detail) {
+    return spans(detail, new SecretRegistry());
+  }
+
+  private RunSpans spans(TraceDetail detail, SecretRegistry secrets) {
     var options =
         SessionOptions.newBuilder()
             .withModel(ScriptedModel.newBuilder().build())
             .withSessionId("sess-spans")
             .withOpenTelemetry(capture.openTelemetry())
             .withTraceDetail(detail)
+            .withSecretRegistry(secrets)
             .build();
     return new RunSpans(options);
   }
@@ -130,6 +137,38 @@ final class RunSpansTest {
     assertSame(Span.fromContext(context), Span.fromContext(tool));
     spans.end(run, null, CRASH);
     assertEquals(List.of("invoke_agent helios"), capture.names());
+  }
+
+  @Test
+  void aStepsSpanIsAChildOfItsRunsSpanWhateverContextIsCurrent() {
+    var spans = spans(TraceDetail.STANDARD);
+    var caller = capture.tracer().spanBuilder("request").startSpan();
+    spans.start(run, Context.root().with(caller));
+
+    spans.accept(
+        new QueryEvent.HookFired(
+            "sess-spans", run.runId(), 1, AT, "guard", HookPhase.PRE_STOP, HookOutcome.stop("x")));
+    spans.end(run, null, CRASH);
+
+    var runSpan = capture.run();
+    assertEquals(caller.getSpanContext().getSpanId(), runSpan.getParentSpanId());
+    assertEquals(runSpan.getSpanId(), capture.only("hook guard").getParentSpanId());
+  }
+
+  @Test
+  void aRunsErrorIsTheFirstHostErrorItsSessionRecordedBeforeItsCrashRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("key", SECRET);
+    var spans = spans(TraceDetail.STANDARD, secrets);
+    spans.start(run, Context.root());
+
+    run.ending().fail(new AssertionError("leaked " + SECRET));
+    spans.end(run, null, CRASH);
+
+    var span = capture.run();
+    assertEquals(
+        "java.lang.AssertionError: leaked <redacted:key>", span.getStatus().getDescription());
+    assertEquals("java.lang.AssertionError", SessionSpansTest.string(span, "error.type"));
   }
 
   @Test
