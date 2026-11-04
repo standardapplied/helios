@@ -14,14 +14,6 @@ import java.util.Objects;
  */
 final class FileActivation {
 
-  /**
-   * An active file.
-   *
-   * @param reference the reference a model message carries
-   * @param resourceName the resource name, {@code files/{id}}
-   */
-  record ReadyFile(FileReference reference, String resourceName) {}
-
   private final FilesHttp http;
   private final Duration pollInterval;
 
@@ -49,15 +41,15 @@ final class FileActivation {
   }
 
   /**
-   * The file described by {@code uploaded} once it is active, waiting at most {@code timeout}.
+   * The reference of file {@code resourceName} once it is active, starting from {@code uploaded},
+   * its state when the upload ended, and waiting at most {@code timeout}.
    *
    * @throws GeminiException if processing fails, enters an unknown state or times out
    */
-  ReadyFile await(GeminiFileResource uploaded, Duration timeout)
+  FileReference await(String resourceName, GeminiFileResource uploaded, Duration timeout)
       throws IOException, InterruptedException {
-    var file = uploaded;
     var started = System.nanoTime();
-    var ready = readyOrNull(file);
+    var ready = readyOrNull(uploaded);
     while (ready == null) {
       if (System.nanoTime() - started >= timeout.toNanos()) {
         throw new GeminiException(
@@ -66,14 +58,13 @@ final class FileActivation {
       if (!pollInterval.isZero()) {
         Thread.sleep(pollInterval);
       }
-      file = http.get(GeminiFileResource.requireName(file.name()));
-      ready = readyOrNull(file);
+      ready = readyOrNull(http.get(resourceName));
     }
     return ready;
   }
 
-  /** The ready file when {@code file} is active, or {@code null} while it is still processing. */
-  private static ReadyFile readyOrNull(GeminiFileResource file) {
+  /** The reference when {@code file} is active, or {@code null} while it is still processing. */
+  private static FileReference readyOrNull(GeminiFileResource file) {
     return switch (file.state()) {
       case "ACTIVE" -> active(file);
       case "FAILED" -> throw failed(file);
@@ -85,12 +76,11 @@ final class FileActivation {
     };
   }
 
-  private static ReadyFile active(GeminiFileResource file) {
-    var resourceName = GeminiFileResource.requireName(file.name());
+  private static FileReference active(GeminiFileResource file) {
     if (Strings.isBlank(file.uri()) || Strings.isBlank(file.mimeType())) {
       throw new GeminiException("Active Gemini file is missing its URI or MIME type");
     }
-    return new ReadyFile(FileReference.of(file.uri(), file.mimeType()), resourceName);
+    return FileReference.of(file.uri(), file.mimeType());
   }
 
   private static GeminiException failed(GeminiFileResource file) {

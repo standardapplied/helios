@@ -136,24 +136,26 @@ var config = ModelConfig.newBuilder()
     .build();
 
 try (var files = new GeminiFilesClient(config);
-    var video = files.uploadManaged(Path.of("meeting.mp4"), "video/mp4");
+    var video = files.upload(Path.of("meeting.mp4"), "video/mp4");
     var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
   var message = Message.newBuilder()
       .withRole(Role.USER)
       .withContent("Summarize this video and list the decisions.")
-      .withFileReferences(List.of(video.reference()))
+      .withFileReferences(List.of(video.awaitActive()))
       .build();
 
   System.out.println(model.chat(List.of(message), List.of()).content());
 }
 ```
 
-For an `AgentSession`, attach the same reference with
-`UserMessage.newBuilder().withFileReference(video.reference())`. `ManagedFile.close()` issues an
-idempotent deletion against its validated `files/{id}` resource, including on exceptional exits
-from try-with-resources. Existing `upload(...)` methods remain available when the caller owns file
-lifecycle separately. Inline media remains available for small inputs; `GeminiFilesClient` streams
-uploads without loading video bytes into heap.
+`upload` returns a `ManagedFile` as soon as the bytes land, before Gemini has processed the file.
+`awaitActive()` waits for processing (10 minutes by default, or `awaitActive(timeout)`) and
+returns the reference a message carries; it throws when processing fails or runs out of time. The
+handle is the caller's: `close()` or `delete()` removes its validated `files/{id}` resource,
+including after a failed wait and on exceptional exits from try-with-resources, and Helios never
+deletes it on its own. For an `AgentSession`, attach the same reference with
+`UserMessage.newBuilder().withFileReference(video.awaitActive())`. Inline media remains available
+for small inputs; `GeminiFilesClient` streams uploads without loading video bytes into heap.
 
 ### Gemini privacy controls
 
@@ -169,12 +171,12 @@ var config = ModelConfig.newBuilder()
     .build();
 
 try (var files = new GeminiFilesClient(config);
-    var media = files.uploadManaged(Path.of("private-video.mp4"), "video/mp4");
+    var media = files.upload(Path.of("private-video.mp4"), "video/mp4");
     var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
   var input = Message.newBuilder()
       .withRole(Role.USER)
       .withContent("Analyze the video.")
-      .withFileReferences(List.of(media.reference()))
+      .withFileReferences(List.of(media.awaitActive()))
       .build();
   var response = model.chat(List.of(input), List.of());
 }
