@@ -1,0 +1,167 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.persistence;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.CostCalculator.Pricing;
+import com.standardapplied.helios.core.common.Paginate;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.TraceDetail;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.testing.ScriptedModel;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * A session wired to {@link PgSpanExporter} stores each run as it ends, and {@link PgTraceStore}
+ * and {@link PgAnnotationStore} read it back by its run id.
+ */
+final class PgSessionTracingTest {
+
+  private static final String SID = "sess-pg";
+  private static final CostCalculator COSTS =
+      CostCalculator.staticTable(Map.of("scripted", new Pricing(1_000_000, 2_000_000)));
+
+  private final InMemorySpanExporter memory = InMemorySpanExporter.create();
+  private final PgTraceStore store = new PgTraceStore(PgTestSupport.pgConfig());
+
+  @BeforeEach
+  void setUp() {
+    PgTestSupport.truncateTraces();
+  }
+
+  private ResultMessage run(TraceDetail detail) {
+    var tracing =
+        SdkTracerProvider.builder()
+            .addSpanProcessor(
+                SimpleSpanProcessor.create(new PgSpanExporter(PgTestSupport.pgConfig())))
+            .addSpanProcessor(SimpleSpanProcessor.create(memory))
+            .build();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(Usage.of(100, 10), new ToolCall("c-noop", "noop", Map.of()))
+            .withTextTurn("matched", Usage.of(200, 20))
+            .build();
+    var noop =
+        ToolBinding.newBuilder(
+                Tool.newBuilder()
+                    .withName("noop")
+                    .withDescription("noop")
+                    .withExecutor((arguments, context) -> ToolResult.success("ok"))
+                    .build())
+            .withCategory(ToolCategory.READ)
+            .build();
+    var options =
+        SessionOptions.newBuilder()
+            .withModel(model)
+            .withSessionId(SID)
+            .withAgentName("matchmaking")
+            .withCostCalculator(COSTS)
+            .withTool(noop)
+            .withTraceDetail(detail)
+            .withOpenTelemetry(OpenTelemetrySdk.builder().setTracerProvider(tracing).build())
+            .build();
+    try (var session = AgentSession.open(options)) {
+      return Await.value("the result", session.send("find a match"));
+    }
+  }
+
+  @Test
+  void aRunIsStoredWithItsIdsTotalsAndSteps() {
+    var result = run(TraceDetail.STANDARD);
+
+    var found = store.findById(result.runId());
+    var runSpan =
+        memory.getFinishedSpanItems().stream()
+            .filter(span -> span.getName().equals("invoke_agent matchmaking"))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("matchmaking", found.name());
+    assertEquals(SID, found.sessionId());
+    assertEquals("scripted", found.modelId());
+    assertEquals(runSpan.getTraceId(), found.otelTraceId());
+    assertEquals(runSpan.getSpanId(), found.otelSpanId());
+    assertEquals(result.usage(), found.usage());
+    assertEquals(result.usage().totalTokens(), found.totalTokens());
+    assertEquals(result.cost(), found.cost());
+    assertTrue(found.success());
+    assertEquals(null, found.inputText());
+    assertEquals(
+        List.of("chat", "execute_tool", "chat"), found.spans().stream().map(Span::kind).toList());
+    assertEquals(
+        List.of("chat scripted", "execute_tool noop", "chat scripted"),
+        found.spans().stream().map(Span::name).toList());
+    assertEquals(
+        result.usage().outputTokens(),
+        found.spans().stream()
+            .filter(span -> span.usage() != null)
+            .mapToInt(span -> span.usage().outputTokens())
+            .sum());
+
+    assertEquals(
+        List.of(result.runId()),
+        store.list(Paginate.of(), null).items().stream().map(Trace::id).toList());
+    var byName = store.summarize(TraceRollupKey.NAME, TraceFilter.none());
+    assertEquals(Map.of("name", "matchmaking"), byName.getFirst().key());
+    assertEquals(1, byName.getFirst().runCount());
+    var byModel = store.summarize(TraceRollupKey.MODEL_ID, TraceFilter.none());
+    assertEquals(Map.of("modelId", "scripted"), byModel.getFirst().key());
+    assertEquals(result.cost().microUsd(), byModel.getFirst().costMicroUsd());
+  }
+
+  @Test
+  void aRunAndOneOfItsSpansCanEachBeAnnotated() {
+    var result = run(TraceDetail.STANDARD);
+    var spanId = store.findById(result.runId()).spans().get(1).id();
+    var annotations = new PgAnnotationStore(PgTestSupport.pgConfig());
+
+    annotations.storeAnnotation(
+        Annotation.newBuilder()
+            .withSubjectId(result.runId())
+            .withLabel("match quality")
+            .withAuthorKind(AuthorKind.HUMAN)
+            .withRating(1)
+            .build());
+    annotations.storeAnnotation(
+        Annotation.newBuilder()
+            .withSubjectId(spanId)
+            .withLabel("tool choice")
+            .withAuthorKind(AuthorKind.MODEL)
+            .build());
+
+    assertEquals(
+        List.of("match quality"),
+        annotations.findAnnotationsBySubject(result.runId()).stream()
+            .map(Annotation::label)
+            .toList());
+    assertEquals(
+        List.of("tool choice"),
+        annotations.findAnnotationsBySubject(spanId).stream().map(Annotation::label).toList());
+  }
+
+  @Test
+  void aVerboseRunStoresItsPlainInputAndOutputText() {
+    var result = run(TraceDetail.VERBOSE);
+
+    var found = store.findById(result.runId());
+    assertEquals("find a match", found.inputText());
+    assertEquals("matched", found.outputText());
+  }
+}

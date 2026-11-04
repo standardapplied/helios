@@ -54,7 +54,8 @@ final class LoopCollaboratorsTest {
             queue,
             events::add,
             contextFactory,
-            CLOCK);
+            CLOCK,
+            NoSpans.INSTANCE);
     var state = new SessionState("sess-collab", new CancellationToken(), CLOCK);
 
     assertEquals("sess-collab", collaborators.hookContext(state).sessionId());

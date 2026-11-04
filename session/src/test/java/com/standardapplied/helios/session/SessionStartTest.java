@@ -18,7 +18,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.execution.ExecuteTool;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
-import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;
 import com.standardapplied.helios.session.test.LogCapture;
@@ -141,8 +140,9 @@ final class SessionStartTest {
     var lifecycle = lifecycle(provider, SessionLimits.defaults());
     var events = lifecycle.events().open();
 
-    assertThrows(
-        Throwable.class, () -> lifecycle.open(loop(lifecycle, provider), Optional.empty()));
+    var wiring = wiring(lifecycle, provider);
+
+    assertThrows(Throwable.class, () -> lifecycle.open(wiring.loop(), wiring.spans()));
 
     assertFalse(Await.value("the stream to end", reading(events)), kind + " ends the events");
     assertFalse(lifecycle.runs().isRunning(), kind + " starts no run");
@@ -501,20 +501,19 @@ final class SessionStartTest {
         StoredHistory.none());
   }
 
-  private static AgentLoop loop(SessionLifecycle lifecycle, RecordingProvider provider) {
+  private static SessionWiring wiring(SessionLifecycle lifecycle, RecordingProvider provider) {
     var options = withProvider(provider).build();
     var token = new CancellationToken();
     var context = new SessionContext(SID, token, Clock.systemUTC(), new SecretRegistry());
     var state = new SessionState(SID, token, Clock.systemUTC());
     return new SessionWiring(
-            options,
-            context,
-            new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
-            new SteeringQueue(4),
-            lifecycle.events(),
-            state.ending(),
-            StoredHistory.none())
-        .loop();
+        options,
+        context,
+        new PendingQuestions(() -> state, lifecycle.events(), Clock.systemUTC()),
+        new SteeringQueue(4),
+        lifecycle.events(),
+        state.ending(),
+        StoredHistory.none());
   }
 
   /** Whether {@code events} holds an event, read on a thread of its own. */

@@ -99,7 +99,8 @@ final class ModelCallTest {
             s ->
                 new DefaultHookContext(
                     s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), model),
-            CLOCK);
+            CLOCK,
+            NoSpans.INSTANCE);
     state.history().append(Message.user("hello"));
     state.beginTurn();
     var emitter = collaborators.emitter();

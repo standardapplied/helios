@@ -6,6 +6,7 @@ import com.standardapplied.helios.session.loop.AgentLoop;
 import com.standardapplied.helios.session.loop.RunBoundary;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;
+import io.opentelemetry.context.Context;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -18,9 +19,10 @@ import java.util.function.Consumer;
  * soon as that one has ended. Each {@link Run} runs on a virtual thread of its own. Once the
  * session is closed, its store refused a write, or a host {@link Error} failed it, no run starts;
  * the thread of the run that was in progress tears the session down once that run ended, and a host
- * {@code Error} that fails an idle session tears it down on a thread of its own. A session with a
- * trace listener hands each run's trace over on the run's thread once the run ended, before its
- * future completes ({@link SessionTraceRecorder#finish}).
+ * {@code Error} that fails an idle session tears it down on a thread of its own. Each run's span
+ * ({@link RunSpans}) is a child of the OpenTelemetry {@link Context} current where the {@code send}
+ * that started the run was called, is current on the run's thread while the loop runs, and ends on
+ * that thread once the run ended, before its future completes.
  */
 final class SessionRuns implements RunBoundary {
 
@@ -34,9 +36,10 @@ final class SessionRuns implements RunBoundary {
   final Object lock = new Object();
 
   private AgentLoop loop;
-  private Optional<SessionTraceRecorder> recorder = Optional.empty();
+  private RunSpans spans;
   private Run active;
   private CompletableFuture<ResultMessage> next;
+  private Context nextParent;
   private boolean ending;
   private boolean closed;
   private Error failure;
@@ -60,10 +63,10 @@ final class SessionRuns implements RunBoundary {
     this.teardown = teardown;
   }
 
-  /** Bind the loop that runs each run and the recorder, if any, that traces it. */
-  void bind(AgentLoop loop, Optional<SessionTraceRecorder> recorder) {
+  /** Bind the loop that runs each run and the spans that trace it. */
+  void bind(AgentLoop loop, RunSpans spans) {
     this.loop = loop;
-    this.recorder = recorder;
+    this.spans = spans;
   }
 
   /**
@@ -91,13 +94,14 @@ final class SessionRuns implements RunBoundary {
         throw new SteeringQueueFullException("steering queue full at capacity " + queue.capacity());
       }
       if (active == null) {
-        return start(new CompletableFuture<>());
+        return start(new CompletableFuture<>(), Context.current());
       }
       if (!ending) {
         return active.result();
       }
       if (next == null) {
         next = new CompletableFuture<>();
+        nextParent = Context.current();
       }
       return next;
     }
@@ -163,9 +167,13 @@ final class SessionRuns implements RunBoundary {
     }
   }
 
-  /** Start a run whose future is {@code result}; called under the lock. */
-  private CompletableFuture<ResultMessage> start(CompletableFuture<ResultMessage> result) {
-    var run = new Run(session, result, limits.maxWallClock(), this::execute);
+  /**
+   * Start a run whose future is {@code result} and whose span is a child of {@code parent}; called
+   * under the lock.
+   */
+  private CompletableFuture<ResultMessage> start(
+      CompletableFuture<ResultMessage> result, Context parent) {
+    var run = new Run(session, result, parent, limits.maxWallClock(), this::execute);
     active = run;
     ending = false;
     run.start();
@@ -181,14 +189,15 @@ final class SessionRuns implements RunBoundary {
    * only an {@link Error} escapes it, which goes to the session's ending; the run fails with the
    * {@code Error} that failed the session, and this thread ends by throwing it to its
    * uncaught-exception handler once the session is torn down. A {@link RuntimeException} that
-   * escapes anyway fails the run as itself, so its future never stays pending. The run's trace, if
-   * the session has a recorder, is handed over before the run is left, so an {@link Error} its
-   * listener throws fails the run and the session.
+   * escapes anyway fails the run as itself, so its future never stays pending. The run's span
+   * starts before the wall clock and is current while the loop runs; it ends before the run is
+   * left, so an {@link Error} a span call throws fails the run and the session as the loop's does.
    */
   private void execute(Run run) {
     ResultMessage terminal = null;
     RuntimeException crash = null;
-    try {
+    try (var scope = spans.start(run.state(), run.parent()).makeCurrent()) {
+      run.startWallClock();
       terminal = loop.run(run.state(), limits, this);
     } catch (RuntimeException e) {
       crash = e;
@@ -197,8 +206,10 @@ final class SessionRuns implements RunBoundary {
     }
     // An interrupt host code left on this thread is no request to cut the teardown's waits short.
     Thread.interrupted();
-    if (recorder.isPresent()) {
-      recorder.get().finish(run.state(), terminal, crash);
+    try {
+      spans.end(run.state(), terminal, crash);
+    } catch (Error e) {
+      session.ending().fail(e);
     }
     run.unlink();
     var left = leave();
@@ -245,9 +256,11 @@ final class SessionRuns implements RunBoundary {
       active = null;
       ending = false;
       var prevented = next;
+      var parent = nextParent;
       next = null;
+      nextParent = null;
       if (prevented != null && !closed) {
-        start(prevented);
+        start(prevented, parent);
         return new Left(Optional.empty(), false, Optional.empty());
       }
       return new Left(recorded, closed, Optional.ofNullable(prevented));

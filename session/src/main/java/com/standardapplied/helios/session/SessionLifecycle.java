@@ -75,20 +75,20 @@ final class SessionLifecycle {
   }
 
   /**
-   * Bind the loop and notify the execution provider, if any, that the session starts, the last step
-   * of the session's construction, waiting for it within {@code startTimeout}. A start the provider
-   * does not accept ({@link SessionStart}) releases what the lifecycle acquired and throws, and an
-   * {@link Error} that reaches the session after that is logged. Once open, the first host {@code
-   * Error} fails the session's runs ({@link SessionRuns#failed}). {@code onSessionEnd} is called
-   * only if the provider accepts after the session stopped waiting, by the {@link SessionTeardown}
-   * that ends that late acceptance.
+   * Bind the loop and its runs' spans, and notify the execution provider, if any, that the session
+   * starts, the last step of the session's construction, waiting for it within {@code
+   * startTimeout}. A start the provider does not accept ({@link SessionStart}) releases what the
+   * lifecycle acquired and throws, and an {@link Error} that reaches the session after that is
+   * logged. Once open, the first host {@code Error} fails the session's runs ({@link
+   * SessionRuns#failed}). {@code onSessionEnd} is called only if the provider accepts after the
+   * session stopped waiting, by the {@link SessionTeardown} that ends that late acceptance.
    *
    * @throws SessionUnavailableException if the provider did not accept the session
    * @throws Error the {@link Error} {@code onSessionStart} threw, as itself
    */
-  void open(AgentLoop loop, Optional<SessionTraceRecorder> recorder) {
+  void open(AgentLoop loop, RunSpans spans) {
     this.loop = loop;
-    runs.bind(loop, recorder);
+    runs.bind(loop, spans);
     try {
       start
           .flatMap(provider -> provider.await(limits.startTimeout()))

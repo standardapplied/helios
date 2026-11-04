@@ -36,6 +36,7 @@
 
     <properties>
         <junit-version>6.0.2</junit-version>
+        <opentelemetry.version>1.67.0</opentelemetry.version>
         <jackson-tools-version>3.1.7</jackson-tools-version>
         <helidon-version>4.5.6</helidon-version>
         <testcontainers-version>1.21.4</testcontainers-version>
@@ -75,6 +76,13 @@
                 <groupId>org.junit</groupId>
                 <artifactId>junit-bom</artifactId>
                 <version>${junit-version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

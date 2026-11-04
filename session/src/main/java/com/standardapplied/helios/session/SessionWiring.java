@@ -22,8 +22,6 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import java.util.ArrayList;
-import java.util.Optional;
-import java.util.function.Consumer;
 
 /**
  * Builds one session's agent loop from its options: the tool registry, the options' tools followed
@@ -33,15 +31,14 @@ import java.util.function.Consumer;
  * dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
  * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
- * questions, with the rules that decide a key withholding what walking tools return. With a trace
- * listener, the loop's events reach the session's {@link SessionTraceRecorder} before its
- * publisher; without one, no recorder is built. It acquires nothing, so a failure here leaves only
- * what the caller acquired to release.
+ * questions, with the rules that decide a key withholding what walking tools return. The loop's
+ * events reach the session's {@link RunSpans} before its publisher. It acquires nothing, so a
+ * failure here leaves only what the caller acquired to release.
  */
 final class SessionWiring {
 
   private final AgentLoop loop;
-  private final Optional<SessionTraceRecorder> recorder;
+  private final RunSpans spans;
 
   SessionWiring(
       SessionOptions options,
@@ -51,10 +48,7 @@ final class SessionWiring {
       SessionEventPublisher events,
       SessionEnding ending,
       StoredHistory storedHistory) {
-    this.recorder =
-        options
-            .traceListener()
-            .map(listener -> new SessionTraceRecorder(options, listener, ending));
+    this.spans = new RunSpans(options, ending);
     var tools = registry(options, pendingQuestions);
     var model = options.model();
     var evaluator =
@@ -70,11 +64,13 @@ final class SessionWiring {
             evaluator::authorize,
             options.permission(),
             steeringQueue,
-            recorder
-                .<Consumer<QueryEvent>>map(traces -> recordedBy(traces, events))
-                .orElse(events::emit),
+            event -> {
+              spans.accept(event);
+              events.emit(event);
+            },
             state -> SessionHookContext.of(state, model),
-            options.clock());
+            options.clock(),
+            spans);
     var turnRunner =
         new TurnRunner(
             collaborators, model, options.costCalculator(), options.outputSchema().orElse(null));
@@ -92,17 +88,9 @@ final class SessionWiring {
     return loop;
   }
 
-  /** The session's trace recorder; empty when the options name no trace listener. */
-  Optional<SessionTraceRecorder> recorder() {
-    return recorder;
-  }
-
-  private static Consumer<QueryEvent> recordedBy(
-      SessionTraceRecorder recorder, SessionEventPublisher events) {
-    return event -> {
-      recorder.accept(event);
-      events.emit(event);
-    };
+  /** The spans of the session's runs. */
+  RunSpans spans() {
+    return spans;
   }
 
   private static ToolRegistry registry(SessionOptions options, QuestionGateway gateway) {

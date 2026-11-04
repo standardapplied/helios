@@ -5,8 +5,8 @@
 
 package com.standardapplied.helios.persistence.mapper;
 
-import com.standardapplied.helios.core.trace.Annotation;
-import com.standardapplied.helios.core.trace.AuthorKind;
+import com.standardapplied.helios.persistence.Annotation;
+import com.standardapplied.helios.persistence.AuthorKind;
 import io.helidon.dbclient.DbRow;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -25,7 +25,7 @@ public final class AnnotationMapper {
 
     return Annotation.newBuilder()
         .withId(row.column("id").get(UUID.class))
-        .withSubjectId(row.column("subject_id").get(UUID.class))
+        .withSubjectId(row.column("subject_id").getString())
         .withFacet(row.column("facet").getString())
         .withLabel(row.column("label").getString())
         .withAuthorKind(AuthorKind.valueOf(row.column("author_kind").getString()))

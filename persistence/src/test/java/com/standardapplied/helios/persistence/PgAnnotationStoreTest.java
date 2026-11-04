@@ -9,11 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Paginate;
-import com.standardapplied.helios.core.trace.Annotation;
-import com.standardapplied.helios.core.trace.AuthorKind;
-import com.standardapplied.helios.core.trace.Span;
-import com.standardapplied.helios.core.trace.SpanKind;
-import com.standardapplied.helios.core.trace.Trace;
+import io.opentelemetry.api.common.Attributes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -23,6 +19,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class PgAnnotationStoreTest {
+
+  /** A fresh run id to annotate. */
+  private static String subject() {
+    return "run-" + UUID.randomUUID();
+  }
+
+  private static final String STEP_SPAN_ID = "1000000000000001";
 
   private PgTraceStore traces;
   private PgAnnotationStore store;
@@ -34,9 +37,21 @@ class PgAnnotationStoreTest {
     store = new PgAnnotationStore(PgTestSupport.pgConfig());
   }
 
+  /** Store a run with one step through the exporter; its run id. */
+  private static String storedRun() {
+    var runId = subject();
+    var exporter = new PgSpanExporter(PgTestSupport.pgConfig());
+    var spans =
+        List.of(
+            ExportedSpans.step(runId, STEP_SPAN_ID, "chat scripted", "chat", 1, Attributes.empty()),
+            ExportedSpans.run(runId, "00f067aa0ba902b7", "feedback-test", 0, Attributes.empty()));
+    assertTrue(exporter.export(spans).isSuccess());
+    return runId;
+  }
+
   @Test
   void storeAndFindAnnotationWithAllFields() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var annotation =
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -70,7 +85,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void storeAnnotationWithNullableFields() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var annotation =
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -91,7 +106,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void multipleAnnotationsForSameSubject() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.storeAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -113,12 +128,12 @@ class PgAnnotationStoreTest {
 
   @Test
   void findAnnotationsForNonExistentSubjectReturnsEmpty() {
-    assertTrue(store.findAnnotationsBySubject(UUID.randomUUID()).isEmpty());
+    assertTrue(store.findAnnotationsBySubject(subject()).isEmpty());
   }
 
   @Test
   void metadataRoundTripsThroughJsonb() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -135,8 +150,8 @@ class PgAnnotationStoreTest {
 
   @Test
   void findAnnotationsBySubjectsBatchesAcrossSubjects() {
-    var subjectA = UUID.randomUUID();
-    var subjectB = UUID.randomUUID();
+    var subjectA = subject();
+    var subjectB = subject();
     store.storeAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectA)
@@ -150,7 +165,7 @@ class PgAnnotationStoreTest {
             .withAuthorKind(AuthorKind.HUMAN)
             .build());
 
-    var found = store.findAnnotationsBySubjects(List.of(subjectA, subjectB, UUID.randomUUID()));
+    var found = store.findAnnotationsBySubjects(List.of(subjectA, subjectB, subject()));
     assertEquals(2, found.size());
   }
 
@@ -171,16 +186,15 @@ class PgAnnotationStoreTest {
                 .build());
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId(subject())
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .build();
 
     assertThrows(PgException.class, () -> broken.storeAnnotation(annotation));
     assertThrows(PgException.class, () -> broken.upsertAnnotation(annotation));
-    assertThrows(PgException.class, () -> broken.findAnnotationsBySubject(UUID.randomUUID()));
-    assertThrows(
-        PgException.class, () -> broken.findAnnotationsBySubjects(List.of(UUID.randomUUID())));
+    assertThrows(PgException.class, () -> broken.findAnnotationsBySubject(subject()));
+    assertThrows(PgException.class, () -> broken.findAnnotationsBySubjects(List.of(subject())));
     assertThrows(PgException.class, () -> broken.listAnnotations(Paginate.of(), null));
   }
 
@@ -193,7 +207,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void listAnnotationsPaginatesWithoutFilter() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     for (var label : List.of("a", "b", "c")) {
       store.storeAnnotation(
           Annotation.newBuilder()
@@ -210,7 +224,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void listAnnotationsFiltersByScimOverFirstClassFields() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.storeAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -235,7 +249,7 @@ class PgAnnotationStoreTest {
   // --- Annotation authorId tests ---
   @Test
   void storeAnnotationWithAuthorId() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var annotation =
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -254,7 +268,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void storeAnnotationWithNullAuthorId() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var annotation =
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -273,7 +287,7 @@ class PgAnnotationStoreTest {
   // --- upsertAnnotation tests ---
   @Test
   void upsertAnnotationCreatesNew() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var annotation =
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -293,7 +307,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationUpdatesSameKeyInPlace() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     var createdAt = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
     var first =
         Annotation.newBuilder()
@@ -333,7 +347,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationSameAuthorFacetDifferentLabelsCreatesSeparate() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -358,7 +372,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationSameAuthorLabelDifferentFacetsCreatesSeparate() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -383,7 +397,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationNullFacetCoalescesToSingleRow() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -408,7 +422,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationNullAuthorIdAlwaysInserts() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -430,7 +444,7 @@ class PgAnnotationStoreTest {
 
   @Test
   void upsertAnnotationDifferentAuthorsCreatesSeparate() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = subject();
     store.upsertAnnotation(
         Annotation.newBuilder()
             .withSubjectId(subjectId)
@@ -455,157 +469,117 @@ class PgAnnotationStoreTest {
   // --- Feedback trigger tests ---
   @Test
   void feedbackTriggerIncrementsThumbsUp() {
-    var trace =
-        Trace.newBuilder()
-            .withName("feedback-test")
-            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("quality")
             .withRating(1)
             .build());
 
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(1, found.thumbsUpCount());
     assertEquals(0, found.thumbsDownCount());
   }
 
   @Test
   void feedbackTriggerIncrementsThumbsDown() {
-    var trace =
-        Trace.newBuilder()
-            .withName("feedback-test")
-            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("quality")
             .withRating(-1)
             .build());
 
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(0, found.thumbsUpCount());
     assertEquals(1, found.thumbsDownCount());
   }
 
   @Test
   void feedbackTriggerIgnoresZeroRating() {
-    var trace =
-        Trace.newBuilder()
-            .withName("feedback-test")
-            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("quality")
             .withRating(0)
             .build());
 
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(0, found.thumbsUpCount());
     assertEquals(0, found.thumbsDownCount());
   }
 
   @Test
   void feedbackTriggerIgnoresNullRating() {
-    var trace =
-        Trace.newBuilder()
-            .withName("feedback-test")
-            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withLabel("flag")
             .withAuthorKind(AuthorKind.HUMAN)
             .build());
 
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(0, found.thumbsUpCount());
     assertEquals(0, found.thumbsDownCount());
   }
 
   @Test
   void feedbackTriggerSpanAnnotationIsNoOp() {
-    var now = OffsetDateTime.now(ZoneOffset.UTC);
-    var span =
-        Span.newBuilder()
-            .withName("model.chat")
-            .withKind(SpanKind.MODEL_CALL)
-            .withStartTime(now)
-            .withEndTime(now.plusSeconds(1))
-            .build();
-    var trace =
-        Trace.newBuilder()
-            .withName("span-feedback-test")
-            .withStartTime(now)
-            .withEndTime(now.plusSeconds(2))
-            .withSpan(span)
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     // Annotate the span, not the trace
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(span.id())
+            .withSubjectId(STEP_SPAN_ID)
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .withRating(1)
             .build());
 
     // Trace counters should remain zero
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(0, found.thumbsUpCount());
     assertEquals(0, found.thumbsDownCount());
   }
 
   @Test
   void feedbackTriggerMultipleAnnotationsAccumulate() {
-    var trace =
-        Trace.newBuilder()
-            .withName("multi-feedback")
-            .withStartTime(OffsetDateTime.now(ZoneOffset.UTC))
-            .build();
-    traces.onTrace(trace);
+    var runId = storedRun();
 
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("quality")
             .withRating(1)
             .build());
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("relevance")
             .withRating(1)
             .build());
     store.storeAnnotation(
         Annotation.newBuilder()
-            .withSubjectId(trace.id())
+            .withSubjectId(runId)
             .withAuthorKind(AuthorKind.HUMAN)
             .withLabel("accuracy")
             .withRating(-1)
             .build());
 
-    var found = traces.findById(trace.id());
+    var found = traces.findById(runId);
     assertEquals(2, found.thumbsUpCount());
     assertEquals(1, found.thumbsDownCount());
   }

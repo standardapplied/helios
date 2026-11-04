@@ -8,12 +8,10 @@ import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.common.Validate;
 import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.schema.OutputSchema;
-import com.standardapplied.helios.core.trace.Trace;
-import com.standardapplied.helios.core.trace.TraceDetail;
-import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.session.execution.ExecutionProvider;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.memory.MemoryBackend;
@@ -21,6 +19,8 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.tools.ToolBinding;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.ArrayList;
@@ -99,15 +99,16 @@ import java.util.Optional;
  * @param store optional store that makes the session durable: {@link AgentSession#open} loads the
  *     conversation stored under {@code sessionId}, or starts it when there is none, and every turn
  *     appends what it added. Absent by default: the conversation lives only in the session
- * @param traceListener optional listener handed one {@link Trace} per run, however the run ends,
- *     before the run's result completes: a {@code model.call} span per model attempt, a {@code
- *     tool.<name>} span per tool call and a {@code hook.<name>} span per hook decision, its usage
- *     and cost the run's result's, and its {@code sessionId} this session's id. An {@code
- *     Exception} it throws is logged and changes nothing; an {@code Error} fails the run's result.
- *     Absent by default: the session does no tracing work
- * @param traceDetail how much content the session's traces store; {@link TraceDetail#STANDARD}
- *     stores none, {@link TraceDetail#VERBOSE} the redacted input, output, tool arguments and
- *     results. Non-null, defaults to {@code STANDARD}
+ * @param openTelemetry the OpenTelemetry the session's spans are emitted through: an {@code
+ *     invoke_agent} span per run, with a {@code chat} span per model attempt, an {@code
+ *     execute_tool} span per tool call and a {@code hook} span per hook decision under it. Absent
+ *     by default: the session uses {@link GlobalOpenTelemetry#get()} when it opens, a no-op unless
+ *     the application installed an SDK
+ * @param agentName the name of the session's runs, the {@code gen_ai.agent.name} of their spans;
+ *     non-blank, defaults to {@code "helios"}
+ * @param traceDetail how much content the session's spans carry; {@link TraceDetail#STANDARD}
+ *     carries none, {@link TraceDetail#VERBOSE} the redacted input, output, tool arguments and
+ *     results and hook texts. Non-null, defaults to {@code STANDARD}
  */
 public record SessionOptions(
     Model model,
@@ -128,7 +129,8 @@ public record SessionOptions(
     ContextCompactor contextCompactor,
     SecretRegistry secretRegistry,
     Optional<SessionStore> store,
-    Optional<TraceListener> traceListener,
+    Optional<OpenTelemetry> openTelemetry,
+    String agentName,
     TraceDetail traceDetail) {
 
   /**
@@ -136,8 +138,8 @@ public record SessionOptions(
    *
    * @throws NullPointerException if any argument is null or {@code tools} or {@code hooks} holds a
    *     null element
-   * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule or {@code
-   *     maxQueuedUserMessages} is not positive
+   * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule, {@code
+   *     maxQueuedUserMessages} is not positive or {@code agentName} is blank
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -158,7 +160,8 @@ public record SessionOptions(
     Objects.requireNonNull(contextCompactor, "contextCompactor must not be null");
     Objects.requireNonNull(secretRegistry, "secretRegistry must not be null");
     Objects.requireNonNull(store, "store must not be null");
-    Objects.requireNonNull(traceListener, "traceListener must not be null");
+    Objects.requireNonNull(openTelemetry, "openTelemetry must not be null");
+    Validate.notBlank("agentName", agentName);
     Objects.requireNonNull(traceDetail, "traceDetail must not be null");
   }
 
@@ -189,7 +192,7 @@ public record SessionOptions(
     var builder = new Builder();
     executionProvider.ifPresent(builder::withExecutionProvider);
     store.ifPresent(builder::withStore);
-    traceListener.ifPresent(builder::withTraceListener);
+    openTelemetry.ifPresent(builder::withOpenTelemetry);
     if (askUserQuestion) {
       builder.withAskUserQuestion();
     }
@@ -209,6 +212,7 @@ public record SessionOptions(
         .withTokenCounter(tokenCounter)
         .withContextCompactor(contextCompactor)
         .withSecretRegistry(secretRegistry)
+        .withAgentName(agentName)
         .withTraceDetail(traceDetail);
   }
 
@@ -228,9 +232,7 @@ public record SessionOptions(
     private final List<Hook> hooks = new ArrayList<>();
     private Permission permission = Permission.empty(PermissionMode.DEFAULT);
     private CostCalculator costCalculator = CostCalculator.ZERO;
-    private final BuiltInTools builtInTools = new BuiltInTools();
-    private TraceListener traceListener;
-    private TraceDetail traceDetail = TraceDetail.STANDARD;
+    private final Wiring wiring = new Wiring();
     private OutputSchema<?> outputSchema;
     private String systemPrompt;
     private TokenCounter tokenCounter = TokenCounter.charBased();
@@ -389,7 +391,7 @@ public record SessionOptions(
      * @return this builder
      */
     public Builder withMemoryBackend(MemoryBackend memoryBackend) {
-      builtInTools.memoryBackend = memoryBackend;
+      wiring.memoryBackend = memoryBackend;
       return this;
     }
 
@@ -421,7 +423,7 @@ public record SessionOptions(
      * @throws NullPointerException if {@code executionProvider} is null
      */
     public Builder withExecutionProvider(ExecutionProvider executionProvider) {
-      builtInTools.executionProvider =
+      wiring.executionProvider =
           Objects.requireNonNull(executionProvider, "executionProvider must not be null");
       return this;
     }
@@ -434,7 +436,7 @@ public record SessionOptions(
      * @return this builder
      */
     public Builder withAskUserQuestion() {
-      builtInTools.askUserQuestion = true;
+      wiring.askUserQuestion = true;
       return this;
     }
 
@@ -541,32 +543,47 @@ public record SessionOptions(
     }
 
     /**
-     * Hand {@code traceListener} one {@link Trace} per run, however the run ends, before the run's
-     * result completes. One listener per session: a caller with two stores composes them, {@code
-     * trace -> { pg.onTrace(trace); otel.onTrace(trace); }}, and one that wants a trace name, user
-     * id, group id or labels wraps it, {@code trace ->
-     * pg.onTrace(Trace.newBuilder(trace).withName("matchmaking").build())}. Unset by default: the
-     * session does no tracing work.
+     * Emit the session's spans through {@code openTelemetry}, whose tracer is fetched once per
+     * session under the scope {@code com.standardapplied.helios}. A run's span is a child of the
+     * span current where {@code send} was called, and a tool's span is current while the tool runs,
+     * so what the tool's own instrumentation records nests under it. Unset by default: the session
+     * uses {@link GlobalOpenTelemetry#get()} when it opens, which, with no SDK installed, installs
+     * the no-op as the global, so install a global SDK before opening such a session.
      *
-     * @param traceListener non-null listener
+     * @param openTelemetry non-null OpenTelemetry
      * @return this builder
-     * @throws NullPointerException if {@code traceListener} is null
+     * @throws NullPointerException if {@code openTelemetry} is null
      */
-    public Builder withTraceListener(TraceListener traceListener) {
-      this.traceListener = Objects.requireNonNull(traceListener, "traceListener must not be null");
+    public Builder withOpenTelemetry(OpenTelemetry openTelemetry) {
+      wiring.openTelemetry =
+          Objects.requireNonNull(openTelemetry, "openTelemetry must not be null");
       return this;
     }
 
     /**
-     * Set how much content the session's traces store. Defaults to {@link TraceDetail#STANDARD},
-     * which stores none.
+     * Name the session's runs: each run's span is {@code invoke_agent <agentName>}. Defaults to
+     * {@code "helios"}.
+     *
+     * @param agentName non-blank name
+     * @return this builder
+     * @throws NullPointerException if {@code agentName} is null
+     * @throws IllegalArgumentException if {@code agentName} is blank
+     */
+    public Builder withAgentName(String agentName) {
+      wiring.agentName = Validate.notBlank("agentName", agentName);
+      return this;
+    }
+
+    /**
+     * Set how much content the session's spans carry. Defaults to {@link TraceDetail#STANDARD},
+     * which carries none.
      *
      * @param traceDetail non-null detail
      * @return this builder
      * @throws NullPointerException if {@code traceDetail} is null
      */
     public Builder withTraceDetail(TraceDetail traceDetail) {
-      this.traceDetail = Objects.requireNonNull(traceDetail, "traceDetail must not be null");
+      wiring.traceDetail = Objects.requireNonNull(traceDetail, "traceDetail must not be null");
       return this;
     }
 
@@ -594,29 +611,35 @@ public record SessionOptions(
           tools,
           hooks,
           permission,
-          Optional.ofNullable(builtInTools.memoryBackend),
+          Optional.ofNullable(wiring.memoryBackend),
           costCalculator,
-          Optional.ofNullable(builtInTools.executionProvider),
-          builtInTools.askUserQuestion,
+          Optional.ofNullable(wiring.executionProvider),
+          wiring.askUserQuestion,
           Optional.ofNullable(outputSchema),
           Optional.ofNullable(systemPrompt),
           tokenCounter,
           compactor,
           secretRegistry != null ? secretRegistry : new SecretRegistry(),
           Optional.ofNullable(store),
-          Optional.ofNullable(traceListener),
-          traceDetail);
+          Optional.ofNullable(wiring.openTelemetry),
+          wiring.agentName,
+          wiring.traceDetail);
     }
 
     /**
-     * The built-in tools the session registers when switched on: the memory tools over a backend,
-     * {@code Execute} over a provider, and {@code AskUserQuestion}.
+     * What {@code SessionWiring} turns into the session's collaborators when it opens: the built-in
+     * tools the session registers when switched on (the memory tools over a backend, {@code
+     * Execute} over a provider, and {@code AskUserQuestion}), and its spans: where they go, what
+     * its runs are named and how much content they carry.
      */
-    private static final class BuiltInTools {
+    private static final class Wiring {
 
       private MemoryBackend memoryBackend;
       private ExecutionProvider executionProvider;
       private boolean askUserQuestion;
+      private OpenTelemetry openTelemetry;
+      private String agentName = "helios";
+      private TraceDetail traceDetail = TraceDetail.STANDARD;
     }
   }
 }

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package com.standardapplied.helios.core.trace;
+package com.standardapplied.helios.persistence;
 
 /**
  * Classifies who or what authored an {@link Annotation}.

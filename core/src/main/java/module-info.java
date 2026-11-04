@@ -23,7 +23,6 @@
  *   <li>{@code prompt} — versioned prompt registry + template rendering.
  *   <li>{@code provider} — the mechanics every streaming model provider shares: the SSE reader, the
  *       chat exchange and the JSON request assembly.
- *   <li>{@code trace} — the trace model and {@code TraceListener}.
  * </ul>
  *
  * <p>The v1 {@code agent} / {@code workflow} / {@code memory} / {@code eval} surface was removed in
@@ -43,7 +42,6 @@ module com.standardapplied.helios.core {
   exports com.standardapplied.helios.core.provider;
   exports com.standardapplied.helios.core.schema;
   exports com.standardapplied.helios.core.tool;
-  exports com.standardapplied.helios.core.trace;
 
   uses com.standardapplied.helios.core.embedding.EmbeddingProvider;
   uses com.standardapplied.helios.core.model.ModelProvider;

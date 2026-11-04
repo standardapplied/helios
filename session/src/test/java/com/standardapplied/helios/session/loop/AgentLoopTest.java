@@ -272,7 +272,8 @@ final class AgentLoopTest {
                   }
                 },
                 fixture::hookContext,
-                fixture.clock),
+                fixture.clock,
+                NoSpans.INSTANCE),
             runner,
             TokenCounter.charBased(),
             ContextCompactor.disabled());
