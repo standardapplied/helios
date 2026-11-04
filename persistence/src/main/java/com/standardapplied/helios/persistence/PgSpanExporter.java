@@ -107,25 +107,29 @@ public final class PgSpanExporter implements SpanExporter {
       tx.commit();
       return CompletableResultCode.ofSuccess();
     } catch (RuntimeException e) {
-      if (tx != null) {
-        rollback(tx, e);
-      }
       var runs = helios.stream().map(span -> span.getAttributes().get(RUN_ID)).distinct().toList();
-      LOGGER.log(
-          Level.WARNING,
-          "the spans of runs " + config.redact(runs.toString()) + " were not stored",
-          SerializedError.redactedForLog(
-              e, Objects.requireNonNullElse(config.redactor(), Redactor.of(Map.of()))));
+      warn("the spans of runs " + config.redact(runs.toString()) + " were not stored", e);
+      if (tx != null) {
+        rollback(tx);
+      }
       return CompletableResultCode.ofFailure();
     }
   }
 
-  private static void rollback(DbTransaction tx, RuntimeException failure) {
+  private void rollback(DbTransaction tx) {
     try {
       tx.rollback();
-    } catch (RuntimeException rollbackFailure) {
-      failure.addSuppressed(rollbackFailure);
+    } catch (RuntimeException e) {
+      warn("the rollback of spans that were not stored failed", e);
     }
+  }
+
+  private void warn(String message, RuntimeException failure) {
+    LOGGER.log(
+        Level.WARNING,
+        message,
+        SerializedError.redactedForLog(
+            failure, Objects.requireNonNullElse(config.redactor(), Redactor.of(Map.of()))));
   }
 
   @Override
