@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     id                VARCHAR(64)     PRIMARY KEY,
     otel_trace_id     CHAR(32)        NOT NULL,
     otel_span_id      CHAR(16)        NOT NULL,
-    name              VARCHAR(255)    NOT NULL,
+    name              TEXT            NOT NULL,
     start_time        TIMESTAMPTZ     NOT NULL,
     end_time          TIMESTAMPTZ,
     error             TEXT,
@@ -53,7 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_helios_traces_model_id
 CREATE TABLE IF NOT EXISTS helios_spans (
     id          CHAR(16)        PRIMARY KEY,
     run_id      VARCHAR(64)     NOT NULL,
-    name        VARCHAR(255)    NOT NULL,
+    name        TEXT            NOT NULL,
     kind        VARCHAR(50)     NOT NULL,
     start_time  TIMESTAMPTZ     NOT NULL,
     end_time    TIMESTAMPTZ,

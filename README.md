@@ -548,7 +548,7 @@ For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events
 Under it: a `chat <model>` span per model attempt, an `execute_tool <tool>` span per tool call and a zero-length `hook <hook>` span per hook decision.
 A step's span is current while it runs, so what a tool or the model client records with your own instrumentation nests under it.
 `TraceDetail.STANDARD` (the default) puts no content on a span; `VERBOSE` adds the prompt, answer, tool arguments and results and hook texts, redacted by the session.
-The names follow the OpenTelemetry GenAI semantic conventions, still at status Development. `PgSpanExporter` writes Helios's spans to Postgres for `PgTraceStore`:
+The names follow the OpenTelemetry GenAI semantic conventions, still at status Development. `PgSpanExporter` writes Helios's spans to Postgres for `PgTraceStore`; `OpenTelemetrySdk` comes from `io.opentelemetry:opentelemetry-sdk`, which your application adds:
 
 ```java
 var tracing = SdkTracerProvider.builder()
