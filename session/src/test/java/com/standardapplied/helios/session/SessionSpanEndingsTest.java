@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * However a run ends, its span ends exactly once, before the run's result completes, with the run's
@@ -295,17 +296,19 @@ final class SessionSpanEndingsTest {
     assertNull(string(tool, "helios.tool.outcome"));
   }
 
-  @Test
-  void anErrorEndingAToolsOpenSpanStillEndsTheRunSpan() {
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void whatEndingAToolsOpenSpanThrowsStillEndsTheRunSpan(boolean error) {
     var failure = new HostFailure();
-    var ending = new AssertionError("span processor failed");
-    var failing =
-        new SpanCapture(
-            new FailingOnEnd(
-                "execute_tool fatal",
-                () -> {
-                  throw ending;
-                }));
+    Runnable ending =
+        error
+            ? () -> {
+              throw new AssertionError("span processor failed");
+            }
+            : () -> {
+              throw new IllegalStateException("span processor failed");
+            };
+    var failing = new SpanCapture(new FailingOnEnd("execute_tool fatal", ending));
     var model = ScriptedModel.newBuilder().withToolCallsTurn(call("fatal", Map.of())).build();
     var fatal =
         EndingSessions.binding(
@@ -368,28 +371,6 @@ final class SessionSpanEndingsTest {
 
     var name = EndingSessions.Unprintable.class.getName();
     assertFailed(endedRun(), name, name);
-  }
-
-  @Test
-  void aRuntimeExceptionEndingTheRunsSpanFailsTheRunAsItself() {
-    var failure = new IllegalStateException("span processor failed");
-    var failing =
-        new SpanCapture(
-            new FailingOnEnd(
-                "invoke_agent helios",
-                () -> {
-                  throw failure;
-                }));
-    var options =
-        EndingSessions.options(ScriptedModel.newBuilder().withTextTurn("done").build())
-            .withOpenTelemetry(failing.openTelemetry());
-
-    try (var session = AgentSession.open(options.build())) {
-      assertSame(failure, Await.failure("the result to fail", session.send("go")));
-    }
-
-    failing.run();
-    assertEquals(Set.of(), failing.unended());
   }
 
   @Test

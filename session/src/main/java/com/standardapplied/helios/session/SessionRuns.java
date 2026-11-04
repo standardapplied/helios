@@ -7,7 +7,6 @@ import com.standardapplied.helios.session.loop.RunBoundary;
 import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;
 import io.opentelemetry.context.Context;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -192,8 +191,7 @@ final class SessionRuns implements RunBoundary {
    * uncaught-exception handler once the session is torn down. A {@link RuntimeException} that
    * escapes anyway fails the run as itself, so its future never stays pending. The run's span
    * starts before the wall clock and is current while the loop runs; it ends before the run is
-   * left, so an {@link Error} a span call throws fails the run and the session as the loop's does,
-   * and a {@code RuntimeException} its end throws fails a run that has not already crashed.
+   * left, so an {@link Error} a span call throws fails the run and the session as the loop's does.
    */
   private void execute(Run run) {
     ResultMessage terminal = null;
@@ -210,8 +208,6 @@ final class SessionRuns implements RunBoundary {
     Thread.interrupted();
     try {
       spans.end(run.state(), terminal, crash);
-    } catch (RuntimeException e) {
-      crash = Objects.requireNonNullElse(crash, e);
     } catch (Error e) {
       session.ending().fail(e);
     }
