@@ -21,7 +21,6 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
@@ -34,8 +33,11 @@ import com.standardapplied.helios.session.store.FileSessionStore;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
+import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -230,10 +232,9 @@ final class Claude55AgentSessionIntegrationTest {
 
   /**
    * Two runs of one traced Sonnet 5.5 tool-loop session priced by {@link AnthropicPricing}: each
-   * run hands over one trace, every model call in it carries the usage the API reported and its
-   * computed cost, and each trace's totals equal its run's result. Cache reads are not asserted
-   * live; {@code RecordedSessionTest#claudeProgressLoopTracesTheCacheReadOfEachModelCall} covers
-   * them.
+   * run ends one span, every model call in it carries the usage the API reported and its computed
+   * cost, and each run span's totals equal its run's result. Cache reads are not asserted live;
+   * {@code RecordedSessionTest#claudeProgressLoopTracesTheCacheReadOfEachModelCall} covers them.
    */
   @Test
   void sonnet55TracesEachRunOfASession() {
@@ -242,7 +243,7 @@ final class Claude55AgentSessionIntegrationTest {
             .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
             .withMaxOutputTokens(4_000)
             .build();
-    var traces = new CopyOnWriteArrayList<Trace>();
+    var capture = new SpanCapture();
     try (var model =
             new AnthropicProvider()
                 .create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config, CachePolicy.shortLived());
@@ -253,7 +254,7 @@ final class Claude55AgentSessionIntegrationTest {
                     .withTools(List.of(searchProfiles(), getProfile()))
                     .withSystemPrompt(SYSTEM_PROMPT)
                     .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
-                    .withTraceListener(traces::add)
+                    .withOpenTelemetry(capture.openTelemetry())
                     .withLimits(SessionLimits.newBuilder().withMaxTurns(4).build())
                     .build())) {
       var events = new EventCollector(QuestionAnswers.selecting(session, "Deny"));
@@ -266,19 +267,26 @@ final class Claude55AgentSessionIntegrationTest {
       events.awaitDone();
 
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty());
-      assertEquals(2, traces.size());
+      var spans = capture.starting("invoke_agent ");
+      var runId = AttributeKey.stringKey("helios.run.id");
+      var outputTokens = AttributeKey.longKey("gen_ai.usage.output_tokens");
+      var cost = AttributeKey.longKey("helios.cost.micro_usd");
+      assertEquals(2, spans.size());
       for (var i = 0; i < runs.size(); i++) {
         var terminal = runs.get(i);
-        var trace = traces.get(i);
-        assertEquals(terminal.runId(), trace.attributes().get("run.id"));
-        assertEquals(terminal.usage(), trace.usage());
-        assertEquals(terminal.cost(), trace.cost());
+        var run = spans.get(i).getAttributes();
+        assertEquals(terminal.runId(), run.get(runId));
+        assertEquals((long) terminal.usage().outputTokens(), run.get(outputTokens));
+        assertEquals(terminal.cost().microUsd(), run.get(cost));
         var calls =
-            trace.spans().stream().filter(span -> span.name().equals("model.call")).toList();
+            capture.starting("chat ").stream()
+                .map(SpanData::getAttributes)
+                .filter(call -> terminal.runId().equals(call.get(runId)))
+                .toList();
         assertTrue(!calls.isEmpty(), "run " + i + " made no model call");
         for (var call : calls) {
-          assertTrue(call.usage().outputTokens() > 0, () -> "usage " + call.usage());
-          assertTrue(call.cost().microUsd() > 0, () -> "cost " + call.cost());
+          assertTrue(call.get(outputTokens) > 0, () -> "usage " + call);
+          assertTrue(call.get(cost) > 0, () -> "cost " + call);
         }
       }
     }

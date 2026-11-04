@@ -17,6 +17,7 @@ import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
+import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -33,9 +34,11 @@ import java.util.logging.Logger;
  *
  * <p>Each attempt reads the turn's stream on a virtual thread of its own, {@code
  * helios-model-stream-<sessionId>}, while the loop thread waits for it; the run's cancellation
- * closes the stream. When the session has an {@link OutputSchema}, every call goes through {@link
- * Model#chatStream(List, List, OutputSchema)} so the schema rides the provider's native channel; it
- * is dormant on tool-calling turns and activates on text-output turns.
+ * closes the stream. Each attempt's span ({@link StepSpans#modelAttempt}) is current while the
+ * stream is opened and on the reader thread; a thread that closes the stream runs in the context
+ * current where it was started. When the session has an {@link OutputSchema}, every call goes
+ * through {@link Model#chatStream(List, List, OutputSchema)} so the schema rides the provider's
+ * native channel; it is dormant on tool-calling turns and activates on text-output turns.
  */
 final class ModelCall {
 
@@ -141,11 +144,17 @@ final class ModelCall {
   }
 
   /**
-   * One attempt. What opening the stream throws ends the turn; an {@link Error} also ends the
-   * session ({@link TurnReader}), and one the turn ended with is thrown as itself, so it leaves the
-   * loop as a tool's or a hook's does.
+   * One attempt, its span current while its stream is opened and read. What opening the stream
+   * throws ends the turn; an {@link Error} also ends the session ({@link TurnReader}), and one the
+   * turn ended with is thrown as itself, so it leaves the loop as a tool's or a hook's does.
    */
   private TurnOutcome streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
+    try (var scope = collaborators.spans().modelAttempt(state).makeCurrent()) {
+      return thrownIfError(attempt(state, limits, tools));
+    }
+  }
+
+  private TurnOutcome attempt(SessionState state, SessionLimits limits, List<Tool> tools) {
     var reader = new TurnReader(state, emitter, collaborators.clock());
     CloseableIterator<ModelChunk> stream;
     try {
@@ -156,9 +165,9 @@ final class ModelCall {
               : model.chatStream(history, tools);
     } catch (Throwable t) {
       reader.end(t);
-      return thrownIfError(reader.outcome());
+      return reader.outcome();
     }
-    return thrownIfError(read(state, limits, reader, stream));
+    return read(state, limits, reader, stream);
   }
 
   private static TurnOutcome thrownIfError(TurnOutcome turn) {
@@ -190,7 +199,7 @@ final class ModelCall {
     var thread =
         Thread.ofVirtual()
             .name("helios-model-stream-" + state.sessionId())
-            .start(() -> reader.read(stream));
+            .start(Context.current().wrap(() -> reader.read(stream)));
     var interrupted = false;
     try {
       reader.await();
@@ -217,7 +226,7 @@ final class ModelCall {
       SessionState state, TurnReader reader, CloseableIterator<ModelChunk> stream) {
     Thread.ofVirtual()
         .name("helios-model-stream-close-" + state.sessionId())
-        .start(() -> reader.close(stream));
+        .start(Context.current().wrap(() -> reader.close(stream)));
   }
 
   private static void awaitReader(String sessionId, Thread reader, Duration grace) {

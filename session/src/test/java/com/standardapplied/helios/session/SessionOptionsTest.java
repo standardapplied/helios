@@ -25,8 +25,6 @@ import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.core.trace.TraceDetail;
-import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.session.hooks.Hook;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
@@ -34,6 +32,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import io.opentelemetry.api.OpenTelemetry;
 import java.lang.reflect.InvocationTargetException;
 import java.time.Clock;
 import java.time.Duration;
@@ -117,7 +116,8 @@ final class SessionOptionsTest {
         "contextCompactor",
         "secretRegistry",
         "store",
-        "traceListener",
+        "openTelemetry",
+        "agentName",
         "traceDetail"
       })
   void canonicalConstructorRejectsANullComponent(String component) {
@@ -624,35 +624,55 @@ final class SessionOptionsTest {
   // ── tracing ───────────────────────────────────────────────────────────────
 
   @Test
-  void tracingDefaultsToNoListenerAndStandardDetail() {
+  void tracingDefaultsToNoOpenTelemetryTheHeliosAgentAndStandardDetail() {
     var opts = SessionOptions.newBuilder().withModel(stubModel()).build();
-    assertTrue(opts.traceListener().isEmpty());
+    assertTrue(opts.openTelemetry().isEmpty());
+    assertEquals("helios", opts.agentName());
     assertEquals(TraceDetail.STANDARD, opts.traceDetail());
   }
 
   @Test
   void tracingIsThreadedThroughBuildAndToBuilder() {
-    TraceListener listener = trace -> {};
+    var openTelemetry = OpenTelemetry.noop();
     var opts =
         SessionOptions.newBuilder()
             .withModel(stubModel())
-            .withTraceListener(listener)
+            .withOpenTelemetry(openTelemetry)
+            .withAgentName("matchmaking")
             .withTraceDetail(TraceDetail.VERBOSE)
             .build();
     var copy = opts.toBuilder().build();
-    assertSame(listener, copy.traceListener().orElseThrow());
+    assertSame(openTelemetry, copy.openTelemetry().orElseThrow());
+    assertEquals("matchmaking", copy.agentName());
     assertEquals(TraceDetail.VERBOSE, copy.traceDetail());
   }
 
   @Test
-  void withTraceListenerAndWithTraceDetailRejectNull() {
+  void theTracingSettersRejectNull() {
     var builder = SessionOptions.newBuilder();
     assertEquals(
-        "traceListener must not be null",
-        assertThrows(NullPointerException.class, () -> builder.withTraceListener(null))
+        "openTelemetry must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withOpenTelemetry(null))
             .getMessage());
+    assertEquals(
+        "agentName must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withAgentName(null)).getMessage());
     assertEquals(
         "traceDetail must not be null",
         assertThrows(NullPointerException.class, () -> builder.withTraceDetail(null)).getMessage());
+  }
+
+  @Test
+  void aBlankAgentNameIsRejected() {
+    assertEquals(
+        "agentName must not be blank",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SessionOptions.newBuilder().withAgentName(" "))
+            .getMessage());
+    assertEquals(
+        "agentName must not be blank",
+        assertThrows(IllegalArgumentException.class, () -> canonical("agentName", " "))
+            .getMessage());
   }
 }

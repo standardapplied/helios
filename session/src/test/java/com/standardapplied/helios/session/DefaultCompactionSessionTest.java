@@ -14,10 +14,9 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.core.trace.Span;
-import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.test.EventCollector;
+import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -61,21 +60,27 @@ class DefaultCompactionSessionTest {
             .withTextTurn("the gist", Usage.of(0, 0))
             .withTextTurn("done")
             .build();
-    List<Trace> traces = new CopyOnWriteArrayList<>();
+    var capture = new SpanCapture();
 
     var events =
-        runToSuccess(compactingAfterTheFirstToolResult(model).withTraceListener(traces::add));
+        runToSuccess(
+            compactingAfterTheFirstToolResult(model).withOpenTelemetry(capture.openTelemetry()));
 
     var summary = events.eventsOf(QueryEvent.ModelCallEnded.class).get(1);
     assertEquals(3, model.calls().size());
     assertEquals(3, events.eventsOf(QueryEvent.ModelCallEnded.class).size());
     assertEquals(Usage.of(0, 0), summary.usage());
     assertEquals(FinishReason.STOP, summary.finishReason());
-    var spans = traces.getFirst().spans();
     assertEquals(
-        List.of("model.call", "tool.echo", "model.call", "model.call"),
-        spans.stream().map(Span::name).toList());
-    assertEquals(summary.duration(), spans.get(2).duration());
+        List.of(
+            "chat scripted",
+            "execute_tool echo",
+            "chat scripted",
+            "chat scripted",
+            "invoke_agent helios"),
+        capture.names());
+    var span = capture.spans().get(2);
+    assertEquals(summary.duration().toNanos(), span.getEndEpochNanos() - span.getStartEpochNanos());
   }
 
   @Test

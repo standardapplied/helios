@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package com.standardapplied.helios.core.trace;
+package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -22,7 +22,7 @@ class AnnotationTest {
 
   @Test
   void builderDefaults() {
-    var subjectId = UUID.randomUUID();
+    var subjectId = "run-1";
 
     var annotation =
         Annotation.newBuilder()
@@ -48,7 +48,7 @@ class AnnotationTest {
   void builderRoundTrip() {
     var original =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withFacet("mutuality")
             .withLabel("relevance")
             .withAuthorKind(AuthorKind.MODEL)
@@ -76,7 +76,7 @@ class AnnotationTest {
   @Test
   void builderWithExplicitTimestamps() {
     var id = UUID.randomUUID();
-    var subjectId = UUID.randomUUID();
+    var subjectId = "run-1";
     var createdAt = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
     var updatedAt = createdAt.plusHours(3);
 
@@ -104,7 +104,7 @@ class AnnotationTest {
 
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .withCreatedAt(createdAt)
@@ -117,7 +117,7 @@ class AnnotationTest {
   void optionalFieldsCanBeNull() {
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withLabel("flag")
             .withAuthorKind(AuthorKind.SYSTEM)
             .build();
@@ -132,7 +132,7 @@ class AnnotationTest {
   void metadataDefaultsToEmptyImmutableMap() {
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .build();
@@ -148,7 +148,7 @@ class AnnotationTest {
 
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .withMetadata(source)
@@ -167,7 +167,7 @@ class AnnotationTest {
 
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withLabel("quality")
             .withAuthorKind(AuthorKind.HUMAN)
             .withMetadata(source)
@@ -186,12 +186,24 @@ class AnnotationTest {
   }
 
   @Test
+  void builderBlankSubjectIdThrows() {
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            Annotation.newBuilder()
+                .withSubjectId(" ")
+                .withLabel("quality")
+                .withAuthorKind(AuthorKind.HUMAN)
+                .build());
+  }
+
+  @Test
   void builderMissingLabelThrows() {
     assertThrows(
         IllegalStateException.class,
         () ->
             Annotation.newBuilder()
-                .withSubjectId(UUID.randomUUID())
+                .withSubjectId("run-1")
                 .withAuthorKind(AuthorKind.HUMAN)
                 .build());
   }
@@ -202,7 +214,7 @@ class AnnotationTest {
         IllegalStateException.class,
         () ->
             Annotation.newBuilder()
-                .withSubjectId(UUID.randomUUID())
+                .withSubjectId("run-1")
                 .withLabel("   ")
                 .withAuthorKind(AuthorKind.HUMAN)
                 .build());
@@ -212,15 +224,14 @@ class AnnotationTest {
   void builderMissingAuthorKindThrows() {
     assertThrows(
         IllegalStateException.class,
-        () ->
-            Annotation.newBuilder().withSubjectId(UUID.randomUUID()).withLabel("quality").build());
+        () -> Annotation.newBuilder().withSubjectId("run-1").withLabel("quality").build());
   }
 
   @Test
   void builderWithFacetAndAuthor() {
     var annotation =
         Annotation.newBuilder()
-            .withSubjectId(UUID.randomUUID())
+            .withSubjectId("run-1")
             .withFacet("relevance")
             .withLabel("rubric")
             .withAuthorKind(AuthorKind.HUMAN)

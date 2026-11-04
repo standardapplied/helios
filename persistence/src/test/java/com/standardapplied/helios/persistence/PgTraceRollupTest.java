@@ -9,92 +9,90 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.trace.Trace;
-import com.standardapplied.helios.core.trace.TraceFilter;
-import com.standardapplied.helios.core.trace.TraceRollup;
-import com.standardapplied.helios.core.trace.TraceRollupKey;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.sdk.trace.data.StatusData;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+/** {@link PgTraceStore#summarize} aggregates the stored runs by name or by model. */
 class PgTraceRollupTest {
 
   private static final OffsetDateTime BASE =
       OffsetDateTime.of(2026, 6, 1, 0, 0, 0, 0, ZoneOffset.UTC);
 
-  private PgTraceStore store;
+  private final PgTraceStore store = new PgTraceStore(PgTestSupport.pgConfig());
+  private final PgSpanExporter exporter = new PgSpanExporter(PgTestSupport.pgConfig());
+  private final AtomicInteger runs = new AtomicInteger();
 
   @BeforeEach
   void setUp() {
     PgTestSupport.truncateTraces();
-    store = new PgTraceStore(PgTestSupport.pgConfig());
   }
 
   @Test
-  void rollupByGroupIdAggregatesCountsTokensAndCost() {
-    seed("batch-a", "analytics", 1, 1000, null, Usage.of(100, 50, 20, 10), 1_000L);
-    seed("batch-a", "analytics", 1, 2000, null, Usage.of(200, 100, 0, 0), 2_000L);
-    seed("batch-a", "analytics", 1, 3000, "boom", Usage.of(10, 5, 0, 0), 500L);
-    seed("batch-b", "analytics", 2, 4000, null, Usage.of(1, 1, 1, 1), 4L);
-    seedWithoutGroup();
+  void rollupByNameAggregatesCountsTokensAndCost() {
+    seed("analytics", "model-x", BASE, 1000, null, Usage.of(100, 50, 20, 10), 1_000L);
+    seed("analytics", "model-x", BASE, 2000, null, Usage.of(200, 100, 0, 0), 2_000L);
+    seed("analytics", "model-y", BASE, 3000, "boom", Usage.of(10, 5, 0, 0), 500L);
+    seed("matchmaking", "model-x", BASE, 4000, null, Usage.of(1, 1, 1, 1), 4L);
 
-    var rollups = store.summarize(TraceRollupKey.GROUP_ID, TraceFilter.none());
+    var byName = index(store.summarize(TraceRollupKey.NAME, TraceFilter.none()), "name");
 
-    assertEquals(2, rollups.size());
-    var byKey = index(rollups, "groupId");
-    var a = byKey.get("batch-a");
-    assertEquals(3, a.runCount());
-    assertEquals(1, a.errorCount());
-    assertEquals(2.0d / 3.0d, a.successRate(), 1e-9);
-    assertEquals(310, a.inputTokens());
-    assertEquals(155, a.outputTokens());
-    assertEquals(20, a.cacheCreationTokens());
-    assertEquals(10, a.cacheReadTokens());
-    assertEquals(495, a.totalTokens());
-    assertEquals(3_500L, a.costMicroUsd());
-    assertEquals(2000, a.durationP50Millis());
-    assertEquals(2900, a.durationP95Millis());
-
-    var b = byKey.get("batch-b");
-    assertEquals(1, b.runCount());
-    assertEquals(0, b.errorCount());
-    assertEquals(4L, b.costMicroUsd());
+    assertEquals(2, byName.size());
+    var analytics = byName.get("analytics");
+    assertEquals(3, analytics.runCount());
+    assertEquals(1, analytics.errorCount());
+    assertEquals(2.0d / 3.0d, analytics.successRate(), 1e-9);
+    assertEquals(310, analytics.inputTokens());
+    assertEquals(155, analytics.outputTokens());
+    assertEquals(20, analytics.cacheCreationTokens());
+    assertEquals(10, analytics.cacheReadTokens());
+    assertEquals(495, analytics.totalTokens());
+    assertEquals(3_500L, analytics.costMicroUsd());
+    assertEquals(2000, analytics.durationP50Millis());
+    assertEquals(2900, analytics.durationP95Millis());
+    var matchmaking = byName.get("matchmaking");
+    assertEquals(1, matchmaking.runCount());
+    assertEquals(0, matchmaking.errorCount());
+    assertEquals(4L, matchmaking.costMicroUsd());
   }
 
   @Test
-  void rollupByPromptGroupsOnNameAndVersion() {
-    seed("batch-a", "analytics", 1, 1000, null, Usage.of(10, 5), 100L);
-    seed("batch-b", "analytics", 1, 1000, null, Usage.of(10, 5), 100L);
-    seed("batch-a", "analytics", 2, 1000, null, Usage.of(30, 15), 300L);
+  void rollupByModelGroupsOnTheModelAndSkipsRunsWithNone() {
+    seed("analytics", "model-x", BASE, 1000, null, Usage.of(10, 5), 100L);
+    seed("matchmaking", "model-x", BASE, 1000, null, Usage.of(10, 5), 100L);
+    seed("analytics", "model-y", BASE, 1000, null, Usage.of(30, 15), 300L);
+    seed("analytics", null, BASE, 1000, null, Usage.of(1, 1), 1L);
 
-    var rollups = store.summarize(TraceRollupKey.PROMPT, TraceFilter.none());
+    var byModel = index(store.summarize(TraceRollupKey.MODEL_ID, TraceFilter.none()), "modelId");
 
-    assertEquals(2, rollups.size());
-    var v1 =
-        rollups.stream().filter(r -> r.key().get("promptVersion").equals("1")).findFirst().get();
-    assertEquals("analytics", v1.key().get("promptName"));
-    assertEquals(2, v1.runCount());
-    assertEquals(20, v1.inputTokens());
-    var v2 =
-        rollups.stream().filter(r -> r.key().get("promptVersion").equals("2")).findFirst().get();
-    assertEquals(1, v2.runCount());
-    assertEquals(30, v2.inputTokens());
+    assertEquals(2, byModel.size());
+    assertEquals(2, byModel.get("model-x").runCount());
+    assertEquals(20, byModel.get("model-x").inputTokens());
+    assertEquals(1, byModel.get("model-y").runCount());
+    assertEquals(30, byModel.get("model-y").inputTokens());
   }
 
   @Test
-  void filterRestrictsByGroupAndTimeWindow() {
-    seed("batch-a", "analytics", 1, 1000, null, Usage.of(10, 5), 100L);
-    seedAt("batch-a", BASE.plusDays(7), 1000, Usage.of(90, 45), 900L);
+  void filterRestrictsByNameAndTimeWindow() {
+    seed("analytics", "model-x", BASE, 1000, null, Usage.of(10, 5), 100L);
+    seed("analytics", "model-x", BASE.plusDays(7), 1000, null, Usage.of(90, 45), 900L);
+    seed("matchmaking", "model-x", BASE, 1000, null, Usage.of(5, 5), 50L);
 
     var windowed =
         store.summarize(
-            TraceRollupKey.GROUP_ID,
+            TraceRollupKey.MODEL_ID,
             TraceFilter.newBuilder()
-                .withGroupId("batch-a")
+                .withName("analytics")
                 .withSince(BASE.minusHours(1))
                 .withUntil(BASE.plusDays(1))
                 .build());
@@ -105,10 +103,10 @@ class PgTraceRollupTest {
   }
 
   @Test
-  void tracesWithoutUsageContributeZeroToTokenSums() {
-    seedWithoutUsage("batch-a");
+  void runsWithoutUsageContributeZeroToTokenSums() {
+    seed("analytics", "model-x", BASE, 1000, null, null, null);
 
-    var rollups = store.summarize(TraceRollupKey.GROUP_ID, TraceFilter.none());
+    var rollups = store.summarize(TraceRollupKey.NAME, TraceFilter.none());
 
     assertEquals(1, rollups.size());
     assertEquals(1, rollups.getFirst().runCount());
@@ -127,65 +125,55 @@ class PgTraceRollupTest {
     assertThrows(NullPointerException.class, () -> store.summarize(TraceRollupKey.NAME, null));
   }
 
+  /** Store a run of {@code name} on {@code model}, as the session's run span describes it. */
   private void seed(
-      String groupId,
-      String promptName,
-      int promptVersion,
+      String name,
+      String model,
+      OffsetDateTime start,
       long durationMillis,
       String error,
       Usage usage,
-      long costMicroUsd) {
-    store.onTrace(
-        Trace.newBuilder()
-            .withName("agent-run")
-            .withStartTime(BASE)
-            .withEndTime(BASE.plusNanos(durationMillis * 1_000_000L))
-            .withError(error)
-            .withGroupId(groupId)
-            .withPromptName(promptName)
-            .withPromptVersion(promptVersion)
-            .withModelId("model-x")
-            .withTotalTokens(usage.totalTokens())
-            .withUsage(usage)
-            .withCost(CostEstimate.ofMicroUsd(costMicroUsd))
-            .build());
+      Long costMicroUsd) {
+    var index = runs.incrementAndGet();
+    var attributes =
+        Attributes.builder()
+            .put("gen_ai.operation.name", "invoke_agent")
+            .put("gen_ai.agent.name", name)
+            .put("helios.run.id", "run-" + index);
+    if (model != null) {
+      attributes.put("gen_ai.request.model", model);
+    }
+    if (usage != null) {
+      attributes
+          .put(
+              "gen_ai.usage.input_tokens",
+              (long) usage.inputTokens()
+                  + usage.cacheCreationInputTokens()
+                  + usage.cacheReadInputTokens())
+          .put("gen_ai.usage.output_tokens", (long) usage.outputTokens())
+          .put("gen_ai.usage.cache_write.input_tokens", (long) usage.cacheCreationInputTokens())
+          .put("gen_ai.usage.cache_read.input_tokens", (long) usage.cacheReadInputTokens())
+          .put("helios.usage.total_tokens", (long) usage.totalTokens())
+          .put("helios.cost.micro_usd", costMicroUsd);
+    }
+    var started = nanos(start);
+    var span =
+        ExportedSpans.span("%016x".formatted(index), "invoke_agent " + name, 0, attributes.build())
+            .setStartEpochNanos(started)
+            .setEndEpochNanos(started + Duration.ofMillis(durationMillis).toNanos())
+            .setStatus(
+                error == null ? StatusData.unset() : StatusData.create(StatusCode.ERROR, error))
+            .build();
+    assertTrue(exporter.export(List.of(span)).isSuccess());
   }
 
-  private void seedAt(
-      String groupId, OffsetDateTime start, long durationMillis, Usage usage, long costMicroUsd) {
-    store.onTrace(
-        Trace.newBuilder()
-            .withName("agent-run")
-            .withStartTime(start)
-            .withEndTime(start.plusNanos(durationMillis * 1_000_000L))
-            .withGroupId(groupId)
-            .withTotalTokens(usage.totalTokens())
-            .withUsage(usage)
-            .withCost(CostEstimate.ofMicroUsd(costMicroUsd))
-            .build());
+  private static long nanos(OffsetDateTime at) {
+    var instant = at.toInstant();
+    return Math.addExact(
+        Math.multiplyExact(instant.getEpochSecond(), 1_000_000_000L), instant.getNano());
   }
 
-  private void seedWithoutGroup() {
-    store.onTrace(
-        Trace.newBuilder()
-            .withName("agent-run")
-            .withStartTime(BASE)
-            .withEndTime(BASE.plusSeconds(1))
-            .build());
-  }
-
-  private void seedWithoutUsage(String groupId) {
-    store.onTrace(
-        Trace.newBuilder()
-            .withName("agent-run")
-            .withStartTime(BASE)
-            .withEndTime(BASE.plusSeconds(1))
-            .withGroupId(groupId)
-            .build());
-  }
-
-  private static Map<String, TraceRollup> index(java.util.List<TraceRollup> rollups, String dim) {
-    return rollups.stream()
-        .collect(java.util.stream.Collectors.toMap(r -> r.key().get(dim), r -> r));
+  private static Map<String, TraceRollup> index(List<TraceRollup> rollups, String dimension) {
+    return rollups.stream().collect(Collectors.toMap(r -> r.key().get(dimension), r -> r));
   }
 }

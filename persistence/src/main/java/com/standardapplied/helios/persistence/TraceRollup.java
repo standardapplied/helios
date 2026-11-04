@@ -3,18 +3,17 @@
  * SPDX-License-Identifier: MIT
  */
 
-package com.standardapplied.helios.core.trace;
+package com.standardapplied.helios.persistence;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Aggregated metrics for one group of traces produced by a rollup query. The {@code key} maps each
- * grouping dimension to its value for this group in dimension order (e.g., {@code {groupId:
- * "eval-batch-1"}} or {@code {promptName: "analytics", promptVersion: "3"}}). Token and cost sums
- * cover only traces that recorded typed usage/cost; {@code totalTokens} sums the trace-level total,
- * which every trace carries.
+ * Aggregated metrics for one group of runs produced by a rollup query. The {@code key} maps the
+ * grouping dimension to its value for this group (e.g., {@code {name: "matchmaking"}} or {@code
+ * {modelId: "gemini-3.8-flash"}}). Token and cost sums cover only runs that recorded usage and
+ * cost; {@code totalTokens} sums the run-level total, which every run carries.
  *
  * @param key grouping dimension values for this group, in dimension order
  * @param runCount number of traces in the group

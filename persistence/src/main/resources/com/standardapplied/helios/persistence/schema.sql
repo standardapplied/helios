@@ -16,7 +16,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_helios_prompts_single_active
     ON helios_prompts (name) WHERE active;
 
 CREATE TABLE IF NOT EXISTS helios_traces (
-    id                UUID            PRIMARY KEY,
+    id                VARCHAR(64)     PRIMARY KEY,
+    otel_trace_id     CHAR(32)        NOT NULL,
+    otel_span_id      CHAR(16)        NOT NULL,
     name              VARCHAR(255)    NOT NULL,
     start_time        TIMESTAMPTZ     NOT NULL,
     end_time          TIMESTAMPTZ,
@@ -24,11 +26,8 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     attributes        JSONB           NOT NULL DEFAULT '{}',
     input_text        TEXT,
     output_text       TEXT,
-    user_id           VARCHAR(255),
     session_id        VARCHAR(128),
     model_id          VARCHAR(255),
-    prompt_name       VARCHAR(255),
-    prompt_version    INT,
     total_tokens      INT             NOT NULL DEFAULT 0,
     input_tokens      INT,
     output_tokens     INT,
@@ -36,9 +35,7 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     cache_read_tokens INT,
     cost_micro_usd    BIGINT,
     thumbs_up_count   INT             NOT NULL DEFAULT 0,
-    thumbs_down_count INT             NOT NULL DEFAULT 0,
-    group_id          VARCHAR(255),
-    labels            JSONB           NOT NULL DEFAULT '[]'
+    thumbs_down_count INT             NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_helios_traces_name
@@ -47,25 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_helios_traces_name
 CREATE INDEX IF NOT EXISTS idx_helios_traces_start_time
     ON helios_traces (start_time DESC);
 
-CREATE INDEX IF NOT EXISTS idx_helios_traces_user_id
-    ON helios_traces (user_id);
-
 CREATE INDEX IF NOT EXISTS idx_helios_traces_session_id
     ON helios_traces (session_id);
 
 CREATE INDEX IF NOT EXISTS idx_helios_traces_model_id
     ON helios_traces (model_id);
 
-CREATE INDEX IF NOT EXISTS idx_helios_traces_group_id
-    ON helios_traces (group_id);
-
-CREATE INDEX IF NOT EXISTS idx_helios_traces_labels
-    ON helios_traces USING GIN (labels);
-
 CREATE TABLE IF NOT EXISTS helios_spans (
-    id          UUID            PRIMARY KEY,
-    trace_id    UUID            NOT NULL REFERENCES helios_traces(id) ON DELETE CASCADE,
-    parent_id   UUID,
+    id          CHAR(16)        PRIMARY KEY,
+    run_id      VARCHAR(64)     NOT NULL,
     name        VARCHAR(255)    NOT NULL,
     kind        VARCHAR(50)     NOT NULL,
     start_time  TIMESTAMPTZ     NOT NULL,
@@ -76,18 +63,15 @@ CREATE TABLE IF NOT EXISTS helios_spans (
     output_tokens INT,
     cache_creation_tokens INT,
     cache_read_tokens INT,
-    cost_micro_usd BIGINT,
-    CONSTRAINT fk_spans_parent FOREIGN KEY (trace_id, parent_id)
-        REFERENCES helios_spans(trace_id, id) ON DELETE CASCADE,
-    CONSTRAINT uq_spans_trace_id UNIQUE (trace_id, id)
+    cost_micro_usd BIGINT
 );
 
-CREATE INDEX IF NOT EXISTS idx_helios_spans_trace_id
-    ON helios_spans(trace_id);
+CREATE INDEX IF NOT EXISTS idx_helios_spans_run_id
+    ON helios_spans(run_id);
 
 CREATE TABLE IF NOT EXISTS helios_annotations (
     id          UUID            PRIMARY KEY,
-    subject_id  UUID            NOT NULL,
+    subject_id  VARCHAR(64)     NOT NULL,
     facet       VARCHAR(255),
     label       VARCHAR(255)    NOT NULL,
     author_kind VARCHAR(32)     NOT NULL,

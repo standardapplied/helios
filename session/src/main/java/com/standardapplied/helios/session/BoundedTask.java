@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.model.CancellationToken;
+import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -35,7 +36,10 @@ final class BoundedTask<T> {
     this.threw = threw;
   }
 
-  /** Start {@code task} on a new virtual thread named {@code threadName}. */
+  /**
+   * Start {@code task} on a new virtual thread named {@code threadName}, in the OpenTelemetry
+   * {@link Context} current on the calling thread.
+   */
   static <T> BoundedTask<T> start(
       String threadName, Callable<T> task, Consumer<Throwable> failures) {
     var outcome = new CompletableFuture<T>();
@@ -44,15 +48,17 @@ final class BoundedTask<T> {
         Thread.ofVirtual()
             .name(threadName)
             .start(
-                () -> {
-                  try {
-                    outcome.complete(task.call());
-                  } catch (Throwable t) {
-                    threw.set(true);
-                    failures.accept(t);
-                    outcome.completeExceptionally(t);
-                  }
-                });
+                Context.current()
+                    .wrap(
+                        () -> {
+                          try {
+                            outcome.complete(task.call());
+                          } catch (Throwable t) {
+                            threw.set(true);
+                            failures.accept(t);
+                            outcome.completeExceptionally(t);
+                          }
+                        }));
     return new BoundedTask<>(thread, outcome, threw);
   }
 

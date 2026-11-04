@@ -9,116 +9,66 @@ import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.trace.Trace;
-import com.standardapplied.helios.core.trace.TraceFilter;
-import com.standardapplied.helios.core.trace.TraceListener;
-import com.standardapplied.helios.core.trace.TraceRollup;
-import com.standardapplied.helios.core.trace.TraceRollupKey;
-import com.standardapplied.helios.persistence.mapper.JsonbMapper;
+import com.standardapplied.helios.persistence.mapper.SpanMapper;
 import com.standardapplied.helios.persistence.mapper.TraceMapper;
 import com.standardapplied.helios.persistence.mapper.TraceRollupMapper;
-import com.standardapplied.helios.persistence.mapper.UsageMapper;
+import com.standardapplied.helios.persistence.sql.SpanSql;
 import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import com.standardapplied.helios.persistence.sql.TraceSql;
 import io.helidon.dbclient.DbClient;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
- * PostgreSQL-backed store for traces and their spans. Annotations on a trace or span are stored by
- * {@link PgAnnotationStore}.
+ * Reads the runs and spans {@link PgSpanExporter} stored. Annotations on a run or span are stored
+ * by {@link PgAnnotationStore}.
  *
- * <p>A {@link TraceListener}: every finished trace it receives is stored.
+ * <p>A run's span rows are written as its steps end and its run row once the run itself ended, so
+ * the span rows of a run the process died in exist with no run row: {@link #findById} returns null
+ * for that run, and nothing cleans the rows up.
  */
-public class PgTraceStore implements TraceListener {
+public class PgTraceStore {
 
   private final PgConfig config;
   private final DbClient dbClient;
-  private final PgSpanTree spanTree;
 
   public PgTraceStore(PgConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     this.dbClient = config.dbClient();
-    this.spanTree = new PgSpanTree(config);
   }
 
   /**
-   * Stores a trace and all its spans in a single transaction.
+   * Finds a run by its id, with its spans ordered by start time, then id.
    *
-   * <p>Spans are inserted in BFS order (top-level first, then children) to satisfy the parent_id
-   * foreign key constraint.
+   * @return the run with its spans, or null if no run row was stored under {@code runId}
    */
-  @Override
-  public void onTrace(Trace trace) {
-    var tx = dbClient.transaction();
+  public Trace findById(String runId) {
     try {
-      var params = new ArrayList<Object>();
-      params.add(trace.id().toString());
-      params.add(trace.name());
-      params.add(trace.startTime());
-      params.add(trace.endTime());
-      params.add(config.redact(trace.error()));
-      params.add(JsonbMapper.toJsonb(config.redactValues(trace.attributes())));
-      params.add(config.redact(trace.inputText()));
-      params.add(config.redact(trace.outputText()));
-      params.add(trace.userId());
-      params.add(trace.sessionId());
-      params.add(trace.modelId());
-      params.add(trace.promptName());
-      params.add(trace.promptVersion());
-      params.add(trace.totalTokens());
-      UsageMapper.addParams(params, trace.usage(), trace.cost());
-      params.add(trace.groupId());
-      params.add(JsonbMapper.listToJsonb(trace.labels()));
-      tx.dml(config.qualify(TraceSql.INSERT), params.toArray());
-
-      spanTree.insert(tx, trace.id(), trace.spans());
-
-      tx.commit();
-    } catch (Exception e) {
-      try {
-        tx.rollback();
-      } catch (Exception rollbackEx) {
-        e.addSuppressed(rollbackEx);
-      }
-      throw new PgException("Failed to store trace: " + trace.id(), e);
-    }
-  }
-
-  /**
-   * Finds a trace by id, reconstructing the full span tree.
-   *
-   * @return the trace with spans, or null if not found
-   */
-  public Trace findById(UUID id) {
-    try {
-      var traceOpt =
+      var trace =
           dbClient
               .execute()
-              .query(config.qualify(TraceSql.FIND_BY_ID), id.toString())
+              .query(config.qualify(TraceSql.FIND_BY_ID), runId)
               .findFirst()
               .map(TraceMapper::map);
-
-      if (traceOpt.isEmpty()) {
+      if (trace.isEmpty()) {
         return null;
       }
-
-      var trace = traceOpt.get();
-      var spans = spanTree.find(id);
-
-      return Trace.newBuilder(trace).withSpans(spans).build();
+      var spans =
+          dbClient
+              .execute()
+              .query(config.qualify(SpanSql.FIND_BY_RUN_ID), runId)
+              .map(SpanMapper::map)
+              .toList();
+      return Trace.newBuilder(trace.get()).withSpans(spans).build();
     } catch (Exception e) {
-      throw new PgException("Failed to find trace: " + id, e);
+      throw new PgException("Failed to find trace: " + runId, e);
     }
   }
 
   /**
-   * Lists traces with optional SCIM filter and pagination. Returns traces without span trees
-   * (summary mode).
+   * Lists runs with optional SCIM filter and pagination, without their spans.
    *
    * @param paginate pagination parameters (defaults to page 1, size 50 if null)
    * @param scimFilter optional SCIM filter string (e.g., {@code name eq "my-agent"})
@@ -168,9 +118,9 @@ public class PgTraceStore implements TraceListener {
   }
 
   /**
-   * Aggregates stored traces grouped by the given key: run and error counts, duration percentiles,
-   * token and cost sums, and feedback counts per group. Traces with a null value for a grouping
-   * dimension are excluded — a trace without a {@code groupId} belongs to no eval group.
+   * Aggregates stored runs grouped by the given key: run and error counts, duration percentiles,
+   * token and cost sums, and feedback counts per group. Runs with a null value for the grouping
+   * dimension are excluded.
    *
    * @param key the grouping dimension; non-null
    * @param filter equality/time-window constraints; non-null, {@link TraceFilter#none()} for all

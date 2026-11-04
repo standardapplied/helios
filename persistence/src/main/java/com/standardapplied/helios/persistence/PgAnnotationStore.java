@@ -6,7 +6,6 @@ import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
-import com.standardapplied.helios.core.trace.Annotation;
 import com.standardapplied.helios.persistence.mapper.AnnotationMapper;
 import com.standardapplied.helios.persistence.mapper.JsonbMapper;
 import com.standardapplied.helios.persistence.sql.AnnotationSql;
@@ -15,7 +14,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -58,13 +56,11 @@ public class PgAnnotationStore {
     }
   }
 
-  /** Finds all annotations for a given subject (trace or span), oldest first. */
-  public List<Annotation> findAnnotationsBySubject(UUID subjectId) {
+  /** Finds all annotations for a given subject (run or span), oldest first. */
+  public List<Annotation> findAnnotationsBySubject(String subjectId) {
     try {
       return AnnotationMapper.mapAll(
-          dbClient
-              .execute()
-              .query(config.qualify(AnnotationSql.FIND_BY_SUBJECT), subjectId.toString()));
+          dbClient.execute().query(config.qualify(AnnotationSql.FIND_BY_SUBJECT), subjectId));
     } catch (Exception e) {
       throw new PgException("Failed to find annotations for subject: " + subjectId, e);
     }
@@ -74,18 +70,17 @@ public class PgAnnotationStore {
    * Finds all annotations for a batch of subjects in a single query. Returns an empty list for a
    * null or empty input.
    */
-  public List<Annotation> findAnnotationsBySubjects(List<UUID> subjectIds) {
+  public List<Annotation> findAnnotationsBySubjects(List<String> subjectIds) {
     if (subjectIds == null || subjectIds.isEmpty()) {
       return List.of();
     }
     try {
-      var placeholders =
-          subjectIds.stream().map(id -> "CAST(? AS UUID)").collect(Collectors.joining(", "));
+      var placeholders = subjectIds.stream().map(id -> "?").collect(Collectors.joining(", "));
       var sql =
           config.qualify(AnnotationSql.FIND_BY_SUBJECTS_PREFIX)
               + placeholders
               + AnnotationSql.FIND_BY_SUBJECTS_SUFFIX;
-      var params = subjectIds.stream().map(UUID::toString).toArray();
+      var params = subjectIds.toArray();
       return AnnotationMapper.mapAll(dbClient.execute().query(sql, params));
     } catch (Exception e) {
       throw new PgException("Failed to find annotations for subjects", e);
@@ -151,7 +146,7 @@ public class PgAnnotationStore {
   private static Object[] annotationParams(Annotation annotation) {
     return new Object[] {
       annotation.id().toString(),
-      annotation.subjectId().toString(),
+      annotation.subjectId(),
       annotation.facet(),
       annotation.label(),
       annotation.authorKind().name(),

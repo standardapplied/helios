@@ -70,7 +70,8 @@ final class LoopFixture {
         queue,
         events::add,
         this::hookContext,
-        clock);
+        clock,
+        NoSpans.INSTANCE);
   }
 
   /** A runner of {@code model} with no costs and no output schema. */

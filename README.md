@@ -21,7 +21,7 @@ Pick what you need — each jar is published independently:
 
 | Artifact | What it gives you | External deps |
 |----------|-------------------|---------------|
-| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `Trace` / `TraceListener`, `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
+| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
 | `helios-session` | v2 SDK — long-lived `AgentSession` running an agent loop on a virtual thread. `SessionPresets`, hooks, declarative `Permission`, file tools, `MemoryBackend`, `ExecutionProvider`, `ContextCompactor` | Jackson 3.x |
 | `helios-runtime` | Helidon HTTP/SSE surface for `helios-session` — `POST /sessions`, SSE `/events`, long-poll `/result` | Helidon SE, Jackson 3.x |
 | `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3.x |
@@ -29,7 +29,7 @@ Pick what you need — each jar is published independently:
 | `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
 | `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
 | `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
-| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgTraceStore` and `PgSessionStore` | Helidon DbClient |
+| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgSessionStore`, `PgTraceStore` and `PgSpanExporter`, the OpenTelemetry exporter that writes the trace tables | Helidon DbClient, OpenTelemetry SDK |
 
 Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
 
@@ -52,7 +52,7 @@ Helios is used in production but has documented limitations that you should unde
 
 These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
 
-- **Persistence layer stores trace payloads verbatim unless you set a redactor.** `helios_traces.{input_text, output_text, attributes}` and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever you store yourself, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
+- **Persistence layer stores trace payloads verbatim unless you set a redactor.** `helios_traces.{input_text, output_text, attributes}` and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever else reaches these tables, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
 - **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
 - **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
 - **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
@@ -544,13 +544,17 @@ try (var events = session.events()) {
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
-**Tracing.** A session given a `TraceListener` hands it one `Trace` per run, on every ending, linked to its runs by the session id: a `model.call` span per model attempt (tokens, cost, duration), a `tool.<name>` span per tool call and a `hook.<name>` span per hook decision, with totals equal to the run's result. `TraceDetail.STANDARD` (the default) stores no content; `VERBOSE` adds the prompt, answer, tool arguments and results, redacted by the session. The listener runs before the run's result completes. A trace is not the conversation; that is the session store's.
+**Tracing.** A session emits live OpenTelemetry spans through `withOpenTelemetry(openTelemetry)`, or `GlobalOpenTelemetry` when unset, a no-op without an SDK. Each run is an `invoke_agent <agentName>` span (`withAgentName`, default `helios`), a child of the span current where `send` was called, ended on every ending with the run's totals.
+Under it: a `chat <model>` span per model attempt, an `execute_tool <tool>` span per tool call and a zero-length `hook <hook>` span per hook decision.
+A step's span is current while it runs, so what a tool or the model client records with your own instrumentation nests under it.
+`TraceDetail.STANDARD` (the default) puts no content on a span; `VERBOSE` adds the prompt, answer, tool arguments and results and hook texts, redacted by the session.
+The names follow the OpenTelemetry GenAI semantic conventions, still at status Development. `PgSpanExporter` writes Helios's spans to Postgres for `PgTraceStore`:
 
 ```java
-var options = SessionOptions.newBuilder()
-    .withModel(model)
-    .withTraceListener(new PgTraceStore(pgConfig))
+var tracing = SdkTracerProvider.builder()
+    .addSpanProcessor(BatchSpanProcessor.builder(new PgSpanExporter(pgConfig)).build())
     .build();
+options.withOpenTelemetry(OpenTelemetrySdk.builder().setTracerProvider(tracing).build());
 ```
 
 ## Sandboxed Code Execution (`helios-repl`)
@@ -606,7 +610,7 @@ model.embedDocument(doc, null);  // null = use the spec default
 
 ## Persistence (`helios-persistence`)
 
-PostgreSQL-backed `PromptRegistry`, `PgTraceStore` and `SessionStore`. All share a `PgConfig` carrying the `DbClient` and schema name.
+PostgreSQL-backed `PromptRegistry`, `SessionStore` and trace tables. `PgSpanExporter` writes a session's spans as they end (a step's row before its run's), `PgTraceStore` reads them back by run id (`findById`, `list`, `summarize` by name or model), and `PgAnnotationStore` attaches notes to a run id or a span id. All share a `PgConfig` carrying the `DbClient` and schema name. A run the process died in leaves its span rows without a run row: `findById` returns null for it, and nothing cleans the rows up.
 
 ```java
 var pgConfig = PgConfig.newBuilder()
@@ -614,6 +618,7 @@ var pgConfig = PgConfig.newBuilder()
     .withSchema("helios")
     .build();
 
+var spanExporter = new PgSpanExporter(pgConfig);
 var traceStore = new PgTraceStore(pgConfig);
 var annotationStore = new PgAnnotationStore(pgConfig);
 var promptRegistry = new PgPromptRegistry(pgConfig);
@@ -622,9 +627,9 @@ var sessionStore = new PgSessionStore(pgConfig);
 
 Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
 
-**Annotations.** `core.trace.Annotation` is a structured note attached to a real trace or span (`subjectId`). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
+**Annotations.** `persistence.Annotation` is a structured note attached to a stored run or span (`subjectId`, the run id or the span id). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 
-**Trace fidelity by design.** Trace payloads (`helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to whatever you record into these stores yourself. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
+**Trace fidelity by design.** Trace payloads (`helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to everything `PgSpanExporter` writes. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
 
 ## Security
 
@@ -654,8 +659,8 @@ Not covered:
 - Text that does not come from tools: user messages, the system prompt, hook `Inject` messages (deployer code), and the model's own output.
 - `Read` attachments: images and PDFs pass through unredacted.
 - Runtime HTTP error bodies.
-- Persistence: a session's traces store content only under `TraceDetail.VERBOSE`, redacted by the session; what you store yourself is verbatim unless `PgConfig.Builder.withRedactor(...)` is set.
-- Telemetry content capture.
+- Persistence: a session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; anything else `PgSpanExporter` writes is verbatim unless `PgConfig.Builder.withRedactor(...)` is set.
+- What your own instrumentation records under a Helios span, such as an HTTP client's or a database driver's span attributes.
 - Secrets the model rebuilds from pieces (encoded, or split across calls): redaction matches exact bytes.
 
 `ModelConfig.toString()` elides the `apiKey` and every header value regardless of registry contents, so a `ModelConfig` is safe to log directly.
