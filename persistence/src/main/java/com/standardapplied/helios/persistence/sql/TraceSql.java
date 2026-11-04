@@ -38,22 +38,21 @@ public final class TraceSql {
               ?, ?, ?, ?, ?)
           """;
 
-  public static final String FIND_BY_ID =
-      "SELECT "
-          + COLUMNS
-          + """
-          , feedback.up AS thumbs_up_count, feedback.down AS thumbs_down_count
-          """
-          + FROM_TRACES_WITH_FEEDBACK
-          + "WHERE id = ?\n";
-
-  public static final String LIST_PREFIX =
+  private static final String SELECT_WITH_FEEDBACK =
       "SELECT "
           + COLUMNS
           + """
           , feedback.up AS thumbs_up_count, feedback.down AS thumbs_down_count
           """
           + FROM_TRACES_WITH_FEEDBACK;
+
+  public static final String FIND_BY_ID = SELECT_WITH_FEEDBACK + "WHERE id = ?\n";
+
+  /**
+   * Wraps the projection so a filter appended after it resolves {@code thumbs_up_count} and {@code
+   * thumbs_down_count} to the derived counts, not the stored columns.
+   */
+  public static final String LIST_PREFIX = "SELECT * FROM (" + SELECT_WITH_FEEDBACK + ") traces\n";
 
   public static final String LIST_SUFFIX =
       """
