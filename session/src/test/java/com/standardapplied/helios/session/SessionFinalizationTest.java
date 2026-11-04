@@ -28,7 +28,6 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.core.trace.Trace;
 import com.standardapplied.helios.session.EndingSessions.Unprintable;
 import com.standardapplied.helios.session.ask.AskUserQuestionTool;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -589,16 +588,11 @@ final class SessionFinalizationTest {
               throw failure;
             });
 
-    var traces = new CopyOnWriteArrayList<Trace>();
-
-    try (var session = AgentSession.open(options(model).withTraceListener(traces::add).build())) {
+    try (var session = AgentSession.open(options(model).build())) {
       var future = session.send("go");
 
       assertSame(failure, Await.failure("the result to fail", future));
     }
-    var trace = traces.getFirst();
-    assertEquals(Unprintable.class.getName(), trace.error());
-    assertEquals(Unprintable.class.getName(), trace.attributes().get("error.type"));
   }
 
   @Test

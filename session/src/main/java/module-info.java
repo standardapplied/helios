@@ -24,6 +24,8 @@ module com.standardapplied.helios.session {
   requires com.standardapplied.helios.core;
   requires java.logging;
   requires tools.jackson.databind;
+  requires transitive io.opentelemetry.api;
+  requires io.opentelemetry.context;
 
   exports com.standardapplied.helios.session;
   exports com.standardapplied.helios.session.ask;

@@ -72,7 +72,8 @@ final class LoopStagesTest {
             queue,
             events::add,
             LoopStagesTest::context,
-            CLOCK);
+            CLOCK,
+            NoSpans.INSTANCE);
     var runner =
         new TurnRunner(
             collaborators,

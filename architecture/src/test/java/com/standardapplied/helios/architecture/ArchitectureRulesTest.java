@@ -34,6 +34,7 @@ import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.CompositeArchRule;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.module.ModuleFinder;
@@ -213,6 +214,28 @@ class ArchitectureRulesTest {
         .because(
             "the session module builds its one Jackson mapper in session.loop.SessionJson, and every"
                 + " other class reads JSON through the binding it holds")
+        .check(LIBRARY);
+  }
+
+  @Test
+  void openTelemetryStaysOutOfCoreAndItsSdkInPersistence() {
+    CompositeArchRule.of(
+            noClasses()
+                .that()
+                .resideInAPackage(CORE)
+                .should()
+                .dependOnClassesThat()
+                .resideInAPackage("io.opentelemetry.."))
+        .and(
+            noClasses()
+                .that()
+                .resideOutsideOfPackage(HELIOS + ".persistence..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAPackage("io.opentelemetry.sdk.."))
+        .because(
+            "the session emits spans through the OpenTelemetry API; only the Postgres exporter"
+                + " needs its SDK")
         .check(LIBRARY);
   }
 

@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.tools.ToolBinding;
+import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -28,15 +29,16 @@ import java.util.logging.Logger;
  * One tool call, from its start until its work ends. The call's answer settles once: with the
  * tool's result, whatever the tool threw past {@link
  * com.standardapplied.helios.core.tool.Tool#execute Tool.execute}, a {@link CancellationException},
- * or a {@link TimeoutException} at the deadline. Its worker virtual thread starts the tool only
- * while the answer is unsettled, the session's token is not cancelled and the deadline has not
- * passed. The call's own token is linked to the session's and is cancelled on a thread of its own,
- * so a callback that blocks or throws holds up neither the canceller nor the worker's interrupt.
- * The work is the worker and that cancellation; when both have ended, the worker removes the link
- * and the call is no longer live. A call its caller stops waiting for while its work runs is handed
- * to the dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's
- * token throws or one the tool throws, is recorded by the session's {@link SessionEnding}, the
- * tool's once the answer settled with it, so the caller reads it as itself.
+ * or a {@link TimeoutException} at the deadline. Its worker virtual thread, which runs in the
+ * OpenTelemetry {@link Context} current where the call was built, starts the tool only while the
+ * answer is unsettled, the session's token is not cancelled and the deadline has not passed. The
+ * call's own token is linked to the session's and is cancelled on a thread of its own, so a
+ * callback that blocks or throws holds up neither the canceller nor the worker's interrupt. The
+ * work is the worker and that cancellation; when both have ended, the worker removes the link and
+ * the call is no longer live. A call its caller stops waiting for while its work runs is handed to
+ * the dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's token
+ * throws or one the tool throws, is recorded by the session's {@link SessionEnding}, the tool's
+ * once the answer settled with it, so the caller reads it as itself.
  */
 final class DispatchedCall {
 
@@ -79,7 +81,10 @@ final class DispatchedCall {
     this.liveCalls = liveCalls;
     this.abandoned = abandoned;
     this.ending = ending;
-    this.worker = Thread.ofVirtual().name("helios-tool-" + call.name()).unstarted(this::work);
+    this.worker =
+        Thread.ofVirtual()
+            .name("helios-tool-" + call.name())
+            .unstarted(Context.current().wrap(this::work));
   }
 
   /** Link the call to its parent token, add it to the live calls and start its worker. */

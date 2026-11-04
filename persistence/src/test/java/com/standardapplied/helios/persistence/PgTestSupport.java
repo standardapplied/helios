@@ -8,11 +8,14 @@ package com.standardapplied.helios.persistence;
 import io.helidon.config.Config;
 import io.helidon.config.ConfigSources;
 import io.helidon.dbclient.DbClient;
+import io.helidon.dbclient.DbTransaction;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /** Shared PostgreSQL test container and Helidon DbClient setup. */
@@ -45,8 +48,7 @@ final class PgTestSupport {
   }
 
   static void truncateTraces() {
-    dbClient().execute().dml("TRUNCATE TABLE helios_traces CASCADE");
-    dbClient().execute().dml("TRUNCATE TABLE helios_annotations");
+    dbClient().execute().dml("TRUNCATE TABLE helios_traces, helios_spans, helios_annotations");
   }
 
   static void truncateSessions() {
@@ -113,6 +115,48 @@ final class PgTestSupport {
               WHEN (NEW.rating IS NOT NULL AND NEW.rating != 0)
               EXECUTE FUNCTION helios_update_feedback_counts()
             """);
+  }
+
+  /**
+   * A client whose every statement fails; the rollback of a transaction fails too when {@code
+   * rollbackFails}, and otherwise returns.
+   */
+  static DbClient failingWrites(boolean rollbackFails) {
+    return failingWrites(rollbackFails, new AtomicInteger());
+  }
+
+  /** {@link #failingWrites(boolean)}, counting each rollback in {@code rollbacks}. */
+  static DbClient failingWrites(boolean rollbackFails, AtomicInteger rollbacks) {
+    var tx =
+        (DbTransaction)
+            Proxy.newProxyInstance(
+                DbTransaction.class.getClassLoader(),
+                new Class<?>[] {DbTransaction.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("rollback")) {
+                    rollbacks.incrementAndGet();
+                    if (!rollbackFails) {
+                      return null;
+                    }
+                  }
+                  throw new IllegalStateException(method.getName() + " failed");
+                });
+    return (DbClient)
+        Proxy.newProxyInstance(
+            DbClient.class.getClassLoader(),
+            new Class<?>[] {DbClient.class},
+            (proxy, method, args) -> tx);
+  }
+
+  /** A client that cannot open a transaction, failing with {@code message}. */
+  static DbClient unavailable(String message) {
+    return (DbClient)
+        Proxy.newProxyInstance(
+            DbClient.class.getClassLoader(),
+            new Class<?>[] {DbClient.class},
+            (proxy, method, args) -> {
+              throw new IllegalStateException(message);
+            });
   }
 
   static DbClient dbClient(String url, String username, String password) {

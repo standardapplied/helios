@@ -5,8 +5,8 @@
 
 package com.standardapplied.helios.persistence.sql;
 
-import com.standardapplied.helios.core.trace.TraceFilter;
-import com.standardapplied.helios.core.trace.TraceRollupKey;
+import com.standardapplied.helios.persistence.TraceFilter;
+import com.standardapplied.helios.persistence.TraceRollupKey;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,7 +14,7 @@ import java.util.List;
  * Builds the parameterized aggregation query behind {@code PgTraceStore.summarize}. Filter values
  * always travel as positional bind parameters — never concatenated into the SQL — and the schema
  * stays a {@code %s} placeholder for {@code PgConfig.qualify}. The key-to-column mapping lives only
- * here; {@code TraceRollupMapper} reads dimensions through {@link #dimensions(TraceRollupKey)} so
+ * here; {@code TraceRollupMapper} reads the dimension through {@link #dimension(TraceRollupKey)} so
  * query and mapper cannot drift.
  */
 public final class TraceRollupSql {
@@ -59,20 +59,15 @@ public final class TraceRollupSql {
           .formatted(DURATION_PERCENTILES);
 
   /**
-   * The grouping dimensions for a rollup key, in key-map order.
+   * The grouping dimension of a rollup key.
    *
    * @param key the grouping dimension
-   * @return column + map-key pairs to group by
+   * @return the column to group by and its map key
    */
-  public static List<Dimension> dimensions(TraceRollupKey key) {
+  public static Dimension dimension(TraceRollupKey key) {
     return switch (key) {
-      case GROUP_ID -> List.of(new Dimension("group_id", "groupId"));
-      case PROMPT ->
-          List.of(
-              new Dimension("prompt_name", "promptName"),
-              new Dimension("prompt_version", "promptVersion"));
-      case NAME -> List.of(new Dimension("name", "name"));
-      case MODEL_ID -> List.of(new Dimension("model_id", "modelId"));
+      case NAME -> new Dimension("name", "name");
+      case MODEL_ID -> new Dimension("model_id", "modelId");
     };
   }
 
@@ -84,55 +79,32 @@ public final class TraceRollupSql {
    * @return the SQL and its positional bind parameters
    */
   public static RollupQuery build(TraceRollupKey key, TraceFilter filter) {
-    var columns = dimensions(key).stream().map(Dimension::column).toList();
-    var dims = String.join(", ", columns);
-    var where = new StringBuilder();
+    var column = dimension(key).column();
+    var where = new StringBuilder(column).append(" IS NOT NULL");
     var params = new ArrayList<Object>();
-    for (var column : columns) {
-      and(where).append(column).append(" IS NOT NULL");
-    }
     if (filter.name() != null) {
-      and(where).append("name = ?");
+      where.append(" AND name = ?");
       params.add(filter.name());
     }
-    if (filter.groupId() != null) {
-      and(where).append("group_id = ?");
-      params.add(filter.groupId());
-    }
-    if (filter.promptName() != null) {
-      and(where).append("prompt_name = ?");
-      params.add(filter.promptName());
-    }
-    if (filter.promptVersion() != null) {
-      and(where).append("prompt_version = ?");
-      params.add(filter.promptVersion());
-    }
     if (filter.since() != null) {
-      and(where).append("start_time >= ?");
+      where.append(" AND start_time >= ?");
       params.add(filter.since());
     }
     if (filter.until() != null) {
-      and(where).append("start_time < ?");
+      where.append(" AND start_time < ?");
       params.add(filter.until());
     }
     var sql =
         "SELECT "
-            + dims
+            + column
             + ",\n"
             + AGGREGATES
             + "FROM %s.helios_traces\nWHERE "
             + where
             + "\nGROUP BY "
-            + dims
+            + column
             + "\nORDER BY "
-            + dims;
+            + column;
     return new RollupQuery(sql, params);
-  }
-
-  private static StringBuilder and(StringBuilder where) {
-    if (!where.isEmpty()) {
-      where.append(" AND ");
-    }
-    return where;
   }
 }

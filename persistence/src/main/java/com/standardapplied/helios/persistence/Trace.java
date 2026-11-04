@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-package com.standardapplied.helios.core.trace;
+package com.standardapplied.helios.persistence;
 
 import com.standardapplied.helios.core.common.CostEstimate;
-import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.model.Response.Usage;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -14,37 +13,35 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
- * An immutable trace representing a complete agent execution.
+ * One stored run of a session, as {@link PgSpanExporter} wrote it from the run's {@code
+ * invoke_agent} span and {@link PgTraceStore} reads it back.
  *
- * @param id unique identifier
- * @param name descriptive name for this trace
- * @param startTime when the trace started
- * @param endTime when the trace ended
- * @param duration wall-clock duration
- * @param error error message, or null if the trace succeeded
- * @param spans top-level spans within this trace
- * @param attributes key-value metadata
- * @param inputText the user's input message
- * @param outputText the agent's final response text
- * @param userId who triggered this trace
- * @param sessionId the session this trace belongs to, such as an agent session's id; null when the
- *     trace belongs to none
- * @param modelId model identifier (e.g., "gemini-3.8-flash")
- * @param promptName prompt registry name
- * @param promptVersion prompt registry version
- * @param totalTokens aggregated token count from model calls
- * @param usage rolled-up token usage summed across spans that recorded one, or null if none did
- * @param cost rolled-up cost summed across spans that recorded one, or null if none did
+ * @param id the run id, the span's {@code helios.run.id}
+ * @param otelTraceId the OpenTelemetry trace id, 32 lower-case hex digits
+ * @param otelSpanId the run span's OpenTelemetry span id, 16 lower-case hex digits
+ * @param name the agent's name, the span's {@code gen_ai.agent.name}
+ * @param startTime when the run started
+ * @param endTime when the run ended
+ * @param duration from {@code startTime} to {@code endTime}
+ * @param error the span's status description when the run failed, or null if it succeeded
+ * @param spans the run's model, tool and hook spans, in start order
+ * @param attributes every other attribute of the run's span, as strings
+ * @param inputText the run's first user message, stored only under {@code TraceDetail.VERBOSE}
+ * @param outputText a successful run's result, stored only under {@code TraceDetail.VERBOSE}
+ * @param sessionId the session the run belongs to
+ * @param modelId the session's model id
+ * @param totalTokens the run's total token count
+ * @param usage the run's token usage, or null if none was recorded
+ * @param cost the run's cost, or null if none was recorded
  * @param thumbsUpCount denormalized positive feedback count (DB-managed)
  * @param thumbsDownCount denormalized negative feedback count (DB-managed)
- * @param groupId comparison/evaluation batch grouping
- * @param labels freeform classification tags
  */
 public record Trace(
-    UUID id,
+    String id,
+    String otelTraceId,
+    String otelSpanId,
     String name,
     OffsetDateTime startTime,
     OffsetDateTime endTime,
@@ -54,20 +51,15 @@ public record Trace(
     Map<String, String> attributes,
     String inputText,
     String outputText,
-    String userId,
     String sessionId,
     String modelId,
-    String promptName,
-    Integer promptVersion,
     int totalTokens,
     Usage usage,
     CostEstimate cost,
     int thumbsUpCount,
-    int thumbsDownCount,
-    String groupId,
-    List<String> labels) {
+    int thumbsDownCount) {
 
-  /** Returns true if this trace completed without error. */
+  /** Returns true if this run completed without error. */
   public boolean success() {
     return error == null;
   }
@@ -80,61 +72,63 @@ public record Trace(
     return new Builder(trace);
   }
 
-  /** Builder for Trace. Used by persistence module to reconstruct from DB rows. */
+  /** Builder for Trace, used to reconstruct one from its row. */
   public static class Builder {
 
-    private UUID id;
+    private String id;
+    private String otelTraceId;
+    private String otelSpanId;
     private String name;
     private OffsetDateTime startTime;
     private OffsetDateTime endTime;
-    private Duration duration;
     private String error;
     private List<Span> spans = new ArrayList<>();
     private Map<String, String> attributes = new LinkedHashMap<>();
     private String inputText;
     private String outputText;
-    private String userId;
     private String sessionId;
     private String modelId;
-    private String promptName;
-    private Integer promptVersion;
     private int totalTokens;
     private Usage usage;
     private CostEstimate cost;
     private int thumbsUpCount;
     private int thumbsDownCount;
-    private String groupId;
-    private List<String> labels = new ArrayList<>();
 
     private Builder() {}
 
     private Builder(Trace trace) {
       this.id = trace.id;
+      this.otelTraceId = trace.otelTraceId;
+      this.otelSpanId = trace.otelSpanId;
       this.name = trace.name;
       this.startTime = trace.startTime;
       this.endTime = trace.endTime;
-      this.duration = trace.duration;
       this.error = trace.error;
       this.spans = new ArrayList<>(trace.spans);
       this.attributes = new LinkedHashMap<>(trace.attributes);
       this.inputText = trace.inputText;
       this.outputText = trace.outputText;
-      this.userId = trace.userId;
       this.sessionId = trace.sessionId;
       this.modelId = trace.modelId;
-      this.promptName = trace.promptName;
-      this.promptVersion = trace.promptVersion;
       this.totalTokens = trace.totalTokens;
       this.usage = trace.usage;
       this.cost = trace.cost;
       this.thumbsUpCount = trace.thumbsUpCount;
       this.thumbsDownCount = trace.thumbsDownCount;
-      this.groupId = trace.groupId;
-      this.labels = new ArrayList<>(trace.labels);
     }
 
-    public Builder withId(UUID id) {
+    public Builder withId(String id) {
       this.id = id;
+      return this;
+    }
+
+    public Builder withOtelTraceId(String otelTraceId) {
+      this.otelTraceId = otelTraceId;
+      return this;
+    }
+
+    public Builder withOtelSpanId(String otelSpanId) {
+      this.otelSpanId = otelSpanId;
       return this;
     }
 
@@ -153,11 +147,6 @@ public record Trace(
       return this;
     }
 
-    public Builder withDuration(Duration duration) {
-      this.duration = duration;
-      return this;
-    }
-
     public Builder withError(String error) {
       this.error = error;
       return this;
@@ -168,18 +157,8 @@ public record Trace(
       return this;
     }
 
-    public Builder withSpan(Span span) {
-      this.spans.add(span);
-      return this;
-    }
-
     public Builder withAttributes(Map<String, String> attributes) {
       this.attributes = new LinkedHashMap<>(attributes);
-      return this;
-    }
-
-    public Builder withAttribute(String key, String value) {
-      this.attributes.put(key, value);
       return this;
     }
 
@@ -193,11 +172,6 @@ public record Trace(
       return this;
     }
 
-    public Builder withUserId(String userId) {
-      this.userId = userId;
-      return this;
-    }
-
     public Builder withSessionId(String sessionId) {
       this.sessionId = sessionId;
       return this;
@@ -205,16 +179,6 @@ public record Trace(
 
     public Builder withModelId(String modelId) {
       this.modelId = modelId;
-      return this;
-    }
-
-    public Builder withPromptName(String promptName) {
-      this.promptName = promptName;
-      return this;
-    }
-
-    public Builder withPromptVersion(Integer promptVersion) {
-      this.promptVersion = promptVersion;
       return this;
     }
 
@@ -243,32 +207,16 @@ public record Trace(
       return this;
     }
 
-    public Builder withGroupId(String groupId) {
-      this.groupId = groupId;
-      return this;
-    }
-
-    public Builder withLabels(List<String> labels) {
-      this.labels = new ArrayList<>(labels);
-      return this;
-    }
-
     /**
-     * Builds the Trace. Auto-generates id and startTime if not set. Computes duration from
-     * startTime and endTime if duration not explicitly set.
+     * Builds the Trace, its duration from {@code startTime} to {@code endTime} when both are set.
      */
     public Trace build() {
-      if (id == null) {
-        id = Ids.newId();
-      }
-      if (startTime == null) {
-        startTime = Ids.now();
-      }
-      if (duration == null && endTime != null) {
-        duration = Duration.between(startTime, endTime);
-      }
+      var duration =
+          startTime != null && endTime != null ? Duration.between(startTime, endTime) : null;
       return new Trace(
           id,
+          otelTraceId,
+          otelSpanId,
           name,
           startTime,
           endTime,
@@ -278,18 +226,13 @@ public record Trace(
           Map.copyOf(attributes),
           inputText,
           outputText,
-          userId,
           sessionId,
           modelId,
-          promptName,
-          promptVersion,
           totalTokens,
           usage,
           cost,
           thumbsUpCount,
-          thumbsDownCount,
-          groupId,
-          List.copyOf(labels));
+          thumbsDownCount);
     }
   }
 }

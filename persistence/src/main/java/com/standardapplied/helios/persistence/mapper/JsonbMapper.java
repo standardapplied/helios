@@ -7,7 +7,6 @@ package com.standardapplied.helios.persistence.mapper;
 
 import com.standardapplied.helios.core.common.Strings;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -102,25 +101,19 @@ public final class JsonbMapper {
     }
   }
 
-  private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
-
-  /** Serializes a list of strings to a JSON array string suitable for JSONB columns. */
-  public static String listToJsonb(List<String> list) {
-    if (list == null || list.isEmpty()) {
-      return "[]";
-    }
-    return MAPPER.writeValueAsString(list);
-  }
-
-  /** Deserializes a JSONB string to a list of strings. */
-  public static List<String> listFromJsonb(String json) {
-    if (Strings.isBlank(json) || "[]".equals(json)) {
-      return List.of();
-    }
+  /**
+   * The {@code content} of the first part of the first message in a {@code gen_ai.*.messages} JSON
+   * array, or null when there is none.
+   *
+   * @param messages the JSON array; non-null
+   * @throws IllegalArgumentException if {@code messages} is not JSON
+   */
+  public static String messageText(String messages) {
     try {
-      return MAPPER.readValue(json, STRING_LIST_TYPE);
+      var content = MAPPER.readTree(messages).path(0).path("parts").path(0).path("content");
+      return content.isString() ? content.stringValue() : null;
     } catch (Exception e) {
-      throw new IllegalArgumentException("Failed to deserialize labels from JSON: " + json, e);
+      throw new IllegalArgumentException("Failed to read messages from JSON", e);
     }
   }
 }

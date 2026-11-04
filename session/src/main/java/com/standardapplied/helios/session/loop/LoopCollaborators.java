@@ -32,6 +32,7 @@ import java.util.function.Function;
  * @param hookContextFactory builds the {@link HookContext} of a hook fire or compaction from the
  *     session state
  * @param clock supplies event timestamps
+ * @param spans the spans the run's model attempts and tool calls run under
  */
 public record LoopCollaborators(
     HookRegistry hooks,
@@ -41,7 +42,8 @@ public record LoopCollaborators(
     SteeringQueue steeringQueue,
     Consumer<QueryEvent> eventSink,
     Function<SessionState, HookContext> hookContextFactory,
-    InstantSource clock) {
+    InstantSource clock,
+    StepSpans spans) {
 
   /** The session's secret registry, the one its tool dispatch hands every tool. */
   SecretRegistry secrets() {

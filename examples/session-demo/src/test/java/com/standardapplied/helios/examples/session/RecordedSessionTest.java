@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.AnthropicModelId;
@@ -23,8 +24,6 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
-import com.standardapplied.helios.core.trace.Trace;
-import com.standardapplied.helios.core.trace.TraceListener;
 import com.standardapplied.helios.gemini.GeminiModelId;
 import com.standardapplied.helios.gemini.GeminiProvider;
 import com.standardapplied.helios.session.AgentSession;
@@ -39,14 +38,16 @@ import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.SampleDocuments;
+import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -91,7 +92,7 @@ final class RecordedSessionTest {
 
   @Test
   void claudeProgressLoopSurfacesItsNotesAndRunsEveryToolCall() {
-    var replay = progressLoop(trace -> {});
+    var replay = progressLoop(OpenTelemetry.noop());
 
     var success = assertInstanceOf(ResultMessage.Success.class, replay.terminal());
     assertTrue(success.cost().microUsd() > 0);
@@ -110,21 +111,29 @@ final class RecordedSessionTest {
 
   @Test
   void claudeProgressLoopTracesTheCacheReadOfEachModelCall() {
-    var traces = new ArrayList<Trace>();
+    var capture = new SpanCapture();
 
-    var replay = progressLoop(traces::add);
+    var replay = progressLoop(capture.openTelemetry());
 
-    assertEquals(1, traces.size());
-    var trace = traces.getFirst();
-    var calls = trace.spans().stream().filter(span -> span.name().equals("model.call")).toList();
-    assertEquals(0, calls.get(0).usage().cacheReadInputTokens());
-    assertEquals(904, calls.get(1).usage().cacheReadInputTokens());
-    assertEquals(replay.terminal().usage(), trace.usage());
-    assertEquals(replay.terminal().cost(), trace.cost());
+    var calls = capture.starting("chat ");
+    var cacheRead = AttributeKey.longKey("gen_ai.usage.cache_read.input_tokens");
+    assertNull(calls.get(0).getAttributes().get(cacheRead));
+    assertEquals(904L, calls.get(1).getAttributes().get(cacheRead));
+    var usage = replay.terminal().usage();
+    var run = capture.run().getAttributes();
+    assertEquals(
+        (long) usage.inputTokens()
+            + usage.cacheCreationInputTokens()
+            + usage.cacheReadInputTokens(),
+        run.get(AttributeKey.longKey("gen_ai.usage.input_tokens")));
+    assertEquals((long) usage.cacheReadInputTokens(), run.get(cacheRead));
+    assertEquals(
+        replay.terminal().cost().microUsd(),
+        run.get(AttributeKey.longKey("helios.cost.micro_usd")));
   }
 
-  /** The recorded claude-opus-5-5 progress loop, its runs' traces handed to {@code listener}. */
-  private static Replay progressLoop(TraceListener listener) {
+  /** The recorded claude-opus-5-5 progress loop, its spans emitted through {@code tracing}. */
+  private static Replay progressLoop(OpenTelemetry tracing) {
     return replay(
         "anthropic/sessions/progress-loop.sse",
         uri ->
@@ -143,7 +152,7 @@ final class RecordedSessionTest {
                         search("search_profiles", "query", "location"),
                         search("get_profile", "id")))
                 .withCostCalculator(AnthropicPricing.calculator(CachePolicy.shortLived()))
-                .withTraceListener(listener));
+                .withOpenTelemetry(tracing));
   }
 
   @Test
