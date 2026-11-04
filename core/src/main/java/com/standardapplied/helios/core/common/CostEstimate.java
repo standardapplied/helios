@@ -27,6 +27,8 @@ public record CostEstimate(long microUsd) {
 
   private static final CostEstimate ZERO = new CostEstimate(0L);
 
+  private static final double MICRO_USD_BOUND = 0x1p63;
+
   /**
    * Canonical constructor.
    *
@@ -65,11 +67,28 @@ public record CostEstimate(long microUsd) {
    *
    * <p>Fractional micro-dollars are rounded half-up.
    *
-   * @param usd the dollar amount; must be non-negative
+   * @param usd the dollar amount; finite and non-negative
    * @return a {@code CostEstimate}
+   * @throws IllegalArgumentException if {@code usd} is {@code NaN}, infinite, negative, or its
+   *     micro-USD amount does not fit in a {@code long}
    */
   public static CostEstimate ofUsd(double usd) {
-    return ofMicroUsd(Math.round(usd * MICRO_USD_PER_USD));
+    return ofMicroUsd(toMicroUsd(usd));
+  }
+
+  /**
+   * Converts a dollar amount to micro-USD, rounding half-up.
+   *
+   * @throws IllegalArgumentException if {@code usd} is {@code NaN}, infinite, negative, or its
+   *     micro-USD amount does not fit in a {@code long}
+   */
+  static long toMicroUsd(double usd) {
+    var micro = usd * MICRO_USD_PER_USD;
+    if (!(usd >= 0.0 && micro < MICRO_USD_BOUND)) {
+      throw new IllegalArgumentException(
+          "USD amount must be finite, non-negative and fit in a long of micro-USD, got " + usd);
+    }
+    return Math.round(micro);
   }
 
   /**

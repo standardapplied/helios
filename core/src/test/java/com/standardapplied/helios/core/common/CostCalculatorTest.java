@@ -14,6 +14,8 @@ import com.standardapplied.helios.core.model.Response.Usage;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 final class CostCalculatorTest {
 
@@ -56,6 +58,22 @@ final class CostCalculatorTest {
     var p = Pricing.ofUsdPerMillion(3.0, 15.0);
     assertEquals(3_000_000L, p.inputMicroUsdPerMillion());
     assertEquals(15_000_000L, p.outputMicroUsdPerMillion());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1e-7, 1e300})
+  void pricingOfFactoriesRejectARateThatIsNotAFiniteNonNegativeLongOfMicroUsd(double rate) {
+    assertThrows(IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(rate, 1.0));
+    assertThrows(IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, rate));
+    assertThrows(
+        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(rate, 1.0, 1.0, 1.0));
+    assertThrows(
+        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, rate, 1.0, 1.0));
+    assertThrows(
+        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, 1.0, rate, 1.0));
+    assertThrows(
+        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, 1.0, 1.0, rate));
   }
 
   @Test
