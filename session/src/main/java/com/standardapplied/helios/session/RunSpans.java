@@ -262,26 +262,29 @@ final class RunSpans implements StepSpans {
 
     synchronized void end(
         SessionTotals totals, ResultMessage terminal, Failure failure, String output) {
-      if (model != null) {
-        failure.end(model);
+      try {
+        if (model != null) {
+          failure.end(model);
+        }
+        tools.forEach(
+            (callId, tool) -> {
+              if (!endedTools.contains(callId)) {
+                failure.end(tool);
+              }
+            });
+      } finally {
+        usage(span, totals.usage(), totals.cost());
+        if (terminal != null) {
+          span.setAttribute(TERMINAL, terminal.getClass().getSimpleName());
+        }
+        if (verbose && input != null) {
+          span.setAttribute(INPUT_MESSAGES, message("user", redacted(input)));
+        }
+        if (verbose && output != null) {
+          span.setAttribute(OUTPUT_MESSAGES, message("assistant", redacted(output)));
+        }
+        failure.end(span);
       }
-      tools.forEach(
-          (callId, tool) -> {
-            if (!endedTools.contains(callId)) {
-              failure.end(tool);
-            }
-          });
-      usage(span, totals.usage(), totals.cost());
-      if (terminal != null) {
-        span.setAttribute(TERMINAL, terminal.getClass().getSimpleName());
-      }
-      if (verbose && input != null) {
-        span.setAttribute(INPUT_MESSAGES, message("user", redacted(input)));
-      }
-      if (verbose && output != null) {
-        span.setAttribute(OUTPUT_MESSAGES, message("assistant", redacted(output)));
-      }
-      failure.end(span);
     }
 
     private SpanBuilder child(String name, SpanKind kind) {

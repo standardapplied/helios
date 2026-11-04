@@ -28,6 +28,10 @@ import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.sdk.trace.ReadWriteSpan;
+import io.opentelemetry.sdk.trace.ReadableSpan;
+import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import java.time.Instant;
 import java.util.List;
@@ -291,6 +295,32 @@ final class SessionSpanEndingsTest {
     assertNull(string(tool, "helios.tool.outcome"));
   }
 
+  @Test
+  void anErrorEndingAToolsOpenSpanStillEndsTheRunSpan() {
+    var failure = new HostFailure();
+    var ending = new AssertionError("span processor failed");
+    var failing = new SpanCapture(new FailingOnEnd("execute_tool fatal", ending));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(call("fatal", Map.of())).build();
+    var fatal =
+        EndingSessions.binding(
+            "fatal",
+            (arguments, context) -> {
+              throw failure;
+            });
+    try (var session =
+        AgentSession.open(
+            EndingSessions.options(model)
+                .withOpenTelemetry(failing.openTelemetry())
+                .withTool(fatal)
+                .build())) {
+      assertSame(failure, Await.failure("the result to fail", session.send("go")));
+    }
+
+    var run = failing.run();
+    assertEquals(Set.of(), failing.unended());
+    assertFailed(run, HostFailure.class.getName() + ": host failure", HostFailure.class.getName());
+  }
+
   @ParameterizedTest
   @CsvSource({"true, true", "false, true", "true, false", "false, false"})
   void aModelAttemptAHostErrorEndsFailsTheRunAndEndsTheAttemptWithTheRunsError(
@@ -345,6 +375,30 @@ final class SessionSpanEndingsTest {
     assertEquals(2, capture.starting("invoke_agent ").size());
     assertEquals(Set.of(), capture.unended());
     assertEquals(List.of("chat scripted", "invoke_agent helios"), capture.names().subList(0, 2));
+  }
+
+  /** A span processor that throws {@code error} once the span named {@code name} has ended. */
+  private record FailingOnEnd(String name, Error error) implements SpanProcessor {
+
+    @Override
+    public void onStart(Context parentContext, ReadWriteSpan span) {}
+
+    @Override
+    public boolean isStartRequired() {
+      return false;
+    }
+
+    @Override
+    public void onEnd(ReadableSpan span) {
+      if (span.getName().equals(name)) {
+        throw error;
+      }
+    }
+
+    @Override
+    public boolean isEndRequired() {
+      return true;
+    }
   }
 
   /** A host failure a hook, a tool or a model throws. */

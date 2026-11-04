@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS helios_spans (
     end_time    TIMESTAMPTZ,
     error       TEXT,
     attributes  JSONB           NOT NULL DEFAULT '{}',
+    total_tokens INT,
     input_tokens INT,
     output_tokens INT,
     cache_creation_tokens INT,

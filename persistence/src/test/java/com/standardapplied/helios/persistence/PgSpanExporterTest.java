@@ -88,7 +88,7 @@ final class PgSpanExporterTest {
             .put("gen_ai.request.model", "scripted")
             .put("gen_ai.provider.name", "testing")
             .put("helios.terminal", "Success")
-            .putAll(usage(180, 22, 30, 50, 202))
+            .putAll(usage(180, 22, 30, 50, 250))
             .build());
   }
 
@@ -104,7 +104,7 @@ final class PgSpanExporterTest {
             Attributes.builder()
                 .put(AttributeKey.stringArrayKey("gen_ai.response.finish_reasons"), List.of("stop"))
                 .put("helios.attempt", 1L)
-                .putAll(usage(180, 22, 30, 50, 202))
+                .putAll(usage(180, 22, 30, 50, 260))
                 .build());
     var tool =
         step(
@@ -136,8 +136,8 @@ final class PgSpanExporterTest {
     assertEquals(START, found.startTime());
     assertEquals(START.plusSeconds(1), found.endTime());
     assertTrue(found.success());
-    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
-    assertEquals(202, found.totalTokens());
+    assertEquals(new Usage(100, 22, 30, 50, 250), found.usage());
+    assertEquals(250, found.totalTokens());
     assertEquals(CostEstimate.ofMicroUsd(42), found.cost());
     assertEquals(
         Map.of(
@@ -154,7 +154,7 @@ final class PgSpanExporterTest {
         List.of("chat", "execute_tool", "hook"), found.spans().stream().map(Span::kind).toList());
     var chatRow = found.spans().getFirst();
     assertEquals("1000000000000001", chatRow.id());
-    assertEquals(Usage.of(100, 22, 30, 50), chatRow.usage());
+    assertEquals(new Usage(100, 22, 30, 50, 260), chatRow.usage());
     assertEquals(CostEstimate.ofMicroUsd(42), chatRow.cost());
     assertEquals(
         Map.of("gen_ai.response.finish_reasons", "[stop]", "helios.attempt", "1"),
@@ -292,6 +292,30 @@ final class PgSpanExporterTest {
 
     var thrown = logged.getFirst().getThrown();
     assertEquals("java.lang.IllegalStateException: dml failed", thrown.getMessage());
+  }
+
+  @Test
+  void aTransactionThatCannotOpenIsAFailureLoggedRedacted() {
+    var secrets = new SecretRegistry();
+    secrets.register("key", SECRET);
+    var unavailable =
+        new PgSpanExporter(
+            new PgConfig(
+                PgTestSupport.unavailable("connection to " + SECRET + " unavailable"),
+                null,
+                secrets.redactor()));
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(PgSpanExporter.class, logged)) {
+      assertFalse(unavailable.export(List.of(runSpan(RUN))).isSuccess());
+    }
+
+    var warning = logged.getFirst();
+    assertEquals(Level.WARNING, warning.getLevel());
+    assertTrue(warning.getMessage().contains(RUN), warning.getMessage());
+    assertEquals(
+        "java.lang.IllegalStateException: connection to <redacted:key> unavailable",
+        warning.getThrown().getMessage());
   }
 
   @Test

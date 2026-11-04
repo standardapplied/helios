@@ -98,16 +98,17 @@ public final class PgSpanExporter implements SpanExporter {
     if (helios.isEmpty()) {
       return CompletableResultCode.ofSuccess();
     }
-    var tx = config.dbClient().transaction();
+    DbTransaction tx = null;
     try {
-      helios.forEach(span -> write(tx, span));
+      tx = config.dbClient().transaction();
+      for (var span : helios) {
+        write(tx, span);
+      }
       tx.commit();
       return CompletableResultCode.ofSuccess();
     } catch (RuntimeException e) {
-      try {
-        tx.rollback();
-      } catch (RuntimeException rollbackFailure) {
-        e.addSuppressed(rollbackFailure);
+      if (tx != null) {
+        rollback(tx, e);
       }
       var runs = helios.stream().map(span -> span.getAttributes().get(RUN_ID)).distinct().toList();
       LOGGER.log(
@@ -116,6 +117,14 @@ public final class PgSpanExporter implements SpanExporter {
           SerializedError.redactedForLog(
               e, Objects.requireNonNullElse(config.redactor(), Redactor.of(Map.of()))));
       return CompletableResultCode.ofFailure();
+    }
+  }
+
+  private static void rollback(DbTransaction tx, RuntimeException failure) {
+    try {
+      tx.rollback();
+    } catch (RuntimeException rollbackFailure) {
+      failure.addSuppressed(rollbackFailure);
     }
   }
 
@@ -176,7 +185,9 @@ public final class PgSpanExporter implements SpanExporter {
     params.add(utc(span.getEndEpochNanos()));
     params.add(error(span));
     params.add(others(attributes, Set.of(OPERATION)));
-    UsageMapper.addParams(params, usage(attributes), cost(attributes));
+    var usage = usage(attributes);
+    params.add(usage != null ? usage.totalTokens() : null);
+    UsageMapper.addParams(params, usage, cost(attributes));
     return params;
   }
 
