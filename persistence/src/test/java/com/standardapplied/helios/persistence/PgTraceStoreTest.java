@@ -50,10 +50,10 @@ class PgTraceStoreTest {
   void aRunsSpansAreOrderedByStartTimeThenId() {
     var spans =
         List.of(
-            step("run-0", "00000000000000b2", "hook late", null, 3, Attributes.empty()),
+            step("run-0", "00000000000000a1", "hook late", null, 3, Attributes.empty()),
             step("run-0", "00000000000000b1", "hook tied", null, 2, Attributes.empty()),
             step("run-0", "00000000000000a9", "chat tied", "chat", 2, Attributes.empty()),
-            step("run-0", "00000000000000a1", "chat first", "chat", 1, Attributes.empty()),
+            step("run-0", "00000000000000c9", "chat first", "chat", 1, Attributes.empty()),
             step("run-other", "00000000000000c1", "chat other", "chat", 0, Attributes.empty()));
     assertTrue(exporter.export(spans).isSuccess());
     seed(0, "agent", "scripted");

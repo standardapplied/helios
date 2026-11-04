@@ -17,12 +17,10 @@ import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.TraceDetail;
+import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
-import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +37,8 @@ final class PgSessionTracingTest {
   private static final CostCalculator COSTS =
       CostCalculator.staticTable(Map.of("scripted", new Pricing(1_000_000, 2_000_000)));
 
-  private final InMemorySpanExporter memory = InMemorySpanExporter.create();
+  private final SpanCapture capture =
+      new SpanCapture(SimpleSpanProcessor.create(new PgSpanExporter(PgTestSupport.pgConfig())));
   private final PgTraceStore store = new PgTraceStore(PgTestSupport.pgConfig());
 
   @BeforeEach
@@ -48,12 +47,6 @@ final class PgSessionTracingTest {
   }
 
   private ResultMessage run(TraceDetail detail) {
-    var tracing =
-        SdkTracerProvider.builder()
-            .addSpanProcessor(
-                SimpleSpanProcessor.create(new PgSpanExporter(PgTestSupport.pgConfig())))
-            .addSpanProcessor(SimpleSpanProcessor.create(memory))
-            .build();
     var model =
         ScriptedModel.newBuilder()
             .withToolCallsTurn(Usage.of(100, 10), new ToolCall("c-noop", "noop", Map.of()))
@@ -76,7 +69,7 @@ final class PgSessionTracingTest {
             .withCostCalculator(COSTS)
             .withTool(noop)
             .withTraceDetail(detail)
-            .withOpenTelemetry(OpenTelemetrySdk.builder().setTracerProvider(tracing).build())
+            .withOpenTelemetry(capture.openTelemetry())
             .build();
     try (var session = AgentSession.open(options)) {
       return Await.value("the result", session.send("find a match"));
@@ -88,11 +81,7 @@ final class PgSessionTracingTest {
     var result = run(TraceDetail.STANDARD);
 
     var found = store.findById(result.runId());
-    var runSpan =
-        memory.getFinishedSpanItems().stream()
-            .filter(span -> span.getName().equals("invoke_agent matchmaking"))
-            .findFirst()
-            .orElseThrow();
+    var runSpan = capture.only("invoke_agent matchmaking");
     assertEquals("matchmaking", found.name());
     assertEquals(SID, found.sessionId());
     assertEquals("scripted", found.modelId());

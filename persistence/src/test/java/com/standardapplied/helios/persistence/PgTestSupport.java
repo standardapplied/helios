@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /** Shared PostgreSQL test container and Helidon DbClient setup. */
@@ -121,14 +122,22 @@ final class PgTestSupport {
    * rollbackFails}, and otherwise returns.
    */
   static DbClient failingWrites(boolean rollbackFails) {
+    return failingWrites(rollbackFails, new AtomicInteger());
+  }
+
+  /** {@link #failingWrites(boolean)}, counting each rollback in {@code rollbacks}. */
+  static DbClient failingWrites(boolean rollbackFails, AtomicInteger rollbacks) {
     var tx =
         (DbTransaction)
             Proxy.newProxyInstance(
                 DbTransaction.class.getClassLoader(),
                 new Class<?>[] {DbTransaction.class},
                 (proxy, method, args) -> {
-                  if (method.getName().equals("rollback") && !rollbackFails) {
-                    return null;
+                  if (method.getName().equals("rollback")) {
+                    rollbacks.incrementAndGet();
+                    if (!rollbackFails) {
+                      return null;
+                    }
                   }
                   throw new IllegalStateException(method.getName() + " failed");
                 });
