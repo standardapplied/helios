@@ -31,11 +31,14 @@ public class PgAnnotationStore {
     this.dbClient = config.dbClient();
   }
 
-  /** Stores an annotation, persisting the full record including {@code metadata}. */
+  /**
+   * Stores an annotation, persisting the full record including {@code metadata}.
+   *
+   * @return the stored row
+   */
   public Annotation storeAnnotation(Annotation annotation) {
     try {
-      dbClient.execute().dml(config.qualify(AnnotationSql.INSERT), annotationParams(annotation));
-      return annotation;
+      return written(AnnotationSql.INSERT, annotation);
     } catch (Exception e) {
       throw new PgException("Failed to store annotation: " + annotation.id(), e);
     }
@@ -46,11 +49,13 @@ public class PgAnnotationStore {
    * the annotation has an {@code authorId} and one already exists for the same {@code (subjectId,
    * facet, label, authorId)} key, the existing row is updated in place ({@code createdAt} is
    * preserved, {@code updatedAt} is advanced). Author-less annotations always insert.
+   *
+   * @return the stored row: on an update, the existing {@code id} and {@code createdAt} with the
+   *     new values and {@code updatedAt}
    */
   public Annotation upsertAnnotation(Annotation annotation) {
     try {
-      dbClient.execute().dml(config.qualify(AnnotationSql.UPSERT), annotationParams(annotation));
-      return annotation;
+      return written(AnnotationSql.UPSERT, annotation);
     } catch (Exception e) {
       throw new PgException("Failed to upsert annotation: " + annotation.id(), e);
     }
@@ -141,6 +146,11 @@ public class PgAnnotationStore {
     } catch (Exception e) {
       throw new PgException("Failed to list annotations", e);
     }
+  }
+
+  private Annotation written(String sql, Annotation annotation) {
+    return AnnotationMapper.map(
+        dbClient.execute().get(config.qualify(sql), annotationParams(annotation)).orElseThrow());
   }
 
   private static Object[] annotationParams(Annotation annotation) {
