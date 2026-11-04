@@ -30,7 +30,8 @@ import java.util.OptionalLong;
  *   <li>{@code maxTurns}: 100 — covers any practical multi-step task without sponsoring runaway
  *       loops.
  *   <li>{@code maxBudgetMicroUsd}: unset — opt in only; production deployments typically enforce
- *       budget in the control plane rather than the SDK.
+ *       budget in the control plane rather than the SDK. A budget needs a cost calculator: {@code
+ *       SessionOptions} refuses one with the default {@code CostCalculator.ZERO}.
  *   <li>{@code maxWallClock}: 1 hour — every long-running task we've shipped finished well inside
  *       this window.
  *   <li>{@code toolTimeoutDefault}: 2 minutes — slow enough for compile-and-run flows, fast enough
@@ -86,7 +87,8 @@ import java.util.OptionalLong;
  * @param maxTurns hard ceiling on a run's turns: each run runs at most this many turns, and ends in
  *     {@link ResultMessage.ErrorMaxTurns} when the last of them would continue; must be positive
  * @param maxBudgetMicroUsd optional spend ceiling in micro-USD; if present, must be strictly
- *     positive
+ *     positive, and the session's {@code SessionOptions.costCalculator} must not be {@code
+ *     CostCalculator.ZERO}
  * @param maxWallClock wall-clock ceiling from a run's start to its terminal state; must be non-null
  *     and strictly positive
  * @param toolTimeoutDefault default per-tool execution timeout; must be non-null and strictly
