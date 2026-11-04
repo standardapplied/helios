@@ -53,8 +53,8 @@ public final class TraceRollupSql {
       CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT) AS cache_read_tokens,
       CAST(COALESCE(SUM(total_tokens), 0) AS BIGINT) AS total_tokens,
       CAST(COALESCE(SUM(cost_micro_usd), 0) AS BIGINT) AS cost_micro_usd,
-      CAST(COALESCE(SUM(thumbs_up_count), 0) AS BIGINT) AS thumbs_up_count,
-      CAST(COALESCE(SUM(thumbs_down_count), 0) AS BIGINT) AS thumbs_down_count
+      CAST(COALESCE(SUM(feedback.up), 0) AS BIGINT) AS thumbs_up_count,
+      CAST(COALESCE(SUM(feedback.down), 0) AS BIGINT) AS thumbs_down_count
       """
           .formatted(DURATION_PERCENTILES);
 
@@ -99,7 +99,8 @@ public final class TraceRollupSql {
             + column
             + ",\n"
             + AGGREGATES
-            + "FROM %s.helios_traces\nWHERE "
+            + TraceSql.FROM_TRACES_WITH_FEEDBACK
+            + "WHERE "
             + where
             + "\nGROUP BY "
             + column

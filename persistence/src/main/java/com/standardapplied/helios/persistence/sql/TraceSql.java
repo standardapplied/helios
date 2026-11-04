@@ -17,6 +17,17 @@ public final class TraceSql {
           input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_micro_usd\
       """;
 
+  static final String FROM_TRACES_WITH_FEEDBACK =
+      """
+      FROM %s.helios_traces
+      CROSS JOIN LATERAL (
+          SELECT CAST(COUNT(*) FILTER (WHERE rating > 0) AS INT) AS up,
+              CAST(COUNT(*) FILTER (WHERE rating < 0) AS INT) AS down
+          FROM %s.helios_annotations
+          WHERE subject_id = helios_traces.id
+      ) feedback
+      """;
+
   public static final String INSERT =
       "INSERT INTO %s.helios_traces ("
           + COLUMNS
@@ -31,18 +42,18 @@ public final class TraceSql {
       "SELECT "
           + COLUMNS
           + """
-          , thumbs_up_count, thumbs_down_count
-          FROM %s.helios_traces
-          WHERE id = ?
-          """;
+          , feedback.up AS thumbs_up_count, feedback.down AS thumbs_down_count
+          """
+          + FROM_TRACES_WITH_FEEDBACK
+          + "WHERE id = ?\n";
 
   public static final String LIST_PREFIX =
       "SELECT "
           + COLUMNS
           + """
-          , thumbs_up_count, thumbs_down_count
-          FROM %s.helios_traces
-          """;
+          , feedback.up AS thumbs_up_count, feedback.down AS thumbs_down_count
+          """
+          + FROM_TRACES_WITH_FEEDBACK;
 
   public static final String LIST_SUFFIX =
       """

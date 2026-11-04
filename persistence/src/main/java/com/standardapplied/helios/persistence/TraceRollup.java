@@ -26,8 +26,8 @@ import java.util.Map;
  * @param cacheReadTokens summed cache-read input tokens
  * @param totalTokens summed trace-level token totals
  * @param costMicroUsd summed cost in micro-USD
- * @param thumbsUpCount summed positive feedback counts
- * @param thumbsDownCount summed negative feedback counts
+ * @param thumbsUpCount the group's run annotations with a positive rating, counted when read
+ * @param thumbsDownCount the group's run annotations with a negative rating, counted when read
  */
 public record TraceRollup(
     Map<String, String> key,

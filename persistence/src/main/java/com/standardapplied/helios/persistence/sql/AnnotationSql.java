@@ -17,8 +17,10 @@ public final class AnnotationSql {
   private static final String VALUES =
       "CAST(? AS UUID), ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?";
 
+  private static final String RETURNING = "RETURNING " + COLUMNS;
+
   public static final String INSERT =
-      "INSERT INTO %s.helios_annotations (" + COLUMNS + ")\nVALUES (" + VALUES + ")";
+      "INSERT INTO %s.helios_annotations (" + COLUMNS + ")\nVALUES (" + VALUES + ")\n" + RETURNING;
 
   public static final String UPSERT =
       "INSERT INTO %s.helios_annotations ("
@@ -34,7 +36,8 @@ public final class AnnotationSql {
               comment = EXCLUDED.comment,
               metadata = EXCLUDED.metadata,
               updated_at = EXCLUDED.updated_at
-          """;
+          """
+          + RETURNING;
 
   public static final String FIND_BY_SUBJECT =
       "SELECT "
