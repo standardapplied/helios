@@ -573,12 +573,28 @@ through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model 
 | `repl.InputBindings` | removed; seed per-session state with `JShellExecutionProvider.Builder.withStartupSnippet` |
 | `repl.SandboxBudgetExceededException` | removed; nothing threw it |
 | the `predict`, `submit`, `getInput`, `fetch` and `query` statics of `HostBridge` | removed; `HostBridge.__call`, which every synthesized host-function wrapper calls, stays. A custom host function may now be named `predict`, `submit`, `fetch`, `query` or `getInput` and gets a typed wrapper |
-| `HostFunctionRegistry.RESERVED_NAMES` held seven names | holds `__call` only |
+| `HostFunctionRegistry.RESERVED_NAMES` held seven names | removed, see the next entry |
 | `sandbox.ExecutionResult.submitted()`, `hasSubmittedValue()`, `success(String, Object)`, `Builder.withSubmitted(Object)`, and the canonical constructor's `submitted` component | removed: no snippet can submit. The execute reply no longer carries `submitted` |
 | `ReplConfig.maxOutputCharsToModel`, `DEFAULT_MAX_OUTPUT_CHARS_TO_MODEL`, `Builder.withMaxOutputCharsToModel(int)` and the canonical constructor's component | removed: only `CodeExecutionTool` read it |
 | `ReplSession.config()` | removed: only `CodeExecutionTool` read it |
 | `Tool.resultCompactor()`, `Tool.DEFAULT_RESULT_COMPACTOR`, `Tool.Builder.withResultCompactor(Function)` and the canonical constructor's `resultCompactor` component | removed: no Helios code read it, and context compaction summarises history without it. `Tool(name, description, parameters, executor)` is the canonical constructor |
 | `examples/codeact-demo`, `examples/rlm-demo` | removed |
+
+**A host-function name the sandbox cannot compile is refused where it is declared.** Each name
+used to be checked character by character only, so a keyword failed late, when the sandbox
+started, and a prelude helper or a `__` name failed silently: a host function named `print`
+replaced the helper, and one named `__call` was registered but never callable. Each case below
+now throws `IllegalArgumentException` naming the offending name.
+
+| 2.x | 3.0 |
+|---|---|
+| a `HostFunction` or `HostParameter` named after a Java keyword or literal (`int`, `class`, `_`, `true`, `null`, `goto`, `const`) was accepted, and `JvmSandbox.create` failed with `Sandbox rejected custom host-function wrappers` | thrown by the record's constructor: `Host function name must be a Java identifier, not a keyword, and not start with __: <name>` (`Host parameter name ...` for a parameter) |
+| a function or parameter name starting with `__` was accepted; a function was registered without a wrapper, and a parameter such as `__args` clashed with the wrapper's local | thrown by the constructor with the same message |
+| a function or parameter name with an identifier-ignorable character (`pr\u200Bint`) passed every check, then compiled as the name without it, so it could replace a prelude helper or clash with another parameter | thrown by the constructor: `Host function name must not contain identifier-ignorable characters: <name>` (`Host parameter name ...` for a parameter) |
+| a function named `yield` got a wrapper the model's unqualified call could not reach | thrown by the `HostFunction` constructor; a parameter may still be named `yield` |
+| two parameters of one `HostFunction` with the same name failed at sandbox start | thrown by the `HostFunction` constructor: `Host function <name> declares parameter <parameter> twice` |
+| a function named after a prelude helper (`print`, `println`, `printf`, `sum`, `sumInts`, `mean`, `max`, `min`, `join`, `filter`, `map`, `sorted`, `countBy`) replaced it | thrown by `HostFunctionRegistry.register`, which leaves the registry unchanged; the names are `HostFunctionRegistry.PRELUDE_HELPER_NAMES` |
+| `HostFunctionRegistry.RESERVED_NAMES` | removed with no replacement: no host function can carry a `__` name |
 
 **A typed `runBlocking` never returns `null`.** `AgentSession.runBlocking(message, schema)` on a
 run that ends as `Success` with a blank result (a model that ends its last turn with no text) now

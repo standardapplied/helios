@@ -612,6 +612,23 @@ class JvmSandboxTest {
   }
 
   @Test
+  void aParameterNamedYieldReachesTheHandlerAndItsResultReachesTheSnippet() {
+    var registry = new HostFunctionRegistry();
+    registry.register(
+        new HostFunction(
+            "harvest",
+            "Echoes the yield it was given.",
+            List.of(HostParameter.required("yield", ParameterType.STRING, "the crop's yield")),
+            params -> "harvested " + params.get("yield")));
+    try (var sandbox = JvmSandbox.create(END_TO_END, registry)) {
+      var result = sandbox.execute(ExecutionRequest.java("println(harvest(\"wheat\"));"));
+
+      assertEquals(0, result.exitCode(), "snippet failed; stderr was:\n" + result.stderr());
+      assertEquals("harvested wheat", result.stdout().strip());
+    }
+  }
+
+  @Test
   void endToEndSubprocessInvokesSynthesizedCustomHostFunction() {
     // The full Skill-host-function path under one test: register a custom HostFunction with
     // declared parameters, launch a subprocess, have it execute Java that calls the synthesized

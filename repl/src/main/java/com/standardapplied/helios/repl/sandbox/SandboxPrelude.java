@@ -8,7 +8,6 @@ package com.standardapplied.helios.repl.sandbox;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
-import java.util.Set;
 import java.util.stream.Collectors;
 import jdk.jshell.JShell;
 
@@ -20,8 +19,8 @@ import jdk.jshell.JShell;
  * operations as one-liners instead of full {@code Stream} chains.
  *
  * <p>On top of the static preamble, {@link #synthesizeCustomWrappers} generates typed JShell static
- * methods for every non-reserved {@link HostFunction} on the registry. A {@code HostFunction} named
- * {@code marketQuote} with a {@code ticker: STRING} parameter becomes callable as {@code
+ * methods for every {@link HostFunction} on the registry. A {@code HostFunction} named {@code
+ * marketQuote} with a {@code ticker: STRING} parameter becomes callable as {@code
  * marketQuote("AAPL")} from emitted Java code; the synthesized body packs arguments into a {@code
  * Map<String, Object>} keyed by parameter name and dispatches via {@code HostBridge.__call}.
  *
@@ -29,12 +28,6 @@ import jdk.jshell.JShell;
  * call.
  */
 public final class SandboxPrelude {
-
-  /**
-   * Function names skipped by the synthesizer: {@link HostFunctionRegistry#RESERVED_NAMES}, whose
-   * signatures {@code HostBridge} owns. Synthesizing a wrapper for these would shadow it.
-   */
-  static final Set<String> RESERVED_NAMES = HostFunctionRegistry.RESERVED_NAMES;
 
   private SandboxPrelude() {}
 
@@ -107,8 +100,8 @@ public final class SandboxPrelude {
   }
 
   /**
-   * Synthesize JShell static method wrappers for every non-reserved host function on the registry.
-   * Returns an empty string when nothing needs synthesizing (registry empty or only built-ins).
+   * Synthesize JShell static method wrappers for every host function on the registry. Returns an
+   * empty string when the registry is empty.
    *
    * <p>Per function:
    *
@@ -131,9 +124,6 @@ public final class SandboxPrelude {
     }
     var sb = new StringBuilder();
     for (var fn : registry.all()) {
-      if (RESERVED_NAMES.contains(fn.name())) {
-        continue;
-      }
       sb.append(synthesizeOne(fn));
       sb.append('\n');
     }
@@ -220,7 +210,7 @@ public final class SandboxPrelude {
 
   /**
    * Model-facing summary of the synthesized custom-host-function wrappers. Returns an empty string
-   * when the registry has no non-reserved functions. Meant for a system prompt, right after {@link
+   * when the registry has no functions. Meant for a system prompt, right after {@link
    * #modelFacingSummary()}, so the LLM sees the full sandbox surface.
    *
    * @param registry the host function registry whose wrappers will be synthesized
@@ -232,9 +222,6 @@ public final class SandboxPrelude {
     }
     var lines = new StringBuilder();
     for (var fn : registry.all()) {
-      if (RESERVED_NAMES.contains(fn.name())) {
-        continue;
-      }
       lines.append("  - ").append(formatSignature(fn)).append('\n');
       if (!fn.description().isBlank()) {
         lines.append("      ").append(fn.description()).append('\n');

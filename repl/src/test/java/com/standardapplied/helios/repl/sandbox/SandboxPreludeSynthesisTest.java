@@ -13,11 +13,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import com.standardapplied.helios.repl.host.HostParameter;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 import jdk.jshell.JShell;
 import jdk.jshell.Snippet;
 import org.junit.jupiter.api.Test;
@@ -27,13 +23,6 @@ class SandboxPreludeSynthesisTest {
   @Test
   void synthesizeReturnsEmptyWhenRegistryIsEmpty() {
     var registry = new HostFunctionRegistry();
-    assertEquals("", SandboxPrelude.synthesizeCustomWrappers(registry));
-  }
-
-  @Test
-  void synthesizeReturnsEmptyWhenRegistryHasOnlyReservedNames() {
-    var registry = new HostFunctionRegistry();
-    registry.register(new HostFunction("__call", "x", p -> ""));
     assertEquals("", SandboxPrelude.synthesizeCustomWrappers(registry));
   }
 
@@ -124,21 +113,6 @@ class SandboxPreludeSynthesisTest {
   }
 
   @Test
-  void synthesizeRegistrySkipsReservedNames() {
-    var registry = new HostFunctionRegistry();
-    registry.register(
-        new HostFunction(
-            "marketQuote",
-            "x",
-            List.of(HostParameter.required("ticker", ParameterType.STRING, "x")),
-            p -> ""));
-    registry.register(new HostFunction("__call", "x", p -> ""));
-    var snippet = SandboxPrelude.synthesizeCustomWrappers(registry);
-    assertFalse(snippet.contains("static Object __call("), "__call is reserved");
-    assertTrue(snippet.contains("static Object marketQuote("));
-  }
-
-  @Test
   void synthesizedSnippetCompilesInJShell() {
     // The strongest signal: feed the synthesized snippet to a real JShell instance and verify
     // every event is VALID. Catches typos and Java-syntax bugs in the codegen.
@@ -218,10 +192,6 @@ class SandboxPreludeSynthesisTest {
     var registry = new HostFunctionRegistry();
     assertEquals("", SandboxPrelude.customWrapperSummary(registry));
     assertEquals("", SandboxPrelude.customWrapperSummary(null));
-
-    var only = new HostFunctionRegistry();
-    only.register(new HostFunction("__call", "x", p -> ""));
-    assertEquals("", SandboxPrelude.customWrapperSummary(only));
   }
 
   @Test
@@ -238,16 +208,6 @@ class SandboxPreludeSynthesisTest {
     assertTrue(summary.contains("marketQuote(java.lang.String ticker)"));
     assertTrue(summary.contains("Get a current quote"));
     assertTrue(summary.contains("ticker (string) — Ticker symbol"));
-  }
-
-  @Test
-  void reservedNamesAreExactlyTheHostBridgeMethods() {
-    var bridgeMethods =
-        Arrays.stream(HostBridge.class.getDeclaredMethods())
-            .filter(m -> Modifier.isPublic(m.getModifiers()) && Modifier.isStatic(m.getModifiers()))
-            .map(Method::getName)
-            .collect(Collectors.toSet());
-    assertEquals(bridgeMethods, SandboxPrelude.RESERVED_NAMES);
   }
 
   @Test
