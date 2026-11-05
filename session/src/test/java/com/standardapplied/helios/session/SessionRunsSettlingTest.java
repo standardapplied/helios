@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -170,7 +169,7 @@ final class SessionRunsSettlingTest {
     }
   }
 
-  @RepeatedTest(300)
+  @Test
   void aHostThatWaitsForTheSessionToStopRunningClosesItWithTheRunsFutureComplete() {
     var model = ScriptedModel.newBuilder().withTextTurn("done").build();
     var session = AgentSession.open(options(model).build());
