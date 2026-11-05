@@ -484,4 +484,74 @@ final class WorkspaceRootTest {
       assertThrows(WorkspaceRoot.WorkspaceEscapeException.class, () -> trusted.resolveSafe(probe));
     }
   }
+
+  @ParameterizedTest(name = "strict {0}")
+  @ValueSource(booleans = {true, false})
+  void renameReplacesTheTargetWithTheSource(boolean strict, @TempDir Path tmp) throws IOException {
+    var ws = new WorkspaceRoot(tmp, strict);
+    var source = ws.resolveSafe("source.txt");
+    var target = ws.resolveSafe("target.txt");
+    Files.writeString(source, "new", StandardCharsets.UTF_8);
+    Files.writeString(target, "old", StandardCharsets.UTF_8);
+    ws.rename(source, target);
+    assertEquals("new", Files.readString(target, StandardCharsets.UTF_8));
+    assertFalse(Files.exists(source));
+  }
+
+  @ParameterizedTest(name = "strict {0}")
+  @ValueSource(booleans = {true, false})
+  void renameRefusesNamesInDifferentDirectories(boolean strict, @TempDir Path tmp)
+      throws IOException {
+    var ws = new WorkspaceRoot(tmp, strict);
+    Files.createDirectories(ws.root().resolve("sub"));
+    var source = ws.resolveSafe("source.txt");
+    Files.writeString(source, "new", StandardCharsets.UTF_8);
+    var elsewhere = ws.resolveSafe("sub/target.txt");
+    assertThrows(IllegalArgumentException.class, () -> ws.rename(source, elsewhere));
+    assertThrows(
+        IllegalArgumentException.class, () -> ws.rename(source, ws.root().resolve("./target.txt")));
+    assertEquals("new", Files.readString(source, StandardCharsets.UTF_8));
+    assertFalse(Files.exists(elsewhere));
+  }
+
+  @Test
+  void renameRefusesTheFilesystemRoot() {
+    var ws = WorkspaceRoot.of(Path.of("/"));
+    assertThrows(IllegalArgumentException.class, () -> ws.rename(Path.of("/"), Path.of("/")));
+  }
+
+  @ParameterizedTest(name = "strict {0}")
+  @ValueSource(booleans = {true, false})
+  void renameMovesOnlyARegularFileAndOnlyOverAFile(boolean strict, @TempDir Path tmp)
+      throws IOException {
+    var ws = new WorkspaceRoot(tmp, strict);
+    var directory = Files.createDirectories(ws.root().resolve("directory"));
+    Files.writeString(directory.resolve("kept.txt"), "kept", StandardCharsets.UTF_8);
+    var file = ws.resolveSafe("file.txt");
+    Files.writeString(file, "file", StandardCharsets.UTF_8);
+    var notRegular = assertThrows(IOException.class, () -> ws.rename(directory, file));
+    assertTrue(notRegular.getMessage().contains("not a regular file"), notRegular.getMessage());
+    assertThrows(IOException.class, () -> ws.rename(file, directory));
+    assertEquals("file", Files.readString(file, StandardCharsets.UTF_8));
+    assertEquals("kept", Files.readString(directory.resolve("kept.txt"), StandardCharsets.UTF_8));
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void renameReplacesASymlinkPlantedAtTheTargetWithoutFollowingIt(@TempDir Path tmp)
+      throws IOException {
+    var root = Files.createDirectory(tmp.resolve("ws"));
+    var sentinel = tmp.resolve("sentinel.txt");
+    Files.writeString(sentinel, "SENTINEL", StandardCharsets.UTF_8);
+    var ws = WorkspaceRoot.of(root);
+    var source = ws.resolveSafe("source.txt");
+    Files.writeString(source, "new", StandardCharsets.UTF_8);
+    var target = ws.resolveSafe("target.txt");
+    Files.createSymbolicLink(target, sentinel);
+    ws.rename(source, target);
+    assertTrue(ws.attributes(target).isRegularFile());
+    assertEquals("new", Files.readString(target, StandardCharsets.UTF_8));
+    assertEquals("SENTINEL", Files.readString(sentinel, StandardCharsets.UTF_8));
+    assertFalse(Files.exists(source));
+  }
 }

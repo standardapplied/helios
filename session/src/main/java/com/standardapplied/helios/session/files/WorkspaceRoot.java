@@ -18,6 +18,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayDeque;
@@ -46,9 +47,9 @@ import java.util.Objects;
  * <p>Strict I/O descends directory descriptors with no-follow opens, including the ancestors of the
  * configured root. Files are pinned for metadata inspection before regular-file I/O, so replacing
  * either an ancestor or a leaf with a symlink, FIFO or device cannot redirect or block an open.
- * Directory creation and deletion are also descriptor-relative. A descriptor continues to refer to
- * the entry it opened if that entry is subsequently renamed; this is confinement, not a filesystem
- * snapshot or protection against in-place edits by another writer.
+ * Directory creation, deletion and renaming are also descriptor-relative. A descriptor continues to
+ * refer to the entry it opened if that entry is subsequently renamed; this is confinement, not a
+ * filesystem snapshot or protection against in-place edits by another writer.
  *
  * <p>Strict mode requires Linux x86-64/AArch64, the default filesystem, mounted {@code
  * /proc/self/fd} and explicit native access: {@code
@@ -413,6 +414,35 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
         throw new IOException("refusing to delete a directory: " + resolved);
       }
       Files.delete(resolved);
+    }
+  }
+
+  /**
+   * Move the regular file at {@code source} over {@code target}, replacing it atomically: a reader
+   * opens either the old target or the new file, never neither. Strict mode renames both names
+   * relative to one pinned descriptor of their parent, so a symlink at either name is moved or
+   * replaced, never followed.
+   *
+   * @param source a resolved regular-file path
+   * @param target a resolved path in the same directory as {@code source}
+   * @throws IllegalArgumentException if either path is not resolved or they have different parents
+   * @throws IOException if {@code source} is not a regular file or the rename fails
+   */
+  public void rename(Path source, Path target) throws IOException {
+    requireResolved(source);
+    requireResolved(target);
+    var parent = source.getParent();
+    if (parent == null || !parent.equals(target.getParent())) {
+      throw new IllegalArgumentException(
+          "rename requires one parent directory: " + source + " -> " + target);
+    }
+    if (!attributes(source).isRegularFile()) {
+      throw new IOException("rename source is not a regular file: " + source);
+    }
+    if (confineSymlinks) {
+      LinuxFiles.rename(source, target);
+    } else {
+      Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
     }
   }
 

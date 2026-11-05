@@ -170,6 +170,12 @@ reserved for Helios in every workspace, with or without a memory backend.
 | `Read`/`LS`/`Glob`/`Grep` could read `<workspace>/.agent/memory`, so `MemoryRead` rules did not protect it | those paths are refused with `path is in the memory store; use MemoryRead: <path>` and walks skip the store |
 | `FileSystemMemoryBackend.STORAGE_SUBDIR` | `WorkspaceRoot.MEMORY_STORE` |
 
+**Memory files are capped at 1 MiB.** `FileSystemMemoryBackend.MAX_FILE_BYTES` (1,048,576) bounds
+every memory file in both directions. `view`, `strReplace` and `insert` on a larger file fail with
+`memory entry exceeds 1048576 bytes: <path>` without reading it; `create`, `strReplace` and `insert`
+refuse content whose UTF-8 encoding is larger before anything is written. Before, a read had no
+limit.
+
 **Core cleanup: one Anthropic price rule, one JSON adapter type, no `core.runtime`.**
 `AnthropicPricing` is the one Anthropic price rule; core's helpers assumed a 0.10× cache read that
 Fable 5.1 and Opus 5.5 do not use. `core.runtime` shared its name with the `helios-runtime`
@@ -1429,6 +1435,14 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Fixed
 
+- **A memory update cut off mid-write no longer truncates the file.** `strReplace` and `insert`
+  rewrote the file in place, so a process killed, or a full disk, between the truncate and the last
+  byte left it short or empty, silently. They now write a temporary sibling
+  (`.<name>.<random>.tmp`, created exclusively) and rename it over the file, so a reader sees the
+  old or the new content; a failed write deletes the sibling and the file keeps its content. The
+  rename is the new `WorkspaceRoot.rename(source, target)`, which in strict mode renames both names
+  relative to one pinned descriptor of their shared parent (`renameat`), so a symlink planted at
+  either name is never followed.
 - **A Gemini stream that Gemini's recitation filter stops mid-response ends with `CONTENT_FILTER`
   and Gemini's message** (`refusal.explanation`, `refusal.category` `recitation`), instead of
   being retried twice and ending in `ErrorTransientStream`. Any other bare error line Gemini ends a
