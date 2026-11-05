@@ -12,7 +12,6 @@ import java.nio.CharBuffer;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -41,16 +40,25 @@ import java.util.Objects;
  *
  * <p>Content is strict UTF-8: a file that is not valid UTF-8 fails to read rather than being
  * silently rewritten with replacement characters, and content that cannot be encoded (unpaired
- * surrogates) is rejected before the target is opened, so an existing entry is never truncated.
+ * surrogates) is rejected before the target is opened, so an existing entry is never truncated. A
+ * file is at most {@link #MAX_FILE_BYTES}: a larger one fails to read, and content that would
+ * encode larger is rejected before anything is written.
+ *
+ * <p>An update replaces the file atomically, so a reader sees the old or the new content, never a
+ * part. There is no {@code fsync}, so a power loss can lose the latest update, and two backends on
+ * one file are last-writer-wins.
  */
 public final class FileSystemMemoryBackend implements MemoryBackend {
+
+  /** The largest memory file, in bytes, the backend reads or writes: 1 MiB. */
+  public static final int MAX_FILE_BYTES = 1_048_576;
 
   private final WorkspaceRoot workspace;
   private final MemoryFiles files;
 
   private FileSystemMemoryBackend(WorkspaceRoot workspace) {
     this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
-    this.files = new MemoryFiles(workspace, WorkspaceRoot.MEMORY_STORE);
+    this.files = new MemoryFiles(workspace);
   }
 
   /**
@@ -102,7 +110,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     } catch (NoSuchFileException missing) {
     }
     files.createDirectories(resolved.getParent());
-    files.write(resolved, bytes, StandardOpenOption.CREATE_NEW);
+    files.create(resolved, bytes);
   }
 
   @Override
@@ -127,7 +135,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     }
     var updated =
         content.substring(0, first) + newString + content.substring(first + oldString.length());
-    files.write(resolved, encode(updated), StandardOpenOption.TRUNCATE_EXISTING);
+    files.replace(resolved, encode(updated));
   }
 
   @Override
@@ -155,7 +163,7 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
     if (existing.endsWith("\n") || existing.isEmpty()) {
       rebuilt = rebuilt + "\n";
     }
-    files.write(resolved, encode(rebuilt), StandardOpenOption.TRUNCATE_EXISTING);
+    files.replace(resolved, encode(rebuilt));
   }
 
   @Override
@@ -169,6 +177,9 @@ public final class FileSystemMemoryBackend implements MemoryBackend {
 
   private static byte[] encode(String content) throws IOException {
     var encoded = UTF_8.newEncoder().encode(CharBuffer.wrap(content));
+    if (encoded.remaining() > MAX_FILE_BYTES) {
+      throw new IOException("memory content exceeds " + MAX_FILE_BYTES + " bytes");
+    }
     var bytes = new byte[encoded.remaining()];
     encoded.get(bytes);
     return bytes;

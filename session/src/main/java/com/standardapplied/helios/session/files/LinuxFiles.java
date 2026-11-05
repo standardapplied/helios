@@ -111,6 +111,12 @@ final class LinuxFiles {
     }
   }
 
+  static void rename(Path source, Path target) throws IOException {
+    try (var parent = directory(source.getParent())) {
+      parent.rename(source.getFileName().toString(), target.getFileName().toString());
+    }
+  }
+
   static Handle pin(Path path) throws IOException {
     return openEntry(path, false, false);
   }

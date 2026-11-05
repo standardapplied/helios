@@ -16,10 +16,10 @@ import java.util.Objects;
 
 /**
  * A pinned Linux file descriptor: the entry it opened stays the entry it refers to, whatever
- * happens to the name afterwards. Children are opened, created and unlinked relative to it, and its
- * metadata and content are reached through the kernel-owned {@code /proc/self/fd} name, in which no
- * model-controlled component participates. {@link PinnedInput} and {@link PinnedOutput} are the
- * streams that hold a handle open for as long as they are.
+ * happens to the name afterwards. Children are opened, created, renamed and unlinked relative to
+ * it, and its metadata and content are reached through the kernel-owned {@code /proc/self/fd} name,
+ * in which no model-controlled component participates. {@link PinnedInput} and {@link PinnedOutput}
+ * are the streams that hold a handle open for as long as they are.
  */
 final class Handle implements AutoCloseable {
   private int fd;
@@ -44,6 +44,10 @@ final class Handle implements AutoCloseable {
 
   void unlink(String name) throws IOException {
     LinuxSyscalls.unlinkAt(fd, name);
+  }
+
+  void rename(String source, String target) throws IOException {
+    LinuxSyscalls.renameAt(fd, source, target);
   }
 
   Path procPath() throws IOException {

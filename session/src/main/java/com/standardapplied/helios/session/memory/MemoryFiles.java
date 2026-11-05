@@ -4,15 +4,17 @@
  */
 package com.standardapplied.helios.session.memory;
 
+import static com.standardapplied.helios.session.memory.FileSystemMemoryBackend.MAX_FILE_BYTES;
 import static com.standardapplied.helios.session.memory.MemoryBackend.PREFIX;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.standardapplied.helios.session.files.WorkspaceRoot;
+import java.io.Closeable;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.file.FileVisitResult;
 import java.nio.file.NoSuchFileException;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
@@ -21,22 +23,25 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Memory's confinement boundary. Maps a {@code /memories/} path to its on-disk location under
  * {@code <workspace>/.agent/memory}, requiring the canonical location to equal the lexical one so
  * no symlink below the memory root is ever traversed, and performs every read, write, creation,
  * deletion and listing through a strict {@link WorkspaceRoot}, even when the workspace it was given
- * is in trusted mode.
+ * is in trusted mode. An entry is replaced through a temporary sibling renamed over it.
  */
 final class MemoryFiles {
+
+  private static final int TEMPORARY_NAME_CODE_POINTS = 48;
 
   private final WorkspaceRoot files;
   private final Path root;
 
-  MemoryFiles(WorkspaceRoot workspace, String storageSubdir) {
+  MemoryFiles(WorkspaceRoot workspace) {
     this.files = workspace.confineSymlinks() ? workspace : WorkspaceRoot.of(workspace.root());
-    this.root = workspace.root().resolve(storageSubdir).normalize();
+    this.root = workspace.root().resolve(WorkspaceRoot.MEMORY_STORE).normalize();
   }
 
   Path root() {
@@ -108,7 +113,8 @@ final class MemoryFiles {
    * @param resolved its on-disk path
    * @return the entry's content
    * @throws NoSuchFileException naming {@code path} if nothing exists there
-   * @throws IOException if the entry is not a regular file, is not valid UTF-8, or cannot be read
+   * @throws IOException if the entry is not a regular file, exceeds {@link
+   *     FileSystemMemoryBackend#MAX_FILE_BYTES}, is not valid UTF-8, or cannot be read
    */
   String read(String path, Path resolved) throws IOException {
     BasicFileAttributes attrs;
@@ -120,15 +126,52 @@ final class MemoryFiles {
     if (!attrs.isRegularFile()) {
       throw new IOException("memory entry is not a regular file: " + path);
     }
-    try (var in = files.newInputStream(resolved)) {
+    if (attrs.size() > MAX_FILE_BYTES) {
+      throw new IOException("memory entry exceeds " + MAX_FILE_BYTES + " bytes: " + path);
+    }
+    try (var in = files.newInputStream(resolved, MAX_FILE_BYTES)) {
       return UTF_8.newDecoder().decode(ByteBuffer.wrap(in.readAllBytes())).toString();
     }
   }
 
-  void write(Path resolved, byte[] bytes, OpenOption mode) throws IOException {
-    try (var out = files.newOutputStream(resolved, mode, StandardOpenOption.WRITE)) {
+  void create(Path resolved, byte[] bytes) throws IOException {
+    try (var out = createNew(resolved)) {
       out.write(bytes);
     }
+  }
+
+  /**
+   * Replace an entry's content: {@code bytes} go to a new temporary sibling, which is then renamed
+   * over the entry. If either step fails, the sibling is deleted and the entry keeps its content.
+   */
+  void replace(Path resolved, byte[] bytes) throws IOException {
+    var temporary = resolved.resolveSibling(temporaryName(resolved.getFileName().toString()));
+    var out = createNew(temporary);
+    try {
+      try (out) {
+        out.write(bytes);
+      }
+      files.rename(temporary, resolved);
+    } catch (Throwable failure) {
+      try (Closeable discard = () -> files.deleteFile(temporary)) {
+        throw failure;
+      }
+    }
+  }
+
+  /**
+   * {@code .<name>.<random>.tmp}, with {@code name} cut to {@value #TEMPORARY_NAME_CODE_POINTS}
+   * code points so the result fits a 255-byte file name whatever the entry's name.
+   */
+  private static String temporaryName(String name) {
+    var kept =
+        name.offsetByCodePoints(
+            0, Math.min(TEMPORARY_NAME_CODE_POINTS, name.codePointCount(0, name.length())));
+    return "." + name.substring(0, kept) + "." + UUID.randomUUID() + ".tmp";
+  }
+
+  private OutputStream createNew(Path resolved) throws IOException {
+    return files.newOutputStream(resolved, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
   }
 
   BasicFileAttributes attributes(Path resolved) throws IOException {

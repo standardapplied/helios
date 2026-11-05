@@ -26,10 +26,10 @@ import java.util.Set;
 
 /**
  * The Linux descriptor-relative system calls strict workspace I/O is built on — {@code openat},
- * {@code mkdirat}, {@code unlinkat} and {@code close} through the foreign-function API — with the
- * flag values of the supported architectures and the mapping of {@code errno} to the {@link
- * java.nio.file} exception a caller expects. Owns the platform and native-access requirement, which
- * fails closed everywhere else.
+ * {@code mkdirat}, {@code unlinkat}, {@code renameat} and {@code close} through the
+ * foreign-function API — with the flag values of the supported architectures and the mapping of
+ * {@code errno} to the {@link java.nio.file} exception a caller expects. Owns the platform and
+ * native-access requirement, which fails closed everywhere else.
  */
 final class LinuxSyscalls {
   static final int AT_FDCWD = -100;
@@ -85,6 +85,23 @@ final class LinuxSyscalls {
 
   static void unlinkAt(int parent, String name) throws IOException {
     callAt(Native.UNLINKAT, parent, name, 0, "unlinkat");
+  }
+
+  static void renameAt(int parent, String source, String target) throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var state = arena.allocate(Native.STATE);
+      var from = arena.allocateFrom(source);
+      var to = arena.allocateFrom(target);
+      int result;
+      try {
+        result = (int) Native.RENAMEAT.invokeExact(state, parent, from, parent, to);
+      } catch (Throwable failure) {
+        throw linkageFailure(failure);
+      }
+      if (result < 0) {
+        throw error(state, "renameat", source);
+      }
+    }
   }
 
   static void close(int fd) throws IOException {
@@ -153,6 +170,11 @@ final class LinuxSyscalls {
             Linker.Option.firstVariadicArg(3));
     static final MethodHandle MKDIRAT = at("mkdirat");
     static final MethodHandle UNLINKAT = at("unlinkat");
+    static final MethodHandle RENAMEAT =
+        LINKER.downcallHandle(
+            LINKER.defaultLookup().find("renameat").orElseThrow(),
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS),
+            Linker.Option.captureCallState("errno"));
     static final MethodHandle CLOSE =
         LINKER.downcallHandle(
             LINKER.defaultLookup().find("close").orElseThrow(),
