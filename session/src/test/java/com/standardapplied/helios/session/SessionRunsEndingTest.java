@@ -64,6 +64,28 @@ final class SessionRunsEndingTest {
   }
 
   @Test
+  void anInterruptDuringACloseLeavesTheNextRunItKeepsFromStartingToTheClose() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build());
+    session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+    var closing = Thread.ofVirtual().start(session::close);
+    Await.until(
+        "the close to wait for the run", () -> closing.getState() == Thread.State.TIMED_WAITING);
+
+    session.interrupt();
+
+    assertFalse(next.isDone());
+    release.countDown();
+    Await.termination("the close", closing);
+    assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
   void aCloseReturnsOnlyOnceTheNextRunItKeptFromStartingIsSettled() {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var ending = new CountDownLatch(1);
