@@ -28,6 +28,7 @@ import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.SseEvents;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -370,6 +371,34 @@ class GeminiStreamParserTest {
     assertEquals(2, events.size());
     assertInstanceOf(StreamEvent.TextDelta.class, events.getFirst());
     assertBlocked(RECITATION_MESSAGE, events.getLast());
+  }
+
+  @Test
+  void aRecitationBlockKeepsTheUsageReportedBeforeIt() {
+    var checkpoint =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":7,"
+            + "\"total_output_tokens\":3}}\n\n";
+
+    var events = drain(checkpoint + MODEL_OUTPUT_START + HELLO_DELTA + bareError(RECITATION_ERROR));
+
+    var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
+    assertEquals(7, done.response().usage().inputTokens());
+    assertEquals(3, done.response().usage().outputTokens());
+  }
+
+  @Test
+  void anUpperCaseRecitationErrorIsABlockUnderATurkishDefaultLocale() {
+    var defaultLocale = Locale.getDefault();
+    Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+    try {
+      var events =
+          drain(MODEL_OUTPUT_START + HELLO_DELTA + bareError("{\"message\":\"RECITATION\"}"));
+
+      assertBlocked("RECITATION", events.getLast());
+    } finally {
+      Locale.setDefault(defaultLocale);
+    }
   }
 
   @ParameterizedTest
