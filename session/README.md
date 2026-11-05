@@ -292,9 +292,12 @@ provider signed against the old conversation (Claude Fable 5.1, Opus 5.5 and Son
 thinking block to its exact request prefix) is replayed, and no `tool_call` or `TOOL` message is
 left to pair: the result is valid for every provider. The agent continues from the summary alone,
 so the default prompt asks for the user's goal, the facts found, the decisions made, the open
-questions and the work left. It never compacts in the middle of a tool round. When the summary
-call throws, times out (default 60 s), is cancelled with the run or returns blank, the compactor
-returns the history unchanged — compaction failure never crashes the loop.
+questions and the work left. No file survives a compaction: the summary model sees each
+summarised inline file and file reference as a `{file <mimeType>}` or `{file <mimeType> <uri>}`
+marker, never its bytes, and the summary message ends with a list of them, in history order, as
+no longer available unless sent again. It never compacts in the middle of a tool round. When the
+summary call throws, times out (default 60 s), is cancelled with the run or returns blank, the
+compactor returns the history unchanged — compaction failure never crashes the loop.
 
 Three library-user tiers of control:
 

@@ -1405,6 +1405,9 @@ price table asked for a model it does not hold, both used to count the call as f
   gives a limit of 6,000 instead of the 180,000-token fallback, and a user cap of 50,000 next to it
   gives 6,000 instead of 50,000. Windows up to 80,000 keep more than before: 30,000 gives 22,500,
   not 10,000.
+- **A `SummarizingCompactor` summary lists the files it left behind**, each inline file by media
+  type and size and each file reference by media type and URI, after the model's words; the
+  summary model sees a `{file ...}` marker where each was, never its bytes.
 - **Cancelling a run stops a `SummarizingCompactor` summary call.** A cancel ends the wait as the
   timeout does: the worker is interrupted, no summary is returned and the history is unchanged. A
   run already cancelled starts no summary call.
