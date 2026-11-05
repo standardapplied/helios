@@ -9,20 +9,17 @@ import com.standardapplied.helios.session.tools.PathSpace;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayDeque;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.Objects;
 
 /**
@@ -46,9 +43,9 @@ import java.util.Objects;
  * <p>Strict I/O descends directory descriptors with no-follow opens, including the ancestors of the
  * configured root. Files are pinned for metadata inspection before regular-file I/O, so replacing
  * either an ancestor or a leaf with a symlink, FIFO or device cannot redirect or block an open.
- * Directory creation and deletion are also descriptor-relative. A descriptor continues to refer to
- * the entry it opened if that entry is subsequently renamed; this is confinement, not a filesystem
- * snapshot or protection against in-place edits by another writer.
+ * Directory creation, deletion and renaming are also descriptor-relative. A descriptor continues to
+ * refer to the entry it opened if that entry is subsequently renamed; this is confinement, not a
+ * filesystem snapshot or protection against in-place edits by another writer.
  *
  * <p>Strict mode requires Linux x86-64/AArch64, the default filesystem, mounted {@code
  * /proc/self/fd} and explicit native access: {@code
@@ -417,6 +414,33 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   }
 
   /**
+   * Move the entry at {@code source} over {@code target}, replacing it atomically: a reader opens
+   * either the old target or the new file, never neither. Strict mode renames both names relative
+   * to one pinned descriptor of their parent, so a symlink at either name is moved or replaced,
+   * never followed.
+   *
+   * @param source a resolved path
+   * @param target a resolved path in the same directory as {@code source}
+   * @throws IllegalArgumentException if either path is not resolved or they have different parents
+   * @throws IOException if the rename fails, such as a directory over a file or a file over a
+   *     directory
+   */
+  public void rename(Path source, Path target) throws IOException {
+    requireResolved(source);
+    requireResolved(target);
+    var parent = source.getParent();
+    if (parent == null || !parent.equals(target.getParent())) {
+      throw new IllegalArgumentException(
+          "rename requires one parent directory: " + source + " -> " + target);
+    }
+    if (confineSymlinks) {
+      LinuxFiles.rename(source, target);
+    } else {
+      Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+    }
+  }
+
+  /**
    * Enumerate a pinned directory, returning logical workspace paths rather than descriptor paths.
    *
    * @param resolved a resolved directory path
@@ -440,113 +464,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   public void walkFileTree(Path start, FileVisitor<? super Path> visitor) throws IOException {
     requireResolved(start);
     Objects.requireNonNull(visitor, "visitor must not be null");
-    try (var stack = new WalkStack()) {
-      var next = start;
-      while (next != null) {
-        var result = visit(next, visitor, stack);
-        if (result == FileVisitResult.TERMINATE) {
-          return;
-        }
-        next = stack.next(visitor, result);
-      }
-    }
-  }
-
-  private FileVisitResult visit(Path entry, FileVisitor<? super Path> visitor, WalkStack stack)
-      throws IOException {
-    BasicFileAttributes attrs;
-    try {
-      attrs = attributes(entry);
-    } catch (IOException failure) {
-      return visitor.visitFileFailed(entry, failure);
-    }
-    if (!attrs.isDirectory()) {
-      return visitor.visitFile(entry, attrs);
-    }
-    var result = visitor.preVisitDirectory(entry, attrs);
-    return result == FileVisitResult.CONTINUE ? push(entry, visitor, stack) : result;
-  }
-
-  private FileVisitResult push(Path directory, FileVisitor<? super Path> visitor, WalkStack stack)
-      throws IOException {
-    try {
-      stack.push(new WalkFrame(directory, newDirectoryStream(directory)));
-      return FileVisitResult.CONTINUE;
-    } catch (IOException failure) {
-      return visitor.visitFileFailed(directory, failure);
-    }
-  }
-
-  private static final class WalkFrame implements AutoCloseable {
-    final Path path;
-    final DirectoryStream<Path> stream;
-    final Iterator<Path> iterator;
-    boolean skipSiblings;
-
-    WalkFrame(Path path, DirectoryStream<Path> stream) throws IOException {
-      this.path = path;
-      this.stream = stream;
-      try {
-        this.iterator = stream.iterator();
-      } catch (Throwable failure) {
-        try (stream) {
-          throw failure;
-        }
-      }
-    }
-
-    @Override
-    public void close() throws IOException {
-      stream.close();
-    }
-  }
-
-  private static final class WalkStack implements AutoCloseable {
-    private final ArrayDeque<WalkFrame> frames = new ArrayDeque<>();
-
-    void push(WalkFrame frame) {
-      frames.push(frame);
-    }
-
-    Path next(FileVisitor<? super Path> visitor, FileVisitResult result) throws IOException {
-      while (!frames.isEmpty()) {
-        var frame = frames.peek();
-        frame.skipSiblings |= result == FileVisitResult.SKIP_SIBLINGS;
-        IOException failure = null;
-        try {
-          if (!frame.skipSiblings && frame.iterator.hasNext()) {
-            return frame.iterator.next();
-          }
-        } catch (DirectoryIteratorException e) {
-          failure = e.getCause();
-        }
-        frames.pop().close();
-        result = visitor.postVisitDirectory(frame.path, failure);
-        if (result == FileVisitResult.TERMINATE) {
-          return null;
-        }
-      }
-      return null;
-    }
-
-    @Override
-    public void close() throws IOException {
-      IOException failure = null;
-      while (!frames.isEmpty()) {
-        try {
-          frames.pop().close();
-        } catch (IOException e) {
-          if (failure == null) {
-            failure = e;
-          } else if (failure != e) {
-            failure.addSuppressed(e);
-          }
-        }
-      }
-      if (failure != null) {
-        throw failure;
-      }
-    }
+    FileTreeWalk.walk(this, start, visitor);
   }
 
   private Path requireResolved(Path resolved) {
