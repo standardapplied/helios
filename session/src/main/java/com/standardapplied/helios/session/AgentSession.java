@@ -113,9 +113,10 @@ public interface AgentSession extends AutoCloseable {
    * Cancel the run in progress: it ends in {@link ResultMessage.Cancelled} with the reason {@code
    * "interrupted"}, its model stream closed and its tool calls cancelled, and messages still queued
    * for it are discarded. A next run queued behind a run that had decided to end, by a {@link
-   * #send} after that decision, is discarded too: it never starts, and its future is cancelled. The
-   * session stays open, and the next {@link #send} starts a new run. With no run in progress, or on
-   * a closed session, it does nothing. Never blocks, never throws.
+   * #send} after that decision, is discarded too: it never starts, and its future is cancelled on a
+   * thread of its own, possibly after this returns. The session stays open, and the next {@link
+   * #send} starts a new run. With no run in progress, or on a closed session, it does nothing.
+   * Never blocks, never throws.
    */
   void interrupt();
 
