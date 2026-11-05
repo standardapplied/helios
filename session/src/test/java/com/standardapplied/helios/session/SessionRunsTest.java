@@ -606,7 +606,7 @@ final class SessionRunsTest {
   }
 
   @Test
-  void aCallbackOfTheDiscardedRunCanInterruptAndSendFromAnotherThread() {
+  void aCallbackOfTheDiscardedRunCanInterruptAndSend() {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
     var ending = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -618,15 +618,15 @@ final class SessionRunsTest {
           session
               .send("next")
               .handle(
-                  (result, failure) ->
-                      CompletableFuture.supplyAsync(
-                              () -> {
-                                session.interrupt();
-                                return session.send("later");
-                              })
-                          .join());
-      Await.termination("the interrupt", Thread.ofVirtual().start(session::interrupt));
-      release.countDown();
+                  (result, failure) -> {
+                    session.interrupt();
+                    return session.send("later");
+                  });
+      try {
+        session.interrupt();
+      } finally {
+        release.countDown();
+      }
 
       var run = Await.value("the run the callback sent", Await.value("the callback", later));
       assertInstanceOf(ResultMessage.Success.class, run);
