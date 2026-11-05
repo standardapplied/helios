@@ -5,6 +5,8 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -23,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -37,6 +40,12 @@ import java.util.logging.Logger;
  * is replayed, and no tool call or tool result remains: the result is valid for every provider.
  * Everything the agent knew before the summary survives only through it, so the default prompt asks
  * for the goal, the facts found, the decisions made, the open questions and the work left.
+ *
+ * <p>No file survives a compaction. The summary model sees each summarised message's inline files
+ * and file references as {@code {file <mimeType>}} and {@code {file <mimeType> <uri>}} markers,
+ * never their bytes, and the summary message ends, after the model's words, with a list naming each
+ * of them in history order (an inline file by media type and size, a reference by media type and
+ * URI) as no longer available unless sent again. Files in the kept messages are not listed.
  *
  * <p>It never compacts in the middle of a tool round: while the last assistant turn with tool calls
  * has a call without a later {@code TOOL} answer, when fewer than two messages would be summarised,
@@ -66,6 +75,8 @@ public final class SummarizingCompactor implements ContextCompactor {
 
   private static final int DEFAULT_SUMMARY_TIMEOUT_SECONDS = 60;
   private static final int MIN_SUMMARISED_MESSAGES = 2;
+  private static final String DROPPED_FILES_HEADING =
+      "\n\nFiles from the summarized conversation, no longer available unless sent again:";
   private static final String DEFAULT_SUMMARY_PROMPT =
       "You are a summariser. The following messages are a tool-using agent's conversation so far."
           + " The agent continues from your summary alone: every earlier message, its reasoning"
@@ -130,7 +141,7 @@ public final class SummarizingCompactor implements ContextCompactor {
       return new CompactionResult(history, usage, summaryModel.id());
     }
     var compacted = new ArrayList<>(history.subList(0, summarisedFrom));
-    compacted.add(Message.user(SUMMARY_PREFIX + response.content()));
+    compacted.add(Message.user(SUMMARY_PREFIX + response.content() + droppedFiles(summarised)));
     compacted.addAll(history.subList(summarisedTo, history.size()));
     return new CompactionResult(List.copyOf(compacted), usage, summaryModel.id());
   }
@@ -228,9 +239,37 @@ public final class SummarizingCompactor implements ContextCompactor {
           sb.append(" {tool_call ").append(c.name()).append('}');
         }
       }
+      appendFiles(
+          sb,
+          m,
+          f -> " {file " + f.mimeType() + "}",
+          f -> " {file " + f.mimeType() + " " + f.uri() + "}");
       sb.append('\n');
     }
     return sb.toString();
+  }
+
+  private static String droppedFiles(List<Message> summarised) {
+    var lines = new StringBuilder();
+    summarised.forEach(
+        m ->
+            appendFiles(
+                lines,
+                m,
+                f -> "\n- " + f.mimeType() + ", " + f.data().length + " bytes",
+                f -> "\n- " + f.mimeType() + ", " + f.uri()));
+    return lines.isEmpty() ? "" : DROPPED_FILES_HEADING + lines;
+  }
+
+  private static void appendFiles(
+      StringBuilder sb,
+      Message message,
+      Function<InlineFile, String> inline,
+      Function<FileReference, String> reference) {
+    if (message.hasInlineFiles()) {
+      message.inlineFiles().forEach(f -> sb.append(inline.apply(f)));
+    }
+    message.fileReferences().forEach(f -> sb.append(reference.apply(f)));
   }
 
   /** Mutable builder for {@link SummarizingCompactor}. */
