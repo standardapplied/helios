@@ -30,6 +30,7 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -67,23 +68,28 @@ final class SessionRunsEndingTest {
 
   @Test
   void anInterruptDuringACloseLeavesTheNextRunItKeepsFromStartingToTheClose() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var ending = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build());
+    var session =
+        AgentSession.open(
+            holdingItsEnd(options(model), ending, release).withExecutionProvider(provider).build());
     session.send("go");
     Await.latch("the run to decide its end", ending);
     var next = session.send("next");
+    var endsAtSettling = new CompletableFuture<Integer>();
+    next.whenComplete((result, failure) -> endsAtSettling.complete(provider.ends.get()));
     var closing = Thread.ofVirtual().start(session::close);
     Await.until(
         "the close to wait for the run", () -> closing.getState() == Thread.State.TIMED_WAITING);
 
     session.interrupt();
 
-    assertFalse(next.isDone());
     release.countDown();
     Await.termination("the close", closing);
     assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+    assertEquals(1, Await.value("the teardowns the settling saw", endsAtSettling));
     assertEquals(1, model.calls().size());
   }
 
@@ -145,11 +151,15 @@ final class SessionRunsEndingTest {
                   session.close();
                   return failure;
                 });
-    session.interrupt();
+    var interrupting = Thread.ofVirtual().start(session::interrupt);
     Await.until(
         "the callback's close to wait for the run",
         () -> closer.get() != null && closer.get().getState() == Thread.State.TIMED_WAITING);
-    release.countDown();
+    try {
+      Await.termination("the interrupt", interrupting);
+    } finally {
+      release.countDown();
+    }
 
     assertInstanceOf(CancellationException.class, Await.value("the callback's close", closed));
     assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
