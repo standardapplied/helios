@@ -634,6 +634,43 @@ final class SessionRunsTest {
     assertEquals(2, model.calls().size());
   }
 
+  @Test
+  void aCallbackOfTheDiscardedRunThatWaitsForTheInterruptToReturnDoesNotHoldItUp() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var returned = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build())) {
+      session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var waited =
+          session
+              .send("next")
+              .handle(
+                  (result, failure) -> {
+                    Uninterruptible.await(returned);
+                    return failure;
+                  });
+      var interrupting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    session.interrupt();
+                    returned.countDown();
+                  });
+
+      try {
+        Await.termination("the interrupt", interrupting);
+      } finally {
+        returned.countDown();
+        release.countDown();
+      }
+      assertInstanceOf(CancellationException.class, Await.value("the callback", waited));
+    }
+    assertEquals(1, model.calls().size());
+  }
+
   // ── 9. a blocked first message ───────────────────────────────────────────
 
   @Test

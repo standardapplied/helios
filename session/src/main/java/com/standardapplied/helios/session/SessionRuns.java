@@ -126,27 +126,30 @@ final class SessionRuns implements RunBoundary {
   /**
    * Cancel the run in progress, if any, with the reason {@code "interrupted"}, and discard a next
    * run queued behind it once it decided to end: its messages are dropped and its future is
-   * cancelled outside the lock, so a callback of that future may send or interrupt. Only the next
-   * run's messages are queued then, since {@link #end} drained the ending run's under the lock. A
-   * closed session's next run is left to {@link #leave}, which cancels it, or fails it with the
-   * host {@link Error} that failed the session.
+   * cancelled on a thread of its own, so a callback of that future may send, interrupt or wait for
+   * the caller without holding it up. Only the next run's messages are queued then, since {@link
+   * #end} drained the ending run's under the lock. A closed session's next run, or one whose
+   * session's ending recorded a host {@link Error} its {@link #failed} listener has yet to see, is
+   * left to {@link #leave}, which cancels it, or fails it with that {@code Error}.
    */
   void interrupt() {
     Optional<Run> run;
     CompletableFuture<ResultMessage> discarded;
     synchronized (lock) {
       run = Optional.ofNullable(active);
-      discarded = closed ? null : next;
+      discarded = closed || session.ending().first().isPresent() ? null : next;
       if (discarded != null) {
         queue.drain();
         next = null;
         nextParent = null;
       }
     }
-    if (discarded != null) {
-      discarded.cancel(false);
-    }
     run.ifPresent(Run::interrupt);
+    if (discarded != null) {
+      Thread.ofVirtual()
+          .name("helios-discarded-run-" + session.sessionId())
+          .start(() -> discarded.cancel(false));
+    }
   }
 
   /**
