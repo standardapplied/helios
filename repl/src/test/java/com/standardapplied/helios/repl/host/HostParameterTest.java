@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ParameterType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class HostParameterTest {
 
@@ -58,9 +60,46 @@ class HostParameterTest {
 
   @Test
   void allowsUnderscorePrefix() {
-    // Internal names like __raw should be permissible — same rule as Java identifiers.
     var p = new HostParameter("_raw", ParameterType.STRING, "raw value", true);
     assertEquals("_raw", p.name());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"class", "int", "_", "false", "__args", "__call"})
+  void aNameTheWrapperCannotDeclareThrowsNamingIt(String name) {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostParameter.required(name, ParameterType.STRING, "x"));
+
+    assertEquals(
+        "Host parameter name must be a Java identifier, not a keyword, and not start with __: "
+            + name,
+        thrown.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"ti\u200Bcker", "_\u200B_args", "cl\u00ADass", "x\u007F"})
+  void aNameWithAnIdentifierIgnorableCharacterThrowsNamingIt(String name) {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostParameter.required(name, ParameterType.STRING, "x"));
+
+    assertEquals(
+        "Host parameter name must not contain identifier-ignorable characters: " + name,
+        thrown.getMessage());
+  }
+
+  @Test
+  void allowsNonAsciiIdentifier() {
+    assertEquals(
+        "prix\u20AC", HostParameter.required("prix\u20AC", ParameterType.STRING, "x").name());
+  }
+
+  @Test
+  void allowsYield() {
+    assertEquals("yield", HostParameter.required("yield", ParameterType.STRING, "x").name());
   }
 
   @Test

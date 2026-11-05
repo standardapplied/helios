@@ -11,18 +11,19 @@ import com.standardapplied.helios.core.tool.ParameterType;
 /**
  * Declared parameter for a {@link HostFunction}.
  *
- * <p>The parameter list on a {@code HostFunction} drives JShell wrapper synthesis: every
- * non-reserved {@code HostFunction} the registry knows about gets a typed static method generated
- * into the sandbox's preamble at boot. With a parameter named {@code ticker} of type {@code STRING}
- * the model writes {@code marketQuote("AAPL")} from emitted Java code; the wrapper packs the
- * arguments into a {@code Map<String, Object>} keyed by parameter name and dispatches to the host.
+ * <p>The parameter list on a {@code HostFunction} drives JShell wrapper synthesis: every {@code
+ * HostFunction} the registry knows about gets a typed static method generated into the sandbox's
+ * preamble at boot. With a parameter named {@code ticker} of type {@code STRING} the model writes
+ * {@code marketQuote("AAPL")} from emitted Java code; the wrapper packs the arguments into a {@code
+ * Map<String, Object>} keyed by parameter name and dispatches to the host.
  *
  * <p>Without declared parameters the synthesized wrapper is zero-arg ({@code static Object foo()})
  * and passes an empty map to the handler. That is rarely useful — declare parameters explicitly so
  * the model has a typed signature to call.
  *
- * @param name parameter name; must be a valid Java identifier (used as the method-parameter name in
- *     synthesized JShell)
+ * @param name parameter name, used as the method-parameter name in synthesized JShell; must be a
+ *     Java identifier, not a keyword or literal, and not start with {@code __}, the prefix of the
+ *     wrapper's own locals
  * @param type JSON Schema-style type, mapped to a Java type in the synthesized signature
  * @param description short description of the parameter; surfaced in {@code
  *     SandboxPrelude.customWrapperSummary} so the LLM knows what the parameter means
@@ -33,13 +34,7 @@ import com.standardapplied.helios.core.tool.ParameterType;
 public record HostParameter(String name, ParameterType type, String description, boolean required) {
 
   public HostParameter {
-    if (Strings.isBlank(name)) {
-      throw new IllegalArgumentException("Host parameter name must not be null or blank");
-    }
-    if (!HostIdentifiers.isValidJavaIdentifier(name)) {
-      throw new IllegalArgumentException(
-          "Host parameter name must be a valid Java identifier: " + name);
-    }
+    HostIdentifiers.requireValid(name, "Host parameter name");
     if (type == null) {
       throw new IllegalArgumentException("Host parameter type must not be null");
     }

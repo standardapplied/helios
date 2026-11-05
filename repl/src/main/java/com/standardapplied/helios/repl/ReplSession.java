@@ -13,7 +13,6 @@ import com.standardapplied.helios.repl.sandbox.Sandbox;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
@@ -88,16 +87,8 @@ public final class ReplSession implements AutoCloseable {
   }
 
   /**
-   * Names excluded from {@link #calledHostFunctions()}. Framework-reserved names ({@link
-   * HostFunctionRegistry#RESERVED_NAMES}); the map contains exactly the user-registered host
-   * functions.
-   */
-  private static final Set<String> CALLED_HOST_FN_EXCLUDES = HostFunctionRegistry.RESERVED_NAMES;
-
-  /**
-   * Wrap every user-registered host function with a per-call counter that flows into {@link
-   * #calledHostFunctions()}. Reserved names ({@link #CALLED_HOST_FN_EXCLUDES}) are not counted —
-   * they are framework-provided plumbing, not interesting trajectory data.
+   * Wrap every registered host function with a per-call counter that flows into {@link
+   * #calledHostFunctions()}.
    *
    * <p>Cost per call: a single {@link AtomicInteger#incrementAndGet} on a per-name counter.
    */
@@ -105,9 +96,6 @@ public final class ReplSession implements AutoCloseable {
       HostFunction fn, Map<String, AtomicInteger> hostFnCounts) {
     var inner = fn.handler();
     var name = fn.name();
-    if (CALLED_HOST_FN_EXCLUDES.contains(name)) {
-      return fn;
-    }
     return new HostFunction(
         name,
         fn.description(),
@@ -152,9 +140,8 @@ public final class ReplSession implements AutoCloseable {
   }
 
   /**
-   * Per-host-function call counts for the trajectory, keyed by function name. Excludes the
-   * framework-reserved names ({@link HostFunctionRegistry#RESERVED_NAMES}); contains exactly the
-   * user-registered host functions that the model invoked.
+   * Per-host-function call counts for the trajectory, keyed by function name: exactly the
+   * registered host functions that the model invoked.
    *
    * @return unmodifiable map of {@code name -> callCount}, sorted by name; absent keys mean zero
    *     calls
