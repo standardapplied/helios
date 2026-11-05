@@ -9,6 +9,7 @@ import static com.standardapplied.helios.session.EndingSessions.stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -42,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -554,6 +556,119 @@ final class SessionRunsTest {
       var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the run", run));
       assertEquals("interrupted", cancelled.reason());
     }
+  }
+
+  @Test
+  void anInterruptDiscardsTheNextRunQueuedBehindTheRunThatDecidedToEnd() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var events = new EventCollector();
+
+    try (var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build())) {
+      events.read(session.events());
+      var first = session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var next = session.send("next");
+      session.interrupt();
+      release.countDown();
+
+      assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
+      session.close();
+      events.awaitDone();
+    }
+    assertEquals(1, model.calls().size());
+    assertEquals(List.of("go"), receivedTexts(events));
+    assertEquals(1, events.eventsOf(QueryEvent.RunStarted.class).size());
+  }
+
+  @Test
+  void aSendAfterAnInterruptDiscardedTheQueuedRunStartsAFreshRunWithOnlyItsOwnMessage() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build())) {
+      session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var next = session.send("next");
+      session.interrupt();
+      var later = session.send("later");
+      release.countDown();
+
+      assertNotSame(next, later);
+      assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the later run", later));
+    }
+    var second = model.calls().get(1);
+    assertEquals(List.of(Message.user("later")), second.subList(2, second.size()));
+  }
+
+  @Test
+  void aCallbackOfTheDiscardedRunCanInterruptAndSend() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build())) {
+      session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var later =
+          session
+              .send("next")
+              .handle(
+                  (result, failure) -> {
+                    session.interrupt();
+                    return session.send("later");
+                  });
+      try {
+        session.interrupt();
+      } finally {
+        release.countDown();
+      }
+
+      var run = Await.value("the run the callback sent", Await.value("the callback", later));
+      assertInstanceOf(ResultMessage.Success.class, run);
+    }
+    assertEquals(2, model.calls().size());
+  }
+
+  @Test
+  void aCallbackOfTheDiscardedRunThatWaitsForTheInterruptToReturnDoesNotHoldItUp() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var returned = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build())) {
+      session.send("go");
+      Await.latch("the run to decide its end", ending);
+      var waited =
+          session
+              .send("next")
+              .handle(
+                  (result, failure) -> {
+                    Uninterruptible.await(returned);
+                    return failure;
+                  });
+      var interrupting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    session.interrupt();
+                    returned.countDown();
+                  });
+
+      try {
+        Await.termination("the interrupt", interrupting);
+      } finally {
+        returned.countDown();
+        release.countDown();
+      }
+      assertInstanceOf(CancellationException.class, Await.value("the callback", waited));
+    }
+    assertEquals(1, model.calls().size());
   }
 
   // ── 9. a blocked first message ───────────────────────────────────────────
