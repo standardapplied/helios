@@ -290,7 +290,7 @@ class SseReaderTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"", "\n", "\r\n"})
+  @ValueSource(strings = {"", "\n", "\r\n", "\n \t", "\n \t\n", "\r\n \r\n\t"})
   void aBodyEndingWithALineOutsideTheFormatEndsInTheTerminalTheParserReadsInIt(String end) {
     var done = new StreamEvent.Done(Response.newBuilder().withContent("blocked").build());
     var parser = new LineParser(done);

@@ -2,13 +2,22 @@
 
 package com.standardapplied.helios.gemini;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.test.StreamParity;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -69,6 +78,29 @@ class GeminiStreamTranscriptTest {
 
     Golden.assertMatches("gemini/streams/" + name + ".txt", transcript);
   }
+
+  @Test
+  void aRecitationBlockUnderASchemaEndsInOneContentFilterLeftUnparsed() {
+    var responses = new ArrayList<Response<Answer>>();
+
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read("gemini/streams/recitation.sse")),
+            GeminiStreamTranscriptTest::modelAt,
+            model ->
+                responses.add(
+                    model.chat(
+                        List.of(Message.user("Count")), List.of(), OutputSchema.of(Answer.class))));
+
+    var response = responses.getFirst();
+    assertEquals(FinishReason.CONTENT_FILTER, response.finishReason());
+    assertNull(response.parsed());
+    assertEquals("recitation", response.metadata().get(Response.REFUSAL_CATEGORY_KEY));
+    assertEquals(1, requests.size());
+  }
+
+  /** The answer the schema asks for. */
+  public record Answer(String numbers) {}
 
   private static Model modelAt(URI uri) {
     return new GeminiProvider()
