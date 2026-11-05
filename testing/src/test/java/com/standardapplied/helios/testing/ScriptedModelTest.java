@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ScriptedModelTest {
 
@@ -232,12 +234,15 @@ class ScriptedModelTest {
     assertEquals(Map.of("k", "v"), response.metadata());
   }
 
-  @Test
-  void structuredRefusalResponseTurnSkipsTheParseAndKeepsEveryField() {
+  @ParameterizedTest
+  @EnumSource(
+      value = FinishReason.class,
+      names = {"REFUSAL", "CONTENT_FILTER"})
+  void structuredRefusedResponseTurnSkipsTheParseAndKeepsEveryField(FinishReason reason) {
     var scripted =
         Response.newBuilder()
             .withContent("I can't judge that.")
-            .withFinishReason(FinishReason.REFUSAL)
+            .withFinishReason(reason)
             .withUsage(Usage.of(412, 3, 2, 1))
             .withThinking("weighing it")
             .withCitations(List.of(Citation.of("doc-1", "policy")))
