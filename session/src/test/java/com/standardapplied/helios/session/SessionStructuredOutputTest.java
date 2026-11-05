@@ -9,25 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.standardapplied.helios.core.common.HttpClientFactory;
 import com.standardapplied.helios.core.model.BlockingModel;
-import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.ModelConfig;
-import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
-import com.standardapplied.helios.core.model.StreamEvent;
-import com.standardapplied.helios.core.provider.Exchange;
-import com.standardapplied.helios.core.provider.StreamingModel;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.RawOutputCapturePolicy;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.tool.Tool;
-import com.standardapplied.helios.session.loop.SessionJson;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Clock;
@@ -36,7 +28,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -160,54 +151,36 @@ final class SessionStructuredOutputTest {
   }
 
   @Test
-  void aProviderTurnFilteredMidAnswerEndsInOneRefusalUnderASessionSchema() {
-    var requests = new AtomicInteger();
-    var filtered =
-        Response.newBuilder()
-            .withContent("{\"name\":\"twenty-")
-            .withFinishReason(FinishReason.CONTENT_FILTER)
-            .withMetadata(
-                Map.of(
-                    Response.REFUSAL_EXPLANATION_KEY, "Request blocked due to recitation.",
-                    Response.REFUSAL_CATEGORY_KEY, "recitation"))
-            .build();
-    Exchange<String> exchange =
-        request -> {
-          requests.incrementAndGet();
-          return CloseableIterator.of(
-              List.<StreamEvent>of(
-                      new StreamEvent.TextDelta(filtered.content()), new StreamEvent.Done(filtered))
-                  .iterator());
-        };
+  void aTurnFilteredMidAnswerEndsInOneRefusalUnderASessionSchema() {
     var model =
-        StreamingModel.<String>newBuilder()
-            .withId("filtering-1")
-            .withProvider("filtering")
-            .withConfig(ModelConfig.newBuilder().build())
-            .withHttpClient(HttpClientFactory.create())
-            .withRequests((messages, tools, schema) -> "request")
-            .withExchange(exchange)
-            .withFailure(ProviderException::new)
-            .withJson(SessionJson.BINDING)
+        ScriptedModel.newBuilder()
+            .withResponseTurn(
+                Response.newBuilder()
+                    .withContent("{\"name\":\"twenty-")
+                    .withFinishReason(FinishReason.CONTENT_FILTER)
+                    .withMetadata(
+                        Map.of(
+                            Response.REFUSAL_EXPLANATION_KEY, "Request blocked due to recitation.",
+                            Response.REFUSAL_CATEGORY_KEY, "recitation"))
+                    .build())
             .build();
 
-    try (model;
-        var session =
-            AgentSession.open(
-                SessionOptions.newBuilder()
-                    .withModel(model)
-                    .withSessionId(SID)
-                    .withClock(CLOCK)
-                    .withOutputSchema(OutputSchema.of(TypedAnswer.class))
-                    .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
-                    .build())) {
+    try (var session =
+        AgentSession.open(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withOutputSchema(OutputSchema.of(TypedAnswer.class))
+                .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
+                .build())) {
       var refusal =
           assertInstanceOf(
               ResultMessage.Refusal.class, session.runBlocking(UserMessage.text("count")));
 
       assertEquals("Request blocked due to recitation.", refusal.refusalText());
       assertEquals("recitation", refusal.category());
-      assertEquals(1, requests.get());
+      assertEquals(1, model.calls().size());
     }
   }
 
