@@ -414,15 +414,16 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   }
 
   /**
-   * Move the regular file at {@code source} over {@code target}, replacing it atomically: a reader
-   * opens either the old target or the new file, never neither. Strict mode renames both names
-   * relative to one pinned descriptor of their parent, so a symlink at either name is moved or
-   * replaced, never followed.
+   * Move the entry at {@code source} over {@code target}, replacing it atomically: a reader opens
+   * either the old target or the new file, never neither. Strict mode renames both names relative
+   * to one pinned descriptor of their parent, so a symlink at either name is moved or replaced,
+   * never followed.
    *
-   * @param source a resolved regular-file path
+   * @param source a resolved path
    * @param target a resolved path in the same directory as {@code source}
    * @throws IllegalArgumentException if either path is not resolved or they have different parents
-   * @throws IOException if {@code source} is not a regular file or the rename fails
+   * @throws IOException if the rename fails, such as a directory over a file or a file over a
+   *     directory
    */
   public void rename(Path source, Path target) throws IOException {
     requireResolved(source);
@@ -431,9 +432,6 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
     if (parent == null || !parent.equals(target.getParent())) {
       throw new IllegalArgumentException(
           "rename requires one parent directory: " + source + " -> " + target);
-    }
-    if (!attributes(source).isRegularFile()) {
-      throw new IOException("rename source is not a regular file: " + source);
     }
     if (confineSymlinks) {
       LinuxFiles.rename(source, target);
