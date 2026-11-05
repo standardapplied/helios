@@ -7,7 +7,9 @@ import com.standardapplied.helios.session.loop.SessionState;
 import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -34,7 +36,7 @@ final class Run {
   private final CancellationToken.Registration link;
   private final Duration maxWallClock;
   private final Thread thread;
-  private Thread prevented;
+  private final Queue<Thread> settlers = new ConcurrentLinkedQueue<>();
 
   /**
    * The next run of {@code session}, its token cancelled with the session's reason as soon as the
@@ -91,16 +93,20 @@ final class Run {
   }
 
   /**
-   * Wait until the run's thread has ended, then the thread that settles the future of the next run
-   * its end kept from starting, if any, by the {@link System#nanoTime()} instant {@code
-   * deadlineNanos}. Each thread settles its future last, so both futures are settled once the
-   * threads ended; a wait on a future itself may run a caller's callback of it on the waiting
-   * thread. An interrupt ends the wait, its status kept.
+   * Wait until the run's thread has ended, then each thread that settles the future of a next run
+   * kept from starting but the calling one, as a callback of that future that closes the session,
+   * by the {@link System#nanoTime()} instant {@code deadlineNanos}. Each thread settles its future
+   * last, so every future is settled once the threads ended; a wait on a future itself may run a
+   * caller's callback of it on the waiting thread. An interrupt ends the wait, its status kept.
    */
   void awaitEnd(long deadlineNanos) {
     try {
-      if (thread.join(Duration.ofNanos(deadlineNanos - System.nanoTime())) && prevented != null) {
-        prevented.join(Duration.ofNanos(deadlineNanos - System.nanoTime()));
+      if (thread.join(Duration.ofNanos(deadlineNanos - System.nanoTime()))) {
+        for (var settler : settlers) {
+          if (settler != Thread.currentThread()) {
+            settler.join(Duration.ofNanos(deadlineNanos - System.nanoTime()));
+          }
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -108,12 +114,14 @@ final class Run {
   }
 
   /**
-   * Settle the future of the next run this run's end kept from starting with {@code settle}, on a
-   * virtual thread of its own, so a callback of either future may wait for the other; called on the
-   * run's thread before it ends, so {@link #awaitEnd} waits for it too.
+   * Settle the future of a next run kept from starting, by this run's end or by an interrupt while
+   * this run ended, with {@code settle}, on a virtual thread of its own, so a callback of either
+   * future may wait for the other; called before this run's thread ends, so {@link #awaitEnd} waits
+   * for it too.
    */
   void settlePrevented(Runnable settle) {
-    prevented = Thread.ofVirtual().name("helios-prevented-run-" + state.sessionId()).start(settle);
+    settlers.add(
+        Thread.ofVirtual().name("helios-prevented-run-" + state.sessionId()).start(settle));
   }
 
   /**

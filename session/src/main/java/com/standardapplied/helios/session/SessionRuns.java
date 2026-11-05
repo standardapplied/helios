@@ -123,9 +123,29 @@ final class SessionRuns implements RunBoundary {
     return activeRun().isPresent();
   }
 
-  /** Cancel the run in progress, if any, with the reason {@code "interrupted"}. */
+  /**
+   * Cancel the run in progress, if any, with the reason {@code "interrupted"}, and discard a next
+   * run queued behind it once it decided to end: its messages are dropped and its future is
+   * cancelled on a thread of its own, which a close waits for as for the run's, so a callback of
+   * that future may send, interrupt or wait for the caller without holding it up. Only the next
+   * run's messages are queued then, since {@link #end} drained the ending run's under the lock. A
+   * closed session's next run, or one whose session's ending recorded a host {@link Error} its
+   * {@link #failed} listener has yet to see, is left to {@link #leave}, which cancels it, or fails
+   * it with that {@code Error}.
+   */
   void interrupt() {
-    activeRun().ifPresent(Run::interrupt);
+    Optional<Run> run;
+    synchronized (lock) {
+      run = Optional.ofNullable(active);
+      var discarded = closed || session.ending().first().isPresent() ? null : next;
+      if (discarded != null) {
+        queue.drain();
+        next = null;
+        nextParent = null;
+        active.settlePrevented(() -> discarded.cancel(false));
+      }
+    }
+    run.ifPresent(Run::interrupt);
   }
 
   /**

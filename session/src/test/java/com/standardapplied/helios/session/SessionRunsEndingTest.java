@@ -22,6 +22,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.loop.SessionEnding;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -29,9 +30,11 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 
@@ -64,7 +67,116 @@ final class SessionRunsEndingTest {
   }
 
   @Test
+  void anInterruptDuringACloseLeavesTheNextRunItKeepsFromStartingToTheClose() {
+    var provider = new RecordingProvider(new CopyOnWriteArrayList<>());
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session =
+        AgentSession.open(
+            holdingItsEnd(options(model), ending, release).withExecutionProvider(provider).build());
+    session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+    var endsAtSettling = new CompletableFuture<Integer>();
+    next.whenComplete((result, failure) -> endsAtSettling.complete(provider.ends.get()));
+    var closing = Thread.ofVirtual().start(session::close);
+    Await.until(
+        "the close to wait for the run", () -> closing.getState() == Thread.State.TIMED_WAITING);
+
+    session.interrupt();
+
+    release.countDown();
+    Await.termination("the close", closing);
+    assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+    assertEquals(1, Await.value("the teardowns the settling saw", endsAtSettling));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
+  void anInterruptBeforeTheFailedListenerSawARecordedErrorLeavesTheNextRunToFailWithIt() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var sink = new AtomicReference<SessionEnding>();
+    var sentinel = new AssertionError("recorded before its listener ran");
+    PreStopHook capturing =
+        (response, ctx) -> {
+          sink.set(Run.stateOfThisThread().ending());
+          return HookOutcome.cont();
+        };
+    var session =
+        AgentSession.open(
+            holdingItsEnd(options(model).withHook(capturing), ending, release).build());
+    var first = session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+
+    Thread failing;
+    synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
+      failing = Thread.ofVirtual().start(() -> sink.get().fail(sentinel));
+      Await.until(
+          "the failed listener to wait for the lock",
+          () -> failing.getState() == Thread.State.BLOCKED);
+      session.interrupt();
+    }
+    release.countDown();
+    Await.termination("the failing thread", failing);
+
+    assertSame(sentinel, Await.failure("run 1", first));
+    assertSame(sentinel, Await.failure("the next run", next));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
+  void aCloseReturnsOnlyOnceTheNextRunAnInterruptDiscardedIsSettled() {
+    assertACloseReturnsOnlyOnceTheNextRunIsSettled(AgentSession::interrupt);
+  }
+
+  @Test
+  void aCallbackOfTheDiscardedRunThatClosesTheSessionDoesNotWaitForItself() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build());
+    var first = session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var closer = new AtomicReference<Thread>();
+    var closed =
+        session
+            .send("next")
+            .handle(
+                (result, failure) -> {
+                  closer.set(Thread.currentThread());
+                  session.close();
+                  return failure;
+                });
+    var interrupting = Thread.ofVirtual().start(session::interrupt);
+    Await.until(
+        "the callback's close to wait for the run",
+        () -> closer.get() != null && closer.get().getState() == Thread.State.TIMED_WAITING);
+    try {
+      Await.termination("the interrupt", interrupting);
+    } finally {
+      release.countDown();
+    }
+
+    assertInstanceOf(CancellationException.class, Await.value("the callback's close", closed));
+    assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
   void aCloseReturnsOnlyOnceTheNextRunItKeptFromStartingIsSettled() {
+    assertACloseReturnsOnlyOnceTheNextRunIsSettled(session -> {});
+  }
+
+  /**
+   * Queue a next run behind run 1 once it decided to end, hold its future's settling in a callback,
+   * run {@code beforeClose}, then close: the close returns only once that callback returned.
+   */
+  private static void assertACloseReturnsOnlyOnceTheNextRunIsSettled(
+      Consumer<AgentSession> beforeClose) {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var ending = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -81,6 +193,7 @@ final class SessionRunsEndingTest {
           settling.countDown();
           Await.latch("the test to let the settling end", settled);
         });
+    beforeClose.accept(session);
 
     var closing = Thread.ofVirtual().start(session::close);
     Await.until(
