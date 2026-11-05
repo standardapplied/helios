@@ -35,6 +35,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class SseReaderTest {
 
@@ -49,6 +52,22 @@ class SseReaderTest {
     public void close() throws IOException {
       closed = true;
       throw new IOException("close failed");
+    }
+  }
+
+  /** Reads every unframed last line as {@code answer}, recording each line it is offered. */
+  private static final class LineParser extends EchoParser {
+    final List<String> lines = new ArrayList<>();
+    private final StreamEvent answer;
+
+    LineParser(StreamEvent answer) {
+      this.answer = answer;
+    }
+
+    @Override
+    public StreamEvent unframedLine(String line) {
+      lines.add(line);
+      return answer;
     }
   }
 
@@ -268,6 +287,87 @@ class SseReaderTest {
 
     assertInstanceOf(EOFException.class, ((StreamEvent.Error) events.getLast()).cause());
     assertEquals(List.of("one"), parser.payloads);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", "\n", "\r\n"})
+  void aBodyEndingWithALineOutsideTheFormatEndsInTheTerminalTheParserReadsInIt(String end) {
+    var done = new StreamEvent.Done(Response.newBuilder().withContent("blocked").build());
+    var parser = new LineParser(done);
+    var body = new Closing(stream("data: one\n\n{\"error\":{\"code\":1}}" + end));
+    var reader = new SseReader(body, NEVER_IDLE, parser, ProviderException::new);
+
+    var events = drain(reader);
+
+    assertEquals(List.of(new StreamEvent.TextDelta("one"), done), events);
+    assertEquals(List.of("{\"error\":{\"code\":1}}"), parser.lines);
+    assertTrue(body.closed);
+  }
+
+  @Test
+  void anErrorTheParserReadsInTheUnframedLastLineIsTheStreamsOnlyTerminal() {
+    var failure =
+        new StreamEvent.Error(
+            "refused", null, Response.newBuilder().withFinishReason(FinishReason.ERROR).build());
+    var body = new Closing(stream("junk"));
+    var reader = new SseReader(body, NEVER_IDLE, new LineParser(failure), ProviderException::new);
+
+    assertEquals(List.of(failure), drain(reader));
+    assertTrue(body.closed);
+  }
+
+  @ParameterizedTest
+  @MethodSource("notTerminal")
+  void anUnframedLastLineTheParserReadsAsNoTerminalEndsAsABodyThatEndedEarly(EchoParser parser) {
+    var body = new Closing(stream("data: one\n\njunk\n"));
+    var reader = new SseReader(body, NEVER_IDLE, parser, ProviderException::new);
+
+    var events = drain(reader);
+
+    assertEquals(2, events.size());
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertInstanceOf(EOFException.class, error.cause());
+    assertEquals("one", error.partial().content());
+    assertTrue(body.closed);
+  }
+
+  static List<EchoParser> notTerminal() {
+    return List.of(
+        new EchoParser(), new LineParser(null), new LineParser(new StreamEvent.TextDelta("x")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "data: {\"error\":1",
+        "data",
+        "event: x",
+        "id",
+        "retry: 10",
+        ": comment",
+        "junk\ndata: one\n\n"
+      })
+  void aLastLineOfTheFormatIsNeverOfferedToTheParser(String last) {
+    var parser = new LineParser(new StreamEvent.Done(Response.newBuilder().build()));
+    var reader = new SseReader(stream(last), NEVER_IDLE, parser, ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, drain(reader).getLast());
+
+    assertInstanceOf(EOFException.class, error.cause());
+    assertEquals(List.of(), parser.lines);
+  }
+
+  @Test
+  void aLineOutsideTheFormatBeforeTheTerminalIsIgnored() {
+    var parser = new LineParser(new StreamEvent.Done(Response.newBuilder().build()));
+    var reader =
+        new SseReader(
+            stream("{\"error\":1}\ndata: stop\n\n"), NEVER_IDLE, parser, ProviderException::new);
+
+    assertEquals(
+        List.of(new StreamEvent.Done(Response.newBuilder().withContent("done").build())),
+        drain(reader));
+    assertEquals(List.of(), parser.lines);
   }
 
   @Test

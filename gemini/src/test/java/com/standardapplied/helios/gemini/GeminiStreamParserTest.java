@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
@@ -38,6 +39,14 @@ import org.junit.jupiter.params.provider.ValueSource;
  * informational events around its steps.
  */
 class GeminiStreamParserTest {
+
+  private static final String RECITATION_MESSAGE =
+      "Request blocked due to copyright/recitation content. Please modify your input and retry.";
+  private static final String RECITATION_ERROR =
+      "{\"message\":\""
+          + RECITATION_MESSAGE
+          + "\",\"code\":\"The generated content was filtered because it may contain material"
+          + " that resembles existing copyrighted works. Try rephrasing the prompt.\"}";
 
   @Test
   void usageFromCompleteEvent() {
@@ -355,6 +364,66 @@ class GeminiStreamParserTest {
   }
 
   @Test
+  void aBareRecitationErrorLineEndsTheStreamAsAContentFilterWithGeminisMessage() {
+    var events = drain(MODEL_OUTPUT_START + HELLO_DELTA + bareError(RECITATION_ERROR) + "\n");
+
+    assertEquals(2, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.getFirst());
+    assertBlocked(RECITATION_MESSAGE, events.getLast());
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "{\"code\":400,\"message\":\"Blocked: RECITATION\"}|Blocked: RECITATION",
+        "{\"code\":\"Recitation filter\"}|Recitation filter"
+      })
+  void anErrorEventNamingRecitationEndsTheStreamAsAContentFilter(String error, String explanation) {
+    var event = "data: {\"event_type\":\"error\",\"error\":" + error + "}\n\n";
+
+    var events = drain(MODEL_OUTPUT_START + HELLO_DELTA + event);
+
+    assertBlocked(explanation, events.getLast());
+  }
+
+  @Test
+  void aBareRetryableErrorLineIsTransientWithTheGeminiExceptionAsCause() {
+    var events = drain(bareError("{\"code\":503,\"message\":\"backend unavailable\"}"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    var transientFailure = assertInstanceOf(TransientStreamException.class, error.cause());
+    var cause = assertInstanceOf(GeminiException.class, transientFailure.getCause());
+    assertEquals(503, cause.statusCode());
+    assertEquals("API error: 503: backend unavailable", cause.getMessage());
+  }
+
+  @Test
+  void aBareErrorLineOfAnotherCodeIsAPlainGeminiException() {
+    var events = drain(bareError("{\"code\":400,\"message\":\"bad request\"}"));
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    var cause = assertInstanceOf(GeminiException.class, error.cause());
+    assertEquals(400, cause.statusCode());
+    assertFalse(cause.isRetryable());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"foo\":1}",
+        "not json",
+        "null",
+        "{\"error\":\"text\"}",
+        "{\"event_type\":\"error\",\"error\":{\"code\":503}}"
+      })
+  void aLastLineThatIsNoBareErrorIsNoTerminal(String line) {
+    var parser = new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION, "stamp");
+
+    assertNull(parser.unframedLine(line));
+  }
+
+  @Test
   void sseErrorEventWithoutPayloadSurfacesGenericMessage() {
     var errorEvent = "data: {\"event_type\":\"error\"}\n\n";
     try (var iterator = reader(SseEvents.body(errorEvent))) {
@@ -438,6 +507,19 @@ class GeminiStreamParserTest {
     assertEquals("Hello", error.partial().content());
     assertEquals(5, error.partial().usage().outputTokens());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
+  }
+
+  private static String bareError(String errorJson) {
+    return "{\"error\":" + errorJson + "}";
+  }
+
+  private static void assertBlocked(String explanation, StreamEvent event) {
+    var done = assertInstanceOf(StreamEvent.Done.class, event);
+    assertEquals(FinishReason.CONTENT_FILTER, done.response().finishReason());
+    assertEquals("Hello", done.response().content());
+    assertEquals(explanation, done.response().metadata().get(Response.REFUSAL_EXPLANATION_KEY));
+    assertEquals("recitation", done.response().metadata().get(Response.REFUSAL_CATEGORY_KEY));
+    assertEquals("stamp", done.response().metadata().get(ContinuationPoint.PROMPT_STAMP_KEY));
   }
 
   private static StreamEvent.Error onlyError(String errorJson) {
