@@ -11,8 +11,8 @@ import java.util.Map;
 /**
  * Assembles the response of a streamed interaction, at its end or as far as it got: its output,
  * finish reason and usage, and the metadata a later turn needs — the API version, the thought
- * signatures to replay before its tool calls, the interaction id to continue from, and the stamp of
- * the prompt it was produced under.
+ * signatures to replay before its tool calls, the interaction id to continue from, the stamp of the
+ * prompt it was produced under, and the refusal of one Gemini blocked.
  */
 final class GeminiResponseAssembler {
 
@@ -27,6 +27,8 @@ final class GeminiResponseAssembler {
    *
    * @param interactionId the id to record for continuation, or {@code null} to record none
    * @param promptStamp the stamp of the request's prompt
+   * @param refusal the {@link Response#REFUSAL_EXPLANATION_KEY} and {@link
+   *     Response#REFUSAL_CATEGORY_KEY} of a blocked response, empty for any other
    */
   static Response<Void> response(
       StepOutput.Result output,
@@ -34,8 +36,9 @@ final class GeminiResponseAssembler {
       String interactionId,
       String apiVersion,
       String promptStamp,
-      FinishReason finishReason) {
-    var metadata = new HashMap<String, String>();
+      FinishReason finishReason,
+      Map<String, String> refusal) {
+    var metadata = new HashMap<>(refusal);
     metadata.put(API_VERSION_KEY, apiVersion);
     if (!output.signatures().isEmpty()) {
       metadata.put(THOUGHT_SIGNATURES_KEY, String.join(SIGNATURE_DELIMITER, output.signatures()));

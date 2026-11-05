@@ -34,16 +34,16 @@ public record Response<T>(
 
   /**
    * Metadata key under which a provider reports the policy area behind a {@link
-   * FinishReason#REFUSAL} (e.g. Anthropic's {@code stop_details.category}: {@code cyber}, {@code
-   * bio}). An open set — treat unknown values as opaque. Absent when the provider names no
-   * category.
+   * FinishReason#REFUSAL} or {@link FinishReason#CONTENT_FILTER} (e.g. Anthropic's {@code
+   * stop_details.category}: {@code cyber}, {@code bio}). An open set — treat unknown values as
+   * opaque. Absent when the provider names no category.
    */
   public static final String REFUSAL_CATEGORY_KEY = "refusal.category";
 
   /**
    * Metadata key under which a provider reports its human-readable explanation of a {@link
-   * FinishReason#REFUSAL}. Display text, not a stable identifier. Absent when the provider gives
-   * none.
+   * FinishReason#REFUSAL} or {@link FinishReason#CONTENT_FILTER}. Display text, not a stable
+   * identifier. Absent when the provider gives none.
    */
   public static final String REFUSAL_EXPLANATION_KEY = "refusal.explanation";
 

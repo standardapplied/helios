@@ -23,7 +23,9 @@ import org.junit.jupiter.params.provider.MethodSource;
  * its thought. The other streams are hand-built from the documented event shapes (Interactions API
  * reference, checked 2026-10-13); the {@code eof-*} and {@code empty} streams are bodies cut short,
  * which end in an error carrying what they produced, {@code eof-after-usage} after a status update
- * reporting the usage so far. The API documents no refusal terminal.
+ * reporting the usage so far. The API documents no refusal terminal; {@code recitation} is a live
+ * gemini-3.8-flash turn recorded 2026-10-20 that Gemini's recitation filter stopped mid-response,
+ * ending the body with a bare {@code {"error":...}} line and no terminator, kept byte for byte.
  */
 class GeminiStreamTranscriptTest {
 
@@ -47,7 +49,8 @@ class GeminiStreamTranscriptTest {
         "failed",
         "bad-tool-arguments",
         "null-argument",
-        "missing-tool-id");
+        "missing-tool-id",
+        "recitation");
   }
 
   @ParameterizedTest
