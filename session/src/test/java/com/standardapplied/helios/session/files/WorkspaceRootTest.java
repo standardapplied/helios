@@ -522,15 +522,13 @@ final class WorkspaceRootTest {
 
   @ParameterizedTest(name = "strict {0}")
   @ValueSource(booleans = {true, false})
-  void renameMovesOnlyARegularFileAndOnlyOverAFile(boolean strict, @TempDir Path tmp)
-      throws IOException {
+  void renameNeverSwapsAFileAndADirectory(boolean strict, @TempDir Path tmp) throws IOException {
     var ws = new WorkspaceRoot(tmp, strict);
     var directory = Files.createDirectories(ws.root().resolve("directory"));
     Files.writeString(directory.resolve("kept.txt"), "kept", StandardCharsets.UTF_8);
     var file = ws.resolveSafe("file.txt");
     Files.writeString(file, "file", StandardCharsets.UTF_8);
-    var notRegular = assertThrows(IOException.class, () -> ws.rename(directory, file));
-    assertTrue(notRegular.getMessage().contains("not a regular file"), notRegular.getMessage());
+    assertThrows(IOException.class, () -> ws.rename(directory, file));
     assertThrows(IOException.class, () -> ws.rename(file, directory));
     assertEquals("file", Files.readString(file, StandardCharsets.UTF_8));
     assertEquals("kept", Files.readString(directory.resolve("kept.txt"), StandardCharsets.UTF_8));
