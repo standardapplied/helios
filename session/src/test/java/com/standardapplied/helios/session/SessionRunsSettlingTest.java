@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session;
 
 import static com.standardapplied.helios.session.EndingSessions.binding;
+import static com.standardapplied.helios.session.EndingSessions.holdingItsEnd;
 import static com.standardapplied.helios.session.EndingSessions.slowGrace;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -163,6 +164,35 @@ final class SessionRunsSettlingTest {
       assertInstanceOf(ResultMessage.Success.class, Await.value("the callback", chained));
       Await.until("the session to settle both runs", () -> !session.isRunning());
       assertEquals(2, model.calls().size());
+    }
+  }
+
+  @Test
+  void aNextRunQueuedBehindAnEndingRunIsRunningWhileItsFutureCompletes() {
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var runThreads = new CopyOnWriteArrayList<Thread>();
+    PreStopHook waitingForTheFirstToSettle =
+        (response, ctx) -> {
+          runThreads.add(Thread.currentThread());
+          if (runThreads.size() == 2) {
+            Await.termination("run 1's thread", runThreads.getFirst());
+          }
+          return HookOutcome.cont();
+        };
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var options =
+        holdingItsEnd(options(model).withHook(waitingForTheFirstToSettle), ending, release);
+    try (var session = AgentSession.open(options.build())) {
+      var first = session.send("go");
+      Await.latch("run 1 to decide its end", ending);
+      var next = session.send("again");
+      var runningWhileSettling = next.thenApply(result -> session.isRunning());
+      release.countDown();
+
+      assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
+      assertTrue(Await.value("run 2's callback", runningWhileSettling));
+      Await.until("the session to settle both runs", () -> !session.isRunning());
     }
   }
 
