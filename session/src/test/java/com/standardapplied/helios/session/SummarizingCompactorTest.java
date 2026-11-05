@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.BlockingModel;
 import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -29,6 +31,7 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -258,6 +261,64 @@ final class SummarizingCompactorTest {
         .compact(List.of(Message.user("go"), bare), freshContext());
 
     assertEquals("[user] go\n[assistant] \n", onlyCall(summarizer).getLast().content());
+  }
+
+  @Test
+  void theSummaryModelSeesWhereFilesWereAndTheSummaryListsThemInHistoryOrder() {
+    var summarizer = summaryModel("the gist");
+    var image = InlineFile.of("image-body-bytes".getBytes(StandardCharsets.US_ASCII), "image/png");
+    var history =
+        List.of(
+            Message.user("read these", List.of(image)),
+            Message.newBuilder()
+                .withRole(Role.USER)
+                .withContent("and this")
+                .withFileReferences(
+                    List.of(FileReference.of("https://example.com/a.pdf", "application/pdf")))
+                .build(),
+            Message.assistant("done"));
+
+    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshContext());
+
+    var rendered = onlyCall(summarizer).getLast();
+    assertEquals(
+        "[user] read these {file image/png}\n"
+            + "[user] and this {file application/pdf https://example.com/a.pdf}\n"
+            + "[assistant] done\n",
+        rendered.content());
+    assertEquals(List.of(), rendered.inlineFiles());
+    assertEquals(List.of(), rendered.fileReferences());
+    assertEquals(
+        List.of(
+            Message.user(
+                SummarizingCompactor.SUMMARY_PREFIX
+                    + "the gist\n\n"
+                    + "Files from the summarized conversation, no longer available unless sent"
+                    + " again:\n"
+                    + "- image/png, 16 bytes\n"
+                    + "- application/pdf, https://example.com/a.pdf")),
+        out.history());
+  }
+
+  @Test
+  void filesInTheKeptMessagesAreNeitherRenderedNorListed() {
+    var summarizer = summaryModel("the gist");
+    var file = InlineFile.of(new byte[] {1, 2, 3}, "application/pdf");
+    var system =
+        Message.newBuilder()
+            .withRole(Role.SYSTEM)
+            .withContent("sys")
+            .withInlineFiles(List.of(file))
+            .build();
+    var pending = Message.user("next", List.of(file));
+    var history = List.of(system, Message.user("go"), Message.assistant("done"), pending);
+
+    var out = SummarizingCompactor.newBuilder(summarizer).build().compact(history, freshContext());
+
+    assertEquals("[user] go\n[assistant] done\n", onlyCall(summarizer).getLast().content());
+    assertEquals(
+        List.of(system, Message.user(SummarizingCompactor.SUMMARY_PREFIX + "the gist"), pending),
+        out.history());
   }
 
   @Test
