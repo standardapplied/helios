@@ -122,7 +122,7 @@ final class SseFrames {
 
   private String read(StringBuilder line) {
     var text = line.toString();
-    if (!text.isEmpty()) {
+    if (!text.isBlank()) {
       lastLine = text;
     }
     return text;

@@ -41,6 +41,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class StreamingModelTest {
 
@@ -551,6 +553,34 @@ class StreamingModelTest {
     assertEquals(reply.content(), response.content());
     assertEquals(FinishReason.STOP, response.finishReason());
     assertEquals(schema.schema().toMap(), chatted.getFirst().outputSchema());
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = FinishReason.class,
+      names = {"REFUSAL", "CONTENT_FILTER"})
+  void aRefusedTurnEndsWithItsStopUnparsedUnderASchema(FinishReason reason) {
+    var schema = OutputSchema.of(Answer.class);
+    var refusal = Map.of(Response.REFUSAL_EXPLANATION_KEY, "blocked for recitation");
+    reply =
+        Response.newBuilder()
+            .withContent("{\"summ")
+            .withFinishReason(reason)
+            .withMetadata(refusal)
+            .build();
+
+    var read = StreamRead.of(model(config()).chatStream(MESSAGES, List.of(), schema));
+    var response = model(config()).chat(MESSAGES, List.of(), schema);
+
+    assertNull(read.failure());
+    var stop = assertInstanceOf(ModelChunk.MessageStop.class, read.items().getLast());
+    assertEquals(reason.name(), stop.stopReason());
+    assertEquals(refusal, stop.metadata());
+    assertNull(response.parsed());
+    assertEquals("{\"summ", response.content());
+    assertEquals(reason, response.finishReason());
+    assertEquals(refusal, response.metadata());
+    assertEquals(2, chatted.size());
   }
 
   @Test

@@ -60,8 +60,9 @@ public interface Model extends AutoCloseable {
    * whose content does not match the schema throws a {@link
    * com.standardapplied.helios.core.schema.StructuredOutputParseException} from {@code hasNext()}
    * after its text has streamed. A turn that calls tools is not checked: it is intermediate, and a
-   * later text-only turn delivers the structured answer. The default throws, for a model without
-   * structured output.
+   * later text-only turn delivers the structured answer. A {@code REFUSAL} or {@code
+   * CONTENT_FILTER} turn is not checked either: it ends with its {@code MessageStop}. The default
+   * throws, for a model without structured output.
    *
    * @param messages the conversation history
    * @param tools the tools the model may call
