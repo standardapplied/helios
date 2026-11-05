@@ -33,6 +33,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 
@@ -122,7 +123,50 @@ final class SessionRunsEndingTest {
   }
 
   @Test
+  void aCloseReturnsOnlyOnceTheNextRunAnInterruptDiscardedIsSettled() {
+    assertACloseReturnsOnlyOnceTheNextRunIsSettled(AgentSession::interrupt);
+  }
+
+  @Test
+  void aCallbackOfTheDiscardedRunThatClosesTheSessionDoesNotWaitForItself() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var session = AgentSession.open(holdingItsEnd(options(model), ending, release).build());
+    var first = session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var closer = new AtomicReference<Thread>();
+    var closed =
+        session
+            .send("next")
+            .handle(
+                (result, failure) -> {
+                  closer.set(Thread.currentThread());
+                  session.close();
+                  return failure;
+                });
+    session.interrupt();
+    Await.until(
+        "the callback's close to wait for the run",
+        () -> closer.get() != null && closer.get().getState() == Thread.State.TIMED_WAITING);
+    release.countDown();
+
+    assertInstanceOf(CancellationException.class, Await.value("the callback's close", closed));
+    assertInstanceOf(ResultMessage.Success.class, Await.value("run 1", first));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
   void aCloseReturnsOnlyOnceTheNextRunItKeptFromStartingIsSettled() {
+    assertACloseReturnsOnlyOnceTheNextRunIsSettled(session -> {});
+  }
+
+  /**
+   * Queue a next run behind run 1 once it decided to end, hold its future's settling in a callback,
+   * run {@code beforeClose}, then close: the close returns only once that callback returned.
+   */
+  private static void assertACloseReturnsOnlyOnceTheNextRunIsSettled(
+      Consumer<AgentSession> beforeClose) {
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
     var ending = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -139,6 +183,7 @@ final class SessionRunsEndingTest {
           settling.countDown();
           Await.latch("the test to let the settling end", settled);
         });
+    beforeClose.accept(session);
 
     var closing = Thread.ofVirtual().start(session::close);
     Await.until(
