@@ -104,6 +104,7 @@ final class LinuxFilesTest {
     Files.writeString(outside.resolve("file"), "sentinel");
     Files.writeString(outside.resolve("delete"), "sentinel");
     Files.writeString(outside.resolve("outside-only"), "sentinel");
+    Files.writeString(outside.resolve("renamed"), "sentinel");
     var workspace = WorkspaceRoot.of(swapRoot ? parent : root);
     var stop = new AtomicBoolean();
     var failure = new AtomicReference<Throwable>();
@@ -123,6 +124,7 @@ final class LinuxFilesTest {
     assertEquals(null, failure.get());
     assertEquals("sentinel", Files.readString(outside.resolve("file")));
     assertEquals("sentinel", Files.readString(outside.resolve("delete")));
+    assertEquals("sentinel", Files.readString(outside.resolve("renamed")));
     assertFalse(Files.exists(outside.resolve("created")));
   }
 
@@ -156,9 +158,9 @@ final class LinuxFilesTest {
   }
 
   /**
-   * Reads, writes, creates (when the root itself is swapped), deletes and lists under {@code
-   * parent} once. An operation the substitution races may fail with an {@link IOException}; one
-   * that reaches outside the workspace fails the test.
+   * Reads, writes, creates (when the root itself is swapped), deletes, renames and lists under
+   * {@code parent} once. An operation the substitution races may fail with an {@link IOException};
+   * one that reaches outside the workspace fails the test.
    */
   private static void attemptEveryOperationInside(
       WorkspaceRoot workspace, Path parent, boolean swapRoot) throws IOException {
@@ -181,6 +183,13 @@ final class LinuxFilesTest {
       toleratingRace(() -> workspace.createDirectories(parent.resolve("created/nested")));
     }
     toleratingRace(() -> workspace.deleteFile(parent.resolve("delete")));
+    toleratingRace(
+        () -> {
+          try (var output = workspace.newOutputStream(parent.resolve("renamed"))) {
+            output.write("inside".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          }
+          workspace.rename(parent.resolve("renamed"), parent.resolve("file"));
+        });
     workspace.walkFileTree(
         parent,
         new SimpleFileVisitor<>() {
@@ -252,7 +261,7 @@ final class LinuxFilesTest {
   }
 
   @Test
-  void missingNativeAccessFailsClosedButTrustedWorkspaceStillConstructs(@TempDir Path tmp)
+  void missingNativeAccessFailsClosedButTrustedWorkspaceStillWorks(@TempDir Path tmp)
       throws Exception {
     runProbe(tmp, "denied", false);
   }
@@ -643,6 +652,9 @@ final class LinuxFilesTest {
       if (args[1].equals("denied")) {
         assertThrows(UnsupportedOperationException.class, () -> WorkspaceRoot.of(root));
         var trusted = new WorkspaceRoot(root, false);
+        var source = Files.writeString(root.resolve("source"), "new");
+        trusted.rename(source, root.resolve("target"));
+        assertEquals("new", Files.readString(root.resolve("target")));
         assertThrows(
             UnsupportedOperationException.class, () -> FileSystemMemoryBackend.of(trusted));
         return;

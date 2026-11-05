@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -514,7 +515,8 @@ final class FileSystemMemoryBackendTest {
     var files = new MemoryFiles(WorkspaceRoot.of(tmp));
     var target = files.resolve("/memories/taken");
     var bytes = "new".getBytes(StandardCharsets.UTF_8);
-    assertThrows(IOException.class, () -> files.replace(target, bytes));
+    var failure = assertThrows(FileSystemException.class, () -> files.replace(target, bytes));
+    assertTrue(failure.getFile().matches("\\.taken\\.[0-9a-f-]{36}\\.tmp"), failure.getFile());
     assertEquals(List.of("taken"), entries(directory.getParent()));
     assertEquals("kept", Files.readString(directory.resolve("kept.md"), StandardCharsets.UTF_8));
   }
@@ -538,13 +540,12 @@ final class FileSystemMemoryBackendTest {
     var oversized = "a".repeat(FileSystemMemoryBackend.MAX_FILE_BYTES + 1);
     Files.writeString(file, oversized, StandardCharsets.UTF_8);
     var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
-    var limit = Integer.toString(FileSystemMemoryBackend.MAX_FILE_BYTES);
     for (var failure :
         List.of(
             assertThrows(IOException.class, () -> backend.view("/memories/big.md")),
             assertThrows(IOException.class, () -> backend.strReplace("/memories/big.md", "a", "b")),
             assertThrows(IOException.class, () -> backend.insert("/memories/big.md", 1, "x")))) {
-      assertTrue(failure.getMessage().contains(limit), failure.getMessage());
+      assertEquals("memory entry exceeds 1048576 bytes: /memories/big.md", failure.getMessage());
     }
     assertEquals(oversized, Files.readString(file, StandardCharsets.UTF_8));
     assertEquals(List.of("big.md"), entries(file.getParent()));
