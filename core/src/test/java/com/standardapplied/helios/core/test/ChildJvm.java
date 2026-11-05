@@ -27,12 +27,11 @@ public final class ChildJvm {
   private static List<String> command(String main) {
     var command = new ArrayList<String>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.addAll(coverageAgent());
     var classpath = new ArrayList<String>();
     for (var arg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
       if (arg.startsWith("--module-path=")) {
         classpath.add(arg.substring("--module-path=".length()));
-      } else if (arg.startsWith("-javaagent:") && arg.contains("jacoco")) {
-        command.add(arg);
       }
     }
     classpath.add(System.getProperty("java.class.path"));
@@ -40,6 +39,18 @@ public final class ChildJvm {
     command.add(String.join(File.pathSeparator, classpath));
     command.add(main);
     return command;
+  }
+
+  /**
+   * The test JVM's JaCoCo agent option, for a JVM a test launches itself, so what that JVM runs
+   * counts towards coverage. No other agent is passed on.
+   *
+   * @return the option, or nothing when the test JVM runs without JaCoCo
+   */
+  public static List<String> coverageAgent() {
+    return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+        .filter(arg -> arg.startsWith("-javaagent:") && arg.contains("jacoco"))
+        .toList();
   }
 
   /**

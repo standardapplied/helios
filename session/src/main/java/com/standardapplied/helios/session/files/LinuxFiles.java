@@ -12,6 +12,7 @@ import static com.standardapplied.helios.session.files.LinuxSyscalls.O_NOFOLLOW;
 import static com.standardapplied.helios.session.files.LinuxSyscalls.O_WRONLY;
 import static com.standardapplied.helios.session.files.LinuxSyscalls.PIN;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -70,7 +71,8 @@ final class LinuxFiles {
       return new Handle.PinnedOutput(
           Files.newOutputStream(entry.procPath(), mode.options()), entry);
     } catch (Throwable failure) {
-      try (entry) {
+      try (entry;
+          Closeable created = mode.createNew() ? () -> deleteFile(path) : null) {
         throw failure;
       }
     }
@@ -108,6 +110,12 @@ final class LinuxFiles {
     }
     try (var parent = directory(path.getParent())) {
       parent.unlink(path.getFileName().toString());
+    }
+  }
+
+  static void rename(Path source, Path target) throws IOException {
+    try (var parent = directory(source.getParent())) {
+      parent.rename(source.getFileName().toString(), target.getFileName().toString());
     }
   }
 

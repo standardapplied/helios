@@ -26,10 +26,10 @@ import java.util.Set;
 
 /**
  * The Linux descriptor-relative system calls strict workspace I/O is built on — {@code openat},
- * {@code mkdirat}, {@code unlinkat} and {@code close} through the foreign-function API — with the
- * flag values of the supported architectures and the mapping of {@code errno} to the {@link
- * java.nio.file} exception a caller expects. Owns the platform and native-access requirement, which
- * fails closed everywhere else.
+ * {@code mkdirat}, {@code unlinkat}, {@code renameat} and {@code close} through the
+ * foreign-function API — with the flag values of the supported architectures and the mapping of
+ * {@code errno} to the {@link java.nio.file} exception a caller expects. Owns the platform and
+ * native-access requirement, which fails closed everywhere else.
  */
 final class LinuxSyscalls {
   static final int AT_FDCWD = -100;
@@ -63,59 +63,57 @@ final class LinuxSyscalls {
   }
 
   static int openAt(int parent, String name, int flags, int mode) throws IOException {
-    try (var arena = Arena.ofConfined()) {
-      var state = arena.allocate(Native.STATE);
-      var path = arena.allocateFrom(name);
-      int result;
-      try {
-        result = (int) Native.OPENAT.invokeExact(state, parent, path, flags, mode);
-      } catch (Throwable failure) {
-        throw linkageFailure(failure);
-      }
-      if (result < 0) {
-        throw error(state, "openat", name);
-      }
-      return result;
-    }
+    return call(
+        "openat",
+        name,
+        (arena, state) ->
+            (int) Native.OPENAT.invokeExact(state, parent, arena.allocateFrom(name), flags, mode));
   }
 
   static void mkdirAt(int parent, String name, int mode) throws IOException {
-    callAt(Native.MKDIRAT, parent, name, mode, "mkdirat");
+    call(
+        "mkdirat",
+        name,
+        (arena, state) ->
+            (int) Native.MKDIRAT.invokeExact(state, parent, arena.allocateFrom(name), mode));
   }
 
   static void unlinkAt(int parent, String name) throws IOException {
-    callAt(Native.UNLINKAT, parent, name, 0, "unlinkat");
+    call(
+        "unlinkat",
+        name,
+        (arena, state) ->
+            (int) Native.UNLINKAT.invokeExact(state, parent, arena.allocateFrom(name), 0));
+  }
+
+  static void renameAt(int parent, String source, String target) throws IOException {
+    call(
+        "renameat",
+        source,
+        (arena, state) ->
+            (int)
+                Native.RENAMEAT.invokeExact(
+                    state, parent, arena.allocateFrom(source), parent, arena.allocateFrom(target)));
   }
 
   static void close(int fd) throws IOException {
-    try (var arena = Arena.ofConfined()) {
-      var state = arena.allocate(Native.STATE);
-      int result;
-      try {
-        result = (int) Native.CLOSE.invokeExact(state, fd);
-      } catch (Throwable failure) {
-        throw linkageFailure(failure);
-      }
-      if (result < 0) {
-        throw error(state, "close", Integer.toString(fd));
-      }
-    }
+    call(
+        "close", Integer.toString(fd), (arena, state) -> (int) Native.CLOSE.invokeExact(state, fd));
   }
 
-  private static void callAt(
-      MethodHandle call, int parent, String name, int flags, String operation) throws IOException {
+  private static int call(String operation, String name, Call call) throws IOException {
     try (var arena = Arena.ofConfined()) {
       var state = arena.allocate(Native.STATE);
-      var path = arena.allocateFrom(name);
       int result;
       try {
-        result = (int) call.invokeExact(state, parent, path, flags);
+        result = call.invoke(arena, state);
       } catch (Throwable failure) {
         throw linkageFailure(failure);
       }
       if (result < 0) {
         throw error(state, operation, name);
       }
+      return result;
     }
   }
 
@@ -140,6 +138,12 @@ final class LinuxSyscalls {
     return new AssertionError("unexpected native linkage failure", failure);
   }
 
+  /** One downcall, given the arena for its arguments and the segment that captures errno. */
+  @FunctionalInterface
+  private interface Call {
+    int invoke(Arena arena, MemorySegment state) throws Throwable;
+  }
+
   private static final class Native {
     static final Linker LINKER = Linker.nativeLinker();
     static final MemoryLayout STATE = Linker.Option.captureStateLayout();
@@ -151,18 +155,19 @@ final class LinuxSyscalls {
             FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT),
             Linker.Option.captureCallState("errno"),
             Linker.Option.firstVariadicArg(3));
-    static final MethodHandle MKDIRAT = at("mkdirat");
-    static final MethodHandle UNLINKAT = at("unlinkat");
+    static final MethodHandle MKDIRAT = at("mkdirat", JAVA_INT);
+    static final MethodHandle UNLINKAT = at("unlinkat", JAVA_INT);
+    static final MethodHandle RENAMEAT = at("renameat", JAVA_INT, ADDRESS);
     static final MethodHandle CLOSE =
         LINKER.downcallHandle(
             LINKER.defaultLookup().find("close").orElseThrow(),
             FunctionDescriptor.of(JAVA_INT, JAVA_INT),
             Linker.Option.captureCallState("errno"));
 
-    private static MethodHandle at(String name) {
+    private static MethodHandle at(String name, MemoryLayout... rest) {
       return LINKER.downcallHandle(
           LINKER.defaultLookup().find(name).orElseThrow(),
-          FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT),
+          FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS).appendArgumentLayouts(rest),
           Linker.Option.captureCallState("errno"));
     }
   }

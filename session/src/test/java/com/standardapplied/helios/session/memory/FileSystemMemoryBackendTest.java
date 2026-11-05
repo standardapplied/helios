@@ -14,9 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.session.files.SpecialFiles;
 import com.standardapplied.helios.session.files.WorkspaceRoot;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -452,5 +454,121 @@ final class FileSystemMemoryBackendTest {
     assertThrows(
         CharacterCodingException.class, () -> backend.insert("/memories/note.md", 1, unpaired));
     assertEquals("keep\n", Files.readString(file, StandardCharsets.UTF_8));
+  }
+
+  private static List<String> entries(Path directory) throws IOException {
+    try (var names = Files.list(directory)) {
+      return names.map(entry -> entry.getFileName().toString()).sorted().toList();
+    }
+  }
+
+  private static String readOpened(InputStream opened) throws IOException {
+    try (opened) {
+      return new String(opened.readAllBytes(), StandardCharsets.UTF_8);
+    }
+  }
+
+  @Test
+  void strReplaceLeavesAReaderOpenedBeforeItOnTheOldContent(@TempDir Path tmp) throws IOException {
+    var file = seed(tmp, "note.md", "old content");
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    var opened = Files.newInputStream(file);
+    backend.strReplace("/memories/note.md", "old", "new");
+    assertEquals("old content", readOpened(opened));
+    assertEquals("new content", backend.view("/memories/note.md"));
+    assertEquals(List.of("note.md"), entries(file.getParent()));
+  }
+
+  @Test
+  void insertLeavesAReaderOpenedBeforeItOnTheOldContent(@TempDir Path tmp) throws IOException {
+    var file = seed(tmp, "note.md", "old content");
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    var opened = Files.newInputStream(file);
+    backend.insert("/memories/note.md", 1, "new line");
+    assertEquals("old content", readOpened(opened));
+    assertEquals("new line\nold content", backend.view("/memories/note.md"));
+    assertEquals(List.of("note.md"), entries(file.getParent()));
+  }
+
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void anUpdateThatCannotWriteKeepsTheOldFileAndLeavesNoTemporary(@TempDir Path tmp)
+      throws IOException {
+    var file = seed(tmp, "note.md", "old content");
+    var directory = file.getParent();
+    Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
+    try {
+      Assumptions.assumeFalse(Files.isWritable(directory), "permissions are not enforced (root)");
+      var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+      assertThrows(IOException.class, () -> backend.strReplace("/memories/note.md", "old", "new"));
+      assertThrows(IOException.class, () -> backend.insert("/memories/note.md", 1, "new"));
+      assertEquals("old content", Files.readString(file, StandardCharsets.UTF_8));
+      assertEquals(List.of("note.md"), entries(directory));
+    } finally {
+      Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+    }
+  }
+
+  @Test
+  void aReplaceThatCannotRenameDeletesItsTemporary(@TempDir Path tmp) throws IOException {
+    var directory = seed(tmp, "taken/kept.md", "kept").getParent();
+    var files = new MemoryFiles(WorkspaceRoot.of(tmp));
+    var target = files.resolve("/memories/taken");
+    var bytes = "new".getBytes(StandardCharsets.UTF_8);
+    var failure = assertThrows(FileSystemException.class, () -> files.replace(target, bytes));
+    assertTrue(failure.getFile().matches("\\.taken\\.[0-9a-f-]{36}\\.tmp"), failure.getFile());
+    assertEquals(List.of("taken"), entries(directory.getParent()));
+    assertEquals("kept", Files.readString(directory.resolve("kept.md"), StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void updatesWorkUnderTheLongestFileNames(@TempDir Path tmp) throws IOException {
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    for (var name : List.of("a".repeat(255), "\ud83d\ude00".repeat(63) + "abc")) {
+      var path = "/memories/" + name;
+      backend.create(path, "old content");
+      backend.strReplace(path, "old", "new");
+      backend.insert(path, 1, "first");
+      assertEquals("first\nnew content", backend.view(path));
+    }
+    assertEquals(2, entries(backend.memoryRoot()).size());
+  }
+
+  @Test
+  void aFileOverTheLimitIsNeitherReadNorUpdated(@TempDir Path tmp) throws IOException {
+    var file = seed(tmp, "big.md", "");
+    var oversized = "a".repeat(FileSystemMemoryBackend.MAX_FILE_BYTES + 1);
+    Files.writeString(file, oversized, StandardCharsets.UTF_8);
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    for (var failure :
+        List.of(
+            assertThrows(IOException.class, () -> backend.view("/memories/big.md")),
+            assertThrows(IOException.class, () -> backend.strReplace("/memories/big.md", "a", "b")),
+            assertThrows(IOException.class, () -> backend.insert("/memories/big.md", 1, "x")))) {
+      assertEquals("memory entry exceeds 1048576 bytes: /memories/big.md", failure.getMessage());
+    }
+    assertEquals(oversized, Files.readString(file, StandardCharsets.UTF_8));
+    assertEquals(List.of("big.md"), entries(file.getParent()));
+  }
+
+  @Test
+  void contentOverTheLimitIsRefusedBeforeAnythingIsWritten(@TempDir Path tmp) throws IOException {
+    var backend = FileSystemMemoryBackend.of(WorkspaceRoot.of(tmp));
+    var limit = Integer.toString(FileSystemMemoryBackend.MAX_FILE_BYTES);
+    var atLimit = "x" + "a".repeat(FileSystemMemoryBackend.MAX_FILE_BYTES - 1);
+    backend.create("/memories/full.md", atLimit);
+    assertEquals(atLimit, backend.view("/memories/full.md"));
+    var oversized = "a".repeat(FileSystemMemoryBackend.MAX_FILE_BYTES + 1);
+    var created =
+        assertThrows(IOException.class, () -> backend.create("/memories/new.md", oversized));
+    var replaced =
+        assertThrows(IOException.class, () -> backend.strReplace("/memories/full.md", "x", "yy"));
+    var inserted =
+        assertThrows(IOException.class, () -> backend.insert("/memories/full.md", 1, "y"));
+    for (var failure : List.of(created, replaced, inserted)) {
+      assertTrue(failure.getMessage().contains(limit), failure.getMessage());
+    }
+    assertEquals(atLimit, backend.view("/memories/full.md"));
+    assertEquals(List.of("full.md"), entries(backend.memoryRoot()));
   }
 }

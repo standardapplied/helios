@@ -8,11 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ChildJvm;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import java.io.IOException;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.ValueLayout;
 import java.net.URI;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
@@ -31,6 +36,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -98,6 +104,7 @@ final class LinuxFilesTest {
     Files.writeString(outside.resolve("file"), "sentinel");
     Files.writeString(outside.resolve("delete"), "sentinel");
     Files.writeString(outside.resolve("outside-only"), "sentinel");
+    Files.writeString(outside.resolve("renamed"), "sentinel");
     var workspace = WorkspaceRoot.of(swapRoot ? parent : root);
     var stop = new AtomicBoolean();
     var failure = new AtomicReference<Throwable>();
@@ -117,6 +124,7 @@ final class LinuxFilesTest {
     assertEquals(null, failure.get());
     assertEquals("sentinel", Files.readString(outside.resolve("file")));
     assertEquals("sentinel", Files.readString(outside.resolve("delete")));
+    assertEquals("sentinel", Files.readString(outside.resolve("renamed")));
     assertFalse(Files.exists(outside.resolve("created")));
   }
 
@@ -150,9 +158,9 @@ final class LinuxFilesTest {
   }
 
   /**
-   * Reads, writes, creates (when the root itself is swapped), deletes and lists under {@code
-   * parent} once. An operation the substitution races may fail with an {@link IOException}; one
-   * that reaches outside the workspace fails the test.
+   * Reads, writes, creates (when the root itself is swapped), deletes, renames and lists under
+   * {@code parent} once. An operation the substitution races may fail with an {@link IOException};
+   * one that reaches outside the workspace fails the test.
    */
   private static void attemptEveryOperationInside(
       WorkspaceRoot workspace, Path parent, boolean swapRoot) throws IOException {
@@ -175,6 +183,13 @@ final class LinuxFilesTest {
       toleratingRace(() -> workspace.createDirectories(parent.resolve("created/nested")));
     }
     toleratingRace(() -> workspace.deleteFile(parent.resolve("delete")));
+    toleratingRace(
+        () -> {
+          try (var output = workspace.newOutputStream(parent.resolve("renamed"))) {
+            output.write("inside".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          }
+          workspace.rename(parent.resolve("renamed"), parent.resolve("file"));
+        });
     workspace.walkFileTree(
         parent,
         new SimpleFileVisitor<>() {
@@ -236,7 +251,17 @@ final class LinuxFilesTest {
   }
 
   @Test
-  void missingNativeAccessFailsClosedButTrustedWorkspaceStillConstructs(@TempDir Path tmp)
+  void exclusiveCreationThatCannotReopenForWritingDeletesTheNewEntry(@TempDir Path tmp)
+      throws Exception {
+    var readOnly = Files.writeString(tmp.resolve("read-only"), "x");
+    Files.setPosixFilePermissions(readOnly, PosixFilePermissions.fromString("r--------"));
+    assumeFalse(Files.isWritable(readOnly), "requires an unprivileged test process");
+    Files.delete(readOnly);
+    runProbe(tmp, "unwritable", true);
+  }
+
+  @Test
+  void missingNativeAccessFailsClosedButTrustedWorkspaceStillWorks(@TempDir Path tmp)
       throws Exception {
     runProbe(tmp, "denied", false);
   }
@@ -590,6 +615,7 @@ final class LinuxFilesTest {
   private static void runProbe(Path directory, String mode, boolean nativeAccess) throws Exception {
     var command = new ArrayList<String>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.addAll(ChildJvm.coverageAgent());
     if (nativeAccess) {
       command.add("--enable-native-access=ALL-UNNAMED");
     }
@@ -621,16 +647,23 @@ final class LinuxFilesTest {
   }
 
   public static final class Probe {
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Throwable {
       var root = Path.of(args[0]);
       if (args[1].equals("denied")) {
         assertThrows(UnsupportedOperationException.class, () -> WorkspaceRoot.of(root));
         var trusted = new WorkspaceRoot(root, false);
+        var source = Files.writeString(root.resolve("source"), "new");
+        trusted.rename(source, root.resolve("target"));
+        assertEquals("new", Files.readString(root.resolve("target")));
         assertThrows(
             UnsupportedOperationException.class, () -> FileSystemMemoryBackend.of(trusted));
         return;
       }
       var workspace = WorkspaceRoot.of(root);
+      if (args[1].equals("unwritable")) {
+        createdEntriesAreUnwritable(workspace, root);
+        return;
+      }
       var fifo = root.resolve("fifo");
       assertFalse(workspace.attributes(fifo).isRegularFile());
       assertThrows(IOException.class, () -> workspace.newInputStream(fifo));
@@ -640,6 +673,29 @@ final class LinuxFilesTest {
       var device = new WorkspaceRoot(Path.of("/dev"), true);
       assertThrows(IOException.class, () -> device.newInputStream(Path.of("/dev/null")));
       assertThrows(IOException.class, () -> device.newOutputStream(Path.of("/dev/null")));
+    }
+
+    private static void createdEntriesAreUnwritable(WorkspaceRoot workspace, Path root)
+        throws Throwable {
+      var memory = FileSystemMemoryBackend.of(workspace);
+      memory.create("/memories/note.md", "old content");
+      var linker = Linker.nativeLinker();
+      var umask =
+          linker.downcallHandle(
+              linker.defaultLookup().find("umask").orElseThrow(),
+              FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+      int unused = (int) umask.invokeExact(0277);
+      var file = root.resolve("file");
+      assertThrows(
+          AccessDeniedException.class,
+          () -> workspace.newOutputStream(file, StandardOpenOption.CREATE_NEW));
+      assertFalse(Files.exists(file, LinkOption.NOFOLLOW_LINKS));
+      assertThrows(
+          AccessDeniedException.class, () -> memory.strReplace("/memories/note.md", "old", "new"));
+      assertEquals("old content", memory.view("/memories/note.md"));
+      try (var entries = Files.list(memory.memoryRoot())) {
+        assertEquals(List.of(memory.memoryRoot().resolve("note.md")), entries.toList());
+      }
     }
   }
 }
