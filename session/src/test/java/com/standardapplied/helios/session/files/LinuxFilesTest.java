@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ChildJvm;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import java.io.IOException;
 import java.lang.foreign.FunctionDescriptor;
@@ -34,7 +35,6 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -606,10 +606,7 @@ final class LinuxFilesTest {
   private static void runProbe(Path directory, String mode, boolean nativeAccess) throws Exception {
     var command = new ArrayList<String>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
-    ProcessHandle.current().info().arguments().stream()
-        .flatMap(Arrays::stream)
-        .filter(argument -> argument.startsWith("-javaagent:"))
-        .forEach(command::add);
+    command.addAll(ChildJvm.coverageAgent());
     if (nativeAccess) {
       command.add("--enable-native-access=ALL-UNNAMED");
     }
