@@ -18,15 +18,14 @@ import java.util.Set;
 public final class HostFunctionRegistry {
 
   /**
-   * Names reserved by the framework: {@code __call}, the dispatcher on the sandbox's {@code
-   * HostBridge} that every synthesized wrapper calls. The prelude synthesizer emits no typed
-   * wrapper for a reserved name, so the dispatcher is never shadowed, and {@code ReplSession}
-   * excludes reserved names from its called-host-function counts.
-   *
-   * <p>Not enforced at {@link #register(HostFunction)}; reservation is the concern of the
-   * components that read this constant, its single source of truth.
+   * The helper methods the sandbox prelude ({@code SandboxPrelude.SNIPPET}) declares. A host
+   * function with one of these names would replace the helper the model calls, so {@link
+   * #register(HostFunction)} refuses it.
    */
-  public static final Set<String> RESERVED_NAMES = Set.of("__call");
+  public static final Set<String> PRELUDE_HELPER_NAMES =
+      Set.of(
+          "print", "println", "printf", "sum", "sumInts", "mean", "max", "min", "join", "filter",
+          "map", "sorted", "countBy");
 
   private final Map<String, HostFunction> functions = new LinkedHashMap<>();
   private volatile boolean frozen;
@@ -35,11 +34,17 @@ public final class HostFunctionRegistry {
    * Register a host function.
    *
    * @param function the function to register
+   * @throws IllegalArgumentException if {@code function} is null or named after a prelude helper
+   *     ({@link #PRELUDE_HELPER_NAMES})
    * @throws IllegalStateException if the registry is frozen or a function with the same name exists
    */
   public void register(HostFunction function) {
     if (function == null) {
       throw new IllegalArgumentException("Host function must not be null");
+    }
+    if (PRELUDE_HELPER_NAMES.contains(function.name())) {
+      throw new IllegalArgumentException(
+          "Host function name must not be a sandbox prelude helper: " + function.name());
     }
     if (frozen) {
       throw new IllegalStateException("Registry is frozen");

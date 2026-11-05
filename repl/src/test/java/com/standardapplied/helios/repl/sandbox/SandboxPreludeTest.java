@@ -10,8 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.repl.host.HostFunctionRegistry;
 import java.util.List;
+import java.util.stream.Collectors;
 import jdk.jshell.JShell;
+import jdk.jshell.MethodSnippet;
 import jdk.jshell.Snippet;
 import org.junit.jupiter.api.Test;
 
@@ -71,6 +74,15 @@ class SandboxPreludeTest {
       assertTrue(
           failed.isEmpty(),
           "Every snippet in the prelude must compile and become VALID; failures: " + failed);
+    }
+  }
+
+  @Test
+  void theHelpersTheSnippetDeclaresAreExactlyTheRegistrysPreludeHelperNames() {
+    try (var jshell = JShell.builder().executionEngine("local").build()) {
+      SandboxPrelude.install(jshell);
+      var declared = jshell.methods().map(MethodSnippet::name).collect(Collectors.toSet());
+      assertEquals(HostFunctionRegistry.PRELUDE_HELPER_NAMES, declared);
     }
   }
 

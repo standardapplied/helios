@@ -8,7 +8,6 @@ package com.standardapplied.helios.repl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -249,34 +248,6 @@ class ReplSessionTest {
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
-  }
-
-  @Test
-  void calledHostFunctionsExcludesReservedNames() throws Exception {
-    var reserved = new HostFunction("__call", "fake", params -> Map.of("query", "hi"));
-    var sandbox = new RecordingSandbox();
-    var config =
-        ReplConfig.newBuilder()
-            .withSandboxFactory(
-                registry -> {
-                  sandbox.setRegistry(registry);
-                  return sandbox;
-                })
-            .withExecutionTimeout(Duration.ofSeconds(1))
-            .withHostFunction(reserved)
-            .build();
-    var session = ReplSession.create(config, new Semaphore(1));
-    sandbox.behavior =
-        registry -> {
-          try {
-            registry.get("__call").handler().handle(Map.of());
-          } catch (Exception e) {
-            throw new RuntimeException(e);
-          }
-        };
-    session.execute("noop");
-    assertNull(session.calledHostFunctions().get("__call"));
-    session.close();
   }
 
   /**
