@@ -62,6 +62,9 @@ final class SseFrames {
     StringBuilder data = null;
     var framed = false;
     for (var line = lines.next(); line != null; line = lines.next()) {
+      if (!line.isBlank()) {
+        lastLine = line;
+      }
       if (!line.isEmpty()) {
         data = appendData(data, line);
         framed = true;
@@ -95,10 +98,7 @@ final class SseFrames {
       skipByteOrderMark();
     }
     var line = new StringBuilder();
-    while (true) {
-      if (position == limit && !fill()) {
-        return lastLineOf(line);
-      }
+    while (position < limit || fill()) {
       var c = buffer[position++];
       if (skipLineFeed && c == '\n') {
         skipLineFeed = false;
@@ -106,26 +106,14 @@ final class SseFrames {
       }
       skipLineFeed = c == '\r';
       if (c == '\n' || c == '\r') {
-        return read(line);
+        return line.toString();
       }
       if (line.length() == MAX_FRAME_CHARS) {
         throw tooLarge("line");
       }
       line.append(c);
     }
-  }
-
-  /** The body's unterminated last line, or {@code null} when it ended with a terminator. */
-  private String lastLineOf(StringBuilder line) {
-    return line.isEmpty() ? null : read(line);
-  }
-
-  private String read(StringBuilder line) {
-    var text = line.toString();
-    if (!text.isBlank()) {
-      lastLine = text;
-    }
-    return text;
+    return line.isEmpty() ? null : line.toString();
   }
 
   private static boolean isFramed(String line) {
