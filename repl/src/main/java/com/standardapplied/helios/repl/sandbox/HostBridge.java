@@ -10,9 +10,9 @@ import java.util.Map;
 /**
  * Static bridge for sandbox code to call host functions. Sandbox code evaluated by JShell reaches
  * the host through {@link #__call}, which delegates to the sandbox's installed {@link
- * HostBridgeState}. Every non-reserved host function registered on the parent gets a typed wrapper
- * synthesized by {@link SandboxPrelude} that calls it, so {@code marketQuote("AAPL")} is the form
- * sandbox code uses.
+ * HostBridgeState}. Every host function registered on the parent gets a typed wrapper synthesized
+ * by {@link SandboxPrelude} that calls it, so {@code marketQuote("AAPL")} is the form sandbox code
+ * uses. A host function named with {@code __} is refused, so none shadows {@code __call}.
  */
 public final class HostBridge {
 

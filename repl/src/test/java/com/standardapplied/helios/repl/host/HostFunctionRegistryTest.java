@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class HostFunctionRegistryTest {
@@ -101,23 +102,17 @@ class HostFunctionRegistryTest {
   }
 
   @Test
-  void reservedNamesIsExactCanonicalSet() {
-    assertEquals(java.util.Set.of("__call"), HostFunctionRegistry.RESERVED_NAMES);
-  }
-
-  @Test
-  void reservedNamesIsImmutable() {
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> HostFunctionRegistry.RESERVED_NAMES.add("__hack"));
-  }
-
-  @Test
-  void registerAcceptsReservedNames() {
+  void registerRefusesAPreludeHelperNameAndLeavesTheRegistryUnchanged() {
     var registry = new HostFunctionRegistry();
-    for (var reserved : HostFunctionRegistry.RESERVED_NAMES) {
-      registry.register(new HostFunction(reserved, "framework wiring", params -> null));
-    }
-    assertEquals(HostFunctionRegistry.RESERVED_NAMES.size(), registry.size());
+    registry.register(new HostFunction("lookup", "desc", params -> "ok"));
+
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> registry.register(new HostFunction("print", "desc", params -> "no")));
+
+    assertEquals(
+        "Host function name must not be a sandbox prelude helper: print", thrown.getMessage());
+    assertEquals(List.of("lookup"), registry.all().stream().map(HostFunction::name).toList());
   }
 }

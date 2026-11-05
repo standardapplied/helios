@@ -127,7 +127,7 @@ class SandboxPreludeInstallTest {
         new HostFunction(
             "lookup",
             "Looks a key up.",
-            List.of(HostParameter.required("int", ParameterType.STRING, "Named after a keyword.")),
+            List.of(HostParameter.required("com", ParameterType.STRING, "Hides a package.")),
             params -> null));
     var earlierChildren = livePids();
 
