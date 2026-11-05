@@ -188,6 +188,8 @@ deleted, costs one resend of the whole conversation, never the request. `RawOutp
 corrections while keeping raw model text out of structured-output exceptions. The effective
 Interactions version is reported in response metadata under `gemini.apiVersion`; base URLs and
 credentials are excluded from that diagnostic.
+A response Gemini blocks for recitation ends with `FinishReason.CONTENT_FILTER`; a session ends
+in `Refusal` with Gemini's message.
 When `withBaseUrl(...)` is also set, that compatibility override supplies the complete endpoint
 prefix and therefore takes precedence over canonical version-path construction.
 

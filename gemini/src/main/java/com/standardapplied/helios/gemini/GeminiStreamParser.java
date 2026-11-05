@@ -13,6 +13,7 @@ import com.standardapplied.helios.gemini.api.GeminiJson;
 import com.standardapplied.helios.gemini.api.InteractionResponse;
 import com.standardapplied.helios.gemini.api.InteractionUsage;
 import com.standardapplied.helios.gemini.api.StreamingEvent;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -23,9 +24,14 @@ import java.util.Objects;
  * there, when that event's own interaction status is one the assembler counts as an ending and no
  * function call is still open; any other status, an unreadable event and function arguments that
  * are not a JSON object end it in an error, and an {@code error} event in one whose {@link
- * GeminiException} carries the reported code.
+ * GeminiException} carries the reported code. An error that names recitation is Gemini's recitation
+ * filter blocking the response: it ends the stream with what streamed before it, finishing with
+ * {@link FinishReason#CONTENT_FILTER} and Gemini's message as the refusal's explanation. A body
+ * that ends early with a bare {@code {"error":...}} line ends as that error event would.
  */
 final class GeminiStreamParser implements SseReader.Parser {
+
+  private static final String RECITATION = "recitation";
 
   private final boolean propagateInteractionId;
   private final String apiVersion;
@@ -61,6 +67,18 @@ final class GeminiStreamParser implements SseReader.Parser {
     return response(FinishReason.ERROR);
   }
 
+  @Override
+  public StreamEvent unframedLine(String line) {
+    try {
+      var event = GeminiJson.LENIENT.readValue(line, StreamingEvent.class);
+      return event != null && event.eventType() == null && event.error() != null
+          ? error(event.error())
+          : null;
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
+
   private StreamEvent on(StreamingEvent event) {
     return switch (event.eventType()) {
       case "error" -> error(event.error());
@@ -78,11 +96,12 @@ final class GeminiStreamParser implements SseReader.Parser {
   private StreamEvent error(Map<String, Object> error) {
     var fields = error == null ? Map.<String, Object>of() : error;
     var code = fields.get("code");
-    var message =
-        StreamErrorMessage.of(
-            "API error",
-            Objects.toString(code, null),
-            Objects.toString(fields.get("message"), null));
+    var reported = Objects.toString(fields.get("message"), null);
+    var codeText = Objects.toString(code, null);
+    if (namesRecitation(reported) || namesRecitation(codeText)) {
+      return blocked(Objects.requireNonNullElse(reported, codeText));
+    }
+    var message = StreamErrorMessage.of("API error", codeText, reported);
     var statusCode = code instanceof Number number && number.intValue() > 0 ? number.intValue() : 0;
     var exception = new GeminiException(message, statusCode);
     return failed(
@@ -111,14 +130,35 @@ final class GeminiStreamParser implements SseReader.Parser {
     return new StreamEvent.Error(message, cause, partial());
   }
 
+  /** The response so far, which Gemini's recitation filter stopped for {@code explanation}. */
+  private StreamEvent blocked(String explanation) {
+    return new StreamEvent.Done(
+        response(
+            FinishReason.CONTENT_FILTER,
+            Map.of(
+                Response.REFUSAL_EXPLANATION_KEY,
+                explanation,
+                Response.REFUSAL_CATEGORY_KEY,
+                RECITATION)));
+  }
+
+  private static boolean namesRecitation(String text) {
+    return text != null && text.toLowerCase(Locale.ROOT).contains(RECITATION);
+  }
+
   private Response<Void> response(FinishReason finishReason) {
+    return response(finishReason, Map.of());
+  }
+
+  private Response<Void> response(FinishReason finishReason, Map<String, String> refusal) {
     return GeminiResponseAssembler.response(
         steps.result(),
         usage,
         propagateInteractionId ? interactionId : null,
         apiVersion,
         promptStamp,
-        finishReason);
+        finishReason,
+        refusal);
   }
 
   private StreamEvent envelope(InteractionResponse interaction) {

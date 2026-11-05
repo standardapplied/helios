@@ -113,7 +113,10 @@ public final class ScriptedModel implements Model {
             .withThinking(scripted.thinking())
             .withCitations(scripted.citations())
             .withMetadata(scripted.metadata());
-    if (scripted.hasToolCalls() || scripted.finishReason() == FinishReason.REFUSAL) {
+    var reason = scripted.finishReason();
+    if (scripted.hasToolCalls()
+        || reason == FinishReason.REFUSAL
+        || reason == FinishReason.CONTENT_FILTER) {
       return builder.build();
     }
     var parsed = StructuredContentParser.parse(scripted.content(), outputSchema, JSON_ADAPTER);
@@ -269,7 +272,8 @@ public final class ScriptedModel implements Model {
     /**
      * Scripts a turn that answers with exactly {@code response}: any finish reason, thinking,
      * citations or provider metadata it carries reach the caller as given. A structured-output call
-     * parses its content unless it carries tool calls or a {@link FinishReason#REFUSAL}.
+     * parses its content unless it carries tool calls or finishes {@link FinishReason#REFUSAL} or
+     * {@link FinishReason#CONTENT_FILTER}.
      *
      * @param response the response this turn returns
      * @return this builder for chaining

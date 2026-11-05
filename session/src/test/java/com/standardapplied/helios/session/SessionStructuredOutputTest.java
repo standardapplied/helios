@@ -150,6 +150,40 @@ final class SessionStructuredOutputTest {
     }
   }
 
+  @Test
+  void aTurnFilteredMidAnswerEndsInOneRefusalUnderASessionSchema() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withResponseTurn(
+                Response.newBuilder()
+                    .withContent("{\"name\":\"twenty-")
+                    .withFinishReason(FinishReason.CONTENT_FILTER)
+                    .withMetadata(
+                        Map.of(
+                            Response.REFUSAL_EXPLANATION_KEY, "Request blocked due to recitation.",
+                            Response.REFUSAL_CATEGORY_KEY, "recitation"))
+                    .build())
+            .build();
+
+    try (var session =
+        AgentSession.open(
+            SessionOptions.newBuilder()
+                .withModel(model)
+                .withSessionId(SID)
+                .withClock(CLOCK)
+                .withOutputSchema(OutputSchema.of(TypedAnswer.class))
+                .withLimits(SessionLimits.newBuilder().withMaxTurns(2).build())
+                .build())) {
+      var refusal =
+          assertInstanceOf(
+              ResultMessage.Refusal.class, session.runBlocking(UserMessage.text("count")));
+
+      assertEquals("Request blocked due to recitation.", refusal.refusalText());
+      assertEquals("recitation", refusal.category());
+      assertEquals(1, model.calls().size());
+    }
+  }
+
   /** Output record whose simple name the blank-result message names. */
   public record Person(String name) {}
 

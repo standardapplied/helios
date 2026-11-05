@@ -42,13 +42,14 @@ import java.util.concurrent.TimeoutException;
  * <p>A stream that is not closed first ends with exactly one terminal event: the {@link
  * StreamEvent.Done} or {@link StreamEvent.Error} the parser yields, or an error this reader raises.
  * A body that ends before the parser's terminal is never a completion: it ends in an error whose
- * cause is an {@link EOFException}. A failure to read ends in an error carrying its {@link
- * IOException}, an idle timeout or an oversized line or event one carrying the provider's own
- * exception. Each error carries the parser's {@link Parser#partial()}. Closing the reader from
- * another thread releases a blocked read as such an error, an interrupt of the reading thread
- * closes the reader and throws a {@link CancellationException} with the interrupt kept, even when
- * an event was read ahead; a reader that ended still has nothing next. {@link SseFrames} frames the
- * lines into events.
+ * cause is an {@link EOFException}, unless its last non-blank line is outside the server-sent-event
+ * format and the parser's {@link Parser#unframedLine(String)} reads it as the terminal. A failure
+ * to read ends in an error carrying its {@link IOException}, an idle timeout or an oversized line
+ * or event one carrying the provider's own exception. Each error carries the parser's {@link
+ * Parser#partial()}. Closing the reader from another thread releases a blocked read as such an
+ * error, an interrupt of the reading thread closes the reader and throws a {@link
+ * CancellationException} with the interrupt kept, even when an event was read ahead; a reader that
+ * ended still has nothing next. {@link SseFrames} frames the lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
 
@@ -71,6 +72,19 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
      * without its terminal event.
      */
     Response<Void> partial();
+
+    /**
+     * Reads the line a body that ended before the terminal event ended with. Called at most once,
+     * when the body's last non-blank line is not part of the server-sent-event format. Never
+     * throws.
+     *
+     * @param line that line, without its terminator
+     * @return the stream's terminal event the line means, a {@link StreamEvent.Done} or {@link
+     *     StreamEvent.Error}, or {@code null} to end the stream as a body that ended early
+     */
+    default StreamEvent unframedLine(String line) {
+      return null;
+    }
   }
 
   private static final int OK = 200;
@@ -223,6 +237,12 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     try {
       var payload = frames.payload(this::readLine);
       if (payload == null) {
+        var line = frames.unframedLine();
+        var ending = line == null ? null : parser.unframedLine(line);
+        if (ending instanceof StreamEvent.Done || ending instanceof StreamEvent.Error) {
+          release();
+          return ending;
+        }
         return failed(
             "Stream ended before its terminal event",
             new EOFException("the response body ended before the provider's terminal event"),

@@ -65,9 +65,13 @@ final class StopClassifierTest {
   }
 
   private ResultMessage.Refusal classifyRefusal(String content, Map<String, String> metadata) {
+    return classifyRefusal(FinishReason.REFUSAL, content, metadata);
+  }
+
+  private ResultMessage.Refusal classifyRefusal(
+      FinishReason reason, String content, Map<String, String> metadata) {
     var outcome =
-        new TurnOutcome(
-            FinishReason.REFUSAL, content, List.of(), List.of(), Usage.of(0, 0), metadata, null, 1);
+        new TurnOutcome(reason, content, List.of(), List.of(), Usage.of(0, 0), metadata, null, 1);
     return assertInstanceOf(
         ResultMessage.Refusal.class,
         classifier.classify(state(), defaults(), outcome, false).orElseThrow());
@@ -293,6 +297,22 @@ final class StopClassifierTest {
 
     assertEquals(
         "This request was declined because it could enable biological harm.", r.refusalText());
+  }
+
+  @Test
+  void aContentFilterSurfacesTheProviderExplanationAndCategory() {
+    var r =
+        classifyRefusal(
+            FinishReason.CONTENT_FILTER,
+            "one\ntwo\nthree",
+            Map.of(
+                Response.REFUSAL_CATEGORY_KEY,
+                "recitation",
+                Response.REFUSAL_EXPLANATION_KEY,
+                "Request blocked due to copyright/recitation content."));
+
+    assertEquals("Request blocked due to copyright/recitation content.", r.refusalText());
+    assertEquals("recitation", r.category());
   }
 
   @Test

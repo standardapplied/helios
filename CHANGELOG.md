@@ -1194,6 +1194,8 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Added
 
+- `SseReader.Parser.unframedLine(String)`, default `null`: reads the last line of a body that ended
+  before the terminal event when that line is outside the SSE format.
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
   off; 65,536 output tokens per request.
 - **`SessionLimits.maxToolResultChars()`**, set with `Builder.withMaxToolResultChars(int)`, and
@@ -1411,6 +1413,14 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Fixed
 
+- **A Gemini stream that Gemini's recitation filter stops mid-response ends with `CONTENT_FILTER`
+  and Gemini's message** (`refusal.explanation`, `refusal.category` `recitation`), instead of
+  being retried twice and ending in `ErrorTransientStream`. Any other bare error line Gemini ends a
+  stream with now surfaces as that error.
+- **A refused turn under an output schema was retried as a schema mismatch.** A `REFUSAL` or
+  `CONTENT_FILTER` turn's content, often cut short, was parsed against the schema; the failure
+  started self-correction, so a session ended in `ErrorMaxTurns` instead of `Refusal`. A refused
+  turn is now left unparsed (`parsed()` is `null`) and ends with its `MessageStop`.
 - **A Gemini upload whose processing failed left a file nobody could delete.** The caller got an
   exception and no handle, so the file stayed in the project's Files storage until Gemini's
   retention expired; a plain `upload(...)` never gave a handle at all. Every upload now returns

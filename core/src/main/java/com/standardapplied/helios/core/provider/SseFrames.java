@@ -5,6 +5,7 @@ package com.standardapplied.helios.core.provider;
 import com.standardapplied.helios.core.model.ProviderException;
 import java.io.IOException;
 import java.io.Reader;
+import java.util.Set;
 
 /**
  * The server-sent-events wire format of one response body: its lines, each ending with CR, LF or
@@ -30,6 +31,7 @@ final class SseFrames {
   static final int MAX_FRAME_CHARS = 16 * 1024 * 1024;
 
   private static final String DATA_FIELD = "data";
+  private static final Set<String> FIELDS = Set.of(DATA_FIELD, "event", "id", "retry");
   private static final String DONE_MARKER = "[DONE]";
   private static final int BUFFER_CHARS = 8192;
   private static final char BYTE_ORDER_MARK = '\uFEFF';
@@ -41,6 +43,7 @@ final class SseFrames {
   private int limit;
   private boolean skipLineFeed;
   private boolean atBodyStart = true;
+  private String lastLine;
 
   /** Frames the text {@code reader} decodes; an oversized frame fails with {@code failure}. */
   SseFrames(Reader reader, ProviderFailure failure) {
@@ -59,6 +62,9 @@ final class SseFrames {
     StringBuilder data = null;
     var framed = false;
     for (var line = lines.next(); line != null; line = lines.next()) {
+      if (!line.isBlank()) {
+        lastLine = line;
+      }
       if (!line.isEmpty()) {
         data = appendData(data, line);
         framed = true;
@@ -71,8 +77,18 @@ final class SseFrames {
   }
 
   /**
+   * The last non-blank line read when it is not part of the server-sent-event format, else {@code
+   * null}. A line is part of the format when it is a comment, starting with {@code :}, or its field
+   * name, the text before its first {@code :} or the whole line, is {@code data}, {@code event},
+   * {@code id} or {@code retry}.
+   */
+  String unframedLine() {
+    return lastLine == null || isFramed(lastLine) ? null : lastLine;
+  }
+
+  /**
    * The next line read from the body, without its terminator, or {@code null} at the end of the
-   * body, where a line without a terminator belongs to an event the body cut off.
+   * body; a non-empty last line the body ends without a terminator is still a line.
    *
    * @throws ProviderException if the line exceeds {@link #MAX_FRAME_CHARS}
    */
@@ -82,10 +98,7 @@ final class SseFrames {
       skipByteOrderMark();
     }
     var line = new StringBuilder();
-    while (true) {
-      if (position == limit && !fill()) {
-        return null;
-      }
+    while (position < limit || fill()) {
       var c = buffer[position++];
       if (skipLineFeed && c == '\n') {
         skipLineFeed = false;
@@ -100,6 +113,12 @@ final class SseFrames {
       }
       line.append(c);
     }
+    return line.isEmpty() ? null : line.toString();
+  }
+
+  private static boolean isFramed(String line) {
+    var colon = line.indexOf(':');
+    return colon == 0 || FIELDS.contains(colon < 0 ? line : line.substring(0, colon));
   }
 
   private StringBuilder appendData(StringBuilder data, String line) {
