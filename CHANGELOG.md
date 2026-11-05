@@ -1435,6 +1435,11 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Fixed
 
+- **`interrupt()` right after a `send` no longer lets that message be answered.** A `send` that
+  arrived once the run in progress had decided to end queued the next run, and `interrupt()`
+  cancelled only the ending run, so the queued run started and called the model. `interrupt()`
+  now also discards that next run: its messages are dropped, it never starts, and its future is
+  cancelled (`CancellationException`). A `send` after the interrupt starts a fresh run.
 - **A memory update cut off mid-write no longer truncates the file.** `strReplace` and `insert`
   rewrote the file in place, so a process killed, or a full disk, between the truncate and the last
   byte left it short or empty, silently. They now write a temporary sibling
