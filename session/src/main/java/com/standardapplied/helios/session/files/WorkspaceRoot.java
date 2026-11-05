@@ -9,9 +9,7 @@ import com.standardapplied.helios.session.tools.PathSpace;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -21,9 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayDeque;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.Objects;
 
 /**
@@ -470,113 +466,7 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
   public void walkFileTree(Path start, FileVisitor<? super Path> visitor) throws IOException {
     requireResolved(start);
     Objects.requireNonNull(visitor, "visitor must not be null");
-    try (var stack = new WalkStack()) {
-      var next = start;
-      while (next != null) {
-        var result = visit(next, visitor, stack);
-        if (result == FileVisitResult.TERMINATE) {
-          return;
-        }
-        next = stack.next(visitor, result);
-      }
-    }
-  }
-
-  private FileVisitResult visit(Path entry, FileVisitor<? super Path> visitor, WalkStack stack)
-      throws IOException {
-    BasicFileAttributes attrs;
-    try {
-      attrs = attributes(entry);
-    } catch (IOException failure) {
-      return visitor.visitFileFailed(entry, failure);
-    }
-    if (!attrs.isDirectory()) {
-      return visitor.visitFile(entry, attrs);
-    }
-    var result = visitor.preVisitDirectory(entry, attrs);
-    return result == FileVisitResult.CONTINUE ? push(entry, visitor, stack) : result;
-  }
-
-  private FileVisitResult push(Path directory, FileVisitor<? super Path> visitor, WalkStack stack)
-      throws IOException {
-    try {
-      stack.push(new WalkFrame(directory, newDirectoryStream(directory)));
-      return FileVisitResult.CONTINUE;
-    } catch (IOException failure) {
-      return visitor.visitFileFailed(directory, failure);
-    }
-  }
-
-  private static final class WalkFrame implements AutoCloseable {
-    final Path path;
-    final DirectoryStream<Path> stream;
-    final Iterator<Path> iterator;
-    boolean skipSiblings;
-
-    WalkFrame(Path path, DirectoryStream<Path> stream) throws IOException {
-      this.path = path;
-      this.stream = stream;
-      try {
-        this.iterator = stream.iterator();
-      } catch (Throwable failure) {
-        try (stream) {
-          throw failure;
-        }
-      }
-    }
-
-    @Override
-    public void close() throws IOException {
-      stream.close();
-    }
-  }
-
-  private static final class WalkStack implements AutoCloseable {
-    private final ArrayDeque<WalkFrame> frames = new ArrayDeque<>();
-
-    void push(WalkFrame frame) {
-      frames.push(frame);
-    }
-
-    Path next(FileVisitor<? super Path> visitor, FileVisitResult result) throws IOException {
-      while (!frames.isEmpty()) {
-        var frame = frames.peek();
-        frame.skipSiblings |= result == FileVisitResult.SKIP_SIBLINGS;
-        IOException failure = null;
-        try {
-          if (!frame.skipSiblings && frame.iterator.hasNext()) {
-            return frame.iterator.next();
-          }
-        } catch (DirectoryIteratorException e) {
-          failure = e.getCause();
-        }
-        frames.pop().close();
-        result = visitor.postVisitDirectory(frame.path, failure);
-        if (result == FileVisitResult.TERMINATE) {
-          return null;
-        }
-      }
-      return null;
-    }
-
-    @Override
-    public void close() throws IOException {
-      IOException failure = null;
-      while (!frames.isEmpty()) {
-        try {
-          frames.pop().close();
-        } catch (IOException e) {
-          if (failure == null) {
-            failure = e;
-          } else if (failure != e) {
-            failure.addSuppressed(e);
-          }
-        }
-      }
-      if (failure != null) {
-        throw failure;
-      }
-    }
+    FileTreeWalk.walk(this, start, visitor);
   }
 
   private Path requireResolved(Path resolved) {
