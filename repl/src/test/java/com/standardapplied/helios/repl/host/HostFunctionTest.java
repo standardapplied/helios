@@ -52,6 +52,18 @@ class HostFunctionTest {
         thrown.getMessage());
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"pr\u200Bint", "i\u200Bnt", "yie\u200Bld", "_\u200B_call", "a\u0000b"})
+  void aNameWithAnIdentifierIgnorableCharacterThrowsNamingIt(String name) {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class, () -> new HostFunction(name, "desc", params -> "ok"));
+
+    assertEquals(
+        "Host function name must not contain identifier-ignorable characters: " + name,
+        thrown.getMessage());
+  }
+
   @Test
   void yieldThrowsBecauseTheModelCannotCallItUnqualified() {
     var thrown =
