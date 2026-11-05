@@ -5,6 +5,8 @@
 package com.standardapplied.helios.session;
 
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.Response;
@@ -23,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -236,14 +239,11 @@ public final class SummarizingCompactor implements ContextCompactor {
           sb.append(" {tool_call ").append(c.name()).append('}');
         }
       }
-      if (m.hasInlineFiles()) {
-        for (var f : m.inlineFiles()) {
-          sb.append(" {file ").append(f.mimeType()).append('}');
-        }
-      }
-      for (var f : m.fileReferences()) {
-        sb.append(" {file ").append(f.mimeType()).append(' ').append(f.uri()).append('}');
-      }
+      appendFiles(
+          sb,
+          m,
+          f -> " {file " + f.mimeType() + "}",
+          f -> " {file " + f.mimeType() + " " + f.uri() + "}");
       sb.append('\n');
     }
     return sb.toString();
@@ -251,17 +251,25 @@ public final class SummarizingCompactor implements ContextCompactor {
 
   private static String droppedFiles(List<Message> summarised) {
     var lines = new StringBuilder();
-    for (var m : summarised) {
-      if (m.hasInlineFiles()) {
-        for (var f : m.inlineFiles()) {
-          lines.append("\n- " + f.mimeType() + ", " + f.data().length + " bytes");
-        }
-      }
-      for (var f : m.fileReferences()) {
-        lines.append("\n- " + f.mimeType() + ", " + f.uri());
-      }
-    }
+    summarised.forEach(
+        m ->
+            appendFiles(
+                lines,
+                m,
+                f -> "\n- " + f.mimeType() + ", " + f.data().length + " bytes",
+                f -> "\n- " + f.mimeType() + ", " + f.uri()));
     return lines.isEmpty() ? "" : DROPPED_FILES_HEADING + lines;
+  }
+
+  private static void appendFiles(
+      StringBuilder sb,
+      Message message,
+      Function<InlineFile, String> inline,
+      Function<FileReference, String> reference) {
+    if (message.hasInlineFiles()) {
+      message.inlineFiles().forEach(f -> sb.append(inline.apply(f)));
+    }
+    message.fileReferences().forEach(f -> sb.append(reference.apply(f)));
   }
 
   /** Mutable builder for {@link SummarizingCompactor}. */
