@@ -510,6 +510,7 @@ final class WorkspaceRootTest {
     assertThrows(IllegalArgumentException.class, () -> ws.rename(source, elsewhere));
     assertThrows(
         IllegalArgumentException.class, () -> ws.rename(source, ws.root().resolve("./target.txt")));
+    assertThrows(IllegalArgumentException.class, () -> ws.rename(source, ws.root().resolve("..")));
     assertEquals("new", Files.readString(source, StandardCharsets.UTF_8));
     assertFalse(Files.exists(elsewhere));
   }
