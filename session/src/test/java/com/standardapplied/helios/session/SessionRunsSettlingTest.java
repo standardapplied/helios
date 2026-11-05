@@ -2,8 +2,8 @@
 
 package com.standardapplied.helios.session;
 
-import static com.standardapplied.helios.session.EndingSessions.NOT_REACHED;
 import static com.standardapplied.helios.session.EndingSessions.binding;
+import static com.standardapplied.helios.session.EndingSessions.slowGrace;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -62,7 +62,7 @@ final class SessionRunsSettlingTest {
             options(model)
                 .withExecutionProvider(provider)
                 .withTools(List.of(closing))
-                .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build())
+                .withLimits(slowGrace())
                 .build());
     session.set(open);
     var run = open.send("go");
@@ -141,10 +141,7 @@ final class SessionRunsSettlingTest {
           return HookOutcome.cont();
         };
     var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
-    var options =
-        options(model)
-            .withHook(holdingTheFirst)
-            .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build());
+    var options = options(model).withHook(holdingTheFirst).withLimits(slowGrace());
     try (var session = AgentSession.open(options.build())) {
       var first = session.send("go");
       Await.latch("run 1 to reach its stop", held);
