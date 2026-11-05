@@ -38,6 +38,7 @@ final class SessionRuns implements RunBoundary {
   private AgentLoop loop;
   private RunSpans spans;
   private Run active;
+  private int settling;
   private CompletableFuture<ResultMessage> next;
   private Context nextParent;
   private boolean ending;
@@ -119,8 +120,14 @@ final class SessionRuns implements RunBoundary {
     }
   }
 
+  /**
+   * Whether a run is in progress, or has been left and its future has yet to complete. Several left
+   * runs may be settling at once, since a callback of one's future may start and wait for the next.
+   */
   boolean isRunning() {
-    return activeRun().isPresent();
+    synchronized (lock) {
+      return active != null || settling > 0;
+    }
   }
 
   /**
@@ -244,14 +251,20 @@ final class SessionRuns implements RunBoundary {
                     () ->
                         error.ifPresentOrElse(
                             prevented::completeExceptionally, () -> prevented.cancel(false))));
-    if (error.isPresent()) {
-      run.result().completeExceptionally(error.get());
-      throw error.get();
-    }
-    if (crash != null) {
-      run.result().completeExceptionally(crash);
-    } else {
-      run.result().complete(terminal);
+    try {
+      if (error.isPresent()) {
+        run.result().completeExceptionally(error.get());
+        throw error.get();
+      }
+      if (crash != null) {
+        run.result().completeExceptionally(crash);
+      } else {
+        run.result().complete(terminal);
+      }
+    } finally {
+      synchronized (lock) {
+        settling--;
+      }
     }
   }
 
@@ -274,6 +287,7 @@ final class SessionRuns implements RunBoundary {
         queue.drain();
       }
       active = null;
+      settling++;
       ending = false;
       var prevented = next;
       var parent = nextParent;
