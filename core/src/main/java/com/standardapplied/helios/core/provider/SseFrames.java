@@ -97,7 +97,7 @@ final class SseFrames {
     var line = new StringBuilder();
     while (true) {
       if (position == limit && !fill()) {
-        return line.isEmpty() ? null : read(line);
+        return lastLineOf(line);
       }
       var c = buffer[position++];
       if (skipLineFeed && c == '\n') {
@@ -113,6 +113,11 @@ final class SseFrames {
       }
       line.append(c);
     }
+  }
+
+  /** The body's unterminated last line, or {@code null} when it ended with a terminator. */
+  private String lastLineOf(StringBuilder line) {
+    return line.isEmpty() ? null : read(line);
   }
 
   private String read(StringBuilder line) {

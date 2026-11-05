@@ -237,10 +237,19 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     try {
       var payload = frames.payload(this::readLine);
       if (payload == null) {
-        return bodyEnded();
+        var line = frames.unframedLine();
+        var ending = line == null ? null : parser.unframedLine(line);
+        if (ending instanceof StreamEvent.Done || ending instanceof StreamEvent.Error) {
+          release();
+          return ending;
+        }
+        return failed(
+            "Stream ended before its terminal event",
+            new EOFException("the response body ended before the provider's terminal event"),
+            parser.partial());
       }
       var event = payload.isEmpty() ? null : parser.parse(payload);
-      if (isTerminal(event)) {
+      if (event instanceof StreamEvent.Done || event instanceof StreamEvent.Error) {
         release();
       }
       return event == null ? new StreamEvent.KeepAlive() : event;
@@ -249,24 +258,6 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     } catch (IOException e) {
       return failed("Stream read error", e, parser.partial());
     }
-  }
-
-  /** The terminal the parser reads in the body's unframed last line, else the early-end error. */
-  private StreamEvent bodyEnded() {
-    var line = frames.unframedLine();
-    var event = line == null ? null : parser.unframedLine(line);
-    if (isTerminal(event)) {
-      release();
-      return event;
-    }
-    return failed(
-        "Stream ended before its terminal event",
-        new EOFException("the response body ended before the provider's terminal event"),
-        parser.partial());
-  }
-
-  private static boolean isTerminal(StreamEvent event) {
-    return event instanceof StreamEvent.Done || event instanceof StreamEvent.Error;
   }
 
   private StreamEvent failed(String message, Exception cause, Response<Void> partial) {
