@@ -207,7 +207,10 @@ different one.
 mvn -B clean verify javadoc:jar                                                      # everything, as CI does
 mvn -B verify -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false   # the gate, without the test suite
 mvn -B verify -DskipTests                                                            # PMD and CPD only
+mvn -B -fae -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DfailWhenNoMutations=false -Dspotless.check.skip=true -Dpmd.skip=true -Dcpd.skip=true   # mutation score, by hand
 ```
+
+Repl's sandbox code runs in a child JVM that loads the unmutated classes, so no mutant reaches it.
 
 CI runs the same build through `./mvnw`, which downloads Maven 3.9.14 and checks its SHA-256. The
 wrapper needs `unzip`: without it, the script fetches the `.tar.gz` and refuses it because the
@@ -310,8 +313,9 @@ vulnerabilities, and it cannot see:
   is filed against the outer artifact.
 - **The JDK** (including `jdk.jshell` and `jdk.compiler`, which the REPL sandbox runs on) and the
   host's libc, which `helios-session` calls through the foreign-function API.
-- **Build tooling**: Maven plugins and their dependencies, GitHub Actions, the OSV-Scanner binary
-  itself, and the container images tests start (`postgres:17-alpine`).
+- **Build tooling**: Maven plugins and their dependencies (the `mutation` profile's `pitest-maven`
+  and `pitest-junit5-plugin` among them), GitHub Actions, the OSV-Scanner binary itself, and the
+  container images tests start (`postgres:17-alpine`).
 - **Embedding models** `helios-onnx` downloads at run time.
 - **Advisories osv.dev does not hold yet.** The canary proves the service answers and knows two
   2026 advisories, not that it is complete.
