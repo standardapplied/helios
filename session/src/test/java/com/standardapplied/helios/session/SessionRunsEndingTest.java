@@ -22,6 +22,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
+import com.standardapplied.helios.session.loop.SessionEnding;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -82,6 +83,41 @@ final class SessionRunsEndingTest {
     release.countDown();
     Await.termination("the close", closing);
     assertInstanceOf(CancellationException.class, Await.failure("the next run", next));
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
+  void anInterruptBeforeTheFailedListenerSawARecordedErrorLeavesTheNextRunToFailWithIt() {
+    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("never").build();
+    var ending = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var sink = new AtomicReference<SessionEnding>();
+    var sentinel = new AssertionError("recorded before its listener ran");
+    PreStopHook capturing =
+        (response, ctx) -> {
+          sink.set(Run.stateOfThisThread().ending());
+          return HookOutcome.cont();
+        };
+    var session =
+        AgentSession.open(
+            holdingItsEnd(options(model).withHook(capturing), ending, release).build());
+    var first = session.send("go");
+    Await.latch("the run to decide its end", ending);
+    var next = session.send("next");
+
+    Thread failing;
+    synchronized (((AgentSessionImpl) session).lifecycle.runs().lock) {
+      failing = Thread.ofVirtual().start(() -> sink.get().fail(sentinel));
+      Await.until(
+          "the failed listener to wait for the lock",
+          () -> failing.getState() == Thread.State.BLOCKED);
+      session.interrupt();
+    }
+    release.countDown();
+    Await.termination("the failing thread", failing);
+
+    assertSame(sentinel, Await.failure("run 1", first));
+    assertSame(sentinel, Await.failure("the next run", next));
     assertEquals(1, model.calls().size());
   }
 
