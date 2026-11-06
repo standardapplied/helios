@@ -283,7 +283,9 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
    * Close the provider: destroy every in-flight subprocess and remove the JVM shutdown hook. After
    * close, future {@link #execute(SessionContext, ExecutionRequest, CancellationToken) execute}
    * calls throw an {@link IllegalStateException}. Safe to call from any thread; subsequent calls
-   * are no-ops.
+   * are no-ops. Close and the shutdown hook reap one process after another, each taking up to two
+   * {@link BoundedProcess#GRACE}s when it ignores SIGTERM, so a host stopped within less than their
+   * sum can exit with processes still running.
    */
   @Override
   public void close() {
