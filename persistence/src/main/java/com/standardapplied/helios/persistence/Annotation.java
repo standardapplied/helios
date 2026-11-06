@@ -60,15 +60,31 @@ public record Annotation(
         metadata == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
   }
 
+  /**
+   * Returns an empty builder for a new annotation.
+   *
+   * @return a builder with every field unset
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
+  /**
+   * Returns a builder holding every field of {@code annotation}, to derive a changed copy, such as
+   * a new rating under the same id.
+   *
+   * @param annotation the annotation to copy; non-null
+   * @return a builder preset with {@code annotation}'s fields
+   * @throws NullPointerException if {@code annotation} is null
+   */
   public static Builder newBuilder(Annotation annotation) {
     return new Builder(annotation);
   }
 
-  /** Builder for Annotation. */
+  /**
+   * Builds an {@link Annotation}, generating its id and timestamps when they are not given. Not
+   * thread-safe; use one builder per thread.
+   */
   public static class Builder {
 
     private UUID id;
@@ -99,56 +115,132 @@ public record Annotation(
       this.updatedAt = annotation.updatedAt;
     }
 
+    /**
+     * Sets the annotation's id. Unset or null, {@link #build()} generates a new time-ordered id.
+     *
+     * @param id the id, or null to generate one
+     * @return this builder
+     */
     public Builder withId(UUID id) {
       this.id = id;
       return this;
     }
 
+    /**
+     * Sets the run id or span id the annotation is attached to; required. The store's column holds
+     * at most 64 characters, and a longer id fails the write.
+     *
+     * @param subjectId the run or span id; {@link #build()} rejects null or blank
+     * @return this builder
+     */
     public Builder withSubjectId(String subjectId) {
       this.subjectId = subjectId;
       return this;
     }
 
+    /**
+     * Sets the named sub-coordinate within the subject, such as an evaluation dimension, so one
+     * author can hold several judgments with the same label on one subject. Helios does not
+     * interpret it. Unset means none.
+     *
+     * @param facet the facet, or null for none
+     * @return this builder
+     */
     public Builder withFacet(String facet) {
       this.facet = facet;
       return this;
     }
 
+    /**
+     * Sets the category of the judgment, such as {@code "quality"} or {@code "relevance"};
+     * required.
+     *
+     * @param label the label; {@link #build()} rejects null or blank
+     * @return this builder
+     */
     public Builder withLabel(String label) {
       this.label = label;
       return this;
     }
 
+    /**
+     * Sets the class of author that produced the annotation; required.
+     *
+     * @param authorKind the author kind; {@link #build()} rejects null
+     * @return this builder
+     */
     public Builder withAuthorKind(AuthorKind authorKind) {
       this.authorKind = authorKind;
       return this;
     }
 
+    /**
+     * Sets the precise author identity. With an author id, {@link
+     * PgAnnotationStore#upsertAnnotation} updates the author's earlier annotation on the same
+     * subject, facet and label; without one, every write inserts a new row. Unset means none.
+     *
+     * @param authorId the author id, or null for none
+     * @return this builder
+     */
     public Builder withAuthorId(String authorId) {
       this.authorId = authorId;
       return this;
     }
 
+    /**
+     * Sets the numeric rating. On a run, a positive rating counts as a thumbs-up and a negative one
+     * as a thumbs-down in {@link Trace} and {@link TraceRollup}; zero and null count as neither.
+     *
+     * @param rating the rating, or null for none
+     * @return this builder
+     */
     public Builder withRating(Integer rating) {
       this.rating = rating;
       return this;
     }
 
+    /**
+     * Sets the free-text comment. Unset means none.
+     *
+     * @param comment the comment, or null for none
+     * @return this builder
+     */
     public Builder withComment(String comment) {
       this.comment = comment;
       return this;
     }
 
+    /**
+     * Sets the consumer-owned key/value context, stored as JSON and returned uninterpreted. The map
+     * is copied when the annotation is built; its values may be null.
+     *
+     * @param metadata the metadata, or null for an empty map
+     * @return this builder
+     */
     public Builder withMetadata(Map<String, Object> metadata) {
       this.metadata = metadata;
       return this;
     }
 
+    /**
+     * Sets when the annotation was first created. Unset or null, {@link #build()} uses the current
+     * UTC time. An upsert that updates an existing row keeps that row's creation time.
+     *
+     * @param createdAt the creation time, or null for now
+     * @return this builder
+     */
     public Builder withCreatedAt(OffsetDateTime createdAt) {
       this.createdAt = createdAt;
       return this;
     }
 
+    /**
+     * Sets when the annotation was last written. Unset or null, {@link #build()} uses the creation
+     * time.
+     *
+     * @param updatedAt the last write time, or null for the creation time
+     * @return this builder
+     */
     public Builder withUpdatedAt(OffsetDateTime updatedAt) {
       this.updatedAt = updatedAt;
       return this;
@@ -158,8 +250,9 @@ public record Annotation(
      * Builds the Annotation. Auto-generates {@code id} and {@code createdAt} when unset, and
      * defaults {@code updatedAt} to {@code createdAt} for a first write.
      *
-     * @throws IllegalStateException if {@code subjectId}, {@code label}, or {@code authorKind} is
-     *     not set
+     * @return the annotation
+     * @throws IllegalStateException if {@code subjectId} or {@code label} is null or blank, or
+     *     {@code authorKind} is null
      */
     public Annotation build() {
       if (Strings.isBlank(subjectId)) {

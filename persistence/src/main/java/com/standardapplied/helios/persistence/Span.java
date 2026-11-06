@@ -22,7 +22,7 @@ import java.util.Map;
  *     {@code hook} for a hook decision
  * @param startTime when the step started
  * @param endTime when the step ended
- * @param duration from {@code startTime} to {@code endTime}
+ * @param duration from {@code startTime} to {@code endTime}, or null when either is missing
  * @param error the span's status description when the step failed, or null if it succeeded
  * @param attributes every other attribute of the span, as strings
  * @param usage the model attempt's token usage, or null if none was recorded
@@ -49,11 +49,19 @@ public record Span(
     return error == null;
   }
 
+  /**
+   * Returns an empty builder.
+   *
+   * @return a builder with every field unset and no attributes
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
-  /** Builder for Span, used to reconstruct one from its row. */
+  /**
+   * Builds a {@link Span}, used to reconstruct one from its row. It validates nothing: every field
+   * left unset is null. Not thread-safe; use one builder per thread.
+   */
   public static class Builder {
 
     private String id;
@@ -68,46 +76,101 @@ public record Span(
 
     private Builder() {}
 
+    /**
+     * Sets the OpenTelemetry span id, 16 lower-case hex digits.
+     *
+     * @param id the span id
+     * @return this builder
+     */
     public Builder withId(String id) {
       this.id = id;
       return this;
     }
 
+    /**
+     * Sets the span's name, such as {@code chat gemini-3.8-flash}.
+     *
+     * @param name the span name
+     * @return this builder
+     */
     public Builder withName(String name) {
       this.name = name;
       return this;
     }
 
+    /**
+     * Sets the step's kind: the span's {@code gen_ai.operation.name}, or {@code hook} for a hook
+     * decision.
+     *
+     * @param kind the kind
+     * @return this builder
+     */
     public Builder withKind(String kind) {
       this.kind = kind;
       return this;
     }
 
+    /**
+     * Sets when the step started; with the end time it gives the duration.
+     *
+     * @param startTime the start time, or null if unknown
+     * @return this builder
+     */
     public Builder withStartTime(OffsetDateTime startTime) {
       this.startTime = startTime;
       return this;
     }
 
+    /**
+     * Sets when the step ended; with the start time it gives the duration.
+     *
+     * @param endTime the end time, or null if unknown
+     * @return this builder
+     */
     public Builder withEndTime(OffsetDateTime endTime) {
       this.endTime = endTime;
       return this;
     }
 
+    /**
+     * Sets the span's status description; null marks a successful step.
+     *
+     * @param error the failure description, or null for success
+     * @return this builder
+     */
     public Builder withError(String error) {
       this.error = error;
       return this;
     }
 
+    /**
+     * Sets the span's other attributes, replacing any set before. The map is copied.
+     *
+     * @param attributes the attributes; non-null, with no null key or value
+     * @return this builder
+     */
     public Builder withAttributes(Map<String, String> attributes) {
       this.attributes = new LinkedHashMap<>(attributes);
       return this;
     }
 
+    /**
+     * Sets the model attempt's token usage by class.
+     *
+     * @param usage the usage, or null if none was recorded
+     * @return this builder
+     */
     public Builder withUsage(Usage usage) {
       this.usage = usage;
       return this;
     }
 
+    /**
+     * Sets the model attempt's cost.
+     *
+     * @param cost the cost, or null if none was recorded
+     * @return this builder
+     */
     public Builder withCost(CostEstimate cost) {
       this.cost = cost;
       return this;
@@ -115,6 +178,9 @@ public record Span(
 
     /**
      * Builds the Span, its duration from {@code startTime} to {@code endTime} when both are set.
+     *
+     * @return the span, holding an unmodifiable copy of the attributes
+     * @throws NullPointerException if an attribute key or value is null
      */
     public Span build() {
       var duration =
