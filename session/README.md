@@ -252,7 +252,7 @@ var session =
     AgentSession.open(SessionPresets.workspace(model, root).withHook(denyShell).build());
 ```
 
-Hook outcomes that drop a message (`OnUserMessageHook.Block`) emit
+Hook outcomes that drop a message (`HookOutcome.Block`) emit
 `QueryEvent.MessageBlocked` so UIs can render the drop.
 
 ## Session limits

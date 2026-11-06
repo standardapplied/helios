@@ -41,6 +41,7 @@ public final class SecretRegistry {
   private final Object lock = new Object();
   private volatile Snapshot snapshot = new Snapshot(Map.of(), Redactor.of(Map.of()));
 
+  /** Creates an empty registry, whose {@link #redactor()} changes nothing. */
   public SecretRegistry() {}
 
   /**
@@ -110,6 +111,10 @@ public final class SecretRegistry {
   /**
    * Returns true if {@code candidate} contains the value of any registered secret. Used to refuse
    * argv that would otherwise carry a secret in clear into the process listing.
+   *
+   * @param candidate the text to check; may be null
+   * @return {@code true} if {@code candidate} is non-null and contains a registered value; {@code
+   *     false} for null
    */
   public boolean leaks(String candidate) {
     return candidate != null && snapshot.secrets().values().stream().anyMatch(candidate::contains);
@@ -118,17 +123,28 @@ public final class SecretRegistry {
   /**
    * Returns the {@link Redactor} of the registered secrets: the same instance until the next {@link
    * #register}, which does not affect it.
+   *
+   * @return the redactor of the secrets registered so far; never null, and one that changes nothing
+   *     while the registry is empty
    */
   public Redactor redactor() {
     return snapshot.redactor();
   }
 
-  /** Number of currently registered secrets. */
+  /**
+   * Returns how many secrets are registered; a re-registered name counts once.
+   *
+   * @return the number of registered names, zero or more
+   */
   public int size() {
     return snapshot.secrets().size();
   }
 
-  /** Returns the registered secret names. */
+  /**
+   * Returns the registered secret names.
+   *
+   * @return an unmodifiable snapshot of the names; empty when none are registered
+   */
   public Set<String> names() {
     return Set.copyOf(snapshot.secrets().keySet());
   }

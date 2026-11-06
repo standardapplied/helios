@@ -12,16 +12,19 @@ import java.time.Duration;
 /**
  * Configuration for the JVM subprocess sandbox.
  *
- * @param executionTimeout default timeout for code execution
+ * @param executionTimeout the time a snippet may run when its {@link ExecutionRequest} names no
+ *     timeout; strictly positive. Default {@link #DEFAULT_EXECUTION_TIMEOUT}
  * @param stopGrace how long a snippet that outlived its execution timeout has, once stopped, to end
  *     together with every thread it started. A snippet still running after the grace is blocked
  *     where nothing in the JVM reaches it, so the sandbox answers the execute and exits with code
  *     3. Default {@link #DEFAULT_STOP_GRACE}; travels to the subprocess as a {@code
  *     --stop-grace=<ISO-8601 duration>} argv flag.
- * @param maxHeapMb maximum heap size for the subprocess in MB
+ * @param maxHeapMb maximum heap size for the subprocess in MB, passed as {@code -Xmx<n>m}; strictly
+ *     positive. Default {@link #DEFAULT_MAX_HEAP_MB}
  * @param callTimeout how long the host waits for the subprocess to answer a call such as installing
  *     the host-function wrappers, and the margin an execute's reply has to arrive once its
- *     snippet's timeout and stop grace are over
+ *     snippet's timeout and stop grace are over; strictly positive. Default {@link
+ *     #DEFAULT_CALL_TIMEOUT}
  * @param subprocessStartupTimeout maximum wait for the subprocess to connect back on the RPC socket
  *     after launch. Default {@value #DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS} s is comfortable
  *     for normal JDK cold-start; raise it when launching off slow storage (NAS, EBS-backed
@@ -84,6 +87,14 @@ public record JvmSandboxConfig(
   public static final Duration DEFAULT_SUBPROCESS_STARTUP_TIMEOUT =
       Duration.ofSeconds(DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS);
 
+  /**
+   * Validates the components; {@code workingDirectory} may be {@code null} and is not checked for
+   * existence (a bad path fails the launch instead).
+   *
+   * @throws IllegalArgumentException if any duration is {@code null}, zero or negative, if {@code
+   *     maxHeapMb} is not positive, or if {@code sandboxPolicy} or {@code subprocessModules} is
+   *     {@code null}
+   */
   public JvmSandboxConfig {
     if (executionTimeout == null || executionTimeout.isNegative() || executionTimeout.isZero()) {
       throw new IllegalArgumentException("Execution timeout must be positive");
@@ -113,7 +124,13 @@ public record JvmSandboxConfig(
     // launch-time IOException if ProcessBuilder.directory() rejects the path.
   }
 
-  /** Create a default configuration. */
+  /**
+   * Creates a default configuration.
+   *
+   * @return a configuration holding every {@code DEFAULT_*} constant, a {@link
+   *     SandboxPolicy#permissive() permissive} policy, {@link SubprocessModules#unrestricted()
+   *     unrestricted} modules and the ephemeral working directory
+   */
   public static JvmSandboxConfig defaults() {
     return new JvmSandboxConfig(
         DEFAULT_EXECUTION_TIMEOUT,
@@ -141,10 +158,19 @@ public record JvmSandboxConfig(
     }
   }
 
+  /**
+   * Starts a builder whose settings default to those of {@link #defaults()}.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
+  /**
+   * Mutable, single-thread builder for {@link JvmSandboxConfig}; each setter replaces its value and
+   * {@link #build()} validates them all.
+   */
   public static class Builder {
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
     private Duration stopGrace = DEFAULT_STOP_GRACE;
@@ -157,6 +183,14 @@ public record JvmSandboxConfig(
 
     private Builder() {}
 
+    /**
+     * Sets the time a snippet may run when its request names no timeout; {@link
+     * #DEFAULT_EXECUTION_TIMEOUT} by default.
+     *
+     * @param executionTimeout a strictly positive duration; anything else is rejected by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withExecutionTimeout(Duration executionTimeout) {
       this.executionTimeout = executionTimeout;
       return this;
@@ -165,17 +199,35 @@ public record JvmSandboxConfig(
     /**
      * Override the {@link #DEFAULT_STOP_GRACE} a stopped snippet has to end before the sandbox
      * exits. See the {@link JvmSandboxConfig record javadoc}.
+     *
+     * @param stopGrace a strictly positive duration; anything else is rejected by {@link #build()}
+     * @return this builder
      */
     public Builder withStopGrace(Duration stopGrace) {
       this.stopGrace = stopGrace;
       return this;
     }
 
+    /**
+     * Sets the subprocess's maximum heap, in MB; {@link #DEFAULT_MAX_HEAP_MB} by default.
+     *
+     * @param maxHeapMb a positive size; zero or negative is rejected by {@link #build()}
+     * @return this builder
+     */
     public Builder withMaxHeapMb(int maxHeapMb) {
       this.maxHeapMb = maxHeapMb;
       return this;
     }
 
+    /**
+     * Sets how long the host waits for the subprocess to answer a call, and the margin an execute's
+     * reply has after its snippet's timeout and stop grace; {@link #DEFAULT_CALL_TIMEOUT} by
+     * default.
+     *
+     * @param callTimeout a strictly positive duration; anything else is rejected by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withCallTimeout(Duration callTimeout) {
       this.callTimeout = callTimeout;
       return this;
@@ -185,6 +237,10 @@ public record JvmSandboxConfig(
      * Override the default {@value #DEFAULT_SUBPROCESS_STARTUP_TIMEOUT_SECONDS}-second wait for the
      * subprocess to connect back on its RPC socket. See the {@link JvmSandboxConfig record javadoc}
      * for when to raise it.
+     *
+     * @param subprocessStartupTimeout a strictly positive duration; anything else is rejected by
+     *     {@link #build()}
+     * @return this builder
      */
     public Builder withSubprocessStartupTimeout(Duration subprocessStartupTimeout) {
       this.subprocessStartupTimeout = subprocessStartupTimeout;
@@ -194,9 +250,11 @@ public record JvmSandboxConfig(
     /**
      * Set the {@link SandboxPolicy} the subprocess enforces. Defaults to {@link
      * SandboxPolicy#permissive()} — every snippet is accepted, equivalent to running without a
-     * policy layer. Pass a non-permissive policy to opt into bytecode-level deny enforcement (PR 1
-     * scaffolding: the policy travels to the subprocess but the verifier currently accepts every
-     * byte sequence).
+     * policy layer. Pass a non-permissive policy to opt into bytecode-level enforcement: the policy
+     * travels to the subprocess, whose verifier rejects every class that references a denied API.
+     *
+     * @param sandboxPolicy the policy; {@code null} is rejected by {@link #build()}
+     * @return this builder
      */
     public Builder withSandboxPolicy(SandboxPolicy sandboxPolicy) {
       this.sandboxPolicy = sandboxPolicy;
@@ -209,6 +267,9 @@ public record JvmSandboxConfig(
      * subprocess. {@link SubprocessModules#minimal()} strips everything except the JShell /
      * bootstrap chain; {@link SubprocessModules#allowingExtras(String...)} adds named JDK modules
      * on top of the minimal baseline.
+     *
+     * @param subprocessModules the module restriction; {@code null} is rejected by {@link #build()}
+     * @return this builder
      */
     public Builder withSubprocessModules(SubprocessModules subprocessModules) {
       this.subprocessModules = subprocessModules;
@@ -230,6 +291,13 @@ public record JvmSandboxConfig(
       return this;
     }
 
+    /**
+     * Builds the configuration.
+     *
+     * @return a new configuration
+     * @throws IllegalArgumentException if any duration is {@code null}, zero or negative, if the
+     *     heap is not positive, or if the policy or module restriction is {@code null}
+     */
     public JvmSandboxConfig build() {
       return new JvmSandboxConfig(
           executionTimeout,

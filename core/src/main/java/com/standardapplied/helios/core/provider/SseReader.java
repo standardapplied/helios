@@ -70,6 +70,8 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
      * What the stream has produced so far, finishing with {@link
      * com.standardapplied.helios.core.model.FinishReason#ERROR}: the content of a stream that ends
      * without its terminal event.
+     *
+     * @return the content parsed so far, as a response whose finish reason is {@code ERROR}
      */
     Response<Void> partial();
 

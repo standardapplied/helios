@@ -19,12 +19,15 @@ import java.util.Map;
  * Schema for objects with nested fields. {@code itemsClass} takes precedence over {@code items}
  * when both are set.
  *
- * @param name the parameter name
- * @param description description of the parameter for the model
- * @param type the JSON Schema type
+ * @param name the parameter name, the property key in the tool's schema
+ * @param description description of the parameter for the model; {@code null} omits it
+ * @param type the JSON Schema type; non-null
  * @param required whether the parameter is required
- * @param defaultValue optional default value
- * @param items for ARRAY type with primitive elements, the schema of array items
+ * @param defaultValue optional default value, sent as the schema's {@code default}; {@code null}
+ *     omits it
+ * @param items for ARRAY type with primitive elements, the schema of array items, of which only the
+ *     type and description are sent; {@code null} with no {@code itemsClass} sends a permissive
+ *     object item
  * @param itemsClass for ARRAY type with record-shaped elements, the Java class whose JSON Schema is
  *     derived via {@code SchemaGenerator} and emitted as the {@code items} schema
  */
@@ -37,6 +40,12 @@ public record ToolParameter(
     ToolParameter items,
     Class<?> itemsClass) {
 
+  /**
+   * Returns a builder for an optional {@link ParameterType#STRING STRING} parameter with no name
+   * yet.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -78,6 +87,7 @@ public record ToolParameter(
     return fallback;
   }
 
+  /** Builds a {@link ToolParameter}; not thread-safe, so confine one builder to a thread. */
   public static class Builder {
     private String name;
     private String description;
@@ -89,31 +99,71 @@ public record ToolParameter(
 
     private Builder() {}
 
+    /**
+     * Sets the parameter name, the key the model passes the argument under. Not validated.
+     *
+     * @param name the parameter name
+     * @return this builder
+     */
     public Builder withName(String name) {
       this.name = name;
       return this;
     }
 
+    /**
+     * Sets what the argument means, as the model reads it. Unset by default.
+     *
+     * @param description the description; {@code null} omits it from the schema
+     * @return this builder
+     */
     public Builder withDescription(String description) {
       this.description = description;
       return this;
     }
 
+    /**
+     * Sets the JSON type of the argument. Defaults to {@link ParameterType#STRING}.
+     *
+     * @param type the type; must not be {@code null}, which fails when the tool's schema is built
+     * @return this builder
+     */
     public Builder withType(ParameterType type) {
       this.type = type;
       return this;
     }
 
+    /**
+     * Sets whether the model must pass the argument; listed in the schema's {@code required} when
+     * {@code true}. Defaults to {@code false}.
+     *
+     * @param required whether the argument is required
+     * @return this builder
+     */
     public Builder withRequired(boolean required) {
       this.required = required;
       return this;
     }
 
+    /**
+     * Sets the value the schema advertises as the argument's {@code default}. The model is told of
+     * it; nothing substitutes it for a missing argument. Unset by default.
+     *
+     * @param defaultValue a JSON-serialisable value; {@code null} omits it
+     * @return this builder
+     */
     public Builder withDefaultValue(Object defaultValue) {
       this.defaultValue = defaultValue;
       return this;
     }
 
+    /**
+     * Sets the element shape of an {@link ParameterType#ARRAY ARRAY} parameter with primitive
+     * elements; only its type and description are sent. Ignored for any other type, and when an
+     * items class is set.
+     *
+     * @param items the element descriptor; {@code null} for none
+     * @return this builder
+     */
     public Builder withItems(ToolParameter items) {
       this.items = items;
       return this;
@@ -133,6 +183,11 @@ public record ToolParameter(
       return this;
     }
 
+    /**
+     * Builds the parameter. Nothing is validated here.
+     *
+     * @return a new parameter holding this builder's settings
+     */
     public ToolParameter build() {
       return new ToolParameter(name, description, type, required, defaultValue, items, itemsClass);
     }

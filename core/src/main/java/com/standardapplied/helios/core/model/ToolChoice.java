@@ -85,6 +85,12 @@ public sealed interface ToolChoice {
    *     stored as an unmodifiable copy in the given order
    */
   record Required(SequencedSet<String> allowedTools) implements ToolChoice {
+    /**
+     * Creates a required choice, copying {@code allowedTools} in its order.
+     *
+     * @throws NullPointerException if {@code allowedTools} or a name in it is null
+     * @throws IllegalArgumentException if {@code allowedTools} is empty
+     */
     public Required {
       Objects.requireNonNull(allowedTools, "allowedTools must not be null");
       if (allowedTools.isEmpty()) {

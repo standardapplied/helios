@@ -40,6 +40,14 @@ import java.util.Objects;
 public record UserMessage(
     String text, List<InlineFile> attachments, List<FileReference> fileReferences) {
 
+  /**
+   * Creates a message with text and inline attachments and no file references.
+   *
+   * @param text the message text; non-null, may be blank when {@code attachments} is non-empty
+   * @param attachments inline file attachments; non-null, no null element, defensively copied
+   * @throws NullPointerException if {@code text}, {@code attachments} or an attachment is null
+   * @throws IllegalArgumentException if {@code text} is blank and {@code attachments} is empty
+   */
   public UserMessage(String text, List<InlineFile> attachments) {
     this(text, attachments, List.of());
   }
@@ -47,7 +55,8 @@ public record UserMessage(
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if text, attachments or fileReferences is null
+   * @throws NullPointerException if text, attachments or fileReferences is null, or either list
+   *     holds a null element
    * @throws IllegalArgumentException if the message has no text, attachments, or file references
    */
   public UserMessage {
@@ -73,6 +82,8 @@ public record UserMessage(
    *
    * @param text the message text; non-blank
    * @return a fresh {@code UserMessage} with no attachments
+   * @throws NullPointerException if {@code text} is null
+   * @throws IllegalArgumentException if {@code text} is blank
    */
   public static UserMessage text(String text) {
     Objects.requireNonNull(text, "text must not be null");
@@ -101,6 +112,12 @@ public record UserMessage(
     return !attachments.isEmpty();
   }
 
+  /**
+   * Whether this message carries any provider-accessible file references, such as files uploaded
+   * through a provider's files API.
+   *
+   * @return {@code true} if {@link #fileReferences()} is non-empty
+   */
   public boolean hasFileReferences() {
     return !fileReferences.isEmpty();
   }
@@ -149,6 +166,14 @@ public record UserMessage(
       return this;
     }
 
+    /**
+     * Appends a reference to a file the provider already holds, sent by URI rather than embedded in
+     * the request. References keep the order they were added in; none are added by default.
+     *
+     * @param fileReference the reference; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code fileReference} is null
+     */
     public Builder withFileReference(FileReference fileReference) {
       fileReferences.add(Objects.requireNonNull(fileReference, "fileReference must not be null"));
       return this;

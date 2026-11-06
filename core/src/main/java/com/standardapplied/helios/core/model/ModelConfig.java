@@ -102,6 +102,14 @@ public record ModelConfig(
     String apiVersion,
     RawOutputCapturePolicy rawOutputCapturePolicy) {
 
+  /**
+   * Canonical constructor. A {@code null} {@code reasoning} becomes empty and a {@code null} {@code
+   * headers} an empty map; {@code headers} is copied into an unmodifiable map.
+   *
+   * @throws NullPointerException if {@code rawOutputCapturePolicy} is null, or {@code headers}
+   *     holds a null name or value
+   * @throws IllegalArgumentException if {@code temperature} or {@code topP} is NaN or infinite
+   */
   public ModelConfig {
     reasoning = reasoning == null ? Optional.empty() : reasoning;
     headers = headers == null ? Map.of() : Map.copyOf(headers);
@@ -165,6 +173,9 @@ public record ModelConfig(
    * #baseUrl()} when set (non-null, non-blank); otherwise falls back to the provider's built-in
    * default. Each provider uses it to choose between its endpoint, such as {@code
    * https://api.openai.com/v1/responses}, and a user-supplied override.
+   *
+   * @param providerDefault the provider's canonical endpoint; may be null
+   * @return {@link #baseUrl()} when it is not blank, else {@code providerDefault}
    */
   public String effectiveBaseUrl(String providerDefault) {
     return !Strings.isBlank(baseUrl) ? baseUrl : providerDefault;
@@ -175,6 +186,9 @@ public record ModelConfig(
    * applies {@link #headers()} with case-insensitive override semantics — a user header whose name
    * case-insensitively matches a default replaces the default value entirely. Insertion order of
    * the result is the {@code defaults} order followed by any user-only names. Result is immutable.
+   *
+   * @param defaults the provider's built-in headers; {@code null} is treated as empty
+   * @return the merged headers, unmodifiable; empty when both sides are empty
    */
   public Map<String, String> effectiveHeaders(Map<String, String> defaults) {
     var merged = new LinkedHashMap<String, String>();
@@ -204,18 +218,45 @@ public record ModelConfig(
   private static final Duration DEFAULT_RESPONSE_TIMEOUT = Duration.ofSeconds(60);
   private static final Duration DEFAULT_STREAM_IDLE_TIMEOUT = Duration.ofSeconds(120);
 
+  /**
+   * Starts a builder holding the defaults: 10 s connect timeout, 60 s response timeout, 120 s
+   * stream idle timeout, provider continuation enabled, raw output capture {@link
+   * RawOutputCapturePolicy#ENABLED ENABLED}, and every other setting absent or off.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
+  /**
+   * Starts a builder holding every setting of {@code config}, so a copy can differ in a few.
+   *
+   * @param config the configuration to copy; non-null
+   * @return a new builder initialised from {@code config}
+   * @throws NullPointerException if {@code config} is null
+   */
   public static Builder newBuilder(ModelConfig config) {
     return new Builder(config);
   }
 
+  /**
+   * Creates a configuration with {@code apiKey} and every other setting at the {@link
+   * #newBuilder()} defaults.
+   *
+   * @param apiKey the provider's API key; a provider refuses a blank key at model construction
+   *     unless a {@link #baseUrl()} is set
+   * @return the configuration
+   */
   public static ModelConfig of(String apiKey) {
     return new Builder().withApiKey(apiKey).build();
   }
 
+  /**
+   * Builds a {@link ModelConfig}. Every {@code with*} method replaces the setting it names and,
+   * except {@link #withHeader(String, String)}, validates nothing; {@link #build()} validates. Not
+   * thread-safe.
+   */
   public static class Builder {
     private String apiKey;
     private Reasoning reasoning;
@@ -263,6 +304,15 @@ public record ModelConfig(
       this.rawOutputCapturePolicy = config.rawOutputCapturePolicy;
     }
 
+    /**
+     * Sets the API key the provider sends as its credential header ({@code x-api-key}, {@code
+     * x-goog-api-key}, {@code Authorization: Bearer}). Absent by default; a provider refuses a
+     * blank key at model construction unless a base URL is set. {@link ModelConfig#toString()}
+     * never prints it.
+     *
+     * @param apiKey the key; may be null
+     * @return this builder
+     */
     public Builder withApiKey(String apiKey) {
       this.apiKey = apiKey;
       return this;
@@ -271,32 +321,72 @@ public record ModelConfig(
     /**
      * Ask the model to reason as {@code reasoning} states; {@code null} (the default) sends no
      * reasoning field. See {@link ModelConfig#reasoning()}.
+     *
+     * @param reasoning the reasoning request; may be null
+     * @return this builder
      */
     public Builder withReasoning(Reasoning reasoning) {
       this.reasoning = reasoning;
       return this;
     }
 
+    /**
+     * Sets the longest wait to establish the HTTP connection. Default 10 s; {@code null} leaves the
+     * HTTP client factory's own 10 s default in force.
+     *
+     * @param connectTimeout the connect timeout; may be null
+     * @return this builder
+     */
     public Builder withConnectTimeout(Duration connectTimeout) {
       this.connectTimeout = connectTimeout;
       return this;
     }
 
+    /**
+     * Sets the longest wait for the response headers. Default 60 s; {@code null} sets no limit. See
+     * {@link ModelConfig#responseTimeout()}.
+     *
+     * @param responseTimeout the response timeout; may be null
+     * @return this builder
+     */
     public Builder withResponseTimeout(Duration responseTimeout) {
       this.responseTimeout = responseTimeout;
       return this;
     }
 
+    /**
+     * Sets the sampling temperature (0.0 deterministic, up to 2.0 very random). Absent by default,
+     * so the provider's default applies. A catalogued model that rejects sampling makes its
+     * provider throw at model construction when it is set.
+     *
+     * @param temperature the temperature; may be null; NaN or infinite fails {@link #build()}
+     * @return this builder
+     */
     public Builder withTemperature(Double temperature) {
       this.temperature = temperature;
       return this;
     }
 
+    /**
+     * Sets the nucleus sampling threshold (0.0 to 1.0). Absent by default, so the provider's
+     * default applies. A catalogued model that rejects sampling makes its provider throw at model
+     * construction when it is set.
+     *
+     * @param topP the threshold; may be null; NaN or infinite fails {@link #build()}
+     * @return this builder
+     */
     public Builder withTopP(Double topP) {
       this.topP = topP;
       return this;
     }
 
+    /**
+     * Caps the tokens the model generates per response. {@code null} (default) lets the provider
+     * choose: the model's documented ceiling where its catalogue knows the model.
+     *
+     * @param maxOutputTokens the cap in tokens; may be null
+     * @return this builder
+     */
     public Builder withMaxOutputTokens(Integer maxOutputTokens) {
       this.maxOutputTokens = maxOutputTokens;
       return this;
@@ -307,22 +397,46 @@ public record ModelConfig(
      * provider's known value for the model id. Set this for a model the provider does not yet
      * enumerate so session compaction sizes against the real window instead of a conservative
      * backstop. See {@link ModelConfig#contextWindow()}.
+     *
+     * @param contextWindow the window in tokens; may be null
+     * @return this builder
      */
     public Builder withContextWindow(Integer contextWindow) {
       this.contextWindow = contextWindow;
       return this;
     }
 
+    /**
+     * Sets the sequences that end generation when the model emits one. Absent by default; the list
+     * is kept as given, not copied.
+     *
+     * @param stopSequences the stop sequences; may be null
+     * @return this builder
+     */
     public Builder withStopSequences(List<String> stopSequences) {
       this.stopSequences = stopSequences;
       return this;
     }
 
+    /**
+     * Sets the random seed for reproducible sampling. Absent by default; only the Gemini provider
+     * sends it, the others ignore it.
+     *
+     * @param seed the seed; may be null
+     * @return this builder
+     */
     public Builder withSeed(Long seed) {
       this.seed = seed;
       return this;
     }
 
+    /**
+     * Sets how the model may use the tools it is offered. {@code null} (default) sends no tool
+     * choice, so the provider's own default applies. A session applies it on every turn.
+     *
+     * @param toolChoice the tool choice; may be null
+     * @return this builder
+     */
     public Builder withToolChoice(ToolChoice toolChoice) {
       this.toolChoice = toolChoice;
       return this;
@@ -331,7 +445,10 @@ public record ModelConfig(
     /**
      * Enable provider-native web search. Gemini maps this to Google Search grounding; Anthropic to
      * the {@code web_search} server tool. Providers without web search support fail fast at model
-     * construction.
+     * construction. Disabled by default.
+     *
+     * @param webSearch whether to enable web search
+     * @return this builder
      */
     public Builder withWebSearch(boolean webSearch) {
       this.webSearch = webSearch;
@@ -341,6 +458,10 @@ public record ModelConfig(
     /**
      * Enable provider-native URL fetching. Gemini maps this to URL context; Anthropic to the {@code
      * web_fetch} server tool. Providers without web fetch support fail fast at model construction.
+     * Disabled by default.
+     *
+     * @param webFetch whether to enable URL fetching
+     * @return this builder
      */
     public Builder withWebFetch(boolean webFetch) {
       this.webFetch = webFetch;
@@ -350,12 +471,23 @@ public record ModelConfig(
     /**
      * Stable cache-routing key for providers whose prompt cache benefits from one (OpenAI {@code
      * prompt_cache_key}). See {@link ModelConfig#promptCacheKey()}.
+     *
+     * @param promptCacheKey the key; {@code null} (default) sends none
+     * @return this builder
      */
     public Builder withPromptCacheKey(String promptCacheKey) {
       this.promptCacheKey = promptCacheKey;
       return this;
     }
 
+    /**
+     * Sets the longest wait for the next SSE line once the response headers arrived. Default 120 s.
+     * See {@link ModelConfig#streamIdleTimeout()}.
+     *
+     * @param streamIdleTimeout the idle timeout; a streaming provider rejects {@code null} with
+     *     {@link NullPointerException} when it opens a stream
+     * @return this builder
+     */
     public Builder withStreamIdleTimeout(Duration streamIdleTimeout) {
       this.streamIdleTimeout = streamIdleTimeout;
       return this;
@@ -364,6 +496,9 @@ public record ModelConfig(
     /**
      * Override the provider's default API endpoint. See {@link ModelConfig#baseUrl()} for the
      * canonical URLs each provider falls back to when this is {@code null}.
+     *
+     * @param baseUrl the endpoint, used verbatim; {@code null} or blank selects the provider's own
+     * @return this builder
      */
     public Builder withBaseUrl(String baseUrl) {
       this.baseUrl = baseUrl;
@@ -373,6 +508,10 @@ public record ModelConfig(
     /**
      * Allow providers to continue conversations using provider-side state. Disable this to resend
      * local message history without sending or propagating provider conversation identifiers.
+     * Enabled by default.
+     *
+     * @param providerContinuation whether provider-side continuation is allowed
+     * @return this builder
      */
     public Builder withProviderContinuation(boolean providerContinuation) {
       this.providerContinuation = providerContinuation;
@@ -382,13 +521,22 @@ public record ModelConfig(
     /**
      * Select a provider API version. Providers that support version selection validate their values
      * during model construction; {@code null} restores the provider default.
+     *
+     * @param apiVersion the version; may be null
+     * @return this builder
      */
     public Builder withApiVersion(String apiVersion) {
       this.apiVersion = apiVersion;
       return this;
     }
 
-    /** Configure whether structured-output exceptions retain raw model responses. */
+    /**
+     * Configure whether structured-output exceptions retain raw model responses. Default {@link
+     * RawOutputCapturePolicy#ENABLED}.
+     *
+     * @param rawOutputCapturePolicy the policy; {@code null} fails {@link #build()}
+     * @return this builder
+     */
     public Builder withRawOutputCapture(RawOutputCapturePolicy rawOutputCapturePolicy) {
       this.rawOutputCapturePolicy = rawOutputCapturePolicy;
       return this;
@@ -397,6 +545,9 @@ public record ModelConfig(
     /**
      * Replace the current header map with the given entries. {@code null} clears all extra headers.
      * Names match case-insensitively against built-in provider headers and override them.
+     *
+     * @param headers the headers, copied; may be null
+     * @return this builder
      */
     public Builder withHeaders(Map<String, String> headers) {
       this.headers = headers == null ? new LinkedHashMap<>() : new LinkedHashMap<>(headers);
@@ -407,6 +558,11 @@ public record ModelConfig(
      * Add or replace a single extra HTTP header. Case-insensitive override against built-in
      * provider headers (e.g. setting {@code api-key} replaces the Azure-incompatible default {@code
      * Authorization} on the OpenAI provider). Repeated calls with the same name overwrite.
+     *
+     * @param name the header name; non-blank
+     * @param value the header value; {@code null} fails {@link #build()}
+     * @return this builder
+     * @throws IllegalArgumentException if {@code name} is null or blank
      */
     public Builder withHeader(String name, String value) {
       if (Strings.isBlank(name)) {
@@ -416,6 +572,13 @@ public record ModelConfig(
       return this;
     }
 
+    /**
+     * Builds the configuration, validating it as the canonical constructor does.
+     *
+     * @return the configuration
+     * @throws NullPointerException if the raw output capture policy, or a header value, is null
+     * @throws IllegalArgumentException if the temperature or top-p is NaN or infinite
+     */
     public ModelConfig build() {
       return new ModelConfig(
           apiKey,

@@ -17,14 +17,25 @@ import java.util.List;
 public final class SubmitValidationException extends StructuredOutputParseException {
 
   /**
+   * Creates a submit-validation failure that retains {@code rawContent} as given.
+   *
    * @param correction the validator's model-facing correction message; never blank
    * @param rawContent the model's raw response text, preserved for log-side debugging; may be null
+   * @throws NullPointerException if {@code correction} is {@code null}
    */
   public SubmitValidationException(String correction, String rawContent) {
     super("Structured output failed submit validation", List.of(correction), rawContent);
   }
 
-  /** Creates a submit-validation failure under an explicit raw-output capture policy. */
+  /**
+   * Creates a submit-validation failure under an explicit raw-output capture policy.
+   *
+   * @param correction the validator's model-facing correction message; never blank
+   * @param rawContent the model's raw response text
+   * @param capturePolicy whether {@code rawContent} may be retained; {@link
+   *     RawOutputCapturePolicy#DISABLED} makes {@link #rawContent()} {@code null}
+   * @throws NullPointerException if {@code correction} or {@code capturePolicy} is {@code null}
+   */
   public SubmitValidationException(
       String correction, String rawContent, RawOutputCapturePolicy capturePolicy) {
     super(

@@ -11,10 +11,21 @@ import static com.standardapplied.helios.repl.protocol.ProcessTransport.MAX_CAPT
  */
 public final class CapturedOutput {
 
-  /** Text a buffer kept and the count of characters it dropped, not yet joined by the marker. */
+  /**
+   * Text a buffer kept and the count of characters it dropped, not yet joined by the marker.
+   *
+   * @param kept the unbroken prefix of the output the buffer kept, at most {@link
+   *     ProcessTransport#MAX_CAPTURED_OUTPUT_CHARS} characters
+   * @param discarded the number of characters dropped after {@code kept}; zero when nothing was
+   */
   public record Cut(String kept, long discarded) {
 
-    /** The kept text, followed by {@code \n[output truncated: <n> more chars discarded]} if due. */
+    /**
+     * Joins the kept text and the truncation marker.
+     *
+     * @return {@code kept}, followed by {@code \n[output truncated: <n> more chars discarded]} when
+     *     {@code discarded} is not zero
+     */
     public String text() {
       return discarded == 0
           ? kept
@@ -25,9 +36,15 @@ public final class CapturedOutput {
   private final StringBuilder kept = new StringBuilder();
   private long discarded;
 
+  /** Creates an empty buffer. */
+  public CapturedOutput() {}
+
   /**
    * Keeps as much of {@code text} as the cap allows and counts the rest. Nothing is kept once
    * anything was dropped, so the kept text stays an unbroken prefix of the output.
+   *
+   * @param text the output to add; must not be {@code null}
+   * @throws NullPointerException if {@code text} is {@code null}
    */
   public synchronized void append(String text) {
     var room =
@@ -36,13 +53,23 @@ public final class CapturedOutput {
     discarded += text.length() - room;
   }
 
-  /** Appends what another buffer kept and counts what it dropped. */
+  /**
+   * Appends what another buffer kept and counts what it dropped.
+   *
+   * @param cut another buffer's {@link #take()}; must not be {@code null}
+   * @throws NullPointerException if {@code cut} is {@code null}
+   */
   public synchronized void append(Cut cut) {
     append(cut.kept());
     discard(cut.discarded());
   }
 
-  /** Appends {@code line}, separated by {@code \n} from anything already kept. */
+  /**
+   * Appends {@code line}, separated by {@code \n} from anything already kept.
+   *
+   * @param line the line to add, without its terminator; must not be {@code null}
+   * @throws NullPointerException if {@code line} is {@code null}
+   */
   public synchronized void appendLine(String line) {
     if (!kept.isEmpty()) {
       append("\n");
@@ -50,7 +77,11 @@ public final class CapturedOutput {
     append(line);
   }
 
-  /** Counts {@code chars} characters a caller dropped before they reached this buffer. */
+  /**
+   * Counts {@code chars} characters a caller dropped before they reached this buffer.
+   *
+   * @param chars the number of characters dropped; added to the count as given
+   */
   public synchronized void discard(long chars) {
     discarded += chars;
   }
@@ -58,6 +89,9 @@ public final class CapturedOutput {
   /**
    * Returns what was kept and dropped since the last read and starts over. A surrogate pair the cap
    * would split is dropped whole.
+   *
+   * @return the kept text and dropped count since the last {@code take} or {@link #drain()}; an
+   *     empty text and zero when nothing arrived
    */
   public synchronized Cut take() {
     if (kept.length() == MAX_CAPTURED_OUTPUT_CHARS

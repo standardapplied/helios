@@ -28,13 +28,20 @@ import java.util.Objects;
  */
 public class StructuredOutputParseException extends RuntimeException {
 
+  /** The failure messages, unmodifiable and never empty, in the order they were produced. */
   private final List<String> errors;
+
+  /** The model's raw response text, or {@code null} when not available or not retained. */
   private final String rawContent;
 
   /**
+   * Creates a schema-validation failure that retains {@code rawContent} as given.
+   *
    * @param errors per-field validation messages produced by {@link SchemaValidator}; never empty
    * @param rawContent the model's raw response text (preserved for log-side debugging); may be
    *     {@code null} when the caller doesn't have it available
+   * @throws NullPointerException if {@code errors} is {@code null} or holds a {@code null} message
+   * @throws IllegalArgumentException if {@code errors} is empty
    */
   public StructuredOutputParseException(List<String> errors, String rawContent) {
     this("Structured output schema validation failed", errors, rawContent);
@@ -45,7 +52,11 @@ public class StructuredOutputParseException extends RuntimeException {
    *
    * @param errors actionable validation messages; never empty
    * @param rawContent the model's raw response text
-   * @param capturePolicy whether {@code rawContent} may be retained
+   * @param capturePolicy whether {@code rawContent} may be retained; {@link
+   *     RawOutputCapturePolicy#DISABLED} makes {@link #rawContent()} {@code null}
+   * @throws NullPointerException if {@code capturePolicy} or {@code errors} is {@code null}, or
+   *     {@code errors} holds a {@code null} message
+   * @throws IllegalArgumentException if {@code errors} is empty
    */
   public StructuredOutputParseException(
       List<String> errors, String rawContent, RawOutputCapturePolicy capturePolicy) {
@@ -60,6 +71,10 @@ public class StructuredOutputParseException extends RuntimeException {
    * rawContent} carry the same contract as the public constructor.
    *
    * @param summary the first line of {@link #getMessage()}; the errors are itemised beneath it
+   * @param errors actionable failure messages; never empty
+   * @param rawContent the model's raw response text, retained as given; may be {@code null}
+   * @throws NullPointerException if {@code errors} is {@code null} or holds a {@code null} message
+   * @throws IllegalArgumentException if {@code errors} is empty
    */
   protected StructuredOutputParseException(String summary, List<String> errors, String rawContent) {
     super(buildMessage(summary, errors));
@@ -71,12 +86,21 @@ public class StructuredOutputParseException extends RuntimeException {
     this.rawContent = rawContent;
   }
 
-  /** Per-field validation messages, in the order {@link SchemaValidator} produced them. */
+  /**
+   * Per-field validation messages, in the order {@link SchemaValidator} produced them.
+   *
+   * @return the unmodifiable, never empty list of messages
+   */
   public List<String> errors() {
     return errors;
   }
 
-  /** The model's raw response text, preserved for log-side debugging. May be {@code null}. */
+  /**
+   * The model's raw response text, preserved for log-side debugging.
+   *
+   * @return the raw text, or {@code null} when the thrower did not have it or its capture policy
+   *     was {@link RawOutputCapturePolicy#DISABLED}
+   */
   public String rawContent() {
     return rawContent;
   }
@@ -86,6 +110,8 @@ public class StructuredOutputParseException extends RuntimeException {
    * failing field with its expected/actual mismatch and instructs the model to re-emit the
    * structured output. Does <em>not</em> include the raw content — see the class-level note for
    * why.
+   *
+   * @return the {@link #correctionPreamble()} followed by one indented line per error
    */
   public String correctionMessage() {
     var sb = new StringBuilder(correctionPreamble()).append('\n');
@@ -98,6 +124,8 @@ public class StructuredOutputParseException extends RuntimeException {
   /**
    * The sentence that opens {@link #correctionMessage()}, before the itemised errors. Subclasses
    * override it to describe their failure class accurately to the model.
+   *
+   * @return the opening sentence, ending with a colon that introduces the errors
    */
   protected String correctionPreamble() {
     return "Your structured output did not match the schema. Fix the listed fields and re-emit "

@@ -29,6 +29,8 @@ public record ReasoningSupport(boolean off, Set<Level> levels, Set<Display> disp
       new ReasoningSupport(true, EnumSet.allOf(Level.class), EnumSet.allOf(Display.class));
 
   /**
+   * Canonical constructor; stores unmodifiable copies of {@code levels} and {@code displays}.
+   *
    * @throws NullPointerException if {@code levels} or {@code displays} is null
    */
   public ReasoningSupport {

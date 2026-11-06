@@ -91,6 +91,10 @@ public final class JvmSandboxBootstrap {
    * <p>At startup this method emits a one-time {@code WARNING} on stderr when the bootstrap is
    * running in an unnamed module, naming the reduced-isolation regime explicitly so deployers who
    * took a classpath launch by accident notice in development.
+   *
+   * @param args the launch flags {@link JvmSandbox} passes: {@code --rpc-socket=<path>} (required),
+   *     and optionally {@code --sandbox-policy=<encoded>} and {@code --stop-grace=<ISO-8601
+   *     duration>}; a missing socket, an unreadable flag or a failed connect exits with code 2
    */
   public static void main(String[] args) {
     BootstrapArguments.warnIfReducedIsolation(System.err);

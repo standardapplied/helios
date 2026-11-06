@@ -31,6 +31,9 @@ public final class GuardedExecutionControlProvider implements ExecutionControlPr
    * Construct a provider bound to {@code policy}. The verifier is built once at construction time
    * via {@link BytecodeVerifier#forPolicy(SandboxPolicy)}; per-snippet calls into {@link
    * GuardedExecutionControl#load} reuse the same instance.
+   *
+   * @param policy the policy every generated execution control enforces; must not be {@code null}
+   * @throws IllegalArgumentException if {@code policy} is {@code null}
    */
   public GuardedExecutionControlProvider(SandboxPolicy policy) {
     if (policy == null) {
@@ -40,6 +43,11 @@ public final class GuardedExecutionControlProvider implements ExecutionControlPr
     this.verifier = BytecodeVerifier.forPolicy(policy);
   }
 
+  /**
+   * Returns the policy this provider's execution controls enforce.
+   *
+   * @return the policy given at construction, never {@code null}
+   */
   public SandboxPolicy policy() {
     return policy;
   }

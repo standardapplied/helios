@@ -141,6 +141,10 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-javadoc-plugin</artifactId>
                     <version>3.12.0</version>
+                    <configuration>
+                        <doclint>all</doclint>
+                        <failOnWarnings>true</failOnWarnings>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -382,6 +386,56 @@
                             <targetDirectory>${project.build.directory}/cpd</targetDirectory>
                             <excludeFromFailureFile combine.self="override"/>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  The javadoc plugin skips a run whose stale data matches the last one, and in a
+                  JPMS module that data names module-info.java but no other source, so an edit
+                  would never re-run the gate below without a clean. Deleting it first makes
+                  every verify run javadoc.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>javadoc-stale-data</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <configuration>
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>maven-javadoc-plugin-stale-data.txt</include>
+                                    </includes>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  Documentation gate, documented in AGENTS.md: the doclint configuration in
+                  pluginManagement applies here, to javadoc:jar in CI and to the release, so a
+                  local verify fails on the warnings CI fails on. The no-fork goal reuses the
+                  sources this lifecycle already generated. architecture and the examples set
+                  maven.javadoc.skip.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>javadoc-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>javadoc-no-fork</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>

@@ -35,9 +35,12 @@ import java.util.Objects;
 public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> attachments) {
 
   /**
-   * Canonical constructor. Normalises {@code attachments} to an immutable copy and rejects null —
-   * the empty list is the no-attachment sentinel, never null. {@code outcome} and {@code output}
-   * are rejected if null; an empty string is the right encoding of "no text".
+   * Canonical constructor. Normalises {@code attachments} to an immutable copy, a {@code null} list
+   * to the empty one, the no-attachment sentinel. {@code outcome} and {@code output} are rejected
+   * if null; an empty string is the right encoding of "no text".
+   *
+   * @throws NullPointerException if {@code outcome} or {@code output} is {@code null}, or {@code
+   *     attachments} holds a {@code null} file
    */
   public ToolResult {
     Objects.requireNonNull(outcome, "outcome must not be null");
@@ -45,7 +48,13 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
     attachments = attachments == null ? List.of() : List.copyOf(attachments);
   }
 
-  /** Successful result with text only. */
+  /**
+   * Successful result with text only.
+   *
+   * @param output result text; non-null, may be empty
+   * @return a {@link ToolOutcome.Succeeded} result with no attachment
+   * @throws NullPointerException if {@code output} is {@code null}
+   */
   public static ToolResult success(String output) {
     return new ToolResult(new ToolOutcome.Succeeded(), output, List.of());
   }
@@ -63,7 +72,13 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
     return new ToolResult(new ToolOutcome.Succeeded(), output, attachments);
   }
 
-  /** Failed result with text error: the tool ran and reported failure. */
+  /**
+   * Failed result with text error: the tool ran and reported failure.
+   *
+   * @param error the model-facing failure message; non-null
+   * @return a {@link ToolOutcome.Failed} result with no attachment
+   * @throws NullPointerException if {@code error} is {@code null}
+   */
   public static ToolResult failure(String error) {
     return new ToolResult(new ToolOutcome.Failed(), error, List.of());
   }

@@ -188,6 +188,9 @@ public final class SandboxPrelude {
   /**
    * Model-facing summary of the static preamble (helpers, imports, conveniences), for a system
    * prompt that tells the LLM the surface without it reading the source.
+   *
+   * @return a fixed multi-line description of the preamble's imports, print helpers and collection
+   *     helpers
    */
   public static String modelFacingSummary() {
     return """
@@ -248,6 +251,10 @@ public final class SandboxPrelude {
    * Format a {@link HostFunction} as a Java method-style signature ({@code name(Type1 p1, Type2
    * p2)}). Used by both the synthesizer and the system-prompt builder so the model sees the same
    * signature it'll actually call.
+   *
+   * @param fn the host function to describe; must not be {@code null}
+   * @return the function's name followed by its parameters' Java types and names in declaration
+   *     order, such as {@code marketQuote(String ticker)}
    */
   public static String formatSignature(HostFunction fn) {
     var sig =

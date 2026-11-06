@@ -25,6 +25,13 @@ import java.util.Objects;
  */
 public record ToolCall(String id, String name, Map<String, Object> arguments) {
 
+  /**
+   * Canonical constructor; replaces {@code arguments} with its deep, unmodifiable snapshot.
+   *
+   * @throws NullPointerException if a component is null
+   * @throws IllegalArgumentException if {@code id} or {@code name} is blank, or {@link
+   *     JsonSnapshot} rejects {@code arguments}
+   */
   public ToolCall {
     Validate.notBlank("id", id);
     Validate.notBlank("name", name);
@@ -32,6 +39,11 @@ public record ToolCall(String id, String name, Map<String, Object> arguments) {
     arguments = JsonSnapshot.ofObject("arguments", arguments);
   }
 
+  /**
+   * Starts a builder with no id, no name and empty arguments.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -44,22 +56,48 @@ public record ToolCall(String id, String name, Map<String, Object> arguments) {
 
     private Builder() {}
 
+    /**
+     * Sets the provider-assigned id that pairs the call with its result message. Required; unset by
+     * default.
+     *
+     * @param id the call id; must be non-blank when the call is built
+     * @return this builder
+     */
     public Builder withId(String id) {
       this.id = id;
       return this;
     }
 
+    /**
+     * Sets the name of the tool to call. Required; unset by default.
+     *
+     * @param name the tool name; must be non-blank when the call is built
+     * @return this builder
+     */
     public Builder withName(String name) {
       this.name = name;
       return this;
     }
 
-    /** The arguments, snapshotted when the call is built; empty when never set. */
+    /**
+     * The arguments, snapshotted when the call is built; empty when never set.
+     *
+     * @param arguments the arguments as a JSON object; {@code null} fails {@link #build()}
+     * @return this builder
+     */
     public Builder withArguments(Map<String, Object> arguments) {
       this.arguments = arguments;
       return this;
     }
 
+    /**
+     * Builds the call.
+     *
+     * @return the call, its arguments snapshotted
+     * @throws NullPointerException if the id, the name or the arguments is null
+     * @throws IllegalArgumentException if the id or the name is blank, or {@link JsonSnapshot}
+     *     rejects the arguments
+     */
     public ToolCall build() {
       return new ToolCall(id, name, arguments);
     }

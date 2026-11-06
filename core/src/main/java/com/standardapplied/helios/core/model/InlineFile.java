@@ -21,6 +21,12 @@ import java.util.Objects;
  */
 public record InlineFile(byte[] data, String mimeType) {
 
+  /**
+   * Canonical constructor. The array is kept as given, not copied.
+   *
+   * @throws NullPointerException if {@code data} is null
+   * @throws IllegalArgumentException if {@code data} is empty or {@code mimeType} is null or blank
+   */
   public InlineFile {
     Objects.requireNonNull(data, "data must not be null");
     if (data.length == 0) {
@@ -31,6 +37,15 @@ public record InlineFile(byte[] data, String mimeType) {
     }
   }
 
+  /**
+   * Creates an inline file, validated as the canonical constructor validates it.
+   *
+   * @param data the raw file bytes, not copied; non-empty
+   * @param mimeType the MIME type, such as {@code image/png}; non-blank
+   * @return the inline file
+   * @throws NullPointerException if {@code data} is null
+   * @throws IllegalArgumentException if {@code data} is empty or {@code mimeType} is null or blank
+   */
   public static InlineFile of(byte[] data, String mimeType) {
     return new InlineFile(data, mimeType);
   }

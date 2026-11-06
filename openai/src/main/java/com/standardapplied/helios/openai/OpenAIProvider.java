@@ -32,6 +32,13 @@ public class OpenAIProvider implements ModelProvider {
 
   static final String PROVIDER_NAME = "openai";
 
+  /**
+   * Creates the provider. {@link java.util.ServiceLoader} calls this when it discovers the OpenAI
+   * provider on the module or class path; a caller may also construct it directly. The provider
+   * holds no state of its own, so one instance can create any number of models from any thread.
+   */
+  public OpenAIProvider() {}
+
   @Override
   public String name() {
     return PROVIDER_NAME;

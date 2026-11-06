@@ -32,15 +32,31 @@ public enum AnthropicModelId {
   // always think; display "updates" exists on Fable 5/5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5;
   // Sonnet 5.5 turns up-front thinking off with between_tools; Opus 5, Sonnet 5 and Haiku 5.5 think
   // unless sent disabled.
+  /**
+   * Claude Fable 5.1: always thinks, progress updates; rejects forced tool use; binds its thinking.
+   */
   CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  /** Claude Mythos 5.1: always thinks, progress updates; rejects forced tool use. */
   CLAUDE_MYTHOS_5_1(
       "claude-mythos-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  /** Claude Fable 5: always thinks, with progress updates. */
   CLAUDE_FABLE_5("claude-fable-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  /** Claude Mythos 5: always thinks; no progress updates. */
   CLAUDE_MYTHOS_5("claude-mythos-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON),
+  /**
+   * Claude Opus 5.5: always thinks, progress updates; rejects forced tool use; binds its thinking.
+   */
   CLAUDE_OPUS_5_5("claude-opus-5-5", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  /** Claude Opus 5: thinks unless sent {@code disabled}; no progress updates. */
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
+  /**
+   * Claude Sonnet 5.5: off is {@code between_tools}; progress updates; rejects forced tool use;
+   * binds its thinking.
+   */
   CLAUDE_SONNET_5_5("claude-sonnet-5-5", 1_000_000, 128_000, ReasoningRules.OFF_BETWEEN_TOOLS),
+  /** Claude Sonnet 5: thinks unless sent {@code disabled}; no progress updates. */
   CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
+  /** Claude Haiku 5.5, the small model: thinks unless sent {@code disabled}; binds its thinking. */
   CLAUDE_HAIKU_5_5("claude-haiku-5-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED);
 
   /** How a model is told to stop reasoning. */

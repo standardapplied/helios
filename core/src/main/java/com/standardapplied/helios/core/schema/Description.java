@@ -22,5 +22,10 @@ import java.lang.annotation.Target;
 @Target({ElementType.RECORD_COMPONENT, ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Description {
+  /**
+   * The text the generated schema carries as the annotated element's {@code description}.
+   *
+   * @return the description, written for the model to read
+   */
   String value();
 }

@@ -19,6 +19,8 @@ import java.util.Objects;
 public record StoredSession(String sessionId, long lastSeq, List<Message> history) {
 
   /**
+   * Validates the session and copies {@code history}.
+   *
    * @throws NullPointerException if {@code sessionId} or {@code history} is null, or {@code
    *     history} holds a null
    * @throws IllegalArgumentException if {@code sessionId} is blank or {@code lastSeq} is negative

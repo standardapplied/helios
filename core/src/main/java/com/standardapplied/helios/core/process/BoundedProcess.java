@@ -79,12 +79,22 @@ public final class BoundedProcess implements AutoCloseable {
     return new Builder(argv);
   }
 
-  /** The running child. */
+  /**
+   * Returns the child, for its pid or exit status; prefer {@link #await(CancellationToken)} and
+   * {@link #kill()} over acting on it directly, so the descendants are handled too.
+   *
+   * @return the started child process; never null
+   */
   public Process process() {
     return process;
   }
 
-  /** The child's stdin. The caller closes it, after writing to it or not. */
+  /**
+   * Returns the child's stdin. The caller closes it, after writing to it or not; a child that reads
+   * stdin waits until it is closed.
+   *
+   * @return the stream connected to the child's stdin; never null
+   */
   public OutputStream stdin() {
     return process.getOutputStream();
   }
@@ -203,7 +213,11 @@ public final class BoundedProcess implements AutoCloseable {
 
     /**
      * The child's whole environment, in insertion order; nothing is inherited from the JVM.
-     * Defaults to empty.
+     * Defaults to empty. The map is copied.
+     *
+     * @param environment the variables by name; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code environment} is null
      */
     public Builder withEnvironment(Map<String, String> environment) {
       this.environment = new LinkedHashMap<>(environment);
@@ -213,13 +227,25 @@ public final class BoundedProcess implements AutoCloseable {
     /**
      * Run in {@code directory}, which outlives the process. When unset, each start creates a fresh
      * temporary directory that {@link BoundedProcess#close()} removes.
+     *
+     * @param directory the existing directory to run in; {@code null} restores the per-call
+     *     temporary directory
+     * @return this builder
      */
     public Builder withWorkingDirectory(Path directory) {
       this.workingDirectory = directory;
       return this;
     }
 
-    /** Name prefix of the per-call temporary directory. Defaults to {@code helios-process-}. */
+    /**
+     * Name prefix of the per-call temporary directory. Defaults to {@code helios-process-}. Unused
+     * when a working directory is set.
+     *
+     * @param prefix the prefix passed to {@link Files#createTempDirectory(String,
+     *     java.nio.file.attribute.FileAttribute[])}; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code prefix} is null
+     */
     public Builder withTempDirectoryPrefix(String prefix) {
       this.tempDirectoryPrefix = Objects.requireNonNull(prefix, "prefix");
       return this;
@@ -228,6 +254,10 @@ public final class BoundedProcess implements AutoCloseable {
     /**
      * How long {@link BoundedProcess#await(CancellationToken)} lets the child run. Defaults to 30
      * seconds.
+     *
+     * @param timeout the time from the start of the wait after which the child is killed; positive
+     * @return this builder
+     * @throws IllegalArgumentException if {@code timeout} is null, zero or negative
      */
     public Builder withTimeout(Duration timeout) {
       if (timeout == null || timeout.isZero() || timeout.isNegative()) {
@@ -237,7 +267,14 @@ public final class BoundedProcess implements AutoCloseable {
       return this;
     }
 
-    /** Cap on captured stdout and on captured stderr, each in bytes. Defaults to 50,000. */
+    /**
+     * Cap on captured stdout and on captured stderr, each in bytes. Defaults to 50,000. Output past
+     * the cap is read and dropped, so the child never blocks on a full pipe.
+     *
+     * @param bytes the cap per stream; positive
+     * @return this builder
+     * @throws IllegalArgumentException if {@code bytes} is below 1
+     */
     public Builder withMaxOutputBytes(int bytes) {
       if (bytes < 1) {
         throw new IllegalArgumentException("maxOutputBytes must be positive");
@@ -249,6 +286,10 @@ public final class BoundedProcess implements AutoCloseable {
     /**
      * The registry a stream cut at the cap is trimmed against, so that it keeps no part of a secret
      * the cut went through. Defaults to an empty registry, which trims nothing.
+     *
+     * @param secrets the registry; non-null, read when the outcome is built
+     * @return this builder
+     * @throws NullPointerException if {@code secrets} is null
      */
     public Builder withSecretRegistry(SecretRegistry secrets) {
       this.secrets = Objects.requireNonNull(secrets, "secrets");
