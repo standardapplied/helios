@@ -49,7 +49,7 @@ class SchemaPlusToolsBugReproTest {
   }
 
   private static AnthropicRequestBuilder requests(ModelConfig config) {
-    var model = AnthropicModelId.CLAUDE_SONNET_4_6;
+    var model = AnthropicModelId.CLAUDE_SONNET_5_5;
     return AnthropicFixture.requests(model, config);
   }
 
@@ -119,7 +119,7 @@ class SchemaPlusToolsBugReproTest {
         uri ->
             new AnthropicProvider()
                 .create(
-                    AnthropicModelId.CLAUDE_OPUS_4_7.id(),
+                    AnthropicModelId.CLAUDE_SONNET_5_5.id(),
                     ModelConfig.newBuilder()
                         .withApiKey("test-key")
                         .withBaseUrl(uri + "/v1/messages")
@@ -140,7 +140,7 @@ class SchemaPlusToolsBugReproTest {
                 "message_start",
                 "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\","
                     + "\"type\":\"message\",\"role\":\"assistant\",\"content\":[],"
-                    + "\"model\":\"claude-opus-4-7-20260101\",\"stop_reason\":null,"
+                    + "\"model\":\"claude-sonnet-5-5-20261101\",\"stop_reason\":null,"
                     + "\"usage\":{\"input_tokens\":50,\"output_tokens\":1}}}"));
 
     int idx = 0;

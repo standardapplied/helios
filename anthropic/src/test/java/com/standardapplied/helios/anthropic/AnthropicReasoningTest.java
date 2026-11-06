@@ -48,12 +48,13 @@ class AnthropicReasoningTest {
 
   private static final String BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
-  /** The models "Preserved thinking" lists as binding a thinking block to its prefix (Oct 2026). */
+  /** The models "Preserved thinking" lists as binding a thinking block to its prefix (Nov 2026). */
   private static final Set<AnthropicModelId> BINDING =
       EnumSet.of(
           AnthropicModelId.CLAUDE_FABLE_5_1,
           AnthropicModelId.CLAUDE_OPUS_5_5,
-          AnthropicModelId.CLAUDE_SONNET_5_5);
+          AnthropicModelId.CLAUDE_SONNET_5_5,
+          AnthropicModelId.CLAUDE_HAIKU_5_5);
 
   private static final Set<Level> LOW_TO_MAX = EnumSet.range(Level.LOW, Level.MAX);
 
@@ -67,15 +68,8 @@ class AnthropicReasoningTest {
   private static final Documented ALWAYS_ON_WITH_PROGRESS =
       new Documented(null, LOW_TO_MAX, WITH_PROGRESS);
 
-  private static final Documented OFF_OMITTED =
-      new Documented(Map.of(), LOW_TO_MAX, WITHOUT_PROGRESS);
-
   private static final Documented OFF_DISABLED =
       new Documented(Map.of("type", "disabled"), LOW_TO_MAX, WITHOUT_PROGRESS);
-
-  private static final Documented CLAUDE_4_6 =
-      new Documented(
-          Map.of(), EnumSet.of(Level.LOW, Level.MEDIUM, Level.HIGH, Level.MAX), WITHOUT_PROGRESS);
 
   private static final Map<AnthropicModelId, Documented> DOCUMENTED =
       Map.ofEntries(
@@ -90,18 +84,13 @@ class AnthropicReasoningTest {
               new Documented(Map.of("type", "between_tools"), LOW_TO_MAX, WITH_PROGRESS)),
           Map.entry(AnthropicModelId.CLAUDE_OPUS_5, OFF_DISABLED),
           Map.entry(AnthropicModelId.CLAUDE_SONNET_5, OFF_DISABLED),
-          Map.entry(AnthropicModelId.CLAUDE_OPUS_4_8, OFF_OMITTED),
-          Map.entry(AnthropicModelId.CLAUDE_OPUS_4_7, OFF_OMITTED),
-          Map.entry(AnthropicModelId.CLAUDE_OPUS_4_6, CLAUDE_4_6),
-          Map.entry(AnthropicModelId.CLAUDE_SONNET_4_6, CLAUDE_4_6),
-          Map.entry(
-              AnthropicModelId.CLAUDE_HAIKU_4_5, new Documented(Map.of(), Set.of(), Set.of())));
+          Map.entry(AnthropicModelId.CLAUDE_HAIKU_5_5, OFF_DISABLED));
 
   /**
    * What a model accepts and how its off is spelled.
    *
-   * @param off the {@code thinking} field sent for {@code Reasoning.Off}: empty when it is left
-   *     out, {@code null} when off is rejected
+   * @param off the {@code thinking} field sent for {@code Reasoning.Off}, {@code null} when off is
+   *     rejected
    * @param levels the accepted levels
    * @param displays the accepted displays
    */
@@ -157,7 +146,7 @@ class AnthropicReasoningTest {
 
   @ParameterizedTest
   @ValueSource(
-      strings = {"claude-opus-5-5", "claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-6"})
+      strings = {"claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-6"})
   void anAbsentReasoningSendsNoThinkingOrEffortField(String modelId) {
     var body = wire(modelId, ModelConfig.newBuilder().withApiKey("test-key").build());
 
@@ -185,23 +174,38 @@ class AnthropicReasoningTest {
   }
 
   @Test
-  void haiku45AcceptsNoEffortAndSendsNoThinkingFieldForOff() {
-    var effort = config(new Reasoning.Effort(Level.LOW, Display.HIDDEN));
+  void haiku55SendsDisabledForOffAndAdaptiveSummarizedThinkingForEffort() {
+    var off = wire("claude-haiku-5-5", config(new Reasoning.Off()));
+    var low = wire("claude-haiku-5-5", config(new Reasoning.Effort(Level.LOW, Display.SUMMARY)));
+
+    assertEquals(Map.of("type", "disabled"), off.get("thinking"));
+    assertFalse(off.containsKey("output_config"));
+    assertEquals("adaptive", ((Map<?, ?>) low.get("thinking")).get("type"));
+    assertEquals("summarized", ((Map<?, ?>) low.get("thinking")).get("display"));
+    assertEquals(Map.of("effort", "low"), low.get("output_config"));
+  }
+
+  @Test
+  void haiku55RejectsProgressAndTemperatureAtCreation() {
+    var progress = config(new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS));
+    var temperature = ModelConfig.newBuilder().withApiKey("test-key").withTemperature(0.5).build();
 
     var rejection =
-        assertThrows(IllegalArgumentException.class, () -> model("claude-haiku-4-5", effort));
+        assertThrows(IllegalArgumentException.class, () -> model("claude-haiku-5-5", progress));
 
+    assertTrue(rejection.getMessage().contains("Reasoning.Display.PROGRESS"), rejection::toString);
     assertEquals(
-        "Model claude-haiku-4-5 does not accept Reasoning.Level.LOW; it accepts Off and no Effort.",
-        rejection.getMessage());
-    assertNull(wire("claude-haiku-4-5", config(new Reasoning.Off())).get("thinking"));
+        "Model claude-haiku-5-5 does not accept temperature whenever it is set.",
+        assertThrows(IllegalArgumentException.class, () -> model("claude-haiku-5-5", temperature))
+            .getMessage());
   }
 
   @Test
   void aDatedSnapshotIsJudgedByItsFamilysRules() {
-    var effort = config(new Reasoning.Effort(Level.LOW, Display.SUMMARY));
+    var progress = config(new Reasoning.Effort(Level.LOW, Display.PROGRESS));
 
-    assertThrows(IllegalArgumentException.class, () -> model("claude-haiku-4-5-20251001", effort));
+    assertThrows(
+        IllegalArgumentException.class, () -> model("claude-haiku-5-5-20261101", progress));
   }
 
   @Test
@@ -305,7 +309,7 @@ class AnthropicReasoningTest {
       Documented documented, Reasoning reasoning, boolean binding) {
     return switch (reasoning) {
       case Reasoning.Off _ when documented == null -> Map.of("type", "disabled");
-      case Reasoning.Off _ -> documented.off().isEmpty() ? null : documented.off();
+      case Reasoning.Off _ -> documented.off();
       case Reasoning.Effort e when binding ->
           Map.of(
               "type",

@@ -65,7 +65,7 @@ requires com.standardapplied.helios.anthropic;
 var model =
     new AnthropicProvider()
         .create(
-            AnthropicModelId.CLAUDE_SONNET_4_6.id(),
+            AnthropicModelId.CLAUDE_SONNET_5_5.id(),
             ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
 
 try (var session = AgentSession.open(SessionPresets.minimal(model).build())) {
@@ -144,7 +144,7 @@ Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — c
 
 <!-- snippet: QuickStarts#budgetCap -->
 ```java
-var pricing = Map.of("claude-sonnet-4-6", CostCalculator.Pricing.ofUsdPerMillion(3.0, 15.0));
+var pricing = Map.of("claude-sonnet-5-5", CostCalculator.Pricing.ofUsdPerMillion(2.0, 10.0));
 var limits =
     SessionLimits.newBuilder()
         .withMaxBudgetMicroUsd(5 * CostEstimate.MICRO_USD_PER_USD) // $5

@@ -6,6 +6,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Helios supports Claude 5 and later.** The Claude 4.x models are dropped from the catalogue with
+the request rules only they used.
+
+| Before | 3.0 |
+|---|---|
+| `AnthropicModelId.CLAUDE_OPUS_4_8`, `CLAUDE_OPUS_4_7`, `CLAUDE_OPUS_4_6`, `CLAUDE_SONNET_4_6`, `CLAUDE_HAIKU_4_5`; `ReasoningRules.OFF_WHEN_OMITTED`, `WITHOUT_XHIGH`, `WITHOUT_EFFORT`; `Off.OMITTED`, `Sampling.ONE_OF`; `acceptsProgrammaticToolCalling()` | a Claude 5 model: `CLAUDE_SONNET_5_5` for a general model, `CLAUDE_HAIKU_5_5` for a small one. A `claude…` id before generation 5 (`claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022`, `claude-2.1`) makes `AnthropicProvider.create` throw `IllegalArgumentException` naming the id and the catalogued ids, and `supports` returns false for it; `AnthropicModelId.predatesClaude5(id)` tells which |
+| `anthropic.api.ToolDefinition(type, name, description, inputSchema, cacheControl, allowedCallers)`, `directOnly()` | `ToolDefinition(type, name, description, inputSchema, cacheControl)`: web search takes the API's default callers on every model |
+
 **Runs are traced with OpenTelemetry; the Postgres trace store is an exporter.** A session emits
 live spans through the OpenTelemetry API, and `PgSpanExporter` writes Helios's spans to the trace
 tables. Helios's own trace pipeline is gone, so the other entries in this section that name
@@ -315,7 +323,7 @@ in main code.
 | `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
 | `AnthropicModelId.usesAdaptiveThinking()` | `thinkingShape() != ThinkingShape.LEGACY_BUDGET` |
 | Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
-| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null, null)` |
+| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null)` |
 | `OpenAIModelId.supportsXhighEffort()` | `effortSupport() != EffortSupport.STANDARD` |
 | `ResultMessage.Success(sessionId, result, usage, cost, duration)` | `Success(sessionId, result, usage, cost, duration, List.of())` |
 | `ResultMessage.Refusal(sessionId, refusalText, usage, cost, duration)` | `Refusal(sessionId, refusalText, usage, cost, duration, null)` |
@@ -497,15 +505,10 @@ enum are removed with no bridge.
 - **`Display.PROGRESS`** sends `thinking.display: "updates"` on Fable 5 / 5.1, Mythos 5.1, Opus 5.5
   and Sonnet 5.5, and the Anthropic provider adds the `thinking-display-updates-2026-08-18` beta
   to the `anthropic-beta` header itself, after any beta the configured headers already name.
-- **Haiku 4.5's invented budgets are gone.** `MINIMAL`..`HIGH` sent `enabled` with 1024 / 4096 /
-  10000 / 32000 `budget_tokens` and raised `max_tokens` above the budget; Haiku 4.5 now accepts no
-  `Effort`.
 - **Sampling parameters are exact or throw too.** 2.x dropped `temperature` and `topP` without a
   word where the model would reject them. They are now sent as set, or rejected at construction
-  with the model, the parameter and the rule: Claude 4.7 and later (Opus 4.7 / 4.8 / 5 / 5.5,
-  Sonnet 5 / 5.5, Fable, Mythos) reject either whenever it is set; Opus 4.6 and Sonnet 4.6 reject
-  `temperature` alongside `Reasoning.Effort` and accept `topP` there only from 0.95 to 1; Opus 4.6,
-  Sonnet 4.6 and Haiku 4.5 reject the two together, which the API answers with a 400. On OpenAI,
+  with the model, the parameter and the rule: every catalogued Claude model rejects either
+  whenever it is set. On OpenAI,
   gpt-6-astra, gpt-6.1-sol and the o-series reject both always; gpt-6-sol, gpt-6-luna, the gpt-5.6
   family and gpt-5.5 accept them only with `Reasoning.Off` (effort `none`); the gpt-5.4 family
   accepts them unless an `Effort` is set (its default effort is `none`); gpt-4.1 and gpt-4o accept
@@ -526,14 +529,8 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
 | Opus 5, Sonnet 5 | `NONE` | `thinking.type=disabled` | `Off` |
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
-| Opus 4.7, 4.8, and an uncatalogued Claude id | `NONE` | no `thinking` | absent (or `Off` on 4.7 / 4.8; `Off` sends `disabled` on an uncatalogued id) |
+| An uncatalogued Claude id | `NONE` | no `thinking` | absent (`Off` sends `disabled`) |
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
-| Opus 4.6, Sonnet 4.6 | `NONE` | no `thinking` | absent or `Off` |
-| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `MAX` | as Opus 5.5 | as Opus 5.5 |
-| | `XHIGH` | threw | throws |
-| Haiku 4.5 | `NONE` | no `thinking` | absent or `Off` |
-| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` | `enabled` with `budget_tokens` 1024 / 4096 / 10000 / 32000 | no equivalent: every `Effort` throws |
-| | `XHIGH`, `MAX` | threw | throws |
 | gpt-6-astra, gpt-6.1-sol | `NONE`, `MINIMAL`, `LOW` | `reasoning: {effort: low, summary: auto}` | `E(LOW, SUMMARY)` |
 | | `MEDIUM`..`MAX` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
 | gpt-6-sol, gpt-6-luna, gpt-5.6 family | `NONE` | `reasoning: {effort: none, summary: auto}` | `Off` (sends `{effort: none}`, no summary) |
@@ -1220,6 +1217,11 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Added
 
+- Claude Haiku 5.5 (`AnthropicModelId.CLAUDE_HAIKU_5_5`, `claude-haiku-5-5`): 1M context, 128K
+  output, adaptive thinking that `Off` sends `disabled` and `Effort` takes `LOW`..`MAX` without
+  `PROGRESS`, replayed thinking verified as on Sonnet 5.5, forced tool choice accepted.
+  `AnthropicPricing` prices it at its long-prompt rate, $0.50 / $2.50 per million tokens, for every
+  prompt.
 - `SseReader.Parser.unframedLine(String)`, default `null`: reads the last line of a body that ended
   before the terminal event when that line is outside the SSE format.
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
@@ -1480,10 +1482,6 @@ price table asked for a model it does not hold, both used to count the call as f
 - **A web search run from code execution broke the next request.** Helios blanked its `input` and
   dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
   send failed.
-- **Web search failed on Claude Haiku 4.5.** `web_search_20260318` runs searches from code
-  execution by default, which Haiku 4.5 does not support, so the API refused every request with a
-  400. Helios now sends `allowed_callers: ["direct"]` on that model, declared by
-  `AnthropicModelId.acceptsProgrammaticToolCalling()`.
 - **Files that web search code wrote were lost after the turn.** Each request ran in a new code
   execution container. A turn now records the container it ran code in, and the request after it
   sends the container back: always on a `pause_turn` continuation, and on the next turn while

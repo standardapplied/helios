@@ -58,18 +58,18 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   private static String apiKey;
 
   AnthropicModelIntegrationTest() {
-    super("claude-sonnet-4-6", "anthropic", 1_000_000);
+    super("claude-haiku-5-5", "anthropic", 1_000_000);
   }
 
   @BeforeAll
   static void setUp() {
     apiKey = System.getenv("ANTHROPIC_API_KEY");
-    model = sonnet46(ModelConfig.newBuilder());
+    model = haiku55(ModelConfig.newBuilder());
   }
 
-  private static Model sonnet46(ModelConfig.Builder config) {
+  private static Model haiku55(ModelConfig.Builder config) {
     return new AnthropicProvider()
-        .create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config.withApiKey(apiKey).build());
+        .create(AnthropicModelId.CLAUDE_HAIKU_5_5.id(), config.withApiKey(apiKey).build());
   }
 
   @Override
@@ -79,7 +79,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
   @Override
   protected Model model(ModelConfig.Builder config) {
-    return sonnet46(config);
+    return haiku55(config);
   }
 
   @Override
@@ -97,12 +97,12 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
                 Message.user(
                     "Three friends split a bill of $187.40 so that Ana pays twice what Ben pays and"
                         + " Cy pays $12 more than Ben. How much does each pay? Verify the total.")));
-    try (var thinkingModel = sonnet46(config)) {
+    try (var thinkingModel = haiku55(config)) {
       var response = Accepted.textReply(thinkingModel.chat(messages, List.of()));
 
       assumeTrue(
           response.hasThinking(),
-          AnthropicModelId.CLAUDE_SONNET_4_6.id()
+          AnthropicModelId.CLAUDE_HAIKU_5_5.id()
               + " wrote no thinking; AnthropicStreamTranscriptTest \"thinking\" covers the"
               + " parsing");
       assertFalse(ThinkingBlock.decodeAll(response.metadata()).isEmpty());
@@ -229,7 +229,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
         ModelConfig.newBuilder().withApiKey(apiKey).withToolChoice(ToolChoice.none()).build();
 
     try (var forbidden =
-        new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_4_5.id(), config)) {
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_5_5.id(), config)) {
       var response = Accepted.toolTurn(forbidden.chat(messages, List.of(weatherTool)));
 
       assertNotEquals(FinishReason.TOOL_CALLS, response.finishReason());
@@ -306,16 +306,13 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void sonnet46SendsATopPOfPoint95AlongsideEffort() {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey(apiKey)
-            .withReasoning(new Reasoning.Effort(Level.LOW, Display.SUMMARY))
-            .withTopP(0.95)
-            .withMaxOutputTokens(4_000);
-    try (var sonnet = sonnet46(config)) {
-      Accepted.textReply(
-          sonnet.chat(List.of(Message.user("Reply with the single word: ok")), List.of()));
+  void haiku55AcceptsOffAndMaxEffort() {
+    for (var reasoning :
+        List.of(new Reasoning.Off(), new Reasoning.Effort(Level.MAX, Display.SUMMARY))) {
+      try (var haiku = haiku55(ModelConfig.newBuilder().withReasoning(reasoning))) {
+        Accepted.textReply(
+            haiku.chat(List.of(Message.user("Reply with the single word: ok")), List.of()));
+      }
     }
   }
 
@@ -482,21 +479,6 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void haiku45SearchesTheWebThroughDirectCalls() {
-    var config = ModelConfig.newBuilder().withApiKey(apiKey).withWebSearch(true).build();
-    try (var haiku =
-        new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_4_5.id(), config)) {
-      Accepted.textReply(
-          haiku.chat(
-              List.of(
-                  Message.user(
-                      "Search the web for the latest stable release of Apache Maven and answer"
-                          + " in one line.")),
-              List.of()));
-    }
-  }
-
-  @Test
   void theNextTurnRunsCodeInTheContainerTheLastTurnRanCodeIn() {
     var config =
         ModelConfig.newBuilder()
@@ -533,14 +515,6 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void datedSnapshotIdKeepsItsFamilyRequestShape() {
-    try (var haiku = modelFor("claude-haiku-4-5-20251001", new Reasoning.Off())) {
-      Accepted.textReply(
-          haiku.chat(List.of(Message.user("What is 17 * 23? Think it through.")), List.of()));
-    }
-  }
-
-  @Test
   void aStreamCompletesOnlyAtMessageStopWithTheFinishReasonOfItsStopReason() {
     var response =
         Accepted.stream(
@@ -558,32 +532,6 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
           Accepted.stream(
               sonnet.chatStream(
                   List.of(Message.user("Count from 1 to 3, one per line.")), List.of())));
-    }
-  }
-
-  @Test
-  void opus47ChatWithAdaptiveThinking() {
-    adaptiveThinkingIsAccepted(AnthropicModelId.CLAUDE_OPUS_4_7);
-  }
-
-  @Test
-  void opus48ChatWithAdaptiveThinking() {
-    adaptiveThinkingIsAccepted(AnthropicModelId.CLAUDE_OPUS_4_8);
-  }
-
-  /**
-   * {@code modelId} accepts {@code thinking.type=adaptive} with {@code output_config.effort}; Opus
-   * 4.7 answered the legacy thinking shape with a 400 before 1.1.5.
-   */
-  private static void adaptiveThinkingIsAccepted(AnthropicModelId modelId) {
-    var config =
-        ModelConfig.newBuilder()
-            .withApiKey(apiKey)
-            .withReasoning(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
-            .build();
-    try (var opus = new AnthropicProvider().create(modelId.id(), config)) {
-      Accepted.textReply(
-          opus.chat(List.of(Message.user("What is 2+2? Think briefly.")), List.of()));
     }
   }
 
@@ -618,7 +566,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
 
     var response =
         Accepted.parsedOrSkip(
-            AnthropicModelId.CLAUDE_SONNET_4_6.id(),
+            AnthropicModelId.CLAUDE_HAIKU_5_5.id(),
             STRUCTURED_COUNTERPART,
             () -> model.chat(messages, List.of(), OutputSchema.of(UiResponse.class)));
 

@@ -21,7 +21,7 @@ class AnthropicStreamCloseTest extends StreamCloseContract {
             .withResponseTimeout(Duration.ofMinutes(10))
             .withStreamIdleTimeout(streamIdleTimeout)
             .build();
-    return new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    return new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config);
   }
 
   @Override
@@ -29,7 +29,7 @@ class AnthropicStreamCloseTest extends StreamCloseContract {
     return named(
             "message_start",
             "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\","
-                + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-6\","
+                + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\","
                 + "\"stop_reason\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}")
         + named(
             "content_block_start",

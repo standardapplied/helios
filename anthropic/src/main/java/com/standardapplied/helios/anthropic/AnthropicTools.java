@@ -12,20 +12,16 @@ import java.util.List;
 
 /**
  * The tools of a request: the caller's client tools, then the Anthropic server tools the
- * configuration enables, which keep their documented {@code {type, name}} shape; web search allows
- * only direct calls on a model without programmatic tool calling. A client tool may not take the
- * name of an enabled server tool.
+ * configuration enables, which keep their documented {@code {type, name}} shape. A client tool may
+ * not take the name of an enabled server tool.
  *
  * @param client the client tool definitions, or {@code null} when the caller passed none
  * @param server the enabled server tool definitions
  */
 record AnthropicTools(List<ToolDefinition> client, List<ToolDefinition> server) {
 
-  /**
-   * The tools of a request offering {@code tools} under {@code config} to a model that does or does
-   * not have {@code programmaticToolCalling}.
-   */
-  static AnthropicTools of(List<Tool> tools, ModelConfig config, boolean programmaticToolCalling) {
+  /** The tools of a request offering {@code tools} under {@code config}. */
+  static AnthropicTools of(List<Tool> tools, ModelConfig config) {
     var client =
         tools == null || tools.isEmpty()
             ? null
@@ -37,13 +33,11 @@ record AnthropicTools(List<ToolDefinition> client, List<ToolDefinition> server) 
                             tool.name(),
                             tool.description(),
                             tool.parametersAsJsonSchema(),
-                            null,
                             null))
                 .toList();
     var server = new ArrayList<ToolDefinition>();
     if (config.webSearch()) {
-      var webSearch = ToolDefinition.webSearch();
-      server.add(programmaticToolCalling ? webSearch : webSearch.directOnly());
+      server.add(ToolDefinition.webSearch());
     }
     if (config.webFetch()) {
       server.add(ToolDefinition.webFetch());

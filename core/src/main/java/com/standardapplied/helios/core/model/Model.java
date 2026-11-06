@@ -108,7 +108,7 @@ public interface Model extends AutoCloseable {
     throw new UnsupportedOperationException("Structured output not supported by this model");
   }
 
-  /** The model identifier (e.g., "gemini-3.8-flash", "claude-3-opus"). */
+  /** The model identifier (e.g., "gemini-3.8-flash", "claude-sonnet-5-5"). */
   String id();
 
   /** The provider name (e.g., "gemini", "anthropic", "openai"). */
