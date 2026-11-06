@@ -26,8 +26,9 @@ final class ToolAuthorization {
   /** The predicate of a call that withholds nothing. */
   static final Predicate<String> NOTHING_WITHHELD = key -> false;
 
-  private static final Set<PermissionEffect> OWN_RULES = Set.of(PermissionEffect.DENY);
-  private static final Set<PermissionEffect> CONTENT_RULES =
+  private static final Set<PermissionEffect> ASK_RULES = Set.of(PermissionEffect.ASK);
+  private static final Set<PermissionEffect> DENY_RULES = Set.of(PermissionEffect.DENY);
+  private static final Set<PermissionEffect> DENY_OR_ASK_RULES =
       Set.of(PermissionEffect.DENY, PermissionEffect.ASK);
 
   private ToolAuthorization() {}
@@ -87,7 +88,7 @@ final class ToolAuthorization {
     }
     return refusal(authorization, canonical)
         .<Verdict>map(Refused::new)
-        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, permission)));
+        .orElseGet(() -> new Admitted(canonical.call(), withheld(binding, permission, key)));
   }
 
   private static Optional<String> refusal(
@@ -115,17 +116,22 @@ final class ToolAuthorization {
   }
 
   /**
-   * True for a key that a DENY rule of the call's tool decides, or a DENY or ASK rule of a tool its
-   * path argument names in {@link ToolBinding.PathArgument#contentRulesOf}. A rule's decision does
-   * not depend on the category, so each key is evaluated with the walking tool's own.
+   * True for a key that a DENY rule of the call's tool decides, or an ASK rule of it unless one
+   * decided {@code start} (the user approved the walk on a prompt showing its start), or a DENY or
+   * ASK rule of a tool its path argument names in {@link ToolBinding.PathArgument#contentRulesOf}.
+   * A rule's decision does not depend on the category, so each key is evaluated with the walking
+   * tool's own.
    */
-  private static Predicate<String> withheld(ToolBinding binding, Permission permission) {
+  private static Predicate<String> withheld(
+      ToolBinding binding, Permission permission, ToolPermissionKey start) {
+    var approved = decidedBy(permission.evaluate(start, binding.category()), ASK_RULES);
+    var ownRules = approved ? DENY_RULES : DENY_OR_ASK_RULES;
     var contentTools =
         binding.pathArgument().map(ToolBinding.PathArgument::contentRulesOf).orElse(Set.of());
     return key ->
-        decidedBy(permission, binding, binding.name(), key, OWN_RULES)
+        decidedBy(permission, binding, binding.name(), key, ownRules)
             || contentTools.stream()
-                .anyMatch(tool -> decidedBy(permission, binding, tool, key, CONTENT_RULES));
+                .anyMatch(tool -> decidedBy(permission, binding, tool, key, DENY_OR_ASK_RULES));
   }
 
   private static boolean decidedBy(
@@ -134,7 +140,11 @@ final class ToolAuthorization {
       String tool,
       String key,
       Set<PermissionEffect> effects) {
-    var decision = permission.evaluate(new ToolPermissionKey(tool, key), walking.category());
+    return decidedBy(
+        permission.evaluate(new ToolPermissionKey(tool, key), walking.category()), effects);
+  }
+
+  private static boolean decidedBy(PermissionDecision decision, Set<PermissionEffect> effects) {
     return decision.rule().isPresent() && effects.contains(decision.effect());
   }
 }

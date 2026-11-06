@@ -39,11 +39,12 @@ import java.util.Objects;
  * {@code "/"} for directories.
  *
  * <p>The {@code path} is the canonical one the call was authorised on ({@link
- * WorkspaceRoot#resolveCanonical(String)}). An entry that an {@code LS} DENY rule matches is
- * withheld, keyed by its own path or, for a symlink, by the target it resolves to, and the output
- * ends with {@code [withheld by permission policy: <count>]}. An entry whose metadata cannot be
- * read is withheld when its own path is denied; otherwise the listing fails without naming it,
- * since a symlink's target could not be checked.
+ * WorkspaceRoot#resolveCanonical(String)}). An entry that an {@code LS} DENY rule matches, or an
+ * ASK rule unless the listing was approved through one, is withheld without asking, keyed by its
+ * own path or, for a symlink, by the target it resolves to, and the output ends with {@code
+ * [withheld by permission policy: <count>]}. An entry whose metadata cannot be read is withheld
+ * when its own path is denied; otherwise the listing fails without naming it, since a symlink's
+ * target could not be checked.
  */
 public final class LsTool {
 

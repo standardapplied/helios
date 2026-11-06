@@ -25,12 +25,12 @@ import java.util.Optional;
  *
  * <p>A path tool's rule matches its canonical path ({@code .} or {@code ./a/b} in a workspace,
  * {@code /memories/} or {@code /memories/a/b} in memory), however the model spelled it; see {@link
- * PermissionRule} for the glob dialect. A DENY rule also withholds the entries a walking tool
- * ({@code Glob}, {@code Grep}, {@code LS}, a {@code MemoryRead} listing) would return below its
- * path, and a {@code Read} DENY or ASK rule that decides a file withholds it from {@code Grep},
- * without asking. The decision that admitted a walk's start covers what it finds except what these
- * rules withhold; a mode or category default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not
- * a rule and withholds nothing.
+ * PermissionRule} for the glob dialect. A walking tool ({@code Glob}, {@code Grep}, {@code LS}, a
+ * {@code MemoryRead} listing) skips, without asking, the entries below its path that its own DENY
+ * rules decide, and those its own ASK rules decide unless the walk itself was approved through one;
+ * {@code Grep} also skips the files a {@code Read} DENY or ASK rule decides. The decision that
+ * admitted a walk's start covers what it finds except what these rules withhold; a mode or category
+ * default, such as {@link PermissionMode#LOCKED_DOWN}'s, is not a rule and withholds nothing.
  *
  * <p>{@link #evaluate} is the policy's pure decision for one key, the one the session enforces, so
  * a host can unit-test its policy without a session: no question is asked and nothing runs.

@@ -37,8 +37,9 @@ import java.util.Objects;
  * memory path ({@code /memories/} or {@code /memories/a/b}), so a call is authorised by {@code
  * MemoryRead} rules on that key, and a {@code Read} rule over the directory backing a filesystem
  * memory store does not apply to it. A listing withholds every path a {@code MemoryRead} DENY rule
- * matches, keyed by its canonical spelling however the backend spelled it, and ends with {@code
- * [withheld by permission policy: <count>]}.
+ * matches, or an ASK rule unless the listing was approved through one, keyed by its canonical
+ * spelling however the backend spelled it, and ends with {@code [withheld by permission policy:
+ * <count>]}.
  */
 public final class MemoryReadTool {
 
