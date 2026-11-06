@@ -42,8 +42,9 @@ import java.util.Objects;
  *
  * <p>The {@code path} is the canonical one the call was authorised on ({@link
  * WorkspaceRoot#resolveCanonical(String)}). A file or directory below it that a {@code Glob} DENY
- * rule matches is withheld, a directory without being read, and the output ends with {@code
- * [withheld by permission policy: <count>]}.
+ * rule matches, or an ASK rule unless the walk was approved through one, is withheld without
+ * asking, a directory without being read, and the output ends with {@code [withheld by permission
+ * policy: <count>]}.
  */
 public final class GlobTool {
 
