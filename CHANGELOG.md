@@ -238,10 +238,11 @@ secret registry, the execution provider and the memory backend stay per session.
 | `AgentSession.create(options)` | `AgentSession.open(options)`; `AgentSessionImpl`'s constructor is no longer public |
 | `void send(message)`, then `result()` | `CompletableFuture<ResultMessage> send(message)`: the future of the run the message is part of |
 | `result()` | removed: the future `send` returns |
+| `AgentSession.JacksonJsonAdapter` | removed; it had no public instance. A typed `runBlocking` parses through the session's own adapter |
 | `interrupt(reason)` queued `"[interrupted by user: …]"` | `interrupt()` cancels the run in progress (`Cancelled`, reason `"interrupted"`) and keeps the session |
 | `isStarted()` | `isRunning()`: whether a run is in progress; `currentTurnIndex()` is that run's, `0` between runs |
 | `QueryEvent.LoopEnded` | `QueryEvent.RunEnded`, the last event of each run; `QueryEvent.RunStarted` is the first |
-| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`; `HookContext` gains `runId()` |
+| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as do `QueryEvent.validateCommon`, `ResultMessage.validateCommon` and the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
 | `ResultMessage.ErrorProviderUnavailable` | `AgentSession.open` throws `SessionUnavailableException` (message: the provider and its redacted reason; cause: the provider's exception) |
 | `ErrorDuringExecution` kind `EmptyHistory` | kind `NoUserMessage`: every message queued for a run's first turn was blocked |
 | `send` on a terminal session threw `IllegalStateException("session is terminal")` | it starts the next run; `send` on a session a host `Error` failed throws `IllegalStateException("session failed: <Error class>")` |
