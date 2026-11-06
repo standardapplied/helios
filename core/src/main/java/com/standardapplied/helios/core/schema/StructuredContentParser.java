@@ -224,10 +224,10 @@ public final class StructuredContentParser {
    * when none exists. Tracks brace depth and respects JSON string-literal escapes so braces inside
    * strings don't terminate the scan early.
    *
-   * <p>Use case: models like Claude Sonnet 4.6 sometimes prepend prose to the JSON answer ({@code
-   * "The map is built correctly. Here is the final answer:\n\n{...}"}). The raw content fails JSON
-   * parsing because of the leading prose; this helper extracts the {@code {...}} portion so the
-   * parser can recover without changing the model output.
+   * <p>Use case: some models prepend prose to the JSON answer ({@code "The map is built correctly.
+   * Here is the final answer:\n\n{...}"}). The raw content fails JSON parsing because of the
+   * leading prose; this helper extracts the {@code {...}} portion so the parser can recover without
+   * changing the model output.
    */
   public static String extractFirstJsonObject(String content) {
     if (content == null) {

@@ -89,7 +89,7 @@ class AnthropicJsonTest {
             .withApiKey("test-key")
             .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
             .build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var error =
         assertThrows(

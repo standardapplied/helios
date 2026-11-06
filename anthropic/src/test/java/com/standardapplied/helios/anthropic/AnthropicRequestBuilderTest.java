@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.SystemContent;
+import com.standardapplied.helios.anthropic.api.ThinkingConfig;
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
@@ -27,7 +28,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void userMessageWithImageAttachmentEmitsImageBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var userMessage = Message.user("look at this", List.of(InlineFile.of(pngBytes, "image/png")));
 
@@ -52,7 +53,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void userMessageWithPdfAttachmentEmitsDocumentBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var pdfBytes = "%PDF-1.4\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var userMessage =
         Message.user("summarize this", List.of(InlineFile.of(pdfBytes, "application/pdf")));
@@ -68,7 +69,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void userMessageWithTextAttachmentInlinesAsTextBlock() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var csvBytes = "a,b\n1,2\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var userMessage = Message.user("", List.of(InlineFile.of(csvBytes, "text/csv")));
 
@@ -85,7 +86,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void rejectsProviderFileReferencesInsteadOfSilentlyDroppingThem() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var message =
         Message.newBuilder()
             .withRole(Role.USER)
@@ -105,7 +106,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestExtractsSystemMessage() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var messages = List.of(Message.system("You are helpful"), Message.user("Hello"));
 
@@ -121,7 +122,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestCoalescesToolMessages() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var toolCalls =
         List.of(
@@ -155,24 +156,11 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestDefaultMaxTokensFallsBackToModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
-    assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.maxOutputTokens(), request.maxTokens());
-  }
-
-  @Test
-  void buildRequestPerModelDefaultDiffersByModelId() {
-    var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var haikuRequests = requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config);
-    var opus47Requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-
-    var haikuReq = haikuRequests.build(List.of(Message.user("Hi")), List.of(), null).body();
-    var opusReq = opus47Requests.build(List.of(Message.user("Hi")), List.of(), null).body();
-
-    assertEquals(64_000, haikuReq.maxTokens());
-    assertEquals(128_000, opusReq.maxTokens());
+    assertEquals(AnthropicModelId.CLAUDE_SONNET_5_5.maxOutputTokens(), request.maxTokens());
   }
 
   @Test
@@ -192,7 +180,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestCustomMaxTokens() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withMaxOutputTokens(8192).build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
@@ -202,7 +190,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestWithOutputSchema() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var schema = Map.<String, Object>of("type", "object", "properties", Map.of());
     var request = requests.build(List.of(Message.user("Extract")), List.of(), schema).body();
@@ -218,7 +206,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestSystemAndOutputSchemaAppended() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var schema = Map.<String, Object>of("type", "object");
     var messages = List.of(Message.system("Be helpful"), Message.user("Extract"));
@@ -239,7 +227,7 @@ class AnthropicRequestBuilderTest {
             .withTemperature(0.7)
             .withStopSequences(List.of("END"))
             .build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests("claude-opus-6", config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
@@ -250,7 +238,7 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestStreamsAlways() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
@@ -260,28 +248,24 @@ class AnthropicRequestBuilderTest {
   @Test
   void buildRequestModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
-    assertEquals("claude-opus-4-6", request.model());
+    assertEquals("claude-opus-5-5", request.model());
   }
 
   @Test
-  void datedLegacySnapshotResolvesToFamilyShape() {
+  void datedSnapshotResolvesToFamilyShape() {
     var config =
-        ModelConfig.newBuilder()
-            .withApiKey("test-key")
-            .withReasoning(new Reasoning.Off())
-            .withTemperature(0.2)
-            .build();
-    var requests = requests("claude-sonnet-4-6-20251114", config);
+        ModelConfig.newBuilder().withApiKey("test-key").withReasoning(new Reasoning.Off()).build();
+    var requests = requests("claude-sonnet-5-5-20261101", config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
     assertEquals(
-        0.2,
-        request.temperature(),
-        "dated snapshots resolve to the family shape, which still accepts sampling params");
+        ThinkingConfig.betweenTools(),
+        request.thinking(),
+        "dated snapshots resolve to the family shape, which stops thinking with between_tools");
   }
 }

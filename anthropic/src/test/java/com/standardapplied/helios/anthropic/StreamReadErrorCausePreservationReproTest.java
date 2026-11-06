@@ -57,7 +57,7 @@ class StreamReadErrorCausePreservationReproTest {
       "event: message_start\n"
           + "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\","
           + "\"type\":\"message\",\"role\":\"assistant\",\"content\":[],"
-          + "\"model\":\"claude-sonnet-4-6-20250514\",\"stop_reason\":null,"
+          + "\"model\":\"claude-sonnet-5-5\",\"stop_reason\":null,"
           + "\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n";
 
   private static final String TEXT_BLOCK_START =
@@ -198,7 +198,7 @@ class StreamReadErrorCausePreservationReproTest {
             .withApiKey("test-key")
             .withBaseUrl("http://localhost:" + port)
             .build();
-    var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config);
 
     var thrown =
         org.junit.jupiter.api.Assertions.assertThrows(

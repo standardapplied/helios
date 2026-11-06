@@ -53,7 +53,7 @@ class AnthropicWebToolsTest {
       JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
 
   private static AnthropicRequestBuilder requests(ModelConfig config) {
-    var model = AnthropicModelId.CLAUDE_OPUS_4_8;
+    var model = AnthropicModelId.CLAUDE_SONNET_5_5;
     return AnthropicFixture.requests(model, config);
   }
 
@@ -82,36 +82,24 @@ class AnthropicWebToolsTest {
     assertEquals("web_search_20260318", search.type());
     assertEquals("web_search", search.name());
     assertNull(search.inputSchema(), "server tools carry no input_schema");
-    assertNull(search.allowedCallers(), "a model with programmatic tool calling takes the default");
   }
 
   @Test
-  void webSearchOnAModelWithoutProgrammaticToolCallingIsCalledOnlyDirectly() {
+  void webSearchOnEveryModelTakesTheDefaultCallers() {
     var config =
         ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).withWebFetch(true).build();
+    var ids = new ArrayList<String>();
+    for (var model : AnthropicModelId.values()) {
+      ids.add(model.id());
+    }
+    ids.add("claude-next-9");
 
-    var request =
-        AnthropicFixture.requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config)
-            .build(List.of(Message.user("Hi")), List.of(), null)
-            .body();
+    for (var id : ids) {
+      var json = objectMapper.writeValueAsString(AnthropicFixture.requestFor(id, config));
 
-    var search = request.tools().getFirst();
-    assertEquals("web_search", search.name());
-    assertEquals(List.of("direct"), search.allowedCallers());
-    assertNull(request.tools().getLast().allowedCallers());
-    assertTrue(
-        objectMapper
-            .writeValueAsString(request)
-            .contains("\"name\":\"web_search\",\"allowed_callers\":[\"direct\"]"));
-  }
-
-  @Test
-  void webSearchOnAnUncataloguedModelTakesTheDefaultCallers() {
-    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
-
-    var request = AnthropicFixture.requestFor("claude-next-9", config);
-
-    assertNull(request.tools().getLast().allowedCallers());
+      assertTrue(json.contains("\"name\":\"web_search\""), id);
+      assertFalse(json.contains("allowed_callers"), id);
+    }
   }
 
   @Test
@@ -152,7 +140,7 @@ class AnthropicWebToolsTest {
   private static final String SEARCH_TURN_SSE =
       """
       event: message_start
-      data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":25,"output_tokens":1}}}
+      data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":25,"output_tokens":1}}}
 
       event: content_block_start
       data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -234,7 +222,7 @@ class AnthropicWebToolsTest {
     var sse =
         """
         event: message_start
-        data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
+        data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
 
         event: content_block_start
         data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -305,7 +293,7 @@ class AnthropicWebToolsTest {
   private static final String PAUSED_SEGMENT_SSE =
       """
       event: message_start
-      data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+      data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
 
       event: content_block_start
       data: {"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srv1","name":"web_search"}}
@@ -327,7 +315,7 @@ class AnthropicWebToolsTest {
   private static final String FINAL_SEGMENT_SSE =
       """
       event: message_start
-      data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
+      data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
 
       event: content_block_start
       data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -386,7 +374,7 @@ class AnthropicWebToolsTest {
   private static final String PAUSED_SEGMENT_WITH_THINKING_SSE =
       """
       event: message_start
-      data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+      data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
 
       event: content_block_start
       data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
@@ -420,7 +408,7 @@ class AnthropicWebToolsTest {
   private static final String FINAL_SEGMENT_WITH_THINKING_SSE =
       """
       event: message_start
-      data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
+      data: {"type":"message_start","message":{"id":"m2","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":20,"output_tokens":1}}}
 
       event: content_block_start
       data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
@@ -547,7 +535,7 @@ class AnthropicWebToolsTest {
     var pausedTextOnly =
         """
         event: message_start
-        data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+        data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
 
         event: content_block_start
         data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -583,7 +571,9 @@ class AnthropicWebToolsTest {
             .withWebSearch(true)
             .withToolChoice(new com.standardapplied.helios.core.model.ToolChoice.Any())
             .build();
-    var initial = requests(config).build(List.of(Message.user("go")), List.of(), null);
+    var initial =
+        AnthropicFixture.requests(AnthropicModelId.CLAUDE_HAIKU_5_5, config)
+            .build(List.of(Message.user("go")), List.of(), null);
     assertNotNull(
         initial.body().toolChoice(), "precondition: forced tool choice rides the base request");
 
@@ -606,7 +596,7 @@ class AnthropicWebToolsTest {
     var refusalAfterToolUse =
         """
         event: message_start
-        data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
+        data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
 
         event: content_block_start
         data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"lookup"}}

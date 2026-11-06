@@ -137,7 +137,7 @@ class AnthropicRequestPartsTest {
         CachePolicy.shortLived(),
         request,
         null,
-        AnthropicTools.of(List.of(), ModelConfig.of("k"), true),
+        AnthropicTools.of(List.of(), ModelConfig.of("k")),
         entries);
 
     assertEquals("again", entries.getLast().content());
@@ -233,7 +233,7 @@ class AnthropicRequestPartsTest {
     var body =
         MessagesRequest.newBuilder()
             .withModel("m")
-            .withTools(List.of(new ToolDefinition(null, "t", "d", self, null, null)))
+            .withTools(List.of(new ToolDefinition(null, "t", "d", self, null)))
             .build();
     try (var client = HttpClientFactory.create()) {
       var streams = new AnthropicStreams(ModelConfig.of("k"), client, List.of());
@@ -274,7 +274,7 @@ class AnthropicRequestPartsTest {
     assertEquals(
         stamp, stamp(AnthropicModelId.CLAUDE_OPUS_5_5, CachePolicy.shortLived(), "sys", tools));
     assertEquals(
-        stamp, stamp(AnthropicModelId.CLAUDE_SONNET_4_6, CachePolicy.shortLived(), "sys", tools));
+        stamp, stamp(AnthropicModelId.CLAUDE_SONNET_5_5, CachePolicy.shortLived(), "sys", tools));
     assertEquals(
         stamp, stamp(AnthropicModelId.CLAUDE_OPUS_5_5, CachePolicy.disabled(), "sys", tools));
     assertNotEquals(

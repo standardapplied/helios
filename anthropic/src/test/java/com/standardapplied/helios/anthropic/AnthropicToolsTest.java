@@ -22,7 +22,7 @@ class AnthropicToolsTest {
   @Test
   void buildRequestWithTools() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var messages = List.of(Message.user("Weather?"));
     var request = requests.build(messages, ConversationFixture.tools(), null).body();
@@ -37,7 +37,7 @@ class AnthropicToolsTest {
   @Test
   void buildRequestNoToolsReturnsNullToolDefs() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
@@ -47,7 +47,7 @@ class AnthropicToolsTest {
   @Test
   void buildRequestNullToolsReturnsNullToolDefs() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), null, null).body();
 
@@ -58,7 +58,7 @@ class AnthropicToolsTest {
   void buildRequestToolChoiceAuto() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.auto()).build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var tool =
         Tool.newBuilder()
@@ -76,7 +76,7 @@ class AnthropicToolsTest {
   void buildRequestToolChoiceAny() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.any()).build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_5_5, config);
 
     var tool =
         Tool.newBuilder()
@@ -94,7 +94,7 @@ class AnthropicToolsTest {
   void buildRequestToolChoiceNoneSendsNone() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var tool =
         Tool.newBuilder()
@@ -111,7 +111,7 @@ class AnthropicToolsTest {
   void buildRequestToolChoiceNoneSendsNoneWithoutTools() {
     var config =
         ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.none()).build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
 
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
 
@@ -125,7 +125,7 @@ class AnthropicToolsTest {
             .withApiKey("test-key")
             .withToolChoice(ToolChoice.required("my_tool"))
             .build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_5_5, config);
 
     var tool =
         Tool.newBuilder()
@@ -147,7 +147,7 @@ class AnthropicToolsTest {
             .withApiKey("test-key")
             .withToolChoice(ToolChoice.required("tool1", "tool2"))
             .build();
-    var requests = requests(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var requests = requests(AnthropicModelId.CLAUDE_HAIKU_5_5, config);
 
     var tool =
         Tool.newBuilder()

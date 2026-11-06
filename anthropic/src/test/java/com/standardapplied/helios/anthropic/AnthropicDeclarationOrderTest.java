@@ -35,7 +35,7 @@ class AnthropicDeclarationOrderTest {
         uri ->
             new AnthropicProvider()
                 .create(
-                    AnthropicModelId.CLAUDE_SONNET_4_6.id(),
+                    AnthropicModelId.CLAUDE_SONNET_5_5.id(),
                     ModelConfig.newBuilder()
                         .withApiKey("test-key")
                         .withBaseUrl(uri + "/v1/messages")

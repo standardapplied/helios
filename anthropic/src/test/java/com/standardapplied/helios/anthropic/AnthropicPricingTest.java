@@ -43,19 +43,32 @@ class AnthropicPricingTest {
         AnthropicModelId.CLAUDE_OPUS_5_5, 4_000_000L, 20_000_000L, 5_000_000L, 200_000L);
     assertListPrice(AnthropicModelId.CLAUDE_OPUS_5, 5_000_000L, 25_000_000L, 6_250_000L, 500_000L);
     assertListPrice(
-        AnthropicModelId.CLAUDE_OPUS_4_8, 5_000_000L, 25_000_000L, 6_250_000L, 500_000L);
-    assertListPrice(
-        AnthropicModelId.CLAUDE_OPUS_4_7, 5_000_000L, 25_000_000L, 6_250_000L, 500_000L);
-    assertListPrice(
-        AnthropicModelId.CLAUDE_OPUS_4_6, 5_000_000L, 25_000_000L, 6_250_000L, 500_000L);
-    assertListPrice(
         AnthropicModelId.CLAUDE_SONNET_5_5, 2_000_000L, 10_000_000L, 2_500_000L, 200_000L);
     assertListPrice(
         AnthropicModelId.CLAUDE_SONNET_5, 2_000_000L, 10_000_000L, 2_500_000L, 200_000L);
-    assertListPrice(
-        AnthropicModelId.CLAUDE_SONNET_4_6, 3_000_000L, 15_000_000L, 3_750_000L, 300_000L);
-    assertListPrice(
-        AnthropicModelId.CLAUDE_HAIKU_4_5, 1_000_000L, 5_000_000L, 1_250_000L, 100_000L);
+    assertListPrice(AnthropicModelId.CLAUDE_HAIKU_5_5, 500_000L, 2_500_000L, 625_000L, 50_000L);
+  }
+
+  @Test
+  void haiku55IsPricedAtItsLongPromptRate() {
+    var shortLived = AnthropicPricing.calculator(CachePolicy.shortLived());
+    var longLived = AnthropicPricing.calculator(CachePolicy.longLived());
+
+    assertEquals(
+        CostEstimate.ofMicroUsd(500_000L),
+        shortLived.cost("claude-haiku-5-5", usage(1_000_000, 0, 0, 0)));
+    assertEquals(
+        CostEstimate.ofMicroUsd(2_500_000L),
+        shortLived.cost("claude-haiku-5-5", usage(0, 0, 0, 1_000_000)));
+    assertEquals(
+        CostEstimate.ofMicroUsd(50_000L),
+        shortLived.cost("claude-haiku-5-5", usage(0, 0, 1_000_000, 0)));
+    assertEquals(
+        CostEstimate.ofMicroUsd(625_000L),
+        shortLived.cost("claude-haiku-5-5", usage(0, 1_000_000, 0, 0)));
+    assertEquals(
+        CostEstimate.ofMicroUsd(1_000_000L),
+        longLived.cost("claude-haiku-5-5", usage(0, 1_000_000, 0, 0)));
   }
 
   @Test
@@ -83,9 +96,6 @@ class AnthropicPricingTest {
     assertEquals(
         CostEstimate.ofMicroUsd(370_835L),
         calculator.cost("claude-sonnet-5-5", usage(26, 67_977, 361_356, 12_857)));
-    assertEquals(
-        CostEstimate.ofMicroUsd(2_121_095L),
-        calculator.cost("claude-opus-4-7", usage(28, 107_322, 1_642_336, 25_161)));
   }
 
   @Test
@@ -102,8 +112,8 @@ class AnthropicPricingTest {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
 
     assertEquals(
-        CostEstimate.ofMicroUsd(1_000_000L),
-        calculator.cost("claude-haiku-4-5-20251001", usage(1_000_000, 0, 0, 0)));
+        CostEstimate.ofMicroUsd(500_000L),
+        calculator.cost("claude-haiku-5-5-20261101", usage(1_000_000, 0, 0, 0)));
   }
 
   @Test

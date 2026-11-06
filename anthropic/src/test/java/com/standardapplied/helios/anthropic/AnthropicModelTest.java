@@ -40,21 +40,21 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
   @Test
   void constructorRequiresConfig() {
     assertThrows(
-        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, null));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_5_5, null));
   }
 
   @Test
   void constructorRequiresApiKey() {
     var config = ModelConfig.newBuilder().build();
     assertThrows(
-        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, config));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_5_5, config));
   }
 
   @Test
   void constructorRequiresNonBlankApiKey() {
     var config = ModelConfig.newBuilder().withApiKey("   ").build();
     assertThrows(
-        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_4_6, config));
+        IllegalArgumentException.class, () -> model(AnthropicModelId.CLAUDE_SONNET_5_5, config));
   }
 
   @Test
@@ -63,7 +63,7 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> model(AnthropicModelId.CLAUDE_OPUS_4_7, config, null));
+            () -> model(AnthropicModelId.CLAUDE_SONNET_5_5, config, null));
     assertEquals("cachePolicy is required", ex.getMessage());
   }
 
@@ -100,28 +100,28 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
   @Test
   void idReturnsModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_SONNET_4_6, config);
-    assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6.id(), model.id());
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
+    assertEquals(AnthropicModelId.CLAUDE_SONNET_5_5.id(), model.id());
   }
 
   @Test
   void providerReturnsAnthropic() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_SONNET_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     assertEquals("anthropic", model.provider());
   }
 
   @Test
   void contextWindowReturnsModelValue() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     assertEquals(1_000_000, model.contextWindow());
   }
 
   @Test
   void contextWindowConfigOverrideWinsOverKnownModel() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").withContextWindow(250_000).build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     assertEquals(250_000, model.contextWindow());
   }
 
@@ -142,21 +142,21 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
   @Test
   void modelExposesMaxOutputTokensFromModelId() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_7, config);
-    assertEquals(AnthropicModelId.CLAUDE_OPUS_4_7.maxOutputTokens(), model.maxOutputTokens());
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
+    assertEquals(AnthropicModelId.CLAUDE_SONNET_5_5.maxOutputTokens(), model.maxOutputTokens());
   }
 
   @Test
   void closeReleasesHttpClientResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     model.close();
   }
 
   @Test
   void closeIsIdempotent() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config);
+    var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     model.close();
     model.close();
     model.close();
@@ -165,8 +165,8 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
   @Test
   void modelUsableInTryWithResources() {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
-    try (var model = model(AnthropicModelId.CLAUDE_OPUS_4_6, config)) {
-      assertEquals(AnthropicModelId.CLAUDE_OPUS_4_6.id(), model.id());
+    try (var model = model(AnthropicModelId.CLAUDE_SONNET_5_5, config)) {
+      assertEquals(AnthropicModelId.CLAUDE_SONNET_5_5.id(), model.id());
     }
   }
 

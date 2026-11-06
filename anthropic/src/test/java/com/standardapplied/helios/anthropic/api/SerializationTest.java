@@ -31,13 +31,13 @@ class SerializationTest {
   void serializeSimpleRequest() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
+            .withModel("claude-sonnet-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
             .withStream(true)
             .build();
     var json = objectMapper.writeValueAsString(request);
-    assertTrue(json.contains("\"model\":\"claude-sonnet-4-6-20250514\""));
+    assertTrue(json.contains("\"model\":\"claude-sonnet-5-5\""));
     assertTrue(json.contains("\"max_tokens\":4096"));
     assertTrue(json.contains("\"Hello\""));
     assertTrue(json.contains("\"stream\":true"));
@@ -48,7 +48,7 @@ class SerializationTest {
   void serializeRequestWithSystem() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
+            .withModel("claude-sonnet-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
             .withSystem("You are helpful")
@@ -61,7 +61,7 @@ class SerializationTest {
   void serializeAdaptiveThinkingShape() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
+            .withModel("claude-opus-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
             .withThinking(ThinkingConfig.adaptive("summarized"))
@@ -80,7 +80,7 @@ class SerializationTest {
   void serializeRequestWithoutThinkingOmitsBothFields() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
+            .withModel("claude-opus-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hello")))
             .build();
@@ -151,7 +151,7 @@ class SerializationTest {
 
     var toolDef =
         new ToolDefinition(
-            null, tool.name(), tool.description(), tool.parametersAsJsonSchema(), null, null);
+            null, tool.name(), tool.description(), tool.parametersAsJsonSchema(), null);
     var json = objectMapper.writeValueAsString(toolDef);
     assertTrue(json.contains("\"name\":\"search_people\""));
     assertTrue(json.contains("\"description\":\"Finds people using semantic search\""));
@@ -218,12 +218,11 @@ class SerializationTest {
                 searchTool.name(),
                 searchTool.description(),
                 searchTool.parametersAsJsonSchema(),
-                null,
                 null));
 
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
+            .withModel("claude-sonnet-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Find things")))
             .withTools(toolDefs)
@@ -251,7 +250,7 @@ class SerializationTest {
 
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
+            .withModel("claude-sonnet-5-5")
             .withMaxTokens(4096)
             .withMessages(messages)
             .build();
@@ -274,7 +273,7 @@ class SerializationTest {
           "content": [
             {"type": "text", "text": "Hello!"}
           ],
-          "model": "claude-sonnet-4-6-20250514",
+          "model": "claude-sonnet-5-5",
           "stop_reason": "end_turn",
           "stop_sequence": null,
           "usage": {
@@ -310,7 +309,7 @@ class SerializationTest {
             {"type": "text", "text": "Let me check."},
             {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "NYC"}}
           ],
-          "model": "claude-sonnet-4-6-20250514",
+          "model": "claude-sonnet-5-5",
           "stop_reason": "tool_use",
           "usage": {"input_tokens": 20, "output_tokens": 50}
         }
@@ -337,7 +336,7 @@ class SerializationTest {
             "type": "message",
             "role": "assistant",
             "content": [],
-            "model": "claude-sonnet-4-6-20250514",
+            "model": "claude-sonnet-5-5",
             "usage": {"input_tokens": 25, "output_tokens": 1}
           }
         }
@@ -492,7 +491,7 @@ class SerializationTest {
   void serializeRequestWithGenerationParams() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-sonnet-4-6-20250514")
+            .withModel("claude-sonnet-5-5")
             .withMaxTokens(4096)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
             .withTemperature(0.7)
@@ -592,7 +591,7 @@ class SerializationTest {
   @Test
   void toolDefinitionWithCacheControlRoundTrips() throws Exception {
     var def =
-        new ToolDefinition(null, "calc", "compute", Map.of("type", "object"), null, null)
+        new ToolDefinition(null, "calc", "compute", Map.of("type", "object"), null)
             .withCacheControl(CacheControl.ephemeral());
     var json = objectMapper.writeValueAsString(def);
     assertTrue(json.contains("\"name\":\"calc\""));
@@ -600,18 +599,8 @@ class SerializationTest {
   }
 
   @Test
-  void aDirectOnlyToolKeepsItsCallersUnderACacheBreakpoint() {
-    var def = ToolDefinition.webSearch().directOnly().withCacheControl(CacheControl.ephemeral());
-
-    var json = objectMapper.writeValueAsString(def);
-
-    assertTrue(json.contains("\"allowed_callers\":[\"direct\"]"));
-    assertTrue(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
-  }
-
-  @Test
   void toolDefinitionWithCacheControlRejectsNull() {
-    var def = new ToolDefinition(null, "calc", "compute", Map.of(), null, null);
+    var def = new ToolDefinition(null, "calc", "compute", Map.of(), null);
     org.junit.jupiter.api.Assertions.assertThrows(
         NullPointerException.class, () -> def.withCacheControl(null));
   }
@@ -620,7 +609,7 @@ class SerializationTest {
   void messagesRequestSerializesArraySystemShape() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
+            .withModel("claude-opus-5-5")
             .withMaxTokens(1024)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
             .withSystem(
@@ -640,7 +629,7 @@ class SerializationTest {
   void messagesRequestSerializesPlainStringSystemShape() throws Exception {
     var request =
         MessagesRequest.newBuilder()
-            .withModel("claude-opus-4-7")
+            .withModel("claude-opus-5-5")
             .withMaxTokens(1024)
             .withMessages(List.of(MessagesRequest.MessageEntry.user("Hi")))
             .withSystem("Plain string system")
