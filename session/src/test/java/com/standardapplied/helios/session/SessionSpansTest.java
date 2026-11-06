@@ -115,8 +115,8 @@ final class SessionSpansTest {
   }
 
   /**
-   * The run span carries the run's totals, never re-summed from its children, and its cost only
-   * when there is one.
+   * The run span carries the run's totals, never re-summed from its children, no total of its own,
+   * and its cost only when there is one.
    */
   static void assertTotalsEqual(ResultMessage result, SpanData run) {
     var usage = result.usage();
@@ -126,7 +126,7 @@ final class SessionSpansTest {
             + usage.cacheReadInputTokens();
     assertEquals(input, run.getAttributes().get(INPUT_TOKENS));
     assertEquals(usage.outputTokens(), run.getAttributes().get(OUTPUT_TOKENS));
-    assertEquals(usage.totalTokens(), run.getAttributes().get(TOTAL_TOKENS));
+    assertNull(run.getAttributes().get(TOTAL_TOKENS));
     var cost = result.cost().microUsd();
     assertEquals(cost == 0 ? null : cost, run.getAttributes().get(COST));
   }
@@ -171,7 +171,8 @@ final class SessionSpansTest {
         result.usage().outputTokens(),
         chats.stream().mapToLong(chat -> chat.getAttributes().get(OUTPUT_TOKENS)).sum());
     assertTotalsEqual(result, run);
-    assertEquals(330L, run.getAttributes().get(TOTAL_TOKENS));
+    assertEquals(300L, run.getAttributes().get(INPUT_TOKENS));
+    assertEquals(30L, run.getAttributes().get(OUTPUT_TOKENS));
     assertEquals(Set.of(), capture.unended());
 
     var first = chats.getFirst();
@@ -225,13 +226,13 @@ final class SessionSpansTest {
     assertEquals(20L, cached.get(OUTPUT_TOKENS));
     assertEquals(30L, cached.get(CACHE_WRITE));
     assertEquals(50L, cached.get(CACHE_READ));
-    assertEquals(200L, cached.get(TOTAL_TOKENS));
+    assertNull(cached.get(TOTAL_TOKENS));
     var plain = chats.get(1).getAttributes();
     assertEquals(10L, plain.get(INPUT_TOKENS));
     assertEquals(2L, plain.get(OUTPUT_TOKENS));
     assertNull(plain.get(CACHE_WRITE));
     assertNull(plain.get(CACHE_READ));
-    assertEquals(12L, plain.get(TOTAL_TOKENS));
+    assertNull(plain.get(TOTAL_TOKENS));
     assertTotalsEqual(result, capture.run());
     assertEquals(50L, capture.run().getAttributes().get(CACHE_READ));
   }
