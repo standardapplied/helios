@@ -5,7 +5,6 @@
 
 package com.standardapplied.helios.persistence;
 
-import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
@@ -15,6 +14,7 @@ import com.standardapplied.helios.persistence.mapper.TraceRollupMapper;
 import com.standardapplied.helios.persistence.sql.SpanSql;
 import com.standardapplied.helios.persistence.sql.TraceRollupSql;
 import com.standardapplied.helios.persistence.sql.TraceSql;
+import com.standardapplied.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
 import java.util.HashMap;
 import java.util.List;
