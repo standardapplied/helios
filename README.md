@@ -44,7 +44,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. A snippet that outlives its timeout is stopped through `jshell.stop()`, repeated until it and every thread it started have ended; one still running after `JvmSandboxConfig.stopGrace` (5 s by default) cannot be reached inside the JVM, so the sandbox answers the execute and halts with exit code 3.
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
-- **One secret registry per session, applied where tool output enters it.** `SessionOptions.withSecretRegistry(registry)` gives the session its `SecretRegistry`. The session redacts every tool result's text once, before its `ToolResult` event, a `PostToolUse` hook or the history sees it, and the messages of every error it reports. Output cut at a size cap first loses any trailing start of a registered secret. `ModelConfig.toString()` redacts the API key and header values so accidental `log.info("config={}", cfg)` callsites don't leak credentials. See [Secret redaction](#secret-redaction-secretregistry--redactor) for the promise and what it does not cover.
+- **One secret registry per session, applied where tool output enters it.** The session redacts every tool result and every error it reports against `SessionOptions.withSecretRegistry(registry)`, and output cut at a size cap loses any trailing start of a secret. See [Secret redaction](#secret-redaction-secretregistry--redactor).
 - **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
 - **Test coverage.** One JaCoCo gate in the root `pom.xml` holds every library module (`helios-core`, `-session`, `-runtime`, `-gemini`, `-anthropic`, `-openai`, `-persistence`, `-onnx`, `-repl`, `-testing`) at 95% instruction / 90% branch. Tests across the project: ~3,200 unit tests. The provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) run their live-API tests only when a provider key is set; CI runs everything else, and gates coverage, without those keys.
 
@@ -354,7 +354,11 @@ The loop terminates when the model's `FinishReason` indicates the session is don
 
 ### Event delivery semantics
 
-`AgentSession.events()` opens a new `EventStream` per call, attached before it returns, with its own 256-event buffer. The loop offers each event to every open stream on its own thread and never waits for a reader on a routine event (text, tool use, hook fired): a stream whose buffer is full misses it at once. Control events (`RunEnded`, `QuestionAsked`, `Error`) wait up to 30 s for room in each full stream, then are dropped there. A reader that pauses indefinitely sees a gap in its stream, but cannot pin the agent loop. Drops are logged (FINE for routine, WARNING for control). A dropped terminal stays readable through the future `send` returned, a dropped question through `pendingQuestions()`. A stream spans every run of the session; it ends when its reader closes it, when the session closed and the reader has read every buffered event, or when the reading thread is interrupted. One opened after the session closed ends at once; nothing is replayed. Every event of a run is in each stream's buffer, or missed by it, before the run's future completes, but the session does not wait for readers. A reader that must have handled `RunEnded` before the future returns synchronises with its own reading thread.
+`AgentSession.events()` opens a new `EventStream` per call, spanning every run until the session closes, with its own 256-event buffer.
+The loop never waits for a reader on a routine event: a full stream misses it at once (logged at FINE). `RunEnded`, `QuestionAsked`
+and `Error` wait up to 30 s for room, then are dropped there with a WARNING; a dropped terminal stays readable through the future
+`send` returned, a dropped question through `pendingQuestions()`. The session never waits for readers, so a reader that must have
+handled `RunEnded` before that future completes synchronises with its own thread. Details: `EventStream` javadoc.
 
 ### Context compaction
 
@@ -549,11 +553,11 @@ try (var events = session.events()) {
 
 For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
 
-**Tracing.** A session emits live OpenTelemetry spans through `withOpenTelemetry(openTelemetry)`, or `GlobalOpenTelemetry` when unset, a no-op without an SDK. Each run is an `invoke_agent <agentName>` span (`withAgentName`, default `helios`), a child of the span current where `send` was called, ended on every ending with the run's totals.
-Under it: a `chat <model>` span per model attempt, an `execute_tool <tool>` span per tool call and a zero-length `hook <hook>` span per hook decision.
-A step's span is current while it runs, so what a tool or the model client records with your own instrumentation nests under it.
-`TraceDetail.STANDARD` (the default) puts no content on a span; `VERBOSE` adds the prompt, answer, tool arguments and results and hook texts, redacted by the session.
-The names follow the OpenTelemetry GenAI semantic conventions, still at status Development. `PgSpanExporter` writes Helios's spans to Postgres for `PgTraceStore`; `OpenTelemetrySdk` comes from `io.opentelemetry:opentelemetry-sdk`, which your application adds:
+**Tracing.** A session emits live OpenTelemetry spans through `withOpenTelemetry` (default `GlobalOpenTelemetry`, a no-op without an SDK),
+following the GenAI semantic conventions: an `invoke_agent` span per run, a child of the span current at `send`, and under it `chat`
+per model attempt, `execute_tool` per tool call and `hook` per hook decision, each current while its step runs.
+`TraceDetail.STANDARD` (the default) records no content; `VERBOSE` adds prompts, answers, tool arguments and results, redacted.
+`PgSpanExporter` stores the spans for `PgTraceStore`; your application adds `io.opentelemetry:opentelemetry-sdk`:
 
 ```java
 var tracing = SdkTracerProvider.builder()
@@ -642,9 +646,11 @@ Helios is designed for production but has known limitations — see [Production 
 
 ### Secret redaction (`SecretRegistry` + `Redactor`)
 
-`core.common.SecretRegistry` is a thread-safe registry of secret values: register each one under a name (8+ printable ASCII characters, no `"` or `\`). `registry.redactor()`, cached until the next `register`, replaces every occurrence with `<redacted:NAME>`, and overlapping occurrences with one marker naming the first. `counts()` counts markers per name. Output cut at a size cap drops a trailing partial secret (`trimPartialSecret`).
-
-A secret is registered under a non-blank name (re-registering a name replaces its value) and its value must be at least 8 characters of JSON-safe printable ASCII: every character in `0x20`–`0x7E` except `"` and `\`. `register` throws `IllegalArgumentException` otherwise: on a null value, a value shorter than 8 characters, a control character (`0x00`–`0x1F`, `0x7F`), `"` or `\` (Jackson escapes these, so the serialised text would no longer match), or any non-ASCII character (a registered value must keep its exact text through JSON serialisation).
+`core.common.SecretRegistry` holds secret values by name; its `redactor()` replaces each with `<redacted:NAME>`.
+A session has one (`SessionOptions.withSecretRegistry`, default empty). **A secret a tool returns never reaches the model or anything
+the session emits:** the session redacts every tool result once, before its event, hooks and history, and the error text it reports.
+User messages, the system prompt and the model's output are not redacted; the `withSecretRegistry` javadoc lists what else is not.
+`ModelConfig.toString()` elides the API key and header values. Accepted values: `SecretRegistry` javadoc.
 
 ```java
 var registry = new SecretRegistry();
@@ -656,19 +662,6 @@ var options = SessionOptions.newBuilder()
     .withSecretRegistry(registry)
     .build();
 ```
-
-**The promise: no registered value reaches the model, and none appears in anything the session emits.** Each session has one registry, set with `SessionOptions.withSecretRegistry` (default: a new empty registry, which redacts nothing; sessions built from the same options share it). The session redacts each tool result's text once, right after the tool returns, before its `QueryEvent.ToolResult` (in-process subscribers, `OnStreamEvent` hooks, the runtime's SSE stream), `PostToolUse` hooks and the conversation history see it. That covers every tool — built-in, custom, `MemoryRead`, `CommandGrant`, `Execute` — successes and failures, the results the loop substitutes (blocked, skipped, timed out, threw, not found, dispatch failed), and the text a `PostToolUse` `MutateResult` supplies. `QueryEvent.ToolResult.redactions()` reports how many occurrences of each secret that pass replaced. The messages of every error the session reports — `TurnRetried`, error terminals, a `SessionUnavailableException`'s reason — are redacted the same way. Each redaction takes a fresh snapshot of the registry, so a secret registered mid-session (a tool can reach the registry through `ToolContext.sessionContext().secrets()`) is honoured from the next result on. Where a tool cuts its output at a size cap (`CommandGrant`, `LocalProcessExecutionProvider`, `Read`'s per-line cap), the cut first drops any trailing start of a registered secret, so half a secret never survives the cap. The arguments that `ToolUse`, `ToolMutated`, `ToolBlocked` and `ToolResult` carry are redacted the same way, in keys and string values, while the tool, its `PreToolUse` and `PostToolUse` hooks and the history see them as written; a `ToolBlocked` reason is redacted too, and a hook's or tool's failure the session logs attaches a redacted copy of the exception.
-
-Not covered:
-
-- Text that does not come from tools: user messages, the system prompt, hook `Inject` messages (deployer code), and the model's own output.
-- `Read` attachments: images and PDFs pass through unredacted.
-- Runtime HTTP error bodies.
-- Persistence: a session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; anything else `PgSpanExporter` writes is verbatim unless `PgConfig.Builder.withRedactor(...)` is set.
-- What your own instrumentation records under a Helios span, such as an HTTP client's or a database driver's span attributes.
-- Secrets the model rebuilds from pieces (encoded, or split across calls): redaction matches exact bytes.
-
-`ModelConfig.toString()` elides the `apiKey` and every header value regardless of registry contents, so a `ModelConfig` is safe to log directly.
 
 ### Sandbox security model
 
@@ -737,7 +730,11 @@ Descriptor confinement prevents symlink substitution from redirecting an operati
 
 ### HTTP surface defaults
 
-`RuntimeServer.Builder` binds **`127.0.0.1` by default** (loopback only). Every route authenticates the request through one `Authenticator` before it reads the body or looks up a session, and a session is reachable only by the `Principal` (tenant and subject) that created it; another principal's session answers the same `404` as an unknown id. A missing, malformed, expired, revoked or forged credential is `401`, and every `401` carries the authenticator's `challenge()` in `WWW-Authenticate`. When an identity expires or is revoked, an open SSE stream closes, a pending result long poll, or one whose result is still serializing, answers `401`, and a message or interrupt still uploading its body, or a create whose options factory is still running, answers `401` and does nothing.
+`RuntimeServer.Builder` binds **`127.0.0.1` by default**. Every route runs one `Authenticator` before it reads a body or looks up a
+session, and a session answers only the `Principal` that created it: anyone else gets the same `404` as for an unknown id. A missing
+or invalid credential is `401` with the authenticator's `challenge()` in `WWW-Authenticate`, and an identity that expires or is
+revoked ends its open SSE streams and result polls with `401`. A non-loopback host needs an authenticator; `withoutAuthentication()`
+serves a loopback bind only. Details: `AgentHttpService` and `Authenticator` javadoc.
 
 Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
 
@@ -756,21 +753,19 @@ var server = RuntimeServer.builder()
     .build();
 ```
 
-The proxy must strip client-supplied copies of both headers. Its `401` challenges with `TrustedProxy realm="helios"` unless `withChallenge(...)` sets another. Any other verifier (a JWT library, mutual TLS) plugs in as an `Authenticator` returning an `Authentication` with the principal, the credential's remaining lifetime and a stage that completes on revocation, and declaring its scheme's challenge, such as `Bearer realm="helios"`. The options factory receives a `SessionRequest`: the generated session id, for which it must return options, and the `Principal` that will own the session. `withoutAuthentication()` serves a loopback bind as one local principal; on any other host `build()` refuses it, as it refuses a non-loopback host with no authenticator. `RuntimeServer` installs no Helidon feature discovered on the classpath; mount `AgentHttpService` on your own `WebServer` to combine it with features, and set on it the two Helidon options below. Helios writes its own JSON with one fixed mapper, so that server needs no media support.
+The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) is an `Authenticator`.
 
-Every request is admitted against finite bounds before any work, and a refused one is answered at once with a fixed body. A body is at most `maxRequestBytes` (256 KiB, `413`). A principal has at most `maxConcurrentRequestsPerPrincipal` (32) requests in flight (`429` with `Retry-After: 5`). Open SSE streams and waiting result polls count, so size it above your peak open streams. A `RuntimeServer` serves at most 512 requests at once; beyond that Helidon answers its own `503`, without `Retry-After`, and closes the connection. A full steering queue is `429`.
-
-At most 16 sessions per principal and 256 per registry, finished ones included. Your own oldest finished session is evicted to make room, never another principal's. Otherwise `429` (your cap) or `503` (the registry's), each with `Retry-After: 5`. A session not running, whether never started or finished, is closed after `withRetention` (15 min); `RuntimeServer` sweeps every 30 seconds. A deleted session still running counts until it stops.
-
-A Helios refusal answers without reading the body and closes the connection: a `401`, `404`, `413`, `429` or `503` refused before the body, a fixed `500`, or a `201` for a create that sent one, is written whole with `Connection: close` (Helidon 4.5.4 or later), and nothing after it is read. `RuntimeServer` sets Helidon's `maxPayloadSize(maxRequestBytes)` and `Http1Config.continueImmediately(true)`, and so must your own `WebServer`:
+Every request is admitted against finite bounds before any work: a body is at most 256 KiB (`413`), a principal has at most 32
+requests in flight, open streams and polls included (`429`), and a server at most 512 (`503`). A principal holds at most 16
+sessions and a registry 256 (`429` / `503`), the owner's longest-idle session evicted first; an idle session closes after 15 minutes.
+A refusal answers without reading the body and closes the connection. `RuntimeServer` sets two Helidon options so that no body byte
+is ever parsed as a request (a request-smuggling guard), and a `WebServer` of your own that mounts `AgentHttpService` must set both:
 
 ```java
 WebServer.builder()
     .maxPayloadSize(limits.maxRequestBytes())
     .addProtocol(Http1Config.builder().continueImmediately(true).build())
 ```
-
-Then no body byte is ever parsed as a request, which a client sending `Expect: 100-continue` could otherwise use to smuggle a request, with identity headers of its choosing, past a proxy that checked only the first. A body declared over `maxRequestBytes` gets Helidon's `413` before routing, unread, and Helidon's own answers (an unmatched path, an escaped `Error`) read at most `maxRequestBytes` of a body. A request whose body was read to its end, or that has none, keeps its connection.
 
 ## Design Principles
 
