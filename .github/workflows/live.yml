@@ -1,0 +1,49 @@
+name: Live providers
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-providers
+  cancel-in-progress: false
+
+jobs:
+  live:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: live-providers
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Cache ONNX models
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.helios/models
+          key: onnx-models-pinned-${{ hashFiles('onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelId.java', 'onnx/src/main/java/com/standardapplied/helios/onnx/OnnxModelSpec.java') }}
+          restore-keys: onnx-models-pinned-
+
+      - name: Live tests
+        run: ./mvnw -B verify -Dtest='*IntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true -Dspotless.check.skip=true -Dpmd.skip=true -Dcpd.skip=true -Dcyclonedx.skip=true -fae
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-test-reports
+          path: '**/target/surefire-reports/TEST-*.xml'
