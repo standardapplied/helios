@@ -55,7 +55,7 @@ These are documented intentionally — they're real and you should plan around t
 - **Persistence layer stores trace payloads verbatim unless you set a redactor.** `helios_traces.{input_text, output_text, attributes}` and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever else reaches these tables, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
 - **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
 - **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
-- **Live integration coverage is environment-gated.** Provider integration tests run in CI under deployer-supplied API keys; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
+- **Live integration coverage is environment-gated.** Provider integration tests run with real API keys only when a release is cut; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
 
 If any of these is a deal-breaker for your use case, open an issue — prioritisation tracks demand.
 
@@ -77,6 +77,7 @@ If any of these is a deal-breaker for your use case, open an issue — prioritis
 JPMS:
 
 ```java
+requires com.standardapplied.helios.core;
 requires com.standardapplied.helios.session;
 requires com.standardapplied.helios.anthropic;
 ```
