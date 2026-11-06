@@ -7,7 +7,7 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | **CI** | Push to `main`, pull requests | Build, test, coverage, quality gate |
-| **Release** | Push to `release/**`, manual dispatch | Build, test, sign, deploy to Central Portal |
+| **Release** | Push to `release/**`, manual dispatch | Live provider tests with real keys (the `live-providers` environment), then build, test, sign, deploy to Central Portal; a failing live test stops the deploy |
 
 ## Published Modules
 
