@@ -349,7 +349,7 @@ final class SessionSpanEndingsTest {
     var description = readable ? type + ": host failure" : type;
     assertFailed(run, description, type);
     assertFailed(capture.only("chat scripted-stream"), description, type);
-    assertNull(run.getAttributes().get(SessionSpansTest.TOTAL_TOKENS));
+    assertNull(run.getAttributes().get(SessionSpansTest.INPUT_TOKENS));
   }
 
   @Test

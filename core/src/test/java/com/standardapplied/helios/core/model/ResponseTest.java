@@ -99,6 +99,7 @@ class ResponseTest {
     assertEquals(0, usage.cacheCreationInputTokens());
     assertEquals(0, usage.cacheReadInputTokens());
     assertEquals(150, usage.totalTokens());
+    assertEquals(100L, usage.promptTokens());
   }
 
   @Test
@@ -128,7 +129,7 @@ class ResponseTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new Response.Usage(counts[0], counts[1], counts[2], counts[3], total));
+            () -> new Response.Usage(counts[0], counts[1], counts[2], counts[3], total, 0));
     assertTrue(ex.getMessage().startsWith("token counts must be non-negative, got ["));
   }
 
@@ -138,26 +139,62 @@ class ResponseTest {
 
     assertThrows(
         ArithmeticException.class,
-        () -> new Response.Usage(quarter, quarter, quarter, quarter, Integer.MAX_VALUE));
+        () -> new Response.Usage(quarter, quarter, quarter, quarter, Integer.MAX_VALUE, 0));
   }
 
   @Test
   void usageRejectsATotalThatIsNotTheSumOfItsCounts() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 11));
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 11, 8));
     assertEquals("totalTokens must be the sum of the four counts, 10, got 11", ex.getMessage());
   }
 
   @Test
   void usageAcceptsATotalThatIsTheSumOfItsCounts() {
-    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10));
+    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10, 8));
     assertEquals(10, Response.Usage.of(1, 2, 3, 4).totalTokens());
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {-1, 9})
+  void usageRejectsAPromptSizeOutsideTheInputCounts(long promptTokens) {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 10, promptTokens));
+    assertEquals("promptTokens must lie in [0, 8], got " + promptTokens, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {0, 8})
+  void usageAcceptsAPromptSizeWithinTheInputCounts(long promptTokens) {
+    assertEquals(promptTokens, new Response.Usage(1, 2, 3, 4, 10, promptTokens).promptTokens());
   }
 
   @Test
   void usagePlusSumsClassWise() {
     var sum = Response.Usage.of(100, 50, 20, 10).plus(Response.Usage.of(1, 2, 3, 4));
 
-    assertEquals(Response.Usage.of(101, 52, 23, 14), sum);
+    assertEquals(new Response.Usage(101, 52, 23, 14, 190, 8), sum);
+  }
+
+  @Test
+  void usagePlusKeepsTheLaterRequestsPromptSize() {
+    var segments = Response.Usage.of(100_000, 10).plus(Response.Usage.of(110_000, 20));
+
+    assertEquals(210_000, segments.inputTokens());
+    assertEquals(110_000L, segments.promptTokens());
+  }
+
+  @Test
+  void usagePlusKeepsTheEarlierPromptSizeWhenTheLaterReportsNone() {
+    var usage = Response.Usage.of(1_000, 7, 500, 4_000);
+
+    assertEquals(usage, usage.plus(Response.Usage.of(0, 0)));
+  }
+
+  @Test
+  void usagePlusTakesTheLaterPromptSizeOverAZeroOne() {
+    assertEquals(Response.Usage.of(5, 1), Response.Usage.of(0, 0).plus(Response.Usage.of(5, 1)));
   }
 
   @Test

@@ -70,11 +70,10 @@ public final class PgSpanExporter implements SpanExporter {
       longKey("gen_ai.usage.cache_read.input_tokens");
   private static final AttributeKey<Long> CACHE_WRITE =
       longKey("gen_ai.usage.cache_write.input_tokens");
-  private static final AttributeKey<Long> TOTAL_TOKENS = longKey("helios.usage.total_tokens");
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
 
   private static final Set<AttributeKey<?>> SHARED_COLUMNS =
-      Set.of(RUN_ID, INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, TOTAL_TOKENS, COST);
+      Set.of(RUN_ID, INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, COST);
   private static final Set<AttributeKey<?>> RUN_COLUMNS =
       Set.of(AGENT_NAME, CONVERSATION_ID, REQUEST_MODEL, INPUT_MESSAGES, OUTPUT_MESSAGES);
 

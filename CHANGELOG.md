@@ -1202,7 +1202,9 @@ carry a total that disagreed with its own counts.
 | 2.x | 3.0 |
 |---|---|
 | `new Usage(in, out, cacheWrite, cacheRead, total)` accepted any `total` and negative counts; `plus` summed the totals | throws `IllegalArgumentException` for a negative count or a `total` that is not the sum of the four counts, and `ArithmeticException` when that sum overflows an `int`; use `Usage.of(in, out, cacheWrite, cacheRead)`. `plus` recomputes the total. The serialized form keeps `totalTokens` |
-| `PgTraceStore` read a `Usage` total from `total_tokens`; `PgSpanExporter` from `helios.usage.total_tokens` | both use the four counts' sum, so a stored or reported total that disagrees is ignored; the exporter writes `total_tokens` as that sum |
+| `PgTraceStore` read a `Usage` total from `total_tokens` | it uses the four counts' sum, so a stored total that disagrees is ignored; `PgSpanExporter` writes `total_tokens` as that sum |
+| `new Usage(in, out, cacheWrite, cacheRead, total)`; `promptTokens()` a method summing the three input counts, so usage added over several requests, such as the segments of an Anthropic `pause_turn`, gave their total | `new Usage(in, out, cacheWrite, cacheRead, total, promptTokens)`: `promptTokens` is a component, the prompt size of the last request the usage covers, and the constructor throws `IllegalArgumentException` when it is negative or greater than `in + cacheWrite + cacheRead`. `Usage.of` sets it to that sum; `plus` keeps the later usage's when it is positive, else the earlier's, and still adds every other count. The serialized form gains `promptTokens` |
+| run and step spans carried `helios.usage.total_tokens` | dropped; add the four `gen_ai.usage.*` counts instead (`gen_ai.usage.input_tokens` already includes both cache counts, so the total is it plus `gen_ai.usage.output_tokens`) |
 | `new RetryPolicy(...)` accepted any value; `RetryPolicy.Builder.build()` threw `IllegalStateException` for `maxAttempts < 1` | the record throws `IllegalArgumentException` for `maxAttempts < 1` or a `jitter` outside `0.0`–`1.0` (`NaN` included) and `NullPointerException` for a `null` `backoff` or `retryOn`; the builder throws the same, and `withRetryOn((Predicate) null)` throws at once |
 | `CostEstimate.ofUsd` and `Pricing.ofUsdPerMillion` turned `NaN` into zero, an infinity into `Long.MAX_VALUE` and a small negative into zero | they throw `IllegalArgumentException` for `NaN`, an infinity, any negative value, and an amount whose micro-USD does not fit in a `long` |
 
@@ -1399,7 +1401,8 @@ price table asked for a model it does not hold, both used to count the call as f
   the check then estimates the whole history as before. A compaction's summary call never sets it.
   No compactor runs while what the estimate cannot see, such as inline files and tool definitions,
   reaches the 0.95 watermark by itself; a request that truly overflows ends with the provider's
-  error. An Anthropic `pause_turn` turn reports the sum of its segments, so it can compact early.
+  error. An Anthropic `pause_turn` turn counts from its last segment's request, never the sum of
+  its segments.
 - **A known window of 20,000 tokens or less now yields a limit below that window.** The output
   reserve is 20,000 tokens or a quarter of the window, whichever is smaller, so a window of 8,000
   gives a limit of 6,000 instead of the 180,000-token fallback, and a user cap of 50,000 next to it

@@ -91,7 +91,8 @@ class TurnUsageAccountingTest {
                 .withCostCalculator(RATES)
                 .withOutputSchema(OutputSchema.of(Sample.class)));
 
-    assertEquals(Usage.of(120, 15), success.usage());
+    assertEquals(Usage.of(50, 10).plus(Usage.of(70, 5)), success.usage());
+    assertEquals(70L, success.usage().promptTokens());
     assertEquals(new CostEstimate(150L), success.cost());
   }
 

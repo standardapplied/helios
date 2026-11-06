@@ -30,6 +30,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -156,7 +157,7 @@ class PauseContinuationTest {
     assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened.get());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
     assertEquals("Searching. ".repeat(9), error.partial().content());
-    assertEquals(Response.Usage.of(90, 18), error.partial().usage());
+    assertEquals(new Response.Usage(90, 18, 0, 0, 108, 10), error.partial().usage());
   }
 
   @Test
@@ -184,7 +185,7 @@ class PauseContinuationTest {
     var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
     assertSame(eof, error.cause());
     assertEquals("Searching. Fou", error.partial().content());
-    assertEquals(Response.Usage.of(15, 3), error.partial().usage());
+    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5), error.partial().usage());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
@@ -208,10 +209,26 @@ class PauseContinuationTest {
     var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
     assertEquals(1, events.size());
     assertEquals("Searching. Found.", done.response().content());
-    assertEquals(Response.Usage.of(15, 3), done.response().usage());
+    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5), done.response().usage());
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertTrue(pausedClosedAtSecondOpen.get());
     assertTrue(finished.isClosed());
+  }
+
+  @Test
+  void aPausedTurnBillsEverySegmentAndReportsTheSizeOfItsLastRequest() {
+    var segments =
+        new ArrayDeque<>(
+            List.of(
+                segment(PAUSED_METADATA, 100_000),
+                segment(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"), 110_000)));
+
+    var done =
+        assertInstanceOf(
+            StreamEvent.Done.class, events(r -> stream(segments.removeFirst())).getLast());
+
+    assertEquals(210_000, done.response().usage().inputTokens());
+    assertEquals(110_000L, done.response().usage().promptTokens());
   }
 
   @Test
@@ -496,6 +513,15 @@ class PauseContinuationTest {
         .withFinishReason(FinishReason.STOP)
         .withUsage(Response.Usage.of(5, 1))
         .withMetadata(Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"))
+        .build();
+  }
+
+  private static Response<Void> segment(Map<String, String> metadata, int inputTokens) {
+    return Response.newBuilder()
+        .withContent("")
+        .withFinishReason(FinishReason.STOP)
+        .withUsage(Response.Usage.of(inputTokens, 1))
+        .withMetadata(metadata)
         .build();
   }
 

@@ -87,8 +87,15 @@ final class PgSessionTracingTest {
     assertEquals("scripted", found.modelId());
     assertEquals(runSpan.getTraceId(), found.otelTraceId());
     assertEquals(runSpan.getSpanId(), found.otelSpanId());
-    assertEquals(result.usage(), found.usage());
-    assertEquals(result.usage().totalTokens(), found.totalTokens());
+    var usage = result.usage();
+    assertEquals(
+        Usage.of(
+            usage.inputTokens(),
+            usage.outputTokens(),
+            usage.cacheCreationInputTokens(),
+            usage.cacheReadInputTokens()),
+        found.usage());
+    assertEquals(usage.totalTokens(), found.totalTokens());
     assertEquals(result.cost(), found.cost());
     assertTrue(found.success());
     assertEquals(null, found.inputText());
