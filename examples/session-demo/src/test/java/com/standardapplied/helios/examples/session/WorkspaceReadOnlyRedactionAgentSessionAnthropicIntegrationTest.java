@@ -9,8 +9,9 @@ import com.standardapplied.helios.core.model.ToolChoice;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
- * {@link WorkspaceReadOnlyRedactionContract} on Claude Sonnet 4.6. Guarded by {@code
- * ANTHROPIC_API_KEY} so the suite stays runnable offline.
+ * {@link WorkspaceReadOnlyRedactionContract} on Claude Haiku 5.5, which accepts the forced tool
+ * call the contract sends. Guarded by {@code ANTHROPIC_API_KEY} so the suite stays runnable
+ * offline.
  */
 @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".+")
 final class WorkspaceReadOnlyRedactionAgentSessionAnthropicIntegrationTest
@@ -23,6 +24,6 @@ final class WorkspaceReadOnlyRedactionAgentSessionAnthropicIntegrationTest
             .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
             .withToolChoice(toolChoice)
             .build();
-    return new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), config);
+    return new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_5_5.id(), config);
   }
 }

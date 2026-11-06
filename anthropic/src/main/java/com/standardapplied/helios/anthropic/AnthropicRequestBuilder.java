@@ -47,8 +47,6 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   /** The beta a request carrying {@code thinking.block_binding} needs. */
   static final String BINDING_CONTROLS_BETA = "thinking-binding-controls-2026-08-01";
 
-  private static final double LOWEST_TOP_P_WITH_EFFORT = 0.95;
-
   private static final Map<Display, String> DISPLAY =
       Map.of(
           Display.HIDDEN, "omitted",
@@ -67,8 +65,6 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   private final ModelConfig config;
   private final CachePolicy cachePolicy;
   private final boolean bindsReasoning;
-  private final boolean programmaticToolCalling;
-  private final boolean searchesFromCode;
   private final InstantSource clock;
   private final ThinkingConfig thinking;
   private final OutputConfig outputConfig;
@@ -100,9 +96,6 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.bindsReasoning = knownModel != null && knownModel.bindsReasoning();
-    this.programmaticToolCalling =
-        knownModel == null || knownModel.acceptsProgrammaticToolCalling();
-    this.searchesFromCode = config.webSearch() && programmaticToolCalling;
     this.clock = clock;
     this.thinking = thinking(rules, config.reasoning().orElse(null), bindsReasoning);
     this.outputConfig =
@@ -132,7 +125,7 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   public StampedRequest build(
       List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
     var system = withSchemaInstruction(AnthropicMessages.system(messages), outputSchema, tools);
-    var toolDefinitions = AnthropicTools.of(tools, config, programmaticToolCalling);
+    var toolDefinitions = AnthropicTools.of(tools, config);
     var stamp = ReasoningReplay.stamp(system, toolDefinitions.all());
     var reasoningFrom = ReasoningReplay.keptFrom(messages, stamp, bindsReasoning);
     var toolChoice = AnthropicTools.choice(config.toolChoice());
@@ -148,7 +141,7 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
             .withThinking(thinking)
             .withOutputConfig(outputConfig)
             .withContainer(
-                searchesFromCode ? CodeContainer.reusable(messages, clock.instant()) : null);
+                config.webSearch() ? CodeContainer.reusable(messages, clock.instant()) : null);
     PromptCache.apply(
         cachePolicy,
         request,
@@ -206,31 +199,16 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
    * silently dropped from a request.
    */
   private static void requireSampling(String model, Sampling sampling, ModelConfig config) {
-    var temperature = config.temperature();
-    var topP = config.topP();
-    var effort = config.reasoning().orElse(null) instanceof Reasoning.Effort;
-    switch (sampling) {
-      case UNCHECKED -> {}
-      case REJECTED -> {
-        reject(model, "temperature", temperature != null, "whenever it is set");
-        reject(model, "topP", topP != null, "whenever it is set");
-      }
-      case ONE_OF -> {
-        reject(model, "temperature", temperature != null && topP != null, "and topP together");
-        reject(model, "temperature", effort && temperature != null, "with Reasoning.Effort");
-        reject(
-            model,
-            "topP",
-            effort && topP != null && (topP < LOWEST_TOP_P_WITH_EFFORT || topP > 1),
-            "outside 0.95-1 with Reasoning.Effort");
-      }
+    if (sampling == Sampling.REJECTED) {
+      reject(model, "temperature", config.temperature() != null);
+      reject(model, "topP", config.topP() != null);
     }
   }
 
-  private static void reject(String model, String parameter, boolean rejected, String rule) {
+  private static void reject(String model, String parameter, boolean rejected) {
     if (rejected) {
       throw new IllegalArgumentException(
-          "Model " + model + " does not accept " + parameter + " " + rule + ".");
+          "Model " + model + " does not accept " + parameter + " whenever it is set.");
     }
   }
 

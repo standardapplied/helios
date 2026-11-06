@@ -92,7 +92,7 @@ class AnthropicStreamTranscriptTest {
 
     ModelHarness.exchange(
         List.of(Golden.read("anthropic/streams/structured.sse")),
-        uri -> modelAt(uri, AnthropicModelId.CLAUDE_SONNET_4_6),
+        uri -> modelAt(uri, AnthropicModelId.CLAUDE_SONNET_5_5),
         model ->
             parsed.add(
                 model

@@ -6,6 +6,15 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Breaking
 
+**Helios supports Claude 5 and later.** The Claude 4.x models are dropped from the catalogue with
+the request rules only they used. Other entries in this section that name a Claude 4.x model
+describe 3.0 work this entry replaces.
+
+| Before | 3.0 |
+|---|---|
+| `AnthropicModelId.CLAUDE_OPUS_4_8`, `CLAUDE_OPUS_4_7`, `CLAUDE_OPUS_4_6`, `CLAUDE_SONNET_4_6`, `CLAUDE_HAIKU_4_5`; `ReasoningRules.OFF_WHEN_OMITTED`, `WITHOUT_XHIGH`, `WITHOUT_EFFORT`; `Off.OMITTED`, `Sampling.ONE_OF`; `acceptsProgrammaticToolCalling()` | a Claude 5 model: `CLAUDE_SONNET_5_5` for a general model, `CLAUDE_HAIKU_5_5` for a small one. A `claude…` id before generation 5 (`claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022`, `claude-2.1`) makes `AnthropicProvider.create` throw `IllegalArgumentException` naming the id and the catalogued ids, and `supports` returns false for it; `AnthropicModelId.predatesClaude5(id)` tells which |
+| `anthropic.api.ToolDefinition(type, name, description, inputSchema, cacheControl, allowedCallers)`, `directOnly()` | `ToolDefinition(type, name, description, inputSchema, cacheControl)`: web search takes the API's default callers on every model |
+
 **Runs are traced with OpenTelemetry; the Postgres trace store is an exporter.** A session emits
 live spans through the OpenTelemetry API, and `PgSpanExporter` writes Helios's spans to the trace
 tables. Helios's own trace pipeline is gone, so the other entries in this section that name
@@ -315,7 +324,7 @@ in main code.
 | `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
 | `AnthropicModelId.usesAdaptiveThinking()` | `thinkingShape() != ThinkingShape.LEGACY_BUDGET` |
 | Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
-| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null, null)` |
+| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null)` |
 | `OpenAIModelId.supportsXhighEffort()` | `effortSupport() != EffortSupport.STANDARD` |
 | `ResultMessage.Success(sessionId, result, usage, cost, duration)` | `Success(sessionId, result, usage, cost, duration, List.of())` |
 | `ResultMessage.Refusal(sessionId, refusalText, usage, cost, duration)` | `Refusal(sessionId, refusalText, usage, cost, duration, null)` |
@@ -1220,6 +1229,11 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Added
 
+- Claude Haiku 5.5 (`AnthropicModelId.CLAUDE_HAIKU_5_5`, `claude-haiku-5-5`): 1M context, 128K
+  output, adaptive thinking that `Off` sends `disabled` and `Effort` takes `LOW`..`MAX` without
+  `PROGRESS`, replayed thinking verified as on Sonnet 5.5, forced tool choice accepted.
+  `AnthropicPricing` prices it at its long-prompt rate, $0.50 / $2.50 per million tokens, for every
+  prompt.
 - `SseReader.Parser.unframedLine(String)`, default `null`: reads the last line of a body that ended
   before the terminal event when that line is outside the SSE format.
 - Gemini 4 Argon (`GeminiModelId.GEMINI_4_ARGON`, `gemini-4-argon`): thinking `LOW`..`HIGH`, never
@@ -1480,10 +1494,6 @@ price table asked for a model it does not hold, both used to count the call as f
 - **A web search run from code execution broke the next request.** Helios blanked its `input` and
   dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
   send failed.
-- **Web search failed on Claude Haiku 4.5.** `web_search_20260318` runs searches from code
-  execution by default, which Haiku 4.5 does not support, so the API refused every request with a
-  400. Helios now sends `allowed_callers: ["direct"]` on that model, declared by
-  `AnthropicModelId.acceptsProgrammaticToolCalling()`.
 - **Files that web search code wrote were lost after the turn.** Each request ran in a new code
   execution container. A turn now records the container it ran code in, and the request after it
   sends the container back: always on a `pause_turn` continuation, and on the next turn while

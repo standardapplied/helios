@@ -23,6 +23,12 @@ import java.util.Objects;
  * CostCalculator#staticTable(java.util.Map)} for those. Prices change without a Helios release —
  * compare {@link #AS_OF} against the pricing page before trusting the numbers for billing.
  *
+ * <p>Claude Haiku 5.5 is priced at its rate for prompts over 100K tokens, $0.50 / $2.50 per million
+ * input / output tokens, for every prompt. Anthropic bills a prompt of 100K tokens or fewer at
+ * $0.10 / $0.50, so the estimate errs high for short prompts; a caller who wants the lower rate
+ * passes its own {@link CostCalculator}, for example through {@link
+ * CostCalculator#staticTable(java.util.Map)}.
+ *
  * <p>The calculator prices the token usage a turn reports and nothing else: per-request server-tool
  * fees (web search) are not included, and a refusal the API does not bill still reports usage, so
  * the estimate errs high rather than low.
@@ -30,7 +36,7 @@ import java.util.Objects;
 public final class AnthropicPricing {
 
   /** The date these rates were last checked against Anthropic's pricing page. */
-  public static final LocalDate AS_OF = LocalDate.of(2026, 10, 1);
+  public static final LocalDate AS_OF = LocalDate.of(2026, 11, 6);
 
   private AnthropicPricing() {}
 
@@ -82,12 +88,10 @@ public final class AnthropicPricing {
       case CLAUDE_FABLE_5, CLAUDE_MYTHOS_5 ->
           pricing(10_000_000L, 50_000_000L, 1_000_000L, cachePolicy);
       case CLAUDE_OPUS_5_5 -> pricing(4_000_000L, 20_000_000L, 200_000L, cachePolicy);
-      case CLAUDE_OPUS_5, CLAUDE_OPUS_4_8, CLAUDE_OPUS_4_7, CLAUDE_OPUS_4_6 ->
-          pricing(5_000_000L, 25_000_000L, 500_000L, cachePolicy);
+      case CLAUDE_OPUS_5 -> pricing(5_000_000L, 25_000_000L, 500_000L, cachePolicy);
       case CLAUDE_SONNET_5_5, CLAUDE_SONNET_5 ->
           pricing(2_000_000L, 10_000_000L, 200_000L, cachePolicy);
-      case CLAUDE_SONNET_4_6 -> pricing(3_000_000L, 15_000_000L, 300_000L, cachePolicy);
-      case CLAUDE_HAIKU_4_5 -> pricing(1_000_000L, 5_000_000L, 100_000L, cachePolicy);
+      case CLAUDE_HAIKU_5_5 -> pricing(500_000L, 2_500_000L, 50_000L, cachePolicy);
     };
   }
 

@@ -10,7 +10,6 @@ import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.model.Reasoning.Level;
 import com.standardapplied.helios.core.provider.ReasoningSupport;
 import java.util.EnumSet;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -19,18 +18,20 @@ import java.util.regex.Pattern;
  * <p>Each enum constant maps to a specific Claude model available through the Messages API and
  * records the metadata the request builder needs (context window, output ceiling, reasoning rules).
  * Membership here is <em>not</em> a gate: {@link AnthropicProvider} also accepts any {@code claude}
- * model ID it does not recognize, so deployers can adopt a new Claude release before this enum
- * catches up. An unrecognized ID falls back to {@link ReasoningRules#UNCATALOGUED} and {@code
- * 32_000} output tokens — see {@link #hasClaudePrefix(String)}.
+ * model ID of generation 5 or later it does not recognize, so deployers can adopt a new Claude
+ * release before this enum catches up. An unrecognized ID falls back to {@link
+ * ReasoningRules#UNCATALOGUED} and {@code 32_000} output tokens — see {@link
+ * #hasClaudePrefix(String)}. A Claude ID of an earlier generation is refused — see {@link
+ * #predatesClaude5(String)}.
  */
 public enum AnthropicModelId {
-  // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Oct
+  // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Nov
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
   // ReasoningRules per model (Thinking "Configuring thinking" table and the Fable 5.1 / Opus 5.5 /
-  // Sonnet 5.5 migration notes, Oct 2026): Fable 5/5.1, Mythos 5/5.1 and Opus 5.5 always think;
-  // display "updates" exists on Fable 5/5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5; Sonnet 5.5 turns
-  // up-front thinking off with between_tools; Opus 5 and Sonnet 5 think unless sent disabled; Opus
-  // 4.6 / Sonnet 4.6 have no xhigh and accept sampling parameters; Haiku 4.5 takes no effort.
+  // Sonnet 5.5 / Haiku 5.5 migration notes, Nov 2026): Fable 5/5.1, Mythos 5/5.1 and Opus 5.5
+  // always think; display "updates" exists on Fable 5/5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5;
+  // Sonnet 5.5 turns up-front thinking off with between_tools; Opus 5, Sonnet 5 and Haiku 5.5 think
+  // unless sent disabled.
   CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
   CLAUDE_MYTHOS_5_1(
       "claude-mythos-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
@@ -40,19 +41,12 @@ public enum AnthropicModelId {
   CLAUDE_OPUS_5("claude-opus-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
   CLAUDE_SONNET_5_5("claude-sonnet-5-5", 1_000_000, 128_000, ReasoningRules.OFF_BETWEEN_TOOLS),
   CLAUDE_SONNET_5("claude-sonnet-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED),
-  CLAUDE_OPUS_4_8("claude-opus-4-8", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_OMITTED),
-  CLAUDE_OPUS_4_7("claude-opus-4-7", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_OMITTED),
-  CLAUDE_OPUS_4_6("claude-opus-4-6", 1_000_000, 128_000, ReasoningRules.WITHOUT_XHIGH),
-  CLAUDE_SONNET_4_6("claude-sonnet-4-6", 1_000_000, 128_000, ReasoningRules.WITHOUT_XHIGH),
-  CLAUDE_HAIKU_4_5("claude-haiku-4-5", 200_000, 64_000, ReasoningRules.WITHOUT_EFFORT);
+  CLAUDE_HAIKU_5_5("claude-haiku-5-5", 1_000_000, 128_000, ReasoningRules.OFF_WHEN_DISABLED);
 
   /** How a model is told to stop reasoning. */
   public enum Off {
     /** It cannot stop: {@code Reasoning.Off} is rejected. */
     REJECTED,
-
-    /** The {@code thinking} field is left out; the model does not think without it. */
-    OMITTED,
 
     /** {@code thinking.type=disabled}. */
     DISABLED,
@@ -68,12 +62,6 @@ public enum AnthropicModelId {
   public enum Sampling {
     /** Never: either one is rejected whenever it is set, with or without reasoning. */
     REJECTED,
-
-    /**
-     * Either one, never both together; alongside {@code Reasoning.Effort} {@code temperature} is
-     * rejected and {@code top_p} must lie between 0.95 and 1 inclusive.
-     */
-    ONE_OF,
 
     /** Whatever is set is sent: the API judges a model the catalogue does not know. */
     UNCHECKED
@@ -94,43 +82,26 @@ public enum AnthropicModelId {
     /** Stops up-front thinking with {@code between_tools}, has progress updates (Sonnet 5.5). */
     OFF_BETWEEN_TOOLS(Off.BETWEEN_TOOLS, Level.LOW, Display.PROGRESS, Sampling.REJECTED),
 
-    /** Thinks unless sent {@code disabled} (Opus 5, Sonnet 5). */
+    /** Thinks unless sent {@code disabled} (Opus 5, Sonnet 5, Haiku 5.5). */
     OFF_WHEN_DISABLED(Off.DISABLED, Level.LOW, Display.SUMMARY, Sampling.REJECTED),
-
-    /** Thinks only when asked to (Opus 4.7, 4.8). */
-    OFF_WHEN_OMITTED(Off.OMITTED, Level.LOW, Display.SUMMARY, Sampling.REJECTED),
-
-    /** Thinks only when asked to, has no {@code xhigh} (Opus 4.6, Sonnet 4.6). */
-    WITHOUT_XHIGH(
-        Off.OMITTED,
-        EnumSet.of(Level.LOW, Level.MEDIUM, Level.HIGH, Level.MAX),
-        Display.SUMMARY,
-        Sampling.ONE_OF),
-
-    /** Takes no effort (Haiku 4.5). */
-    WITHOUT_EFFORT(Off.OMITTED, EnumSet.noneOf(Level.class), Display.SUMMARY, Sampling.ONE_OF),
 
     /**
      * A model the catalogue does not know: accepts every value, sends the current-generation shape
      * and spells off as {@code disabled}; the API judges what the model accepts.
      */
-    UNCATALOGUED(Off.DISABLED, ReasoningSupport.ANY.levels(), Display.PROGRESS, Sampling.UNCHECKED);
+    UNCATALOGUED(Off.DISABLED, Level.MINIMAL, Display.PROGRESS, Sampling.UNCHECKED);
 
     private final Off off;
     private final ReasoningSupport support;
     private final Sampling sampling;
 
     ReasoningRules(Off off, Level lowest, Display widest, Sampling sampling) {
-      this(off, EnumSet.range(lowest, Level.MAX), widest, sampling);
-    }
-
-    ReasoningRules(Off off, Set<Level> levels, Display widest, Sampling sampling) {
       this.off = off;
       this.support =
           new ReasoningSupport(
               off != Off.REJECTED,
-              levels,
-              levels.isEmpty() ? Set.of() : EnumSet.range(Display.HIDDEN, widest));
+              EnumSet.range(lowest, Level.MAX),
+              EnumSet.range(Display.HIDDEN, widest));
       this.sampling = sampling;
     }
 
@@ -171,6 +142,9 @@ public enum AnthropicModelId {
 
   private static final Pattern DATED_SNAPSHOT = Pattern.compile("(.+)-\\d{8}");
 
+  private static final Pattern BEFORE_CLAUDE_5 =
+      Pattern.compile(CLAUDE_ID_PREFIX + "-(?:[a-z]+-)*[1-4](?!\\d)");
+
   private final String id;
   private final int contextWindow;
   private final int maxOutputTokens;
@@ -210,29 +184,17 @@ public enum AnthropicModelId {
   }
 
   /**
-   * Whether this model runs tools from code execution (programmatic tool calling), as web search
-   * does by default since {@code web_search_20260209}. The API rejects web search with a 400 on a
-   * model without it unless the tool allows only direct calls. An uncatalogued model is taken to
-   * have it.
-   *
-   * @return false for {@link #CLAUDE_HAIKU_4_5}, true otherwise
-   */
-  public boolean acceptsProgrammaticToolCalling() {
-    return this != CLAUDE_HAIKU_4_5;
-  }
-
-  /**
    * Whether this model binds each thinking block to its prefix — the system prompt, the tools and
    * every earlier message — so a block replayed after any of them changed is rejected ("Preserved
    * thinking", Oct 2026). A newly released binding model is catalogued here: an uncatalogued model
    * is taken not to bind.
    *
-   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_OPUS_5_5} and {@link
-   *     #CLAUDE_SONNET_5_5}, false otherwise
+   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_OPUS_5_5}, {@link
+   *     #CLAUDE_SONNET_5_5} and {@link #CLAUDE_HAIKU_5_5}, false otherwise
    */
   public boolean bindsReasoning() {
     return switch (this) {
-      case CLAUDE_FABLE_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5 -> true;
+      case CLAUDE_FABLE_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5, CLAUDE_HAIKU_5_5 -> true;
       default -> false;
     };
   }
@@ -287,7 +249,7 @@ public enum AnthropicModelId {
   /**
    * Resolves a wire model ID to curated metadata, accepting dated snapshot variants: an exact match
    * wins, otherwise an ID of the form {@code <enum-id>-<yyyymmdd>} (e.g. {@code
-   * claude-haiku-4-5-20251001}) resolves to its family so legacy snapshots keep legacy request
+   * claude-haiku-5-5-20261101}) resolves to its family so a snapshot keeps its family's request
    * semantics instead of taking the uncatalogued rules.
    *
    * <p>Only an eight-digit snapshot date counts as a suffix. A newer release whose ID merely
@@ -331,5 +293,18 @@ public enum AnthropicModelId {
    */
   public static boolean hasClaudePrefix(String id) {
     return !Strings.isBlank(id) && id.startsWith(CLAUDE_ID_PREFIX);
+  }
+
+  /**
+   * Checks whether the given model ID names a Claude model of a generation before 5, which Helios
+   * does not support: a {@value #CLAUDE_ID_PREFIX} ID whose first number, after any name words, is
+   * 1 to 4 ({@code claude-sonnet-4-6}, {@code claude-haiku-4-5-20251001}, {@code
+   * claude-3-5-sonnet-20241022}, {@code claude-2.1}).
+   *
+   * @param id the model identifier string
+   * @return true if {@code id} names a Claude model before generation 5
+   */
+  public static boolean predatesClaude5(String id) {
+    return hasClaudePrefix(id) && BEFORE_CLAUDE_5.matcher(id).lookingAt();
   }
 }

@@ -73,7 +73,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 2026-11-01.
  *
  * <p>{@code anthropic/sessions/file-tools} is a live claude-sonnet-4-6 file-tool session, recorded
- * 2026-10-09.
+ * 2026-10-09, and replayed under claude-sonnet-5-5: the replay does not match a request's model.
  *
  * <p>{@code gemini/sessions/file-tools} is a live gemini-3.8-flash file-tool session, recorded
  * 2026-11-01.
@@ -215,7 +215,7 @@ final class RecordedSessionTest {
         "anthropic".equals(provider)
             ? uri ->
                 new AnthropicProvider()
-                    .create(AnthropicModelId.CLAUDE_SONNET_4_6.id(), anthropicConfig(uri).build())
+                    .create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), anthropicConfig(uri).build())
             : RecordedSessionTest::gemini;
 
     var replay =

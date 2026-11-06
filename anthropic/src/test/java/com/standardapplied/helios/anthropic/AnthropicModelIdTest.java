@@ -20,58 +20,81 @@ class AnthropicModelIdTest {
   void enumHasCorrectId() {
     assertEquals("claude-opus-5", AnthropicModelId.CLAUDE_OPUS_5.id());
     assertEquals("claude-mythos-5", AnthropicModelId.CLAUDE_MYTHOS_5.id());
-    assertEquals("claude-opus-4-8", AnthropicModelId.CLAUDE_OPUS_4_8.id());
-    assertEquals("claude-opus-4-7", AnthropicModelId.CLAUDE_OPUS_4_7.id());
-    assertEquals("claude-opus-4-6", AnthropicModelId.CLAUDE_OPUS_4_6.id());
-    assertEquals("claude-sonnet-4-6", AnthropicModelId.CLAUDE_SONNET_4_6.id());
   }
 
   @Test
-  void opus48OutputCeiling() {
-    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_8.maxOutputTokens());
+  void noCataloguedModelIsAClaude4Model() {
+    for (var model : AnthropicModelId.values()) {
+      assertFalse(model.id().contains("-4-"), model.id());
+      assertFalse(AnthropicModelId.predatesClaude5(model.id()), model.id());
+    }
   }
 
   @Test
-  void legacyFamilyMaxOutputMatchesPublishedLimits() {
-    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_7.maxOutputTokens());
-    assertEquals(128_000, AnthropicModelId.CLAUDE_OPUS_4_6.maxOutputTokens());
-    assertEquals(128_000, AnthropicModelId.CLAUDE_SONNET_4_6.maxOutputTokens());
+  void haiku55IsCatalogued() {
+    var haiku = AnthropicModelId.CLAUDE_HAIKU_5_5;
+    assertEquals("claude-haiku-5-5", haiku.id());
+    assertEquals(haiku, AnthropicModelId.fromId("claude-haiku-5-5"));
+    assertEquals(haiku, AnthropicModelId.fromWireId("claude-haiku-5-5-20261101"));
+    assertEquals(AnthropicModelId.ReasoningRules.OFF_WHEN_DISABLED, haiku.reasoning());
+    assertEquals(1_000_000, haiku.contextWindow());
+    assertEquals(128_000, haiku.maxOutputTokens());
+    assertTrue(haiku.bindsReasoning());
+    assertTrue(haiku.acceptsForcedToolChoice());
   }
 
   @Test
-  void haiku45IsCatalogued() {
-    assertEquals("claude-haiku-4-5", AnthropicModelId.CLAUDE_HAIKU_4_5.id());
-    assertEquals(200_000, AnthropicModelId.CLAUDE_HAIKU_4_5.contextWindow());
-    assertEquals(64_000, AnthropicModelId.CLAUDE_HAIKU_4_5.maxOutputTokens());
-    assertTrue(AnthropicModelId.isSupported("claude-haiku-4-5"));
-    assertEquals(
-        AnthropicModelId.CLAUDE_HAIKU_4_5,
-        AnthropicModelId.fromWireId("claude-haiku-4-5-20251001"));
+  void aClaudeIdBeforeGeneration5PredatesClaude5() {
+    for (var id :
+        List.of(
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+            "claude-opus-4-20250514",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+            "claude-2.1",
+            "claude-instant-1.2")) {
+      assertTrue(AnthropicModelId.predatesClaude5(id), id);
+    }
+  }
+
+  @Test
+  void aClaudeIdOfGeneration5OrLaterDoesNotPredateClaude5() {
+    for (var id :
+        List.of(
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5-20261101",
+            "claude-opus-6",
+            "claude-opus-40",
+            "claude-5",
+            "claude-fable-10-1",
+            "claude-some-future-model",
+            "claude",
+            "anthropic.claude-sonnet-4-6",
+            "Claude-sonnet-4-6",
+            "gpt-4")) {
+      assertFalse(AnthropicModelId.predatesClaude5(id), id);
+    }
+    assertFalse(AnthropicModelId.predatesClaude5(null));
+    assertFalse(AnthropicModelId.predatesClaude5(" "));
   }
 
   @Test
   void contextWindowValues() {
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_5.contextWindow());
     assertEquals(1_000_000, AnthropicModelId.CLAUDE_MYTHOS_5.contextWindow());
-    assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_8.contextWindow());
-    assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_7.contextWindow());
-    assertEquals(1_000_000, AnthropicModelId.CLAUDE_OPUS_4_6.contextWindow());
-    assertEquals(1_000_000, AnthropicModelId.CLAUDE_SONNET_4_6.contextWindow());
   }
 
   @Test
   void fromIdReturnsCorrectModel() {
     assertEquals(AnthropicModelId.CLAUDE_OPUS_5, AnthropicModelId.fromId("claude-opus-5"));
     assertEquals(AnthropicModelId.CLAUDE_MYTHOS_5, AnthropicModelId.fromId("claude-mythos-5"));
-    assertEquals(AnthropicModelId.CLAUDE_OPUS_4_8, AnthropicModelId.fromId("claude-opus-4-8"));
-    assertEquals(AnthropicModelId.CLAUDE_OPUS_4_7, AnthropicModelId.fromId("claude-opus-4-7"));
-    assertEquals(AnthropicModelId.CLAUDE_OPUS_4_6, AnthropicModelId.fromId("claude-opus-4-6"));
-    assertEquals(AnthropicModelId.CLAUDE_SONNET_4_6, AnthropicModelId.fromId("claude-sonnet-4-6"));
   }
 
   @Test
   void hasClaudePrefixMatchesClaudeIds() {
-    assertTrue(AnthropicModelId.hasClaudePrefix("claude-opus-4-8"));
+    assertTrue(AnthropicModelId.hasClaudePrefix("claude-opus-5-5"));
     assertTrue(AnthropicModelId.hasClaudePrefix("claude-opus-9-9"));
     assertTrue(AnthropicModelId.hasClaudePrefix("claude-some-future-model"));
   }
@@ -80,7 +103,7 @@ class AnthropicModelIdTest {
   void hasClaudePrefixRejectsNonClaudeAndBlank() {
     assertFalse(AnthropicModelId.hasClaudePrefix("gpt-5"));
     assertFalse(AnthropicModelId.hasClaudePrefix("gemini-3.8-flash"));
-    assertFalse(AnthropicModelId.hasClaudePrefix("Claude-opus-4-8"));
+    assertFalse(AnthropicModelId.hasClaudePrefix("Claude-opus-5-5"));
     assertFalse(AnthropicModelId.hasClaudePrefix(null));
     assertFalse(AnthropicModelId.hasClaudePrefix(""));
     assertFalse(AnthropicModelId.hasClaudePrefix("   "));
@@ -106,10 +129,8 @@ class AnthropicModelIdTest {
   void isSupportedReturnsTrueForKnownModels() {
     assertTrue(AnthropicModelId.isSupported("claude-opus-5"));
     assertTrue(AnthropicModelId.isSupported("claude-mythos-5"));
-    assertTrue(AnthropicModelId.isSupported("claude-opus-4-8"));
-    assertTrue(AnthropicModelId.isSupported("claude-opus-4-7"));
-    assertTrue(AnthropicModelId.isSupported("claude-opus-4-6"));
-    assertTrue(AnthropicModelId.isSupported("claude-sonnet-4-6"));
+    assertTrue(AnthropicModelId.isSupported("claude-haiku-5-5"));
+    assertFalse(AnthropicModelId.isSupported("claude-sonnet-4-6"));
   }
 
   @Test
@@ -155,16 +176,6 @@ class AnthropicModelIdTest {
             AnthropicModelId.CLAUDE_SONNET_5_5);
     for (var model : AnthropicModelId.values()) {
       assertEquals(!rejecting.contains(model), model.acceptsForcedToolChoice(), model.name());
-    }
-  }
-
-  @Test
-  void onlyHaiku45LacksProgrammaticToolCalling() {
-    for (var model : AnthropicModelId.values()) {
-      assertEquals(
-          model != AnthropicModelId.CLAUDE_HAIKU_4_5,
-          model.acceptsProgrammaticToolCalling(),
-          model.name());
     }
   }
 

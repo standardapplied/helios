@@ -42,7 +42,7 @@ public interface ModelProvider {
   /**
    * Create a model instance with the given model ID and configuration.
    *
-   * @param modelId the specific model to use (e.g., "gemini-3.8-flash", "claude-3-opus")
+   * @param modelId the specific model to use (e.g., "gemini-3.8-flash", "claude-sonnet-5-5")
    * @param config provider configuration (API key, timeouts, etc.)
    * @return a configured Model instance
    * @throws IllegalArgumentException if the model ID is not supported by this provider
@@ -84,7 +84,7 @@ public interface ModelProvider {
   /**
    * Auto-discover which provider supports the given model ID and create the model.
    *
-   * @param modelId the model identifier (e.g., "gemini-3.8-flash", "claude-3-opus")
+   * @param modelId the model identifier (e.g., "gemini-3.8-flash", "claude-sonnet-5-5")
    * @param config provider configuration
    * @return the created model
    * @throws IllegalArgumentException if no provider supports the model ID
