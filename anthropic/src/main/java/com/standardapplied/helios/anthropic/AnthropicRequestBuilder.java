@@ -16,6 +16,7 @@ import com.standardapplied.helios.core.model.Reasoning;
 import com.standardapplied.helios.core.model.Reasoning.Display;
 import com.standardapplied.helios.core.provider.RequestFactory;
 import com.standardapplied.helios.core.tool.Tool;
+import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -66,6 +67,9 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   private final ModelConfig config;
   private final CachePolicy cachePolicy;
   private final boolean bindsReasoning;
+  private final boolean programmaticToolCalling;
+  private final boolean searchesFromCode;
+  private final InstantSource clock;
   private final ThinkingConfig thinking;
   private final OutputConfig outputConfig;
   private final List<String> betas;
@@ -73,6 +77,7 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   /**
    * A builder for {@code wireModelId}, checking the configuration against what the model accepts.
    * An unrecognised model ({@code knownModel} null) takes {@link ReasoningRules#UNCATALOGUED}.
+   * {@code clock} tells whether a recorded code execution container has expired.
    *
    * @throws IllegalArgumentException if the configuration forces a tool call on a model that
    *     rejects forced tool use, or sets a reasoning or sampling parameter the model does not
@@ -82,7 +87,8 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
       String wireModelId,
       AnthropicModelId knownModel,
       ModelConfig config,
-      CachePolicy cachePolicy) {
+      CachePolicy cachePolicy,
+      InstantSource clock) {
     rejectForcedToolChoice(wireModelId, knownModel, config);
     var rules = knownModel != null ? knownModel.reasoning() : ReasoningRules.UNCATALOGUED;
     rules.support().require(wireModelId, config.reasoning());
@@ -94,6 +100,10 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
     this.config = config;
     this.cachePolicy = cachePolicy;
     this.bindsReasoning = knownModel != null && knownModel.bindsReasoning();
+    this.programmaticToolCalling =
+        knownModel == null || knownModel.acceptsProgrammaticToolCalling();
+    this.searchesFromCode = config.webSearch() && programmaticToolCalling;
+    this.clock = clock;
     this.thinking = thinking(rules, config.reasoning().orElse(null), bindsReasoning);
     this.outputConfig =
         effort != null ? new OutputConfig(effort.level().name().toLowerCase(Locale.ROOT)) : null;
@@ -122,7 +132,7 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
   public StampedRequest build(
       List<Message> messages, List<Tool> tools, Map<String, Object> outputSchema) {
     var system = withSchemaInstruction(AnthropicMessages.system(messages), outputSchema, tools);
-    var toolDefinitions = AnthropicTools.of(tools, config);
+    var toolDefinitions = AnthropicTools.of(tools, config, programmaticToolCalling);
     var stamp = ReasoningReplay.stamp(system, toolDefinitions.all());
     var reasoningFrom = ReasoningReplay.keptFrom(messages, stamp, bindsReasoning);
     var toolChoice = AnthropicTools.choice(config.toolChoice());
@@ -136,7 +146,9 @@ final class AnthropicRequestBuilder implements RequestFactory<StampedRequest> {
             .withTopP(config.topP())
             .withStopSequences(config.stopSequences())
             .withThinking(thinking)
-            .withOutputConfig(outputConfig);
+            .withOutputConfig(outputConfig)
+            .withContainer(
+                searchesFromCode ? CodeContainer.reusable(messages, clock.instant()) : null);
     PromptCache.apply(
         cachePolicy,
         request,

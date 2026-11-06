@@ -54,7 +54,7 @@ class AnthropicWebToolsTest {
 
   private static AnthropicRequestBuilder requests(ModelConfig config) {
     var model = AnthropicModelId.CLAUDE_OPUS_4_8;
-    return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+    return AnthropicFixture.requests(model, config);
   }
 
   private static Model dynamicFilteringModel(URI uri) {
@@ -82,6 +82,36 @@ class AnthropicWebToolsTest {
     assertEquals("web_search_20260318", search.type());
     assertEquals("web_search", search.name());
     assertNull(search.inputSchema(), "server tools carry no input_schema");
+    assertNull(search.allowedCallers(), "a model with programmatic tool calling takes the default");
+  }
+
+  @Test
+  void webSearchOnAModelWithoutProgrammaticToolCallingIsCalledOnlyDirectly() {
+    var config =
+        ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).withWebFetch(true).build();
+
+    var request =
+        AnthropicFixture.requests(AnthropicModelId.CLAUDE_HAIKU_4_5, config)
+            .build(List.of(Message.user("Hi")), List.of(), null)
+            .body();
+
+    var search = request.tools().getFirst();
+    assertEquals("web_search", search.name());
+    assertEquals(List.of("direct"), search.allowedCallers());
+    assertNull(request.tools().getLast().allowedCallers());
+    assertTrue(
+        objectMapper
+            .writeValueAsString(request)
+            .contains("\"name\":\"web_search\",\"allowed_callers\":[\"direct\"]"));
+  }
+
+  @Test
+  void webSearchOnAnUncataloguedModelTakesTheDefaultCallers() {
+    var config = ModelConfig.newBuilder().withApiKey("k").withWebSearch(true).build();
+
+    var request = AnthropicFixture.requestFor("claude-next-9", config);
+
+    assertNull(request.tools().getLast().allowedCallers());
   }
 
   @Test

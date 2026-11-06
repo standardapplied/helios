@@ -172,6 +172,6 @@ class ContentBlocksTest {
       String signature,
       Map<String, Object> citation) {
     return new ContentDelta(
-        type, text, partialJson, thinking, signature, citation, null, null, null);
+        type, text, partialJson, thinking, signature, citation, null, null, null, null);
   }
 }

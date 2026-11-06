@@ -7,6 +7,7 @@ package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -24,6 +25,7 @@ import java.util.Objects;
  * @param description description of what the tool does (client tools only)
  * @param inputSchema JSON Schema for tool parameters (client tools only)
  * @param cacheControl optional prompt-cache breakpoint anchored to this tool
+ * @param allowedCallers who may call the tool; null leaves the API's default
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ToolDefinition(
@@ -31,12 +33,14 @@ public record ToolDefinition(
     String name,
     String description,
     @JsonProperty("input_schema") Map<String, Object> inputSchema,
-    @JsonProperty("cache_control") CacheControl cacheControl) {
+    @JsonProperty("cache_control") CacheControl cacheControl,
+    @JsonProperty("allowed_callers") List<String> allowedCallers) {
 
   /**
    * Current Anthropic web-search server-tool type. The {@code _20260318} variant includes dynamic
    * filtering (Claude filters results in code before they reach context) and is supported by every
-   * model in {@link com.standardapplied.helios.anthropic.AnthropicModelId}.
+   * model in {@link com.standardapplied.helios.anthropic.AnthropicModelId}; a model without
+   * programmatic tool calling takes it {@link #directOnly()}.
    */
   public static final String WEB_SEARCH_TYPE = "web_search_20260318";
 
@@ -52,7 +56,7 @@ public record ToolDefinition(
    * @return a fresh server-tool definition
    */
   public static ToolDefinition webSearch() {
-    return new ToolDefinition(WEB_SEARCH_TYPE, "web_search", null, null, null);
+    return new ToolDefinition(WEB_SEARCH_TYPE, "web_search", null, null, null, null);
   }
 
   /**
@@ -62,7 +66,7 @@ public record ToolDefinition(
    * @return a fresh server-tool definition
    */
   public static ToolDefinition webFetch() {
-    return new ToolDefinition(WEB_FETCH_TYPE, "web_fetch", null, null, null);
+    return new ToolDefinition(WEB_FETCH_TYPE, "web_fetch", null, null, null, null);
   }
 
   /**
@@ -73,6 +77,17 @@ public record ToolDefinition(
    */
   public ToolDefinition withCacheControl(CacheControl cacheControl) {
     Objects.requireNonNull(cacheControl, "cacheControl must not be null");
-    return new ToolDefinition(type, name, description, inputSchema, cacheControl);
+    return new ToolDefinition(type, name, description, inputSchema, cacheControl, allowedCallers);
+  }
+
+  /**
+   * Return a copy of this definition that Claude calls only directly ({@code allowed_callers:
+   * ["direct"]}), never from code execution.
+   *
+   * @return a copy with {@code allowed_callers} set to {@code direct}
+   */
+  public ToolDefinition directOnly() {
+    return new ToolDefinition(
+        type, name, description, inputSchema, cacheControl, List.of("direct"));
   }
 }

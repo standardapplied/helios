@@ -12,6 +12,8 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.ModelProvider;
 import com.standardapplied.helios.core.provider.StreamingModel;
+import java.time.Clock;
+import java.time.InstantSource;
 
 /**
  * ModelProvider implementation for Anthropic's Messages API.
@@ -37,6 +39,8 @@ import com.standardapplied.helios.core.provider.StreamingModel;
 public class AnthropicProvider implements ModelProvider {
 
   static final String PROVIDER_NAME = "anthropic";
+
+  private static final InstantSource SYSTEM_CLOCK = Clock.systemUTC();
 
   @Override
   public String name() {
@@ -89,7 +93,8 @@ public class AnthropicProvider implements ModelProvider {
       ModelConfig config,
       CachePolicy cachePolicy) {
     validate(wireModelId, config, cachePolicy);
-    var requests = new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy);
+    var requests =
+        new AnthropicRequestBuilder(wireModelId, knownModel, config, cachePolicy, SYSTEM_CLOCK);
     var httpClient = HttpClientFactory.create(config);
     var streams = new AnthropicStreams(config, httpClient, requests.betas());
     return StreamingModel.<StampedRequest>newBuilder()

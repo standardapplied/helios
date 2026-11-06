@@ -210,6 +210,18 @@ public enum AnthropicModelId {
   }
 
   /**
+   * Whether this model runs tools from code execution (programmatic tool calling), as web search
+   * does by default since {@code web_search_20260209}. The API rejects web search with a 400 on a
+   * model without it unless the tool allows only direct calls. An uncatalogued model is taken to
+   * have it.
+   *
+   * @return false for {@link #CLAUDE_HAIKU_4_5}, true otherwise
+   */
+  public boolean acceptsProgrammaticToolCalling() {
+    return this != CLAUDE_HAIKU_4_5;
+  }
+
+  /**
    * Whether this model binds each thinking block to its prefix — the system prompt, the tools and
    * every earlier message — so a block replayed after any of them changed is rejected ("Preserved
    * thinking", Oct 2026). A newly released binding model is catalogued here: an uncatalogued model

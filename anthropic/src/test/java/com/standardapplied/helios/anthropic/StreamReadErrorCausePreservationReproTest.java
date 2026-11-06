@@ -224,7 +224,7 @@ class StreamReadErrorCausePreservationReproTest {
     var config = ModelConfig.newBuilder().withApiKey("test-key").build();
     var opus = AnthropicModelId.CLAUDE_OPUS_5_5;
     var request =
-        new AnthropicRequestBuilder(opus.id(), opus, config, CachePolicy.shortLived())
+        AnthropicFixture.requests(opus, config)
             .build(List.of(Message.user("hi")), List.<Tool>of(), null);
     Exchange<StampedRequest> segments =
         ignored ->
