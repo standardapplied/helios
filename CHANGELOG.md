@@ -7,8 +7,7 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 ### Breaking
 
 **Helios supports Claude 5 and later.** The Claude 4.x models are dropped from the catalogue with
-the request rules only they used. Other entries in this section that name a Claude 4.x model
-describe 3.0 work this entry replaces.
+the request rules only they used.
 
 | Before | 3.0 |
 |---|---|
@@ -506,15 +505,10 @@ enum are removed with no bridge.
 - **`Display.PROGRESS`** sends `thinking.display: "updates"` on Fable 5 / 5.1, Mythos 5.1, Opus 5.5
   and Sonnet 5.5, and the Anthropic provider adds the `thinking-display-updates-2026-08-18` beta
   to the `anthropic-beta` header itself, after any beta the configured headers already name.
-- **Haiku 4.5's invented budgets are gone.** `MINIMAL`..`HIGH` sent `enabled` with 1024 / 4096 /
-  10000 / 32000 `budget_tokens` and raised `max_tokens` above the budget; Haiku 4.5 now accepts no
-  `Effort`.
 - **Sampling parameters are exact or throw too.** 2.x dropped `temperature` and `topP` without a
   word where the model would reject them. They are now sent as set, or rejected at construction
-  with the model, the parameter and the rule: Claude 4.7 and later (Opus 4.7 / 4.8 / 5 / 5.5,
-  Sonnet 5 / 5.5, Fable, Mythos) reject either whenever it is set; Opus 4.6 and Sonnet 4.6 reject
-  `temperature` alongside `Reasoning.Effort` and accept `topP` there only from 0.95 to 1; Opus 4.6,
-  Sonnet 4.6 and Haiku 4.5 reject the two together, which the API answers with a 400. On OpenAI,
+  with the model, the parameter and the rule: every catalogued Claude model rejects either
+  whenever it is set. On OpenAI,
   gpt-6-astra, gpt-6.1-sol and the o-series reject both always; gpt-6-sol, gpt-6-luna, the gpt-5.6
   family and gpt-5.5 accept them only with `Reasoning.Off` (effort `none`); the gpt-5.4 family
   accepts them unless an `Effort` is set (its default effort is `none`); gpt-4.1 and gpt-4o accept
@@ -535,14 +529,8 @@ What each 2.x level sent, and the `Reasoning` that sends the same now. `E(L, D)`
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
 | Opus 5, Sonnet 5 | `NONE` | `thinking.type=disabled` | `Off` |
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
-| Opus 4.7, 4.8, and an uncatalogued Claude id | `NONE` | no `thinking` | absent (or `Off` on 4.7 / 4.8; `Off` sends `disabled` on an uncatalogued id) |
+| An uncatalogued Claude id | `NONE` | no `thinking` | absent (`Off` sends `disabled`) |
 | | `MINIMAL`..`MAX` | as Opus 5.5 | as Opus 5.5 |
-| Opus 4.6, Sonnet 4.6 | `NONE` | no `thinking` | absent or `Off` |
-| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `MAX` | as Opus 5.5 | as Opus 5.5 |
-| | `XHIGH` | threw | throws |
-| Haiku 4.5 | `NONE` | no `thinking` | absent or `Off` |
-| | `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` | `enabled` with `budget_tokens` 1024 / 4096 / 10000 / 32000 | no equivalent: every `Effort` throws |
-| | `XHIGH`, `MAX` | threw | throws |
 | gpt-6-astra, gpt-6.1-sol | `NONE`, `MINIMAL`, `LOW` | `reasoning: {effort: low, summary: auto}` | `E(LOW, SUMMARY)` |
 | | `MEDIUM`..`MAX` | the same effort, `summary: auto` | `E(<same>, SUMMARY)` |
 | gpt-6-sol, gpt-6-luna, gpt-5.6 family | `NONE` | `reasoning: {effort: none, summary: auto}` | `Off` (sends `{effort: none}`, no summary) |
