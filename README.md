@@ -732,9 +732,9 @@ Descriptor confinement prevents symlink substitution from redirecting an operati
 
 `RuntimeServer.Builder` binds **`127.0.0.1` by default**. Every route runs one `Authenticator` before it reads a body or looks up a
 session, and a session answers only the `Principal` that created it: anyone else gets the same `404` as for an unknown id. A missing
-or invalid credential is `401` with the authenticator's `challenge()` in `WWW-Authenticate`, and an identity that expires or is
-revoked ends its open SSE streams and result polls with `401`. A non-loopback host needs an authenticator; `withoutAuthentication()`
-serves a loopback bind only. Details: `AgentHttpService` and `Authenticator` javadoc.
+or invalid credential is `401` with the authenticator's `challenge()` in `WWW-Authenticate`, and expiry or revocation closes open
+SSE streams without another event; pending result polls answer `401`. A non-loopback host needs an authenticator;
+`withoutAuthentication()` serves a loopback bind only. Details: `AgentHttpService` and `Authenticator` javadoc.
 
 Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
 
