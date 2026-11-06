@@ -143,11 +143,7 @@
                     <version>3.12.0</version>
                     <configuration>
                         <doclint>all</doclint>
-                        <failOnWarnings>false</failOnWarnings>
-                        <additionalOptions>
-                            <additionalOption>-Xmaxwarns</additionalOption>
-                            <additionalOption>100000</additionalOption>
-                        </additionalOptions>
+                        <failOnWarnings>true</failOnWarnings>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -390,6 +386,26 @@
                             <targetDirectory>${project.build.directory}/cpd</targetDirectory>
                             <excludeFromFailureFile combine.self="override"/>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  Documentation gate, documented in AGENTS.md: the doclint configuration in
+                  pluginManagement applies here, to javadoc:jar in CI and to the release, so a
+                  local verify fails on the warnings CI fails on. The no-fork goal reuses the
+                  sources this lifecycle already generated. architecture and the examples set
+                  maven.javadoc.skip.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>javadoc-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>javadoc-no-fork</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>
