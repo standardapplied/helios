@@ -121,7 +121,7 @@ var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_5_5.id()
 Each provider's model catalogue declares what a model accepts, and the request is exactly what
 was asked or `create` throws, naming the model, the rejected value and the accepted ones: `Off` on
 Opus 5.5 (which always thinks), `MAX` on gpt-5.5, `PROGRESS` on any model without progress notes,
-`temperature` on Claude 4.7 and later. Nothing is clamped or silently dropped. An Anthropic or
+`temperature` on any catalogued Claude model. Nothing is clamped or silently dropped. An Anthropic or
 OpenAI model id the catalogue does not know is sent whatever the provider can spell, and the API
 judges it.
 
