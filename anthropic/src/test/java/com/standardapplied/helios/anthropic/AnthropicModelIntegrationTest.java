@@ -482,6 +482,57 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
+  void haiku45SearchesTheWebThroughDirectCalls() {
+    var config = ModelConfig.newBuilder().withApiKey(apiKey).withWebSearch(true).build();
+    try (var haiku =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_HAIKU_4_5.id(), config)) {
+      Accepted.textReply(
+          haiku.chat(
+              List.of(
+                  Message.user(
+                      "Search the web for the latest stable release of Apache Maven and answer"
+                          + " in one line.")),
+              List.of()));
+    }
+  }
+
+  @Test
+  void theNextTurnRunsCodeInTheContainerTheLastTurnRanCodeIn() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(apiKey)
+            .withMaxOutputTokens(16_000)
+            .withWebSearch(true)
+            .build();
+    try (var sonnet =
+        new AnthropicProvider().create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config)) {
+      var history =
+          new ArrayList<>(
+              List.of(
+                  Message.user(
+                      "Search the web for the population of Lima, Peru, and from your code write"
+                          + " it to /tmp/lima.txt. Answer in one line.")));
+      var first = Accepted.textReply(sonnet.chat(history, List.of()));
+      var container = first.metadata().get(CodeContainer.ID_KEY);
+      assumeTrue(
+          container != null,
+          "claude-sonnet-5-5 ran no code on the first turn; CodeContainerTest covers the"
+              + " container a recorded turn ran code in");
+      history.add(first.toMessage());
+      history.add(
+          Message.user("Without searching, print /tmp/lima.txt from code. Answer in one line."));
+
+      var second = Accepted.textReply(sonnet.chat(history, List.of()));
+
+      assumeTrue(
+          second.metadata().containsKey(CodeContainer.ID_KEY),
+          "claude-sonnet-5-5 ran no code on the second turn; CodeContainerTest covers the"
+              + " container the next request sends");
+      assertEquals(container, second.metadata().get(CodeContainer.ID_KEY));
+    }
+  }
+
+  @Test
   void datedSnapshotIdKeepsItsFamilyRequestShape() {
     try (var haiku = modelFor("claude-haiku-4-5-20251001", new Reasoning.Off())) {
       Accepted.textReply(

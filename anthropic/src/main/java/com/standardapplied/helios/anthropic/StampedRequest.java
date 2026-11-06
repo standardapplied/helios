@@ -15,8 +15,11 @@ import java.util.List;
  */
 record StampedRequest(MessagesRequest body, String promptStamp) {
 
-  /** The {@code pause_turn} continuation of this request, under the same stamp. */
-  StampedRequest continuationWith(List<MessageEntry> messages) {
-    return new StampedRequest(body.continuationWith(messages), promptStamp);
+  /**
+   * The {@code pause_turn} continuation of this request in {@code container}, else this request's,
+   * under the same stamp.
+   */
+  StampedRequest continuationWith(List<MessageEntry> messages, String container) {
+    return new StampedRequest(body.continuationWith(messages, container), promptStamp);
   }
 }

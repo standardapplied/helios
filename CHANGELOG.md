@@ -1480,6 +1480,14 @@ price table asked for a model it does not hold, both used to count the call as f
 - **A web search run from code execution broke the next request.** Helios blanked its `input` and
   dropped its `caller` when replaying it, so the API rejected the turn with a 400 and every later
   send failed.
+- **Web search failed on Claude Haiku 4.5.** `web_search_20260318` runs searches from code
+  execution by default, which Haiku 4.5 does not support, so the API refused every request with a
+  400. Helios now sends `allowed_callers: ["direct"]` on that model, declared by
+  `AnthropicModelId.acceptsProgrammaticToolCalling()`.
+- **Files that web search code wrote were lost after the turn.** Each request ran in a new code
+  execution container. A turn now records the container it ran code in, and the request after it
+  sends the container back: always on a `pause_turn` continuation, and on the next turn while
+  the container's `expires_at` has not passed. Only requests with web search on send one.
 - **`ToolChoice.required(...)` did not force a tool call on Gemini.** Helios sent the names as
   `allowed_tools` mode `validated`, which lets Gemini reply with text only. It now sends mode `any`
   with the names, so the model must call one of them.
