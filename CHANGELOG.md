@@ -315,7 +315,7 @@ in main code.
 | `ModelChunk.MessageStop(stopReason, usage)` | `MessageStop(stopReason, usage, Map.of(), List.of())` |
 | `AnthropicModelId.usesAdaptiveThinking()` | `thinkingShape() != ThinkingShape.LEGACY_BUDGET` |
 | Anthropic metadata keys `anthropic.thinking` and `anthropic.thinkingSignature`, and the decode fallback that read them | `anthropic.thinkingBlocks`, a JSON array of `{"text", "signature"}` with one entry per thinking block |
-| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null)` |
+| `anthropic.api.ToolDefinition(name, description, inputSchema)` | `ToolDefinition(null, name, description, inputSchema, null, null)` |
 | `OpenAIModelId.supportsXhighEffort()` | `effortSupport() != EffortSupport.STANDARD` |
 | `ResultMessage.Success(sessionId, result, usage, cost, duration)` | `Success(sessionId, result, usage, cost, duration, List.of())` |
 | `ResultMessage.Refusal(sessionId, refusalText, usage, cost, duration)` | `Refusal(sessionId, refusalText, usage, cost, duration, null)` |
