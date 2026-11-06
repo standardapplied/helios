@@ -267,25 +267,53 @@ public record SessionLimits(
       return this;
     }
 
-    /** Clear any previously-set budget. */
+    /**
+     * Clears any budget set before, so the run has no spend ceiling, which is the default and needs
+     * no cost calculator.
+     *
+     * @return this builder
+     */
     public Builder withoutMaxBudget() {
       this.maxBudgetMicroUsd = OptionalLong.empty();
       return this;
     }
 
-    /** Set the wall-clock ceiling. */
+    /**
+     * Sets how long each run may take, from its start to its terminal state, before it ends in
+     * {@link ResultMessage.ErrorMaxWallClock}. Defaults to 1 hour; checked by {@link #build()}.
+     *
+     * @param maxWallClock the ceiling; non-null, strictly positive and at most {@code
+     *     Long.MAX_VALUE} nanoseconds
+     * @return this builder
+     */
     public Builder withMaxWallClock(Duration maxWallClock) {
       this.maxWallClock = maxWallClock;
       return this;
     }
 
-    /** Set the default per-tool timeout. */
+    /**
+     * Sets how long each tool call may run, from its dispatch, before its token is cancelled and
+     * its thread interrupted. Defaults to 2 minutes; checked by {@link #build()}.
+     *
+     * @param toolTimeoutDefault the timeout; non-null, strictly positive and at most {@code
+     *     Long.MAX_VALUE} nanoseconds
+     * @return this builder
+     */
     public Builder withToolTimeoutDefault(Duration toolTimeoutDefault) {
       this.toolTimeoutDefault = toolTimeoutDefault;
       return this;
     }
 
-    /** Set how long anything the session cancels is given to stop. */
+    /**
+     * Sets how long anything the session cancels is given to stop: a timed-out tool call before it
+     * is {@link com.standardapplied.helios.core.tool.ToolOutcome.Unknown}, a run's end, the whole
+     * of the session's close, and a closed model stream's reader. Defaults to 5 seconds; checked by
+     * {@link #build()}.
+     *
+     * @param stopGrace the grace; non-null, strictly positive and at most {@code Long.MAX_VALUE}
+     *     nanoseconds
+     * @return this builder
+     */
     public Builder withStopGrace(Duration stopGrace) {
       this.stopGrace = stopGrace;
       return this;
@@ -346,9 +374,14 @@ public record SessionLimits(
     }
 
     /**
-     * Build the immutable record.
+     * Builds the immutable record, validating every value set; a builder that was never changed
+     * builds limits equal to {@link #defaults()}.
      *
      * @return the limits
+     * @throws NullPointerException if a duration, the budget optional or the stream-retry policy is
+     *     null
+     * @throws IllegalArgumentException if a value breaks the contract its component states on
+     *     {@link SessionLimits}
      */
     public SessionLimits build() {
       return new SessionLimits(

@@ -495,11 +495,18 @@ public record WorkspaceRoot(Path root, boolean confineSymlinks) implements PathS
     return rel.isEmpty() ? "." : rel;
   }
 
-  /** Thrown by {@link #resolveSafe(String)} when a request fails the path-jail check. */
+  /**
+   * Thrown by {@link #resolveSafe(String)}, {@link #canonical(String)} and {@link
+   * #resolveCanonical(String)} when a requested path fails the path-jail check: it is blank or
+   * malformed, escapes the root lexically or through a symlink, names the memory store, has no
+   * parent directory, or no longer resolves to the key it was authorised as.
+   */
   public static final class WorkspaceEscapeException extends RuntimeException {
 
     /**
-     * @param message human-readable reason
+     * Creates the exception for a path the jail refused.
+     *
+     * @param message why the path was refused, naming the path where it has one
      */
     public WorkspaceEscapeException(String message) {
       super(message);

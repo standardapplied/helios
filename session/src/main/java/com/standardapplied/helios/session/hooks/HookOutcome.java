@@ -163,6 +163,13 @@ public sealed interface HookOutcome
    */
   record MutateArgs(Map<String, Object> args) implements PreToolUse {
 
+    /**
+     * Validates {@code args} and replaces it with its deep, unmodifiable snapshot.
+     *
+     * @throws NullPointerException if {@code args} is null
+     * @throws IllegalArgumentException if {@code args} holds anything but JSON values, holds
+     *     itself, or exceeds a {@link JsonSnapshot} limit
+     */
     public MutateArgs {
       Objects.requireNonNull(args, "args must not be null");
       args = JsonSnapshot.ofObject("args", args);
@@ -176,6 +183,11 @@ public sealed interface HookOutcome
    */
   record MutateHistory(List<Message> history) implements PreModelTurn {
 
+    /**
+     * Copies {@code history}.
+     *
+     * @throws NullPointerException if {@code history} or any of its messages is null
+     */
     public MutateHistory {
       Objects.requireNonNull(history, "history must not be null");
       history = List.copyOf(history);
@@ -189,6 +201,12 @@ public sealed interface HookOutcome
    */
   record MutateText(String text) implements OnUserMessage {
 
+    /**
+     * Validates the replacement text.
+     *
+     * @throws NullPointerException if {@code text} is null
+     * @throws IllegalArgumentException if {@code text} is blank
+     */
     public MutateText {
       Objects.requireNonNull(text, "text must not be null");
       if (Strings.isBlank(text)) {
@@ -204,6 +222,11 @@ public sealed interface HookOutcome
    */
   record MutateResult(String output) implements PostToolUse {
 
+    /**
+     * Validates the replacement output.
+     *
+     * @throws NullPointerException if {@code output} is null
+     */
     public MutateResult {
       Objects.requireNonNull(output, "output must not be null");
     }
@@ -216,6 +239,12 @@ public sealed interface HookOutcome
    */
   record Block(String reason) implements OnUserMessage, PreToolUse {
 
+    /**
+     * Validates the reason.
+     *
+     * @throws NullPointerException if {@code reason} is null
+     * @throws IllegalArgumentException if {@code reason} is blank
+     */
     public Block {
       Objects.requireNonNull(reason, "reason must not be null");
       if (Strings.isBlank(reason)) {
@@ -232,6 +261,12 @@ public sealed interface HookOutcome
   record Inject(String userMessage)
       implements PreModelTurn, PostModelTurn, PreStop, PreToolUse, PostToolUse {
 
+    /**
+     * Validates the message text.
+     *
+     * @throws NullPointerException if {@code userMessage} is null
+     * @throws IllegalArgumentException if {@code userMessage} is blank
+     */
     public Inject {
       Objects.requireNonNull(userMessage, "userMessage must not be null");
       if (Strings.isBlank(userMessage)) {
@@ -248,6 +283,12 @@ public sealed interface HookOutcome
   record Stop(String result)
       implements OnUserMessage, PreModelTurn, PostModelTurn, PreStop, PreToolUse, PostToolUse {
 
+    /**
+     * Validates the result text.
+     *
+     * @throws NullPointerException if {@code result} is null
+     * @throws IllegalArgumentException if {@code result} is blank
+     */
     public Stop {
       Objects.requireNonNull(result, "result must not be null");
       if (Strings.isBlank(result)) {
