@@ -23,6 +23,11 @@ import java.util.Optional;
  * the file's siblings as asks instead, or, where the mode already asks for the tool's category,
  * drop the broad ask and keep the allow.
  *
+ * <p>A rule names its tool exactly, case included. A deny or ask rule must name a tool the session
+ * has, or one whose content a registered walk returns ({@code Read}, for {@code Grep}): one naming
+ * no such tool would never match, so it fails {@code AgentSession.open}; an allow rule may name any
+ * tool.
+ *
  * <p>A path tool's rule matches its canonical path ({@code .} or {@code ./a/b} in a workspace,
  * {@code /memories/} or {@code /memories/a/b} in memory), however the model spelled it; see {@link
  * PermissionRule} for the glob dialect. A walking tool ({@code Glob}, {@code Grep}, {@code LS}, a
@@ -94,12 +99,10 @@ public record Permission(
     return RuleMatcher.firstMatch(key, rules)
         .map(
             rule -> {
-              var pattern = rule.argPattern().map(glob -> "(" + glob + ")").orElse("");
               var reason =
                   effect.name().toLowerCase(Locale.ROOT)
                       + " rule "
-                      + rule.toolName()
-                      + pattern
+                      + rule.describe()
                       + " matched "
                       + key.describe();
               return new PermissionDecision(effect, reason, Optional.of(rule));

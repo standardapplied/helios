@@ -36,9 +36,11 @@ import java.util.stream.Stream;
  * characters (see {@link ApprovalRequest#arguments}); see {@link ToolApprover} for how its answer
  * is read.
  *
- * <p>Building an evaluator checks every rule's glob against the {@link PathSpace} of the tool it
- * names, or, for a tool not registered, of every walk that returns that tool's content: a rule
- * whose glob can never match a canonical path there is a configuration error.
+ * <p>Building an evaluator checks that every deny and ask rule names a registered tool or a tool
+ * whose content a registered walk returns, since any other such rule never matches and protects
+ * nothing; and it checks every rule's glob against the {@link PathSpace} of the tool it names, or,
+ * for a tool not registered, of every walk that returns that tool's content: a rule whose glob can
+ * never match a canonical path there is a configuration error.
  *
  * <h2>Thread-safety</h2>
  *
@@ -56,11 +58,14 @@ public final class DefaultPermissionEvaluator {
   /**
    * Build the evaluator of {@code permission} over {@code tools}.
    *
-   * @throws IllegalArgumentException if a rule has a glob that no canonical path of a space it is
-   *     matched in can match
+   * @throws IllegalArgumentException if a deny or ask rule names neither a tool of {@code tools}
+   *     nor a tool whose content a registered walk returns, or if a rule has a glob that no
+   *     canonical path of a space it is matched in can match
    */
   public DefaultPermissionEvaluator(
       Permission permission, ToolRegistry tools, ToolApprover approver, SecretRegistry secrets) {
+    permission.deny().forEach(rule -> requireNamed(tools, "deny", rule));
+    permission.ask().forEach(rule -> requireNamed(tools, "ask", rule));
     Stream.of(permission.deny(), permission.allow(), permission.ask())
         .flatMap(List::stream)
         .forEach(rule -> requireMatchable(tools, rule));
@@ -138,6 +143,19 @@ public final class DefaultPermissionEvaluator {
   }
 
   /**
+   * Refuse a deny or ask rule that names neither a registered tool nor one whose content a
+   * registered walk returns: it would never match, so the protection it states would not exist.
+   */
+  private static void requireNamed(ToolRegistry tools, String list, PermissionRule rule) {
+    if (tools.get(rule.toolName()).isEmpty()
+        && spacesOf(tools, rule.toolName()).findAny().isEmpty()) {
+      var names = tools.bindings().stream().map(ToolBinding::name).sorted().toList();
+      throw new IllegalArgumentException(
+          list + " rule " + rule.describe() + " names no tool of this session; tools: " + names);
+    }
+  }
+
+  /**
    * Refuse a rule whose glob no canonical path can match in a space the rule is matched in: the
    * registered tool's own, or, for a tool not registered, that of every walk that returns the
    * tool's content.
@@ -152,10 +170,8 @@ public final class DefaultPermissionEvaluator {
     if (refusing.isPresent()) {
       throw new IllegalArgumentException(
           "rule "
-              + rule.toolName()
-              + "("
-              + glob
-              + ") can never match: "
+              + rule.describe()
+              + " can never match: "
               + rule.toolName()
               + " keys are canonical paths such as "
               + refusing.orElseThrow().example());

@@ -4,6 +4,7 @@
  */
 package com.standardapplied.helios.session.loop;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +18,8 @@ import com.standardapplied.helios.session.ask.AskUserQuestionOption;
 import com.standardapplied.helios.session.ask.AskUserQuestionRequest;
 import com.standardapplied.helios.session.ask.AskUserQuestionResponse;
 import com.standardapplied.helios.session.ask.QuestionGateway;
+import com.standardapplied.helios.session.files.GrepTool;
+import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
@@ -25,12 +28,18 @@ import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 final class DefaultPermissionEvaluatorTest {
@@ -290,6 +299,103 @@ final class DefaultPermissionEvaluatorTest {
             Permission.lockedDown(),
             tools(binding("Read", ToolCategory.READ), binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(PermissionEffect.ALLOW, e.authorize(call("Execute")).effect());
+    assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
+  }
+
+  // ── rules naming no tool ─────────────────────────────────────────────────
+
+  /** A policy with {@code rule} as its only rule, in the list {@code effect} names. */
+  private static Permission only(PermissionEffect effect, PermissionRule rule) {
+    var rules = List.of(rule);
+    return switch (effect) {
+      case ALLOW -> rules(PermissionMode.DEFAULT, rules, List.of(), List.of());
+      case ASK -> rules(PermissionMode.DEFAULT, List.of(), rules, List.of());
+      case DENY -> rules(PermissionMode.DEFAULT, List.of(), List.of(), rules);
+    };
+  }
+
+  static Stream<Arguments> misspelledExecuteRules() {
+    return Stream.of(PermissionEffect.DENY, PermissionEffect.ASK)
+        .flatMap(
+            effect ->
+                Stream.of("Exectue", "execute", "\u0415\u0445ecute")
+                    .map(name -> Arguments.of(effect, name)));
+  }
+
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("misspelledExecuteRules")
+  void aDenyOrAskRuleNamingNoRegisteredToolFailsTheBuildListingTheToolsSorted(
+      PermissionEffect effect, String name) {
+    var registry =
+        tools(
+            binding("Write", ToolCategory.WRITE),
+            binding("Execute", ToolCategory.EXECUTION),
+            binding("AskUserQuestion", ToolCategory.CONTROL));
+
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> evaluator(only(effect, PermissionRule.of(name, "BASH/rm*")), registry));
+
+    assertEquals(
+        effect.name().toLowerCase(Locale.ROOT)
+            + " rule "
+            + name
+            + "(BASH/rm*) names no tool of this session; tools: [AskUserQuestion, Execute, Write]",
+        thrown.getMessage());
+  }
+
+  @Test
+  void aRuleWithoutAGlobIsNamedByItsToolAlone() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                evaluator(
+                    only(PermissionEffect.DENY, PermissionRule.any("Exectue")),
+                    tools(binding("Execute", ToolCategory.EXECUTION))));
+
+    assertEquals(
+        "deny rule Exectue names no tool of this session; tools: [Execute]", thrown.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"DENY", "ASK"})
+  void aReadRuleBuildsWhereGrepReturnsReadsContent(PermissionEffect effect, @TempDir Path root) {
+    var grep = tools(GrepTool.binding(new WorkspaceRoot(root, false)));
+
+    assertDoesNotThrow(
+        () -> evaluator(only(effect, PermissionRule.of("Read", "./secrets/**")), grep));
+  }
+
+  @Test
+  void aReadRuleFailsTheBuildWhereNeitherReadNorGrepIsRegistered() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                evaluator(
+                    only(PermissionEffect.DENY, PermissionRule.of("Read", "./secrets/**")),
+                    tools(binding("Execute", ToolCategory.EXECUTION))));
+
+    assertEquals(
+        "deny rule Read(./secrets/**) names no tool of this session; tools: [Execute]",
+        thrown.getMessage());
+  }
+
+  @Test
+  void anAllowRuleNamingNoRegisteredToolBuilds() {
+    assertDoesNotThrow(
+        () ->
+            evaluator(
+                only(PermissionEffect.ALLOW, PermissionRule.any("Exectue")),
+                tools(binding("Execute", ToolCategory.EXECUTION))));
+  }
+
+  @Test
+  void lockedDownBuildsOverARegistryWithoutExecute() {
+    var e = evaluator(Permission.lockedDown(), tools(binding("Read", ToolCategory.READ)));
+
     assertEquals(PermissionEffect.DENY, e.authorize(call("Read")).effect());
   }
 
