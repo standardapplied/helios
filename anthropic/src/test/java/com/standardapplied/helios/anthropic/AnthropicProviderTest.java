@@ -56,7 +56,10 @@ class AnthropicProviderTest {
         "claude-sonnet-4-6",
         "claude-haiku-4-5-20251001",
         "claude-3-5-sonnet-20241022",
-        "claude-2.1"
+        "claude-2.1",
+        "claude-v1",
+        "claude-v1.3",
+        "claude-instant-v1.0"
       })
   void aClaudeIdBeforeGeneration5IsRefused(String id) {
     var config =

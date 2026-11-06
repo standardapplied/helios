@@ -143,7 +143,7 @@ public enum AnthropicModelId {
   private static final Pattern DATED_SNAPSHOT = Pattern.compile("(.+)-\\d{8}");
 
   private static final Pattern BEFORE_CLAUDE_5 =
-      Pattern.compile(CLAUDE_ID_PREFIX + "-(?:[a-z]+-)*[1-4](?!\\d)");
+      Pattern.compile(CLAUDE_ID_PREFIX + "-(?:[a-z]+-)*v?[1-4](?!\\d)");
 
   private final String id;
   private final int contextWindow;
@@ -297,9 +297,10 @@ public enum AnthropicModelId {
 
   /**
    * Checks whether the given model ID names a Claude model of a generation before 5, which Helios
-   * does not support: a {@value #CLAUDE_ID_PREFIX} ID whose first number, after any name words, is
-   * 1 to 4 ({@code claude-sonnet-4-6}, {@code claude-haiku-4-5-20251001}, {@code
-   * claude-3-5-sonnet-20241022}, {@code claude-2.1}).
+   * does not support: a {@value #CLAUDE_ID_PREFIX} ID whose first number, after any name words and
+   * an optional legacy {@code v}, is 1 to 4 ({@code claude-sonnet-4-6}, {@code
+   * claude-haiku-4-5-20251001}, {@code claude-3-5-sonnet-20241022}, {@code claude-2.1}, {@code
+   * claude-instant-v1.0}).
    *
    * @param id the model identifier string
    * @return true if {@code id} names a Claude model before generation 5
