@@ -21,6 +21,7 @@ public final class SessionCapacityException extends IllegalStateException {
     SERVER
   }
 
+  /** Whose cap refused the session; never null. */
   private final Scope scope;
 
   SessionCapacityException(Scope scope, String message) {

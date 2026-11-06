@@ -23,6 +23,13 @@ import java.util.List;
 public record FieldProvenance(
     String field, List<Source> sources, String reasoning, Confidence confidence) {
 
+  /**
+   * Canonical constructor. Copies {@code sources} into an unmodifiable list; a {@code null} list
+   * becomes the empty list.
+   *
+   * @throws IllegalArgumentException if {@code field} or {@code reasoning} is null or blank, if
+   *     {@code confidence} is null, or if {@code sources} contains a null element
+   */
   public FieldProvenance {
     if (Strings.isBlank(field)) {
       throw new IllegalArgumentException("field name must not be blank");

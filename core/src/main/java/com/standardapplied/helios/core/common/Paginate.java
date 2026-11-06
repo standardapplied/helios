@@ -31,12 +31,20 @@ public record Paginate(int pageNumber, int pageSize) {
     return safePageSize() + 1;
   }
 
-  /** Returns a safe page number (minimum 1). */
+  /**
+   * Returns the page number to use: {@code pageNumber}, or 1 when it is zero or negative.
+   *
+   * @return the 1-based page number, at least 1
+   */
   public int safePageNumber() {
     return pageNumber <= 0 ? 1 : pageNumber;
   }
 
-  /** Returns a safe page size (minimum 1, maximum 500). */
+  /**
+   * Returns the page size to use: {@code pageSize} when it is between 1 and 500, otherwise 500.
+   *
+   * @return the page size, from 1 to 500
+   */
   public int safePageSize() {
     if (pageSize <= 0 || pageSize > 500) {
       return 500;
@@ -44,7 +52,11 @@ public record Paginate(int pageNumber, int pageSize) {
     return pageSize;
   }
 
-  /** Default pagination: page 1, size 50. */
+  /**
+   * Returns the default pagination.
+   *
+   * @return page 1 with 50 items per page
+   */
   public static Paginate of() {
     return new Paginate(1, 50);
   }
