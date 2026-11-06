@@ -28,7 +28,11 @@ public record ProcessOutcome(
     boolean stderrTruncated,
     Duration elapsed) {
 
-  /** Whether stdout or stderr exceeded the cap or was still open after the grace. */
+  /**
+   * Whether stdout or stderr exceeded the cap or was still open after the grace.
+   *
+   * @return {@code true} if either {@code stdoutTruncated} or {@code stderrTruncated} is set
+   */
   public boolean truncated() {
     return stdoutTruncated || stderrTruncated;
   }

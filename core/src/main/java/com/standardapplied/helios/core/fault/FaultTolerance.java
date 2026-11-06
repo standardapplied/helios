@@ -42,6 +42,8 @@ import java.util.concurrent.TimeoutException;
  *
  * String result = ft.execute(() -> callExternalService());
  * }</pre>
+ *
+ * <p>Immutable and thread-safe; any state lives in the circuit breaker it shares.
  */
 public class FaultTolerance {
 
@@ -80,6 +82,12 @@ public class FaultTolerance {
     this.executor = executor;
   }
 
+  /**
+   * Creates a builder with nothing configured: no retry policy, no circuit breaker and no timeout,
+   * which builds an envelope that calls the operation directly, like {@link #PASSTHROUGH}.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -162,6 +170,9 @@ public class FaultTolerance {
    *
    * <p>For an operation that must not run twice, such as a call with side effects: a replay would
    * repeat the effect, while the circuit breaker and timeout still apply.
+   *
+   * @return an envelope with the same circuit breaker, timeout and executor and no retry policy, or
+   *     {@code this} when there is no retry policy
    */
   public FaultTolerance withoutRetry() {
     if (retryPolicy == null) {
@@ -239,6 +250,7 @@ public class FaultTolerance {
     }
   }
 
+  /** Builder for {@link FaultTolerance}; not thread-safe. Every part is optional. */
   public static class Builder {
     private RetryPolicy retryPolicy;
     private CircuitBreaker circuitBreaker;
@@ -246,21 +258,49 @@ public class FaultTolerance {
 
     private Builder() {}
 
+    /**
+     * Sets the retry policy each attempt runs under, inside the circuit breaker. Unset by default.
+     *
+     * @param retryPolicy the retry policy; {@code null} for no retry
+     * @return this builder
+     */
     public Builder withRetry(RetryPolicy retryPolicy) {
       this.retryPolicy = retryPolicy;
       return this;
     }
 
+    /**
+     * Sets the circuit breaker the whole retried operation runs through, so a call that exhausts
+     * its retries counts as one failure. Unset by default. Share one breaker between envelopes that
+     * protect the same service.
+     *
+     * @param circuitBreaker the circuit breaker; {@code null} for none
+     * @return this builder
+     */
     public Builder withCircuitBreaker(CircuitBreaker circuitBreaker) {
       this.circuitBreaker = circuitBreaker;
       return this;
     }
 
+    /**
+     * Sets the time limit on the whole execution, retries and backoff included. The operation then
+     * runs on a virtual thread, which is interrupted when the limit passes. Unset by default.
+     *
+     * @param operationTimeout the limit; {@code null} for none, otherwise positive by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withOperationTimeout(Duration operationTimeout) {
       this.operationTimeout = operationTimeout;
       return this;
     }
 
+    /**
+     * Builds the envelope.
+     *
+     * @return the fault tolerance envelope
+     * @throws IllegalStateException if the operation timeout is set and is zero or negative
+     */
     public FaultTolerance build() {
       if (operationTimeout != null
           && (operationTimeout.isNegative() || operationTimeout.isZero())) {

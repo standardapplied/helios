@@ -12,6 +12,10 @@ package com.standardapplied.helios.core.fault;
  */
 public class RetryExhaustedException extends Exception {
 
+  /**
+   * The attempt count given at construction; {@link RetryPolicy} passes its {@code maxAttempts},
+   * also when a failure it does not retry ended the run sooner.
+   */
   private final int attempts;
 
   /**
@@ -31,9 +35,10 @@ public class RetryExhaustedException extends Exception {
   }
 
   /**
-   * Get the number of attempts made before giving up.
+   * Get the number of attempts the policy allowed before giving up.
    *
-   * @return the number of attempts
+   * @return the attempt count given at construction, which {@link RetryPolicy} sets to its {@code
+   *     maxAttempts} even when a failure it does not retry ended the run sooner
    */
   public int attempts() {
     return attempts;

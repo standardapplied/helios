@@ -56,6 +56,11 @@ public final class ScriptedModel implements Model {
     this.script = new Script(turns);
   }
 
+  /**
+   * Creates a builder with the id {@code scripted} and no turns scripted.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -126,6 +131,9 @@ public final class ScriptedModel implements Model {
   /**
    * Every invocation's message history, in call order. Each entry is an immutable snapshot of the
    * messages passed to that call.
+   *
+   * @return an immutable list with one entry per call made so far, including a call that found the
+   *     script exhausted
    */
   public List<List<Message>> calls() {
     return script.calls().stream().map(Call::messages).toList();
@@ -134,6 +142,8 @@ public final class ScriptedModel implements Model {
   /**
    * Every invocation's output schema, in call order: the schema a structured-output call carried,
    * or empty for a call without one.
+   *
+   * @return an immutable list with one entry per call made so far, aligned with {@link #calls()}
    */
   public List<Optional<OutputSchema<?>>> outputSchemas() {
     return script.calls().stream().map(Call::outputSchema).toList();
@@ -202,6 +212,14 @@ public final class ScriptedModel implements Model {
 
     private Builder() {}
 
+    /**
+     * Sets the model id {@link ScriptedModel#id()} reports, for a test that checks which model a
+     * component called or that prices by id. Defaults to {@code scripted}.
+     *
+     * @param id the model id; non-null
+     * @return this builder for chaining
+     * @throws NullPointerException if {@code id} is null
+     */
     public Builder withId(String id) {
       this.id = Objects.requireNonNull(id, "id must not be null");
       return this;
@@ -299,6 +317,13 @@ public final class ScriptedModel implements Model {
       return this;
     }
 
+    /**
+     * Builds a model that replays the turns scripted so far, in order. An empty script is allowed:
+     * its first call fails with {@link IllegalStateException}. Turns scripted after this call do
+     * not reach the built model.
+     *
+     * @return the scripted model
+     */
     public ScriptedModel build() {
       return new ScriptedModel(id, turns);
     }

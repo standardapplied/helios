@@ -28,6 +28,14 @@ import java.util.Map;
  */
 public record Provenanced<T>(T output, List<FieldProvenance> provenance) {
 
+  /**
+   * Canonical constructor. Copies {@code provenance} into an unmodifiable list; a {@code null} list
+   * becomes the empty list. Field correspondence between {@code output} and {@code provenance} is
+   * not checked here.
+   *
+   * @throws IllegalArgumentException if {@code output} is null or {@code provenance} contains a
+   *     null element
+   */
   public Provenanced {
     if (output == null) {
       throw new IllegalArgumentException("output must not be null");

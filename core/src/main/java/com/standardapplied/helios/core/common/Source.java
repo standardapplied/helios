@@ -34,6 +34,14 @@ public record Source(String title, String url, List<String> excerpts) {
    */
   public static final int DEFAULT_EXCERPT_MAX_CHARS = 2000;
 
+  /**
+   * Canonical constructor. Copies {@code excerpts} into an unmodifiable list; a {@code null} list
+   * becomes the empty list. Excerpt length is not checked here; {@link ProvenanceValidator} does
+   * that.
+   *
+   * @throws IllegalArgumentException if {@code url} is null or blank, or {@code excerpts} contains
+   *     a null element
+   */
   public Source {
     if (Strings.isBlank(url)) {
       throw new IllegalArgumentException("source url must not be blank");

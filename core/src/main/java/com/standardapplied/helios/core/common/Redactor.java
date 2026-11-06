@@ -54,6 +54,8 @@ public final class Redactor {
    *
    * @param secrets the secrets by name, in registration order; null or empty gives a redactor that
    *     changes nothing
+   * @return a redactor that replaces each value with the marker of the first name registered for
+   *     it; the shared empty redactor when {@code secrets} is null or empty
    * @throws IllegalArgumentException if a value is null, empty or not pure ASCII
    * @throws NullPointerException if a name is null
    */

@@ -25,13 +25,22 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>OPEN: Circuit is tripped, calls fail immediately without executing
  *   <li>HALF_OPEN: Testing recovery, limited calls allowed through
  * </ul>
+ *
+ * <p>Thread-safe: one instance is shared by every caller of the protected service. In the {@code
+ * HALF_OPEN} state one probe runs at a time, and a call arriving while a probe runs fails with
+ * {@link CircuitBreakerOpenException}.
  */
 public class CircuitBreaker {
 
   /** Circuit breaker states. */
   public enum State {
+    /**
+     * Calls run; consecutive failures are counted, and reaching the threshold opens the circuit.
+     */
     CLOSED,
+    /** Calls fail at once with {@link CircuitBreakerOpenException} until the half-open delay. */
     OPEN,
+    /** One probe call at a time runs; enough successes close the circuit, a failure reopens it. */
     HALF_OPEN
   }
 
@@ -54,6 +63,12 @@ public class CircuitBreaker {
     this.clock = clock;
   }
 
+  /**
+   * Creates a builder with the defaults: failure threshold 5, success threshold 1, half-open after
+   * 30 seconds, and the system UTC clock.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -228,6 +243,10 @@ public class CircuitBreaker {
     state.set(State.OPEN);
   }
 
+  /**
+   * Builder for {@link CircuitBreaker}; not thread-safe. Every setting is validated by {@link
+   * #build()}.
+   */
   public static class Builder {
     private int failureThreshold = 5;
     private int successThreshold = 1;
@@ -236,16 +255,40 @@ public class CircuitBreaker {
 
     private Builder() {}
 
+    /**
+     * Sets how many consecutive failures in the {@link State#CLOSED} state open the circuit; a
+     * success resets the count. Defaults to 5.
+     *
+     * @param failureThreshold the consecutive failures that trip the circuit; at least 1 by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withFailureThreshold(int failureThreshold) {
       this.failureThreshold = failureThreshold;
       return this;
     }
 
+    /**
+     * Sets how many successful probe calls in the {@link State#HALF_OPEN} state close the circuit.
+     * Defaults to 1.
+     *
+     * @param successThreshold the probe successes that close the circuit; at least 1 by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withSuccessThreshold(int successThreshold) {
       this.successThreshold = successThreshold;
       return this;
     }
 
+    /**
+     * Sets how long the circuit stays {@link State#OPEN} after its last failure before it lets a
+     * probe through as {@link State#HALF_OPEN}; the circuit moves once the clock is strictly past
+     * that instant. Defaults to 30 seconds.
+     *
+     * @param halfOpenAfter the delay; non-null and positive by {@link #build()}
+     * @return this builder
+     */
     public Builder withHalfOpenAfter(Duration halfOpenAfter) {
       this.halfOpenAfter = halfOpenAfter;
       return this;
@@ -265,6 +308,13 @@ public class CircuitBreaker {
       return this;
     }
 
+    /**
+     * Builds a circuit breaker in the {@link State#CLOSED} state.
+     *
+     * @return the circuit breaker
+     * @throws IllegalStateException if either threshold is below 1, or the half-open delay is null,
+     *     zero or negative
+     */
     public CircuitBreaker build() {
       if (failureThreshold < 1) {
         throw new IllegalStateException("failureThreshold must be >= 1");

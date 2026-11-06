@@ -19,6 +19,12 @@ import java.util.Objects;
  */
 public record RedactionResult(String text, Map<String, Integer> counts) {
 
+  /**
+   * Canonical constructor. Copies {@code counts} into an unmodifiable map that keeps its iteration
+   * order.
+   *
+   * @throws NullPointerException if {@code text} or {@code counts} is null
+   */
   public RedactionResult {
     Objects.requireNonNull(text, "text must not be null");
     counts = Collections.unmodifiableMap(new LinkedHashMap<>(counts));

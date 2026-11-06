@@ -55,17 +55,34 @@ public final class Strings {
     return result;
   }
 
-  /** Checks if a string is null or empty. */
+  /**
+   * Checks if a string is null or empty.
+   *
+   * @param s the string; may be null
+   * @return {@code true} if {@code s} is null or has no characters
+   */
   public static boolean isEmpty(String s) {
     return s == null || s.isEmpty();
   }
 
-  /** Checks if a string is null, empty, or contains only whitespace. */
+  /**
+   * Checks if a string is null, empty, or contains only whitespace.
+   *
+   * @param s the string; may be null
+   * @return {@code true} if {@code s} is null, empty, or only {@link Character#isWhitespace}
+   *     characters
+   */
   public static boolean isBlank(String s) {
     return s == null || s.isBlank();
   }
 
-  /** Returns the string if not blank, otherwise returns the default value. */
+  /**
+   * Returns the string if not blank, otherwise returns the default value.
+   *
+   * @param s the string; may be null
+   * @param defaultValue returned when {@code s} is blank; may be null
+   * @return {@code s} when it is not {@link #isBlank blank}, else {@code defaultValue}
+   */
   public static String orDefault(String s, String defaultValue) {
     return isBlank(s) ? defaultValue : s;
   }

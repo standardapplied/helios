@@ -43,6 +43,12 @@ public record RetryPolicy(
     Objects.requireNonNull(retryOn, "retryOn must not be null");
   }
 
+  /**
+   * Creates a builder with the defaults: 3 attempts, exponential backoff from 500 ms doubling up to
+   * 5 minutes, jitter 0.1, and every {@link Exception} retried.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -53,8 +59,10 @@ public record RetryPolicy(
    * @param operation the operation to execute
    * @param <T> the return type
    * @return the result of the operation
-   * @throws RetryExhaustedException if all retries are exhausted
-   * @throws InterruptedException if the thread is interrupted while waiting
+   * @throws RetryExhaustedException if all retries are exhausted, or the operation failed with an
+   *     exception {@code retryOn} rejects or throws on; its cause is the last failure
+   * @throws InterruptedException if the operation throws it, or the thread is interrupted while
+   *     waiting; the thread's interrupt flag is set again
    */
   public <T> T execute(Callable<T> operation) throws RetryExhaustedException, InterruptedException {
     Exception lastException = null;
@@ -111,6 +119,10 @@ public record RetryPolicy(
         });
   }
 
+  /**
+   * Builder for {@link RetryPolicy}; not thread-safe. Every setting is validated by {@link
+   * #build()}.
+   */
   public static class Builder {
     private int maxAttempts = 3;
     private Backoff backoff = Backoff.exponential(Duration.ofMillis(500), 2.0);
@@ -120,21 +132,50 @@ public record RetryPolicy(
 
     private Builder() {}
 
+    /**
+     * Sets how many times the operation is tried, the first attempt included. Defaults to 3.
+     *
+     * @param maxAttempts the attempts; at least 1 by {@link #build()}
+     * @return this builder
+     */
     public Builder withMaxAttempts(int maxAttempts) {
       this.maxAttempts = maxAttempts;
       return this;
     }
 
+    /**
+     * Sets the delay strategy between attempts. Defaults to {@code Backoff.exponential(500 ms,
+     * 2.0)}, capped at 5 minutes.
+     *
+     * @param backoff the backoff; non-null by {@link #build()}
+     * @return this builder
+     */
     public Builder withBackoff(Backoff backoff) {
       this.backoff = backoff;
       return this;
     }
 
+    /**
+     * Sets the jitter factor: each delay moves by a random amount of up to this fraction of itself,
+     * in either direction. Defaults to 0.1; 0.0 waits exactly the backoff's delay.
+     *
+     * @param jitter the factor; within {@code 0.0}–{@code 1.0} by {@link #build()}
+     * @return this builder
+     */
     public Builder withJitter(double jitter) {
       this.jitter = jitter;
       return this;
     }
 
+    /**
+     * Adds exception types that are retried; a failure that is an instance of none of them is not.
+     * Repeated calls add to the set. With none added and no predicate, every {@link Exception} is
+     * retried. A predicate set with {@link #withRetryOn(Predicate)} takes precedence over the set.
+     *
+     * @param exceptions the retried exception types; the array non-null
+     * @return this builder
+     * @throws NullPointerException if {@code exceptions} is null
+     */
     @SafeVarargs
     public final Builder withRetryOn(Class<? extends Throwable>... exceptions) {
       for (var exception : exceptions) {
@@ -143,11 +184,28 @@ public record RetryPolicy(
       return this;
     }
 
+    /**
+     * Sets the predicate that decides whether a failure is retried, replacing any earlier one and
+     * taking precedence over the types added with {@link #withRetryOn(Class[])}. A predicate that
+     * throws stops the retries, its exception suppressed onto the failure.
+     *
+     * @param predicate returns {@code true} for a failure to retry; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code predicate} is null
+     */
     public Builder withRetryOn(Predicate<Throwable> predicate) {
       this.customRetryOn = Objects.requireNonNull(predicate, "retryOn must not be null");
       return this;
     }
 
+    /**
+     * Builds the policy through its canonical constructor.
+     *
+     * @return the retry policy
+     * @throws IllegalArgumentException if the attempts are below 1 or the jitter is outside {@code
+     *     0.0}–{@code 1.0}
+     * @throws NullPointerException if the backoff is null
+     */
     public RetryPolicy build() {
       return new RetryPolicy(maxAttempts, backoff, jitter, buildRetryPredicate());
     }
