@@ -1049,6 +1049,7 @@ evaluate to `ALLOW`.
 | `Permission.planMode()` allowed `Read`, `LS`, `Glob`, `Grep` on `./**` | `Permission.empty(PLAN)`, deciding every call as before |
 | `Permission.defaultInWorkspace()` allowed the read tools, `MemoryRead` and `MemoryWrite`, and asked for `Write`, `Edit`, `MultiEdit` and `Execute` | `DEFAULT` plus `allow MemoryWrite(/memories/**)`, deciding every call as before; an `Execute` ask names no rule (the category default asks) |
 | A walking tool's (`Glob`, `Grep`, `LS`, a `MemoryRead` listing) own ASK rule withheld nothing: `ask Grep(./secrets/**)` then `Grep(path=".")` returned `./secrets` without asking | it withholds the entries it decides, without asking, unless the walk itself was approved through an ask rule of that tool (`Grep(path="./secrets")` asks, and once allowed returns what only that tool's deny rules leave) |
+| A deny or ask rule naming no tool of the session (`deny Exectue(BASH/rm*)`, `deny execute`) was accepted and never matched | `AgentSession.open` throws `IllegalArgumentException`: `deny rule Exectue(BASH/rm*) names no tool of this session; tools: [...]`; a `Read` rule counts where `Grep` is registered; allow rules may name any tool |
 
 **The session drops its dead layers.** The file tracker, `StopReason`, the second "off"
 implementations and an implementation detail on `AgentSession` are gone. A typed `runBlocking` on

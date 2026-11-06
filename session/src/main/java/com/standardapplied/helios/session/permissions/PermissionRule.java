@@ -67,4 +67,14 @@ public record PermissionRule(String toolName, Optional<String> argPattern) {
   public static PermissionRule of(String toolName, String glob) {
     return new PermissionRule(toolName, Optional.of(glob));
   }
+
+  /**
+   * The {@code <tool>(<glob>)} form of this rule, as permission reasons show it; just the tool name
+   * when it has no glob.
+   *
+   * @return the display form
+   */
+  public String describe() {
+    return toolName + argPattern.map(glob -> "(" + glob + ")").orElse("");
+  }
 }
