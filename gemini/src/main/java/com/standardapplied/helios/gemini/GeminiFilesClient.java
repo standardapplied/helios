@@ -165,7 +165,12 @@ public final class GeminiFilesClient implements AutoCloseable {
       this.processingTimeout = processingTimeout;
     }
 
-    /** Validated Gemini resource name in {@code files/{id}} form. */
+    /**
+     * The name the Files API gave the upload, the key its delete and status requests use; checked
+     * when the handle was created, so it always has the {@code files/{id}} form.
+     *
+     * @return the resource name, never {@code null} or blank
+     */
     public String resourceName() {
       return resourceName;
     }

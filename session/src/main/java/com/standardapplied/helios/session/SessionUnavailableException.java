@@ -15,6 +15,9 @@ public final class SessionUnavailableException extends RuntimeException {
   private static final long serialVersionUID = 1L;
 
   /**
+   * Creates the exception {@link AgentSession#open} throws for a session its provider did not
+   * accept.
+   *
    * @param message the provider and its redacted reason
    * @param cause the provider's exception, or {@code null} for a refusal without one
    */

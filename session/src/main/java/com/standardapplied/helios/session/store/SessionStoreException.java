@@ -11,8 +11,11 @@ import java.util.Objects;
 public class SessionStoreException extends RuntimeException {
 
   /**
+   * Creates the exception a store throws when it cannot load or append.
+   *
    * @param message what failed; non-null
    * @param cause the underlying failure; nullable
+   * @throws NullPointerException if {@code message} is null
    */
   public SessionStoreException(String message, Throwable cause) {
     super(Objects.requireNonNull(message, "message must not be null"), cause);

@@ -11,6 +11,8 @@ package com.standardapplied.helios.session.store;
 public final class SessionConflictException extends SessionStoreException {
 
   /**
+   * Creates the exception, its message naming the session and both sequence numbers.
+   *
    * @param sessionId the session written to
    * @param expectedLastSeq the last sequence number the writer expected
    * @param lastSeq the last sequence number the store holds

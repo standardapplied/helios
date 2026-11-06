@@ -39,6 +39,8 @@ public sealed interface SessionEntry {
   record MessageAdded(String runId, Instant at, Message message) implements SessionEntry {
 
     /**
+     * Validates the entry.
+     *
      * @throws NullPointerException if a component is null
      * @throws IllegalArgumentException if {@code runId} is blank
      */
@@ -60,6 +62,8 @@ public sealed interface SessionEntry {
   record HistoryReplaced(String runId, Instant at, List<Message> history) implements SessionEntry {
 
     /**
+     * Validates the entry and copies {@code history}.
+     *
      * @throws NullPointerException if a component is null or {@code history} holds a null
      * @throws IllegalArgumentException if {@code runId} is blank
      */

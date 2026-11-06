@@ -95,8 +95,13 @@ public sealed interface QueryEvent
   Instant timestamp();
 
   /**
-   * Validate the four fields every subtype shares.
+   * Validates the four fields every subtype shares; each subtype's canonical constructor calls it
+   * first.
    *
+   * @param sessionId the session id; non-null, non-blank
+   * @param runId the run id; non-null, non-blank
+   * @param turnIndex the turn index; non-negative
+   * @param timestamp when the event was produced; non-null
    * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
    * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
    *     turnIndex} is negative
@@ -134,6 +139,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, String text)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     text} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public AssistantText {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
@@ -158,6 +171,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, String text)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     text} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public AssistantThinking {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(text, "text must not be null");
@@ -181,6 +202,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, List<Citation> citations)
       implements QueryEvent {
 
+    /**
+     * Validates the event and copies {@code citations}.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     citations} or any citation is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, {@code
+     *     turnIndex} is negative or {@code citations} is empty
+     */
     public AssistantCitations {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(citations, "citations must not be null");
@@ -204,6 +233,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, UserMessage message)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     message} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public UserMessageReceived {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(message, "message must not be null");
@@ -238,6 +275,14 @@ public sealed interface QueryEvent
       String reason)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     message}, {@code hookName} or {@code reason} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId}, {@code hookName} or
+     *     {@code reason} is blank or {@code turnIndex} is negative
+     */
     public MessageBlocked {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(message, "message must not be null");
@@ -265,6 +310,13 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, double usagePct)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, {@code
+     *     turnIndex} is negative, or {@code usagePct} is negative or NaN
+     */
     public ContextWarning {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       if (usagePct < 0.0 || Double.isNaN(usagePct)) {
@@ -296,6 +348,14 @@ public sealed interface QueryEvent
       long tokensAfter)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, or {@code
+     *     turnIndex}, {@code removedBlocks}, {@code tokensBefore} or {@code tokensAfter} is
+     *     negative
+     */
     public ContextEdited {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       if (removedBlocks < 0) {
@@ -326,6 +386,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, FinishReason reason)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     reason} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public TurnEnded {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(reason, "reason must not be null");
@@ -372,6 +440,15 @@ public sealed interface QueryEvent
       SerializedError error)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     backoff}, {@code providerName} or {@code error} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code providerName}
+     *     is blank, {@code turnIndex} or {@code backoff} is negative, or {@code attemptNumber} is
+     *     below 1
+     */
     public TurnRetried {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       if (attemptNumber < 1) {
@@ -427,6 +504,14 @@ public sealed interface QueryEvent
       SerializedError error)
       implements QueryEvent {
 
+    /**
+     * Validates the event; {@code error} is the one component that may be null.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     modelId}, {@code finishReason}, {@code usage}, {@code cost} or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, {@code
+     *     turnIndex} or {@code duration} is negative, or {@code attempt} is below 1
+     */
     public ModelCallEnded {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(modelId, "modelId must not be null");
@@ -453,6 +538,12 @@ public sealed interface QueryEvent
    */
   record RunStarted(String sessionId, String runId, Instant timestamp) implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank
+     */
     public RunStarted {
       validateCommon(sessionId, runId, 0, timestamp);
     }
@@ -478,6 +569,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, ResultMessage result)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     result} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public RunEnded {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(result, "result must not be null");
@@ -498,6 +597,14 @@ public sealed interface QueryEvent
       String sessionId, String runId, long turnIndex, Instant timestamp, SerializedError error)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     error} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public Error {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(error, "error must not be null");
@@ -518,6 +625,14 @@ public sealed interface QueryEvent
   record ToolUse(String sessionId, String runId, long turnIndex, Instant timestamp, ToolCall call)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     call} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public ToolUse {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
@@ -551,6 +666,15 @@ public sealed interface QueryEvent
       Map<String, Integer> redactions)
       implements QueryEvent {
 
+    /**
+     * Validates the event and copies {@code redactions}, keeping its order.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     call}, {@code result} or {@code redactions} is null, or {@code redactions} holds a null
+     *     key or value
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public ToolResult {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
@@ -584,6 +708,14 @@ public sealed interface QueryEvent
       String reason)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     call}, {@code hookName} or {@code reason} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId}, {@code hookName} or
+     *     {@code reason} is blank or {@code turnIndex} is negative
+     */
     public ToolBlocked {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
@@ -627,6 +759,15 @@ public sealed interface QueryEvent
       Map<String, Object> inputAfter)
       implements QueryEvent {
 
+    /**
+     * Validates the event and snapshots both argument maps.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     call}, {@code hookName}, {@code inputBefore} or {@code inputAfter} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code hookName} is
+     *     blank, {@code turnIndex} is negative, or either map is not a JSON object {@link
+     *     JsonSnapshot} accepts
+     */
     public ToolMutated {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(call, "call must not be null");
@@ -671,6 +812,15 @@ public sealed interface QueryEvent
       HookOutcome outcome)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp}, {@code
+     *     hookName}, {@code phase} or {@code outcome} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code hookName} is
+     *     blank, {@code turnIndex} is negative, or {@code outcome} is a {@link
+     *     HookOutcome.Continue}
+     */
     public HookFired {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(hookName, "hookName must not be null");
@@ -707,6 +857,14 @@ public sealed interface QueryEvent
       AskUserQuestionRequest request)
       implements QueryEvent {
 
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code timestamp} or {@code
+     *     request} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     turnIndex} is negative
+     */
     public QuestionAsked {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(request, "request must not be null");
