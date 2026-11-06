@@ -64,6 +64,9 @@ public final class CancellationToken {
   private final LinkedHashSet<CallbackRegistration> registrations = new LinkedHashSet<>();
   private volatile String reason;
 
+  /** Creates a token that is not cancelled and holds no callbacks. Thread-safe once created. */
+  public CancellationToken() {}
+
   /**
    * Whether {@link #cancel(String)} has been called at least once.
    *
