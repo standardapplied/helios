@@ -130,23 +130,40 @@ public final class CommandGrant {
 
   /**
    * Start a builder that will run the given binary. {@code spec} may be an absolute path or a
-   * basename to be resolved against {@code PATH}.
+   * basename to be resolved against {@code PATH}. Nothing is resolved until {@link
+   * Builder#build()}.
+   *
+   * @param spec an absolute path to an executable, or a basename with no path separator
+   * @return a new builder with every setting at its default
    */
   public static Builder builder(String spec) {
     return new Builder(spec);
   }
 
-  /** The model-visible tool name (defaults to the binary's basename). */
+  /**
+   * The model-visible tool name.
+   *
+   * @return the name set with {@link Builder#withName(String)}, or the binary's basename
+   */
   public String name() {
     return toolName;
   }
 
-  /** The pinned absolute path to the binary. */
+  /**
+   * The absolute path the binary was resolved to at build time; every invocation runs this file.
+   *
+   * @return the pinned absolute path
+   */
   public Path binaryPath() {
     return binaryPath;
   }
 
-  /** The {@link SecretRegistry} the grant registered its env values in. */
+  /**
+   * The {@link SecretRegistry} the grant registered its env values in. The tool runs only in a
+   * session whose registry is this same instance.
+   *
+   * @return the registry passed to {@link Builder#withSecretRegistry(SecretRegistry)}
+   */
   public SecretRegistry secretRegistry() {
     return secretRegistry;
   }
@@ -154,6 +171,9 @@ public final class CommandGrant {
   /**
    * Wrap this grant as a {@link Tool} that the model can invoke. The tool exposes a single {@code
    * args} parameter (array of strings).
+   *
+   * @return a new tool named {@link #name()}, sharing this grant's concurrency limit with every
+   *     other tool made from it
    */
   public Tool toTool() {
     return new CommandGrantTool(this, description, stderrToModel).toTool();
@@ -268,13 +288,25 @@ public final class CommandGrant {
       this.spec = spec;
     }
 
-    /** Override the tool name exposed to the model. Defaults to the binary basename. */
+    /**
+     * Override the tool name exposed to the model. Defaults to the binary basename.
+     *
+     * @param name the tool name; {@code null} restores the default
+     * @return this builder
+     */
     public Builder withName(String name) {
       this.toolName = name;
       return this;
     }
 
-    /** Override the tool description exposed to the model. */
+    /**
+     * Override the tool description exposed to the model. Defaults to {@code "Invoke the <basename>
+     * command-line tool"}.
+     *
+     * @param description what the tool does, as the model reads it; {@code null} restores the
+     *     default
+     * @return this builder
+     */
     public Builder withDescription(String description) {
       this.description = description;
       return this;
@@ -283,6 +315,14 @@ public final class CommandGrant {
     /**
      * Add an environment variable for the child process. The value is also registered in the {@link
      * SecretRegistry} under the same name, so the session redacts it from every tool's output.
+     * Adding a name again replaces its value. The registry's rules on a secret value apply at
+     * {@link #build()}.
+     *
+     * @param name the variable name, also the secret's name in redaction markers; non-blank
+     * @param value the variable's value; non-null
+     * @return this builder
+     * @throws IllegalArgumentException if {@code name} is {@code null} or blank, or {@code value}
+     *     is {@code null}
      */
     public Builder withEnv(String name, String value) {
       if (Strings.isBlank(name)) {
@@ -295,7 +335,14 @@ public final class CommandGrant {
       return this;
     }
 
-    /** Override the {@code PATH} env var passed to the child. Defaults to a sane minimal path. */
+    /**
+     * Override the {@code PATH} env var passed to the child. Defaults to {@code
+     * /usr/local/bin:/usr/bin:/bin}. A {@code PATH} set through {@link #withEnv(String, String)}
+     * takes precedence. Does not affect how {@link #build()} resolves the binary itself.
+     *
+     * @param path the child's search path; {@code null} restores the default
+     * @return this builder
+     */
     public Builder withPath(String path) {
       this.path = path;
       return this;
@@ -304,13 +351,24 @@ public final class CommandGrant {
     /**
      * Set the working directory for invocations. If not set, a fresh temporary directory is created
      * per call and removed on exit.
+     *
+     * @param cwd the directory every invocation starts in; {@code null} restores the per-call
+     *     temporary directory
+     * @return this builder
      */
     public Builder withCwd(Path cwd) {
       this.cwd = cwd;
       return this;
     }
 
-    /** Maximum wall-clock duration for any invocation. Defaults to 30 seconds. */
+    /**
+     * Maximum wall-clock duration for any invocation; past it the process tree is killed and the
+     * call reports a timeout. Defaults to 30 seconds.
+     *
+     * @param timeout the limit; strictly positive
+     * @return this builder
+     * @throws IllegalArgumentException if {@code timeout} is {@code null}, zero or negative
+     */
     public Builder withTimeout(Duration timeout) {
       if (timeout == null || timeout.isZero() || timeout.isNegative()) {
         throw new IllegalArgumentException("Timeout must be positive");
@@ -322,6 +380,10 @@ public final class CommandGrant {
     /**
      * Cap on captured stdout and stderr (each, in bytes). Output past the cap is dropped and a
      * truncation marker is appended. Defaults to 50,000 bytes.
+     *
+     * @param bytes the per-stream cap in bytes; at least 1,024
+     * @return this builder
+     * @throws IllegalArgumentException if {@code bytes} is below 1,024
      */
     public Builder withMaxOutputBytes(int bytes) {
       if (bytes < 1024) {
@@ -334,14 +396,23 @@ public final class CommandGrant {
     /**
      * Validate argv before exec. Return {@link Optional#empty()} to accept; return a reason to
      * reject. The pre-scan that refuses argv carrying a registered secret always runs after this
-     * validator.
+     * validator. Unset by default: every argv is accepted.
+     *
+     * @param validator receives the call's argument list (without the binary) and returns the
+     *     rejection reason the model sees, or empty to accept; {@code null} removes the validator
+     * @return this builder
      */
     public Builder withArgValidator(Function<List<String>, Optional<String>> validator) {
       this.argValidator = validator;
       return this;
     }
 
-    /** Whether to expose the child's stderr to the model. Defaults to false. */
+    /**
+     * Whether to expose the child's stderr to the model. Defaults to false.
+     *
+     * @param include {@code true} to include stderr in the tool's output, {@code false} to hide it
+     * @return this builder
+     */
     public Builder withStderrToModel(boolean include) {
       this.stderrToModel = include;
       return this;
@@ -351,13 +422,24 @@ public final class CommandGrant {
      * The {@link SecretRegistry} of the sessions that will run this grant, the one passed to {@code
      * SessionOptions.withSecretRegistry}. Required: {@link #build()} registers the env values in
      * it, and the tool refuses to run in a session with a different registry.
+     *
+     * @param registry the sessions' registry; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code registry} is {@code null}
      */
     public Builder withSecretRegistry(SecretRegistry registry) {
       this.secretRegistry = Objects.requireNonNull(registry, "registry");
       return this;
     }
 
-    /** Maximum number of concurrent invocations of this grant. Defaults to 4. */
+    /**
+     * Maximum number of concurrent invocations of this grant. Defaults to 4. A call beyond it is
+     * refused at once, never queued.
+     *
+     * @param n the limit; at least 1
+     * @return this builder
+     * @throws IllegalArgumentException if {@code n} is below 1
+     */
     public Builder withMaxConcurrent(int n) {
       if (n < 1) {
         throw new IllegalArgumentException("maxConcurrent must be at least 1");
@@ -367,9 +449,15 @@ public final class CommandGrant {
     }
 
     /**
-     * Resolve the binary, register the env values in the registry and build the grant.
+     * Resolve the binary, register the env values in the registry and build the grant. A basename
+     * is resolved against the host JVM's {@code PATH}, not the one {@link #withPath(String)} gives
+     * the child.
      *
-     * @throws IllegalStateException if {@link #withSecretRegistry(SecretRegistry)} was not called
+     * @return the grant, its binary pinned
+     * @throws IllegalStateException if {@link #withSecretRegistry(SecretRegistry)} was not called,
+     *     or the binary is not executable or not found on {@code PATH}
+     * @throws IllegalArgumentException if the spec is {@code null}, blank or a relative path with a
+     *     separator, or an env value fails {@link SecretRegistry#register(String, String)}
      */
     public CommandGrant build() {
       if (secretRegistry == null) {
@@ -387,7 +475,12 @@ public final class CommandGrant {
     }
   }
 
-  /** Names of env vars granted to the child (for diagnostics; values not exposed). */
+  /**
+   * Names of env vars granted to the child (for diagnostics; values not exposed).
+   *
+   * @return the unmodifiable set of names given to {@link Builder#withEnv(String, String)}, without
+   *     the {@code PATH} the grant adds itself
+   */
   public Set<String> envVarNames() {
     return env.keySet();
   }

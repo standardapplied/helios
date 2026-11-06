@@ -20,6 +20,9 @@ public class InMemoryPromptRegistry implements PromptRegistry {
 
   private final Map<String, List<Prompt>> prompts = new LinkedHashMap<>();
 
+  /** Creates an empty registry, holding no prompt. */
+  public InMemoryPromptRegistry() {}
+
   @Override
   public synchronized Prompt register(String name, String content) {
     var versions = validateAndVersions(name, content);
