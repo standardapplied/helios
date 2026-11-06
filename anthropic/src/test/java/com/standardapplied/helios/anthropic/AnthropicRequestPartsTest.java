@@ -137,7 +137,7 @@ class AnthropicRequestPartsTest {
         CachePolicy.shortLived(),
         request,
         null,
-        AnthropicTools.of(List.of(), ModelConfig.of("k")),
+        AnthropicTools.of(List.of(), ModelConfig.of("k"), true),
         entries);
 
     assertEquals("again", entries.getLast().content());
@@ -233,7 +233,7 @@ class AnthropicRequestPartsTest {
     var body =
         MessagesRequest.newBuilder()
             .withModel("m")
-            .withTools(List.of(new ToolDefinition(null, "t", "d", self, null)))
+            .withTools(List.of(new ToolDefinition(null, "t", "d", self, null, null)))
             .build();
     try (var client = HttpClientFactory.create()) {
       var streams = new AnthropicStreams(ModelConfig.of("k"), client, List.of());
@@ -323,7 +323,7 @@ class AnthropicRequestPartsTest {
 
   private static String stamp(
       AnthropicModelId model, CachePolicy cachePolicy, String system, List<Tool> tools) {
-    return new AnthropicRequestBuilder(model.id(), model, ModelConfig.of("k"), cachePolicy)
+    return AnthropicFixture.requests(model, ModelConfig.of("k"), cachePolicy)
         .build(List.of(Message.system(system), Message.user("Hi")), tools, null)
         .promptStamp();
   }
@@ -339,7 +339,7 @@ class AnthropicRequestPartsTest {
   private static AnthropicRequestBuilder requests() {
     var model = AnthropicModelId.CLAUDE_OPUS_5_5;
     var config = ModelConfig.newBuilder().withApiKey("k").build();
-    return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+    return AnthropicFixture.requests(model, config);
   }
 
   private static HttpRequest httpRequest(ModelConfig config) {

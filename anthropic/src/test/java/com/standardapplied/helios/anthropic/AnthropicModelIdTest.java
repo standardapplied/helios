@@ -159,6 +159,16 @@ class AnthropicModelIdTest {
   }
 
   @Test
+  void onlyHaiku45LacksProgrammaticToolCalling() {
+    for (var model : AnthropicModelId.values()) {
+      assertEquals(
+          model != AnthropicModelId.CLAUDE_HAIKU_4_5,
+          model.acceptsProgrammaticToolCalling(),
+          model.name());
+    }
+  }
+
+  @Test
   void opus55AndSonnet55AreCatalogued() {
     assertEquals("claude-opus-5-5", AnthropicModelId.CLAUDE_OPUS_5_5.id());
     assertEquals("claude-sonnet-5-5", AnthropicModelId.CLAUDE_SONNET_5_5.id());

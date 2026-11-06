@@ -151,7 +151,7 @@ class SerializationTest {
 
     var toolDef =
         new ToolDefinition(
-            null, tool.name(), tool.description(), tool.parametersAsJsonSchema(), null);
+            null, tool.name(), tool.description(), tool.parametersAsJsonSchema(), null, null);
     var json = objectMapper.writeValueAsString(toolDef);
     assertTrue(json.contains("\"name\":\"search_people\""));
     assertTrue(json.contains("\"description\":\"Finds people using semantic search\""));
@@ -218,6 +218,7 @@ class SerializationTest {
                 searchTool.name(),
                 searchTool.description(),
                 searchTool.parametersAsJsonSchema(),
+                null,
                 null));
 
     var request =
@@ -591,7 +592,7 @@ class SerializationTest {
   @Test
   void toolDefinitionWithCacheControlRoundTrips() throws Exception {
     var def =
-        new ToolDefinition(null, "calc", "compute", Map.of("type", "object"), null)
+        new ToolDefinition(null, "calc", "compute", Map.of("type", "object"), null, null)
             .withCacheControl(CacheControl.ephemeral());
     var json = objectMapper.writeValueAsString(def);
     assertTrue(json.contains("\"name\":\"calc\""));
@@ -599,8 +600,18 @@ class SerializationTest {
   }
 
   @Test
+  void aDirectOnlyToolKeepsItsCallersUnderACacheBreakpoint() {
+    var def = ToolDefinition.webSearch().directOnly().withCacheControl(CacheControl.ephemeral());
+
+    var json = objectMapper.writeValueAsString(def);
+
+    assertTrue(json.contains("\"allowed_callers\":[\"direct\"]"));
+    assertTrue(json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"));
+  }
+
+  @Test
   void toolDefinitionWithCacheControlRejectsNull() {
-    var def = new ToolDefinition(null, "calc", "compute", Map.of(), null);
+    var def = new ToolDefinition(null, "calc", "compute", Map.of(), null, null);
     org.junit.jupiter.api.Assertions.assertThrows(
         NullPointerException.class, () -> def.withCacheControl(null));
   }

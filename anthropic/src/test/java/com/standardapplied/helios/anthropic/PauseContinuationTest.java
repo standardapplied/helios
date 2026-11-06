@@ -86,11 +86,8 @@ class PauseContinuationTest {
       """;
 
   private final StampedRequest request =
-      new AnthropicRequestBuilder(
-              AnthropicModelId.CLAUDE_OPUS_5_5.id(),
-              AnthropicModelId.CLAUDE_OPUS_5_5,
-              ModelConfig.newBuilder().withApiKey("k").build(),
-              CachePolicy.shortLived())
+      AnthropicFixture.requests(
+              AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.newBuilder().withApiKey("k").build())
           .build(List.of(Message.user("go")), List.of(), null);
 
   @Test

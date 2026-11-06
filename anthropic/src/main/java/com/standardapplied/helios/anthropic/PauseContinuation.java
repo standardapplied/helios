@@ -18,14 +18,14 @@ import java.util.concurrent.CancellationException;
 /**
  * Continues a turn across {@code pause_turn}. Anthropic pauses a long server-tool turn (web search,
  * web fetch); the turn resumes when the conversation is re-sent with the paused assistant content
- * appended unchanged. The segments' events are spliced into one stream: a paused segment's
- * completion is swallowed, that segment's stream closed, and the continuation opened on the next
- * {@code hasNext()}; the one terminal carries the merged turn — the completion its response, an
- * error after a pause its partial response. A caller never sees the pause; a continuation's first
- * thinking delta carries the separator the merge puts before its thinking, and every segment is
- * sent under the turn's one prompt stamp. Closing closes the segment in flight and opens no further
- * one. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes, which turns a pause loop into a loud
- * failure.
+ * appended unchanged, in the code execution container the turn ran in. The segments' events are
+ * spliced into one stream: a paused segment's completion is swallowed, that segment's stream
+ * closed, and the continuation opened on the next {@code hasNext()}; the one terminal carries the
+ * merged turn — the completion its response, an error after a pause its partial response. A caller
+ * never sees the pause; a continuation's first thinking delta carries the separator the merge puts
+ * before its thinking, and every segment is sent under the turn's one prompt stamp. Closing closes
+ * the segment in flight and opens no further one. At most {@link #MAX_PAUSE_CONTINUATIONS} resumes,
+ * which turns a pause loop into a loud failure.
  */
 final class PauseContinuation implements Exchange<StampedRequest> {
 
@@ -69,7 +69,10 @@ final class PauseContinuation implements Exchange<StampedRequest> {
     return PAUSE_TURN.equals(response.metadata().get(AnthropicResponseAssembler.STOP_REASON_KEY));
   }
 
-  /** {@code base} with the merged-so-far assistant content appended verbatim. */
+  /**
+   * {@code base} with the merged-so-far assistant content appended verbatim, in the container the
+   * turn ran code in, else {@code base}'s.
+   */
   @SuppressWarnings("unchecked")
   private static StampedRequest continuation(StampedRequest base, Response<Void> merged) {
     var rawContent = merged.metadata().get(RawContentEcho.RAW_CONTENT_KEY);
@@ -85,7 +88,7 @@ final class PauseContinuation implements Exchange<StampedRequest> {
     }
     var messages = new ArrayList<>(base.body().messages());
     messages.add(new MessagesRequest.MessageEntry("assistant", blocks));
-    return base.continuationWith(messages);
+    return base.continuationWith(messages, merged.metadata().get(CodeContainer.ID_KEY));
   }
 
   /**

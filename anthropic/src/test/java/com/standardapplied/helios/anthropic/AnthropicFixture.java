@@ -12,6 +12,8 @@ import com.standardapplied.helios.core.tool.Tool;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
 import java.util.HashMap;
 import java.util.List;
 
@@ -52,6 +54,12 @@ final class AnthropicFixture {
           + "\"usage\":{\"output_tokens\":40}}\n\n"
           + "data: {\"type\":\"message_stop\"}\n\n";
 
+  /**
+   * The time every request builder of the tests runs at: before the {@code expires_at} of the
+   * container the recorded {@code dynamic-filtering-loop.sse} turn ran in.
+   */
+  static final InstantSource CLOCK = InstantSource.fixed(Instant.parse("2026-11-01T21:00:00Z"));
+
   private static final AnthropicProvider PROVIDER = new AnthropicProvider();
 
   private AnthropicFixture() {}
@@ -74,12 +82,16 @@ final class AnthropicFixture {
 
   static AnthropicRequestBuilder requests(
       AnthropicModelId model, ModelConfig config, CachePolicy cachePolicy) {
-    return new AnthropicRequestBuilder(model.id(), model, config, cachePolicy);
+    return new AnthropicRequestBuilder(model.id(), model, config, cachePolicy, CLOCK);
   }
 
   static AnthropicRequestBuilder requests(String wireModelId, ModelConfig config) {
     return new AnthropicRequestBuilder(
-        wireModelId, AnthropicModelId.fromWireId(wireModelId), config, CachePolicy.shortLived());
+        wireModelId,
+        AnthropicModelId.fromWireId(wireModelId),
+        config,
+        CachePolicy.shortLived(),
+        CLOCK);
   }
 
   /**
