@@ -154,12 +154,21 @@ public final class ReplSession implements AutoCloseable {
     return Collections.unmodifiableMap(snapshot);
   }
 
-  /** The host function registry for this session. */
+  /**
+   * Returns the host function registry for this session, holding the config's functions wrapped for
+   * the call counts of {@link #calledHostFunctions()}.
+   *
+   * @return this session's registry, never {@code null}
+   */
   public HostFunctionRegistry registry() {
     return registry;
   }
 
-  /** Whether this session is still open. */
+  /**
+   * Returns whether this session still accepts code.
+   *
+   * @return {@code true} until {@link #close()} is called or the sandbox dies
+   */
   public boolean isOpen() {
     return !closed.get() && sandbox.isAlive();
   }

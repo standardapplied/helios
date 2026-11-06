@@ -26,14 +26,24 @@ import java.util.List;
  *     Must be a Java identifier, not a keyword or literal, not {@code yield} (which Java does not
  *     accept as an unqualified call) and not start with {@code __}, so no host function shadows
  *     {@code HostBridge.__call}
- * @param description human-readable description; surfaced in the LLM's system prompt
+ * @param description human-readable description; surfaced in the LLM's system prompt; must not be
+ *     {@code null} or blank
  * @param parameters declared parameter list driving wrapper synthesis (immutable copy taken); no
- *     two parameters share a name
- * @param handler the implementation
+ *     two parameters share a name. {@code null} is stored as an empty list
+ * @param handler the implementation, called on the host with the arguments keyed by parameter name;
+ *     must not be {@code null}
  */
 public record HostFunction(
     String name, String description, List<HostParameter> parameters, HostFunctionHandler handler) {
 
+  /**
+   * Validates the components and stores an immutable copy of the parameters.
+   *
+   * @throws IllegalArgumentException if {@code name} is not a valid host identifier or is {@code
+   *     yield}, if {@code description} is {@code null} or blank, if {@code handler} is {@code
+   *     null}, or if two parameters share a name
+   * @throws NullPointerException if {@code parameters} holds a {@code null} element
+   */
   public HostFunction {
     HostIdentifiers.requireValid(name, "Host function name");
     if (name.equals("yield")) {
@@ -56,7 +66,15 @@ public record HostFunction(
     }
   }
 
-  /** Convenience constructor for a function with no declared parameters. */
+  /**
+   * Convenience constructor for a function with no declared parameters, whose synthesized wrapper
+   * is zero-arg and whose handler receives an empty map.
+   *
+   * @param name the function name, under the same rules as the canonical constructor
+   * @param description human-readable description; must not be {@code null} or blank
+   * @param handler the implementation; must not be {@code null}
+   * @throws IllegalArgumentException if any argument fails the canonical constructor's validation
+   */
   public HostFunction(String name, String description, HostFunctionHandler handler) {
     this(name, description, List.of(), handler);
   }

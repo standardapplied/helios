@@ -83,6 +83,12 @@ public record SandboxPolicy(
     boolean denyFileSystemAccess,
     ViolationAction onViolation) {
 
+  /**
+   * Validates the components and stores immutable copies of the three sets.
+   *
+   * @throws IllegalArgumentException if any set or {@code onViolation} is {@code null}, or if any
+   *     set holds a {@code null} or blank entry
+   */
   public SandboxPolicy {
     if (allowedPackages == null) {
       throw new IllegalArgumentException(
@@ -122,6 +128,8 @@ public record SandboxPolicy(
    * all. Use this for development and for any workload where the deployer has not yet articulated a
    * specific enforcement requirement; switch to a stricter preset (or a custom policy) when you
    * have one.
+   *
+   * @return a policy with every set empty, every deny flag off and {@link ViolationAction#THROW}
    */
   public static SandboxPolicy permissive() {
     return new SandboxPolicy(
@@ -159,6 +167,9 @@ public record SandboxPolicy(
    * directly to {@link
    * com.standardapplied.helios.repl.sandbox.JvmSandboxConfig.Builder#withSandboxPolicy(SandboxPolicy)}
    * or compose by round-tripping through a Builder.
+   *
+   * @return a new no-egress policy as composed above, reporting violations with {@link
+   *     ViolationAction#THROW}
    */
   public static SandboxPolicy noEgress() {
     return new SandboxPolicy(
@@ -194,6 +205,9 @@ public record SandboxPolicy(
    * Whether this policy enforces nothing. Used by the launch path to skip propagating an empty
    * policy across process boundaries: an entirely permissive policy is the bootstrap's own default,
    * so no argv flag needs to travel.
+   *
+   * @return {@code true} when all three sets are empty and every deny flag is off; {@code
+   *     onViolation} is not considered
    */
   public boolean enforcesNothing() {
     return allowedPackages.isEmpty()
@@ -205,6 +219,12 @@ public record SandboxPolicy(
         && !denyFileSystemAccess;
   }
 
+  /**
+   * Starts a builder whose defaults equal {@link #permissive()}: empty sets, every deny flag off,
+   * {@link ViolationAction#THROW}.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -225,53 +245,123 @@ public record SandboxPolicy(
 
     private Builder() {}
 
-    /** Opt into allow-list mode. See {@link SandboxPolicy#allowedPackages()}. */
+    /**
+     * Opts into allow-list mode, replacing any earlier allow-list; no arguments turns it off. See
+     * {@link SandboxPolicy#allowedPackages()}.
+     *
+     * @param packages JDK package prefixes a snippet may call into, such as {@code "java.util"};
+     *     neither the array nor an element may be {@code null}, and no prefix may repeat
+     * @return this builder
+     * @throws NullPointerException if {@code packages} or an element is {@code null}
+     * @throws IllegalArgumentException if a prefix repeats
+     */
     public Builder withAllowedPackages(String... packages) {
       this.allowedPackages = Set.of(packages);
       return this;
     }
 
-    /** Opt into allow-list mode. See {@link SandboxPolicy#allowedPackages()}. */
+    /**
+     * Opts into allow-list mode with a copy of {@code packages}, replacing any earlier allow-list;
+     * an empty set turns it off. See {@link SandboxPolicy#allowedPackages()}.
+     *
+     * @param packages JDK package prefixes a snippet may call into; neither the set nor an element
+     *     may be {@code null}
+     * @return this builder
+     * @throws NullPointerException if {@code packages} or an element is {@code null}
+     */
     public Builder withAllowedPackages(Set<String> packages) {
       this.allowedPackages = Set.copyOf(packages);
       return this;
     }
 
+    /**
+     * Sets the classes a snippet must not reference, replacing any earlier set; none by default.
+     * See {@link SandboxPolicy#deniedClasses()}.
+     *
+     * @param classes fully-qualified class names, such as {@code "java.lang.ProcessBuilder"};
+     *     neither the array nor an element may be {@code null}, and no name may repeat
+     * @return this builder
+     * @throws NullPointerException if {@code classes} or an element is {@code null}
+     * @throws IllegalArgumentException if a name repeats
+     */
     public Builder withDeniedClasses(String... classes) {
       this.deniedClasses = Set.of(classes);
       return this;
     }
 
+    /**
+     * Sets the classes a snippet must not reference to a copy of {@code classes}, replacing any
+     * earlier set; none by default. See {@link SandboxPolicy#deniedClasses()}.
+     *
+     * @param classes fully-qualified class names; neither the set nor an element may be {@code
+     *     null}
+     * @return this builder
+     * @throws NullPointerException if {@code classes} or an element is {@code null}
+     */
     public Builder withDeniedClasses(Set<String> classes) {
       this.deniedClasses = Set.copyOf(classes);
       return this;
     }
 
+    /**
+     * Sets the package prefixes whose classes and sub-packages a snippet must not reference,
+     * replacing any earlier set; none by default. See {@link SandboxPolicy#deniedPackages()}.
+     *
+     * @param packages package prefixes, such as {@code "java.net.http"}; neither the array nor an
+     *     element may be {@code null}, and no prefix may repeat
+     * @return this builder
+     * @throws NullPointerException if {@code packages} or an element is {@code null}
+     * @throws IllegalArgumentException if a prefix repeats
+     */
     public Builder withDeniedPackages(String... packages) {
       this.deniedPackages = Set.of(packages);
       return this;
     }
 
+    /**
+     * Sets the denied package prefixes to a copy of {@code packages}, replacing any earlier set;
+     * none by default. See {@link SandboxPolicy#deniedPackages()}.
+     *
+     * @param packages package prefixes; neither the set nor an element may be {@code null}
+     * @return this builder
+     * @throws NullPointerException if {@code packages} or an element is {@code null}
+     */
     public Builder withDeniedPackages(Set<String> packages) {
       this.deniedPackages = Set.copyOf(packages);
       return this;
     }
 
-    /** Deny the entire reflection family. See {@link SandboxPolicy#denyReflection()}. */
+    /**
+     * Denies the entire reflection family when {@code true}; off by default. See {@link
+     * SandboxPolicy#denyReflection()}.
+     *
+     * @param denyReflection whether reflective and method-handle entry points are denied
+     * @return this builder
+     */
     public Builder withDenyReflection(boolean denyReflection) {
       this.denyReflection = denyReflection;
       return this;
     }
 
-    /** Deny Panama FFI and {@code System.load*}. See {@link SandboxPolicy#denyNativeAccess()}. */
+    /**
+     * Denies Panama FFI and {@code System.load*} when {@code true}; off by default. See {@link
+     * SandboxPolicy#denyNativeAccess()}.
+     *
+     * @param denyNativeAccess whether native-code entry points are denied
+     * @return this builder
+     */
     public Builder withDenyNativeAccess(boolean denyNativeAccess) {
       this.denyNativeAccess = denyNativeAccess;
       return this;
     }
 
     /**
-     * Deny runtime class definition primitives. See {@link
+     * Denies runtime class definition primitives when {@code true}; off by default. See {@link
      * SandboxPolicy#denyDynamicClassDefinition()}.
+     *
+     * @param denyDynamicClassDefinition whether {@code defineClass} and {@code defineHiddenClass}
+     *     are denied
+     * @return this builder
      */
     public Builder withDenyDynamicClassDefinition(boolean denyDynamicClassDefinition) {
       this.denyDynamicClassDefinition = denyDynamicClassDefinition;
@@ -283,18 +373,34 @@ public record SandboxPolicy(
      * FileReader}, {@code FileWriter}, {@code RandomAccessFile}, {@code FileChannel} / {@code
      * AsynchronousFileChannel}, the entire {@code java.nio.file} package, and the
      * filesystem-touching members of {@code java.io.File}. See {@link
-     * SandboxPolicy#denyFileSystemAccess()}.
+     * SandboxPolicy#denyFileSystemAccess()}. Off by default.
+     *
+     * @param denyFileSystemAccess whether every filesystem-touching API is denied
+     * @return this builder
      */
     public Builder withDenyFileSystemAccess(boolean denyFileSystemAccess) {
       this.denyFileSystemAccess = denyFileSystemAccess;
       return this;
     }
 
+    /**
+     * Sets how the verifier reports a violation; {@link ViolationAction#THROW} by default.
+     *
+     * @param onViolation the reporting mode; {@code null} is rejected by {@link #build()}
+     * @return this builder
+     */
     public Builder withOnViolation(ViolationAction onViolation) {
       this.onViolation = onViolation;
       return this;
     }
 
+    /**
+     * Builds the policy from the current settings.
+     *
+     * @return a new immutable policy
+     * @throws IllegalArgumentException if {@code onViolation} is {@code null} or any set holds a
+     *     blank entry
+     */
     public SandboxPolicy build() {
       return new SandboxPolicy(
           allowedPackages,

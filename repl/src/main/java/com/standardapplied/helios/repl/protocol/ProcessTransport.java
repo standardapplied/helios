@@ -118,7 +118,12 @@ public final class ProcessTransport implements RpcTransport {
     return stdoutBuffer.drain();
   }
 
-  /** As {@link #drainStdout()}, for a caller that adds output of its own to what was set aside. */
+  /**
+   * As {@link #drainStdout()}, for a caller that adds output of its own to what was set aside.
+   *
+   * @return the stdout kept and the count dropped since the last drain, not yet joined by the
+   *     truncation marker
+   */
   public CapturedOutput.Cut takeStdout() {
     return stdoutBuffer.take();
   }
@@ -149,6 +154,9 @@ public final class ProcessTransport implements RpcTransport {
    * {@code id} is a request and without one a notification; otherwise {@code error} is an error
    * response, and {@code result} or an {@code id} is a response.
    *
+   * @param json one RPC line with its {@code \0RPC:} prefix removed
+   * @return the message; a missing or non-string {@code message} in an error object is read as its
+   *     string form and a missing {@code code} as 0
    * @throws IOException if {@code json} is not JSON, or is not a JSON-RPC message
    */
   public static RpcMessage deserializeMessage(String json) throws IOException {
@@ -192,6 +200,17 @@ public final class ProcessTransport implements RpcTransport {
     return new RpcMessage.Response(String.valueOf(map.get("id")), map.get("result"));
   }
 
+  /**
+   * Serialises one JSON-RPC message as a single line of JSON with {@code "jsonrpc": "2.0"}, without
+   * the {@code \0RPC:} prefix. A request's or notification's {@code null} params are written as
+   * {@code {}}; an error's {@code null} data is left out.
+   *
+   * @param message the message to write; must not be {@code null}
+   * @return the JSON text
+   * @throws IOException declared for the transport's write path; the mapper reports a value it
+   *     cannot serialise with an unchecked Jackson exception
+   * @throws NullPointerException if {@code message} is {@code null}
+   */
   public static String serializeMessage(RpcMessage message) throws IOException {
     return switch (message) {
       case RpcMessage.Request req ->
