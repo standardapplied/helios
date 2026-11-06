@@ -2,13 +2,13 @@
 
 package com.standardapplied.helios.persistence;
 
-import ai.singlr.scimsql.ScimEngine;
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.common.PaginatedList;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.persistence.mapper.AnnotationMapper;
 import com.standardapplied.helios.persistence.mapper.JsonbMapper;
 import com.standardapplied.helios.persistence.sql.AnnotationSql;
+import com.standardapplied.scimsql.ScimEngine;
 import io.helidon.dbclient.DbClient;
 import java.util.HashMap;
 import java.util.List;
