@@ -22,18 +22,23 @@ import java.util.regex.Pattern;
  *     Helidon DbClient cannot parameterise identifiers, so the compact-constructor validator is the
  *     only line of defence against SQL injection if the schema name ever flows from configuration
  *     or external input
- * @param redactor optional {@link Redactor} applied by {@link PgTraceStore} to trace and span text
- *     fields and attribute maps before persisting. {@code null} (default) preserves verbatim
- *     capture, suitable for evals and debugging. The session's own redaction pass does not reach
- *     persistence, since the session does not feed these stores; to redact what is persisted, pass
- *     {@code registry.redactor()} from the {@link
- *     com.standardapplied.helios.core.common.SecretRegistry} given to {@code
- *     SessionOptions.withSecretRegistry}
+ * @param redactor optional {@link Redactor} that {@link PgSpanExporter} applies to each span's
+ *     error description, message text and attribute values before writing them. {@code null}
+ *     (default) writes them as the session recorded them, suitable for evals and debugging. The
+ *     session already redacts the text it puts on its spans against its own secret registry; this
+ *     is a second pass, for values that registry does not hold. {@link PgSessionStore} ignores it
  */
 public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
 
   private static final Pattern VALID_SCHEMA = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,62}");
 
+  /**
+   * Validates the configuration and defaults a null {@code schema} to {@code "public"}.
+   *
+   * @throws NullPointerException if {@code dbClient} is null
+   * @throws IllegalArgumentException if {@code schema} is not an unquoted Postgres identifier of at
+   *     most 63 characters
+   */
   public PgConfig {
     Objects.requireNonNull(dbClient, "dbClient");
     if (schema == null) schema = "public";
@@ -51,6 +56,10 @@ public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
    *
    * <p>SQL constants use {@code %s.helios_*} for table references. This method substitutes the
    * configured schema, producing e.g. {@code public.helios_prompts} or {@code lg.helios_prompts}.
+   *
+   * @param sql the SQL text with a {@code %s} for each schema reference; non-null
+   * @return {@code sql} with every {@code %s} replaced by {@link #schema()}
+   * @throws NullPointerException if {@code sql} is null
    */
   public String qualify(String sql) {
     return sql.replace("%s", schema);
@@ -97,11 +106,16 @@ public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
     return redacted;
   }
 
+  /**
+   * Returns an empty builder.
+   *
+   * @return a builder with no client, the default schema and no redactor
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
-  /** Builder for PgConfig. */
+  /** Builds a {@link PgConfig}. Not thread-safe; use one builder per thread. */
   public static class Builder {
 
     private DbClient dbClient;
@@ -110,26 +124,52 @@ public record PgConfig(DbClient dbClient, String schema, Redactor redactor) {
 
     private Builder() {}
 
+    /**
+     * Sets the Helidon client every store and the exporter run their statements through; required.
+     * The caller owns it and closes it.
+     *
+     * @param dbClient the client; {@link #build()} rejects null
+     * @return this builder
+     */
     public Builder withDbClient(DbClient dbClient) {
       this.dbClient = dbClient;
       return this;
     }
 
+    /**
+     * Sets the schema that qualifies every Helios table. Unset or null means {@code "public"}.
+     *
+     * @param schema an unquoted Postgres identifier of at most 63 characters, or null for {@code
+     *     "public"}
+     * @return this builder
+     */
     public Builder withSchema(String schema) {
       this.schema = schema;
       return this;
     }
 
     /**
-     * Set the {@link Redactor} applied to trace and span text fields before persisting. Pass {@code
-     * null} to clear a previously-set redactor (default: unset / no-op). This is the only redaction
-     * persistence applies: the session's redaction pass does not reach these stores.
+     * Set the {@link Redactor} {@link PgSpanExporter} applies to span text fields and attribute
+     * values before persisting. Pass {@code null} to clear a previously-set redactor (default:
+     * unset / no-op). This is the only redaction persistence itself applies, on top of the
+     * session's own redaction of what it records on its spans.
+     *
+     * @param redactor the redactor, or null for none
+     * @return this builder
      */
     public Builder withRedactor(Redactor redactor) {
       this.redactor = redactor;
       return this;
     }
 
+    /**
+     * Builds the configuration.
+     *
+     * @return the configuration
+     * @throws NullPointerException if no client was set
+     * @throws IllegalArgumentException if the schema is not an unquoted Postgres identifier of at
+     *     most 63 characters
+     */
     public PgConfig build() {
       return new PgConfig(dbClient, schema, redactor);
     }

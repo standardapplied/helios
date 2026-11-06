@@ -25,6 +25,12 @@ public class PgPromptRegistry implements PromptRegistry {
   private final PgConfig config;
   private final DbClient dbClient;
 
+  /**
+   * Creates a registry over the {@code helios_prompts} table of {@code config}'s schema.
+   *
+   * @param config the database and schema; non-null
+   * @throws NullPointerException if {@code config} is null
+   */
   public PgPromptRegistry(PgConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     this.dbClient = config.dbClient();

@@ -47,6 +47,8 @@ public final class PgSessionStore implements SessionStore {
   private final DbClient dbClient;
 
   /**
+   * Creates a store over the {@code helios_session_entries} table of {@code config}'s schema.
+   *
    * @param config the database and schema; non-null
    * @throws NullPointerException if {@code config} is null
    */
