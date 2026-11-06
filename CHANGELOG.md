@@ -1217,6 +1217,11 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Added
 
+- **The public API is fully documented, and the build enforces it.** Every public and protected
+  type and member of a shipped module states its contract in Javadoc: what it accepts, `null`
+  included, what it returns, what it throws and, for a stateful type, whether it is thread-safe.
+  `mvn verify` runs Javadoc with doclint `all` on the main code of every shipped module and fails
+  on any warning, as `javadoc:jar` does in CI and the release.
 - Claude Haiku 5.5 (`AnthropicModelId.CLAUDE_HAIKU_5_5`, `claude-haiku-5-5`): 1M context, 128K
   output, adaptive thinking that `Off` sends `disabled` and `Effort` takes `LOW`..`MAX` without
   `PROGRESS`, replayed thinking verified as on Sonnet 5.5, forced tool choice accepted.
