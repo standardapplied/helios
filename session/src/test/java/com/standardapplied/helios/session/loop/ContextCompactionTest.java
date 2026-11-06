@@ -307,6 +307,24 @@ final class ContextCompactionTest {
   }
 
   @Test
+  void aPausedTurnCountsFromItsLastSegmentsRequestAndDoesNotCompact() {
+    var paused = Usage.of(100_000, 10).plus(Usage.of(110_000, 20));
+    var script = ScriptedModel.newBuilder().withTextTurn("one", paused).build();
+    var compactions = new AtomicInteger();
+    ContextCompactor counting =
+        (history, context) -> {
+          compactions.incrementAndGet();
+          return CompactionResult.noOp(history);
+        };
+
+    run(loop(script, counting), 180_000L);
+
+    assertEquals(0, compactions.get());
+    assertTrue(fixture.events.stream().noneMatch(QueryEvent.ContextWarning.class::isInstance));
+    assertEquals(110_000L + TOKENS_PER_MESSAGE, state.history().tokens(recording));
+  }
+
+  @Test
   void noCompactorRunsWhileWhatItCannotSeeReachesTheWatermarkByItself() {
     var script = ScriptedModel.newBuilder().withTextTurn("one", FIRST_TURN).build();
     var compactions = new AtomicInteger();

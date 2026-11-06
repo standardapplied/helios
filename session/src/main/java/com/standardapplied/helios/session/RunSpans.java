@@ -88,7 +88,6 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<String> RUN_ID = stringKey("helios.run.id");
   private static final AttributeKey<String> TERMINAL = stringKey("helios.terminal");
   private static final AttributeKey<Long> ATTEMPT = longKey("helios.attempt");
-  private static final AttributeKey<Long> TOTAL_TOKENS = longKey("helios.usage.total_tokens");
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
   private static final AttributeKey<String> TOOL_OUTCOME = stringKey("helios.tool.outcome");
   private static final AttributeKey<Long> ARGUMENTS_CHARS = longKey("helios.tool.argumentsChars");
@@ -259,7 +258,6 @@ final class RunSpans implements StepSpans {
       if (usage.cacheCreationInputTokens() != 0) {
         span.setAttribute(CACHE_WRITE, (long) usage.cacheCreationInputTokens());
       }
-      span.setAttribute(TOTAL_TOKENS, (long) usage.totalTokens());
     }
     if (cost.microUsd() != 0) {
       span.setAttribute(COST, cost.microUsd());
