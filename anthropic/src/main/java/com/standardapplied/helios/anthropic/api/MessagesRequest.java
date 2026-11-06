@@ -29,8 +29,7 @@ import java.util.List;
  * @param topP nucleus sampling threshold
  * @param stopSequences sequences that stop generation
  * @param thinking extended thinking configuration
- * @param outputConfig output-side controls (effort) — paired with {@code thinking.type=adaptive} on
- *     Opus 4.7+; omitted for legacy {@code thinking.type=enabled} models
+ * @param outputConfig output-side controls (effort) — paired with {@code thinking.type=adaptive}
  * @param container the id of the code execution container to run code in; null starts a new one
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)

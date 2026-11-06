@@ -22,7 +22,7 @@ import java.util.Objects;
  *
  * <p>The {@code modelId} is what lets the loop price compaction spend at the right rate. Pinning
  * compaction cost to the main session model would overcharge any deployment that wired a cheap
- * summary model (e.g. Haiku 4.5) while keeping a premium model (e.g. Opus 4.7) as the main loop —
+ * summary model (e.g. Haiku 5.5) while keeping a premium model (e.g. Opus 5.5) as the main loop —
  * the whole point of letting the summary model be configurable. Pure-trim compactors return {@link
  * #noOp(List)} (empty {@code modelId} and zero usage); the loop then has no cost to attribute.
  *

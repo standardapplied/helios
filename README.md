@@ -91,7 +91,7 @@ Direct `Model` API for the "send messages, get a response" shape. No session, no
 
 ```java
 try (var model = new AnthropicProvider().create(
-    AnthropicModelId.CLAUDE_SONNET_4_6.id(),
+    AnthropicModelId.CLAUDE_SONNET_5_5.id(),
     ModelConfig.newBuilder().withApiKey(System.getenv("ANTHROPIC_API_KEY")).build())) {
   var response = model.chat(List.of(
       Message.system("You are a helpful assistant."),

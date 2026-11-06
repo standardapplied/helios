@@ -29,7 +29,7 @@ class PromptCacheTest {
   @Test
   void promptCachingDefaultsOn() {
     assertNotNull(
-        SentCacheControl.onSystemPrompt(at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at)),
+        SentCacheControl.onSystemPrompt(at -> model(AnthropicModelId.CLAUDE_SONNET_5_5, at)),
         "Helios bills Anthropic via prompt caching by default — opt-out is explicit");
   }
 
@@ -37,7 +37,7 @@ class PromptCacheTest {
   void promptCachingDisabledViaCachePolicy() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var request =
-        requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.disabled())
+        requests(AnthropicModelId.CLAUDE_SONNET_5_5, config, CachePolicy.disabled())
             .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
             .body();
 
@@ -47,7 +47,7 @@ class PromptCacheTest {
     assertEquals("Hi", request.messages().getFirst().content());
     assertNull(
         SentCacheControl.onSystemPrompt(
-            at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at, CachePolicy.disabled())));
+            at -> model(AnthropicModelId.CLAUDE_SONNET_5_5, at, CachePolicy.disabled())));
   }
 
   @Test
@@ -61,7 +61,7 @@ class PromptCacheTest {
     // payload reaches the system block intact so Anthropic bills the correct rate.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
     var request =
-        requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.longLived())
+        requests(AnthropicModelId.CLAUDE_SONNET_5_5, config, CachePolicy.longLived())
             .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
             .body();
 
@@ -78,7 +78,7 @@ class PromptCacheTest {
     assertEquals(
         SentCacheControl.LONG_LIVED,
         SentCacheControl.onSystemPrompt(
-            at -> model(AnthropicModelId.CLAUDE_OPUS_4_7, at, CachePolicy.longLived())));
+            at -> model(AnthropicModelId.CLAUDE_SONNET_5_5, at, CachePolicy.longLived())));
   }
 
   @Test
@@ -86,7 +86,7 @@ class PromptCacheTest {
     // 5m is Anthropic's implicit default; sending ttl='5m' would still work but adds wire bloat.
     // Verify the short-lived policy emits a breakpoint with no ttl field set.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config, CachePolicy.shortLived());
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config, CachePolicy.shortLived());
     var request =
         requests
             .build(List.of(Message.system("Be helpful"), Message.user("Hi")), List.of(), null)
@@ -106,7 +106,7 @@ class PromptCacheTest {
     // server bills every input token at the base rate, producing the Light Grid matchmaking
     // baseline's flat $235.54 across 24 viewers. Annotated requests get the cache discount.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request =
         requests
             .build(
@@ -135,7 +135,7 @@ class PromptCacheTest {
     // No system prompt set; caching ON. The model must not synthesize an empty SystemContent
     // block — Anthropic rejects empty system arrays and an empty text block wastes a breakpoint.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
     assertNull(request.system(), "blank system must serialize as omitted, not as an empty array");
   }
@@ -143,7 +143,7 @@ class PromptCacheTest {
   @Test
   void promptCachingAnnotatesLastToolWithCacheControl() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var tool1 =
         Tool.newBuilder()
             .withName("search")
@@ -187,7 +187,7 @@ class PromptCacheTest {
   @Test
   void promptCachingSingleToolGetsCacheControl() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var tool =
         Tool.newBuilder()
             .withName("solo")
@@ -201,7 +201,7 @@ class PromptCacheTest {
   @Test
   void promptCachingOmitsToolBreakpointWhenToolsEmpty() {
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request = requests.build(List.of(Message.user("Hi")), List.of(), null).body();
     assertNull(request.tools(), "empty tools list serializes as omitted, no breakpoint");
   }
@@ -212,7 +212,7 @@ class PromptCacheTest {
     // block. This test guards the promotion path: a single string-content user message becomes a
     // single-block list with the block annotated.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request = requests.build(List.of(Message.user("Latest turn")), List.of(), null).body();
 
     var last = request.messages().getLast();
@@ -232,7 +232,7 @@ class PromptCacheTest {
     // single cache_control per request slot; annotating multiple blocks of the same message would
     // burn breakpoints with no incremental cacheability.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var pngBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
     var msg = Message.user("Look at this", List.of(InlineFile.of(pngBytes, "image/png")));
     var request = requests.build(List.of(msg), List.of(), null).body();
@@ -251,7 +251,7 @@ class PromptCacheTest {
     // Anthropic's 20-block lookback window, which would otherwise blind out the system+tools
     // cache after roughly five tool-heavy agent turns.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request =
         requests
             .build(
@@ -283,7 +283,7 @@ class PromptCacheTest {
     // Single-message request: there's no second-to-last to annotate. Only the last gets a
     // breakpoint — no synthetic empty breakpoint, no off-by-one.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request = requests.build(List.of(Message.user("solo")), List.of(), null).body();
 
     assertEquals(1, request.messages().size());
@@ -297,7 +297,7 @@ class PromptCacheTest {
     // Verify the rolling breakpoint lands on an ASSISTANT message when that's the penultimate
     // entry — Anthropic accepts cache_control on assistant content blocks too.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request =
         requests
             .build(List.of(Message.user("hi"), Message.assistant("hello!")), List.of(), null)
@@ -319,7 +319,7 @@ class PromptCacheTest {
     // annotator must skip rather than synthesize an empty block. The other breakpoints (system,
     // tools) still apply.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var request =
         requests.build(List.of(Message.system("S"), Message.user("")), List.of(), null).body();
     // Last message stays as an empty string — no promotion to an empty block.
@@ -337,7 +337,7 @@ class PromptCacheTest {
     // last-message = 4 breakpoints. The penultimate breakpoint maintains rolling cache lookup
     // within Anthropic's 20-block lookback window for long conversations.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var tool =
         Tool.newBuilder()
             .withName("only")
@@ -382,7 +382,7 @@ class PromptCacheTest {
     // First-turn shape (no prior conversation): system + tools + last-message = 3 breakpoints.
     // No penultimate to annotate, so we stay one under the 4-breakpoint budget.
     var config = ModelConfig.newBuilder().withApiKey("sk").build();
-    var requests = requests(AnthropicModelId.CLAUDE_OPUS_4_7, config);
+    var requests = requests(AnthropicModelId.CLAUDE_SONNET_5_5, config);
     var tool =
         Tool.newBuilder()
             .withName("only")

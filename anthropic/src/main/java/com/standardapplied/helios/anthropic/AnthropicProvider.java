@@ -14,6 +14,8 @@ import com.standardapplied.helios.core.model.ModelProvider;
 import com.standardapplied.helios.core.provider.StreamingModel;
 import java.time.Clock;
 import java.time.InstantSource;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 /**
  * ModelProvider implementation for Anthropic's Messages API.
@@ -29,9 +31,10 @@ import java.time.InstantSource;
  * be used before this provider's enum catches up; unrecognised ids accept every reasoning
  * configuration, sent in the current adaptive shape, and {@value
  * AnthropicRequestBuilder#DEFAULT_MAX_OUTPUT_TOKENS} output tokens. When {@link
- * ModelConfig#baseUrl()} is set — pointing at Bedrock, Vertex AI, or a compatible proxy — any
- * non-blank {@code modelId} is accepted regardless of prefix. Callers can always override output
- * tokens via {@link ModelConfig.Builder#withMaxOutputTokens(Integer)}.
+ * ModelConfig#baseUrl()} is set — pointing at Bedrock, Vertex AI, or a compatible proxy — any other
+ * non-blank {@code modelId} is accepted too. A Claude model before generation 5 is refused either
+ * way: Helios supports Claude 5 and later. Callers can always override output tokens via {@link
+ * ModelConfig.Builder#withMaxOutputTokens(Integer)}.
  *
  * <p>Managed five-minute prompt caching is enabled by default. Use {@link #create(String,
  * ModelConfig, CachePolicy)} to select the one-hour cache or disable prompt caching.
@@ -59,8 +62,8 @@ public class AnthropicProvider implements ModelProvider {
    * @param config provider configuration
    * @param cachePolicy short-lived (5m), long-lived (1h), or disabled
    * @return a configured Anthropic model
-   * @throws IllegalArgumentException if the model is unsupported or any required argument is
-   *     invalid
+   * @throws IllegalArgumentException if the model is unsupported, including a Claude model before
+   *     generation 5, or any required argument is invalid
    */
   public Model create(String modelId, ModelConfig config, CachePolicy cachePolicy) {
     if (config == null) {
@@ -69,6 +72,16 @@ public class AnthropicProvider implements ModelProvider {
     var known = AnthropicModelId.fromId(modelId);
     if (known != null) {
       return model(known.id(), known, config, cachePolicy);
+    }
+    if (AnthropicModelId.predatesClaude5(modelId)) {
+      throw new IllegalArgumentException(
+          "Claude model "
+              + modelId
+              + " is not supported: Helios supports Claude 5 and later ("
+              + Arrays.stream(AnthropicModelId.values())
+                  .map(AnthropicModelId::id)
+                  .collect(Collectors.joining(", "))
+              + ")");
     }
     if (AnthropicModelId.hasClaudePrefix(modelId) || !Strings.isBlank(config.baseUrl())) {
       return model(modelId, AnthropicModelId.fromWireId(modelId), config, cachePolicy);
@@ -84,7 +97,7 @@ public class AnthropicProvider implements ModelProvider {
 
   @Override
   public boolean supports(String modelId) {
-    return AnthropicModelId.isSupported(modelId) || AnthropicModelId.hasClaudePrefix(modelId);
+    return AnthropicModelId.hasClaudePrefix(modelId) && !AnthropicModelId.predatesClaude5(modelId);
   }
 
   private static Model model(

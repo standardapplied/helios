@@ -12,7 +12,6 @@ import com.standardapplied.helios.core.test.Golden;
 import com.standardapplied.helios.core.test.ModelHarness;
 import com.standardapplied.helios.core.tool.Tool;
 import java.net.URI;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,13 +51,13 @@ class AnthropicRequestSnapshotTest {
     for (var id : AnthropicModelId.values()) {
       snapshot(id.id() + " absent tools", modelAt(id, null, CachePolicy.shortLived()), withTools());
     }
-    for (var id : EnumSet.complementOf(EnumSet.of(AnthropicModelId.CLAUDE_HAIKU_4_5))) {
+    for (var id : AnthropicModelId.values()) {
       snapshot(
           id.id() + " medium summary tools",
           modelAt(id, MEDIUM, CachePolicy.shortLived()),
           withTools());
     }
-    var sonnet = AnthropicModelId.CLAUDE_SONNET_4_6;
+    var sonnet = AnthropicModelId.CLAUDE_SONNET_5_5;
     var medium = MEDIUM;
     snapshot("schema", modelAt(sonnet, medium, CachePolicy.shortLived()), withSchema(List.of()));
     snapshot(
@@ -81,9 +80,8 @@ class AnthropicRequestSnapshotTest {
         uri ->
             new AnthropicProvider()
                 .create(
-                    AnthropicModelId.CLAUDE_HAIKU_4_5.id(),
+                    AnthropicModelId.CLAUDE_HAIKU_5_5.id(),
                     config(uri, new Reasoning.Off())
-                        .withTemperature(0.3)
                         .withStopSequences(List.of("END"))
                         .withMaxOutputTokens(2048)
                         .withToolChoice(ToolChoice.required("weather"))
@@ -114,7 +112,7 @@ class AnthropicRequestSnapshotTest {
    */
   private static List<Message> history(List<Tool> tools, Map<String, Object> schema) {
     var stamp =
-        AnthropicFixture.requests(AnthropicModelId.CLAUDE_SONNET_4_6, ModelConfig.of("k"))
+        AnthropicFixture.requests(AnthropicModelId.CLAUDE_SONNET_5_5, ModelConfig.of("k"))
             .build(ConversationFixture.history(THINKING), tools, schema)
             .promptStamp();
     var metadata = new HashMap<>(THINKING);

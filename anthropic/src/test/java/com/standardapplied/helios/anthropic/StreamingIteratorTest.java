@@ -40,7 +40,7 @@ class StreamingIteratorTest {
       named(
           "message_start",
           "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\","
-              + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-6-20250514\","
+              + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\","
               + "\"stop_reason\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}");
 
   private static final String TEXT_BLOCK_START =

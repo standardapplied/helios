@@ -153,18 +153,6 @@ class CodeContainerTest {
   }
 
   @Test
-  void aModelWithoutProgrammaticToolCallingSendsNoContainer() {
-    var request =
-        nextRequest(
-            AnthropicModelId.CLAUDE_HAIKU_4_5,
-            WEB_SEARCH,
-            EXPIRES_AT.minusNanos(1),
-            afterTheRecordedTurn());
-
-    assertNull(request.container());
-  }
-
-  @Test
   void theLatestAssistantTurnThatRecordedAContainerNamesIt() {
     var later = EXPIRES_AT.plusSeconds(3600);
     var userWithContainer =
