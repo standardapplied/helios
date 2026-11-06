@@ -75,12 +75,11 @@ final class PgSpanExporterTest {
         .getLong();
   }
 
-  private static Attributes usage(long input, long output, long write, long read, long total) {
+  private static Attributes usage(long input, long output, long write, long read) {
     var usage =
         Attributes.builder()
             .put("gen_ai.usage.input_tokens", input)
             .put("gen_ai.usage.output_tokens", output)
-            .put("helios.usage.total_tokens", total)
             .put("helios.cost.micro_usd", 42L);
     if (write != 0) {
       usage.put("gen_ai.usage.cache_write.input_tokens", write);
@@ -102,7 +101,7 @@ final class PgSpanExporterTest {
             .put("gen_ai.request.model", "scripted")
             .put("gen_ai.provider.name", "testing")
             .put("helios.terminal", "Success")
-            .putAll(usage(180, 22, 30, 50, 250))
+            .putAll(usage(180, 22, 30, 50))
             .build());
   }
 
@@ -118,7 +117,7 @@ final class PgSpanExporterTest {
             Attributes.builder()
                 .put(AttributeKey.stringArrayKey("gen_ai.response.finish_reasons"), List.of("stop"))
                 .put("helios.attempt", 1L)
-                .putAll(usage(180, 22, 30, 50, 260))
+                .putAll(usage(180, 22, 30, 50))
                 .build());
     var tool =
         step(

@@ -154,7 +154,6 @@ class PgTraceRollupTest {
           .put("gen_ai.usage.output_tokens", (long) usage.outputTokens())
           .put("gen_ai.usage.cache_write.input_tokens", (long) usage.cacheCreationInputTokens())
           .put("gen_ai.usage.cache_read.input_tokens", (long) usage.cacheReadInputTokens())
-          .put("helios.usage.total_tokens", (long) usage.totalTokens())
           .put("helios.cost.micro_usd", costMicroUsd);
     }
     var started = nanos(start);

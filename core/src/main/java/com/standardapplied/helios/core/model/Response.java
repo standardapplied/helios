@@ -108,18 +108,24 @@ public record Response<T>(
    * @param cacheReadInputTokens tokens read from the provider's prompt cache; typically billed at a
    *     deep discount (Anthropic: 0.10×; OpenAI: ~0.50× depending on model)
    * @param totalTokens convenience sum {@code input + output + cacheCreation + cacheRead}
+   * @param promptTokens the size of the whole prompt of the last request this usage covers: input,
+   *     cache-creation and cache-read tokens are disjoint, so for one request their sum is every
+   *     token it sent, for every provider. Usage added over several requests, such as the segments
+   *     of an Anthropic {@code pause_turn}, keeps the last one's, never their total
    */
   public record Usage(
       int inputTokens,
       int outputTokens,
       int cacheCreationInputTokens,
       int cacheReadInputTokens,
-      int totalTokens) {
+      int totalTokens,
+      long promptTokens) {
     /**
      * Canonical constructor.
      *
-     * @throws IllegalArgumentException if a count is negative or {@code totalTokens} is not the sum
-     *     of the four counts
+     * @throws IllegalArgumentException if a count is negative, {@code totalTokens} is not the sum
+     *     of the four counts, or {@code promptTokens} is negative or greater than the sum of the
+     *     three input counts
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
     public Usage {
@@ -137,6 +143,11 @@ public record Response<T>(
         throw new IllegalArgumentException(
             "totalTokens must be the sum of the four counts, " + sum + ", got " + totalTokens);
       }
+      var inputs = inputs(inputTokens, cacheCreationInputTokens, cacheReadInputTokens);
+      if (promptTokens < 0 || promptTokens > inputs) {
+        throw new IllegalArgumentException(
+            "promptTokens must lie in [0, " + inputs + "], got " + promptTokens);
+      }
     }
 
     /**
@@ -152,19 +163,27 @@ public record Response<T>(
     }
 
     /**
-     * Sum this usage with another, count by count; the total is recomputed from the summed counts.
+     * Add a later request's usage to this one, count by count; the total is recomputed from the
+     * summed counts. {@link #promptTokens} is the later request's size, or this one's when the
+     * later reports none, so adding a zero usage, such as a failed attempt's, changes nothing.
      *
-     * @param other the usage to add; non-null
-     * @return a usage record with every count summed
+     * @param other the usage of a later request; non-null
+     * @return a usage record with every count summed and the last reported prompt size
      * @throws ArithmeticException on overflow of any count or of the total
      */
     public Usage plus(Usage other) {
       Objects.requireNonNull(other, "other must not be null");
-      return of(
-          Math.addExact(inputTokens, other.inputTokens),
-          Math.addExact(outputTokens, other.outputTokens),
-          Math.addExact(cacheCreationInputTokens, other.cacheCreationInputTokens),
-          Math.addExact(cacheReadInputTokens, other.cacheReadInputTokens));
+      var input = Math.addExact(inputTokens, other.inputTokens);
+      var output = Math.addExact(outputTokens, other.outputTokens);
+      var cacheCreation = Math.addExact(cacheCreationInputTokens, other.cacheCreationInputTokens);
+      var cacheRead = Math.addExact(cacheReadInputTokens, other.cacheReadInputTokens);
+      return new Usage(
+          input,
+          output,
+          cacheCreation,
+          cacheRead,
+          sum(input, output, cacheCreation, cacheRead),
+          other.promptTokens > 0 ? other.promptTokens : promptTokens);
     }
 
     /**
@@ -177,34 +196,33 @@ public record Response<T>(
     }
 
     /**
-     * The size of the whole prompt: input, cache-creation and cache-read tokens are disjoint, so
-     * their sum is every token the request sent, for every provider. Usage summed over several
-     * requests, such as the segments of an Anthropic {@code pause_turn}, gives their total instead.
-     *
-     * @return the prompt's tokens
-     */
-    public long promptTokens() {
-      return (long) inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
-    }
-
-    /**
      * Build a {@link Usage} including prompt-cache token counts.
      *
      * @param input uncached prompt tokens
      * @param output completion tokens
      * @param cacheCreation tokens written to the provider's prompt cache
      * @param cacheRead tokens read from the provider's prompt cache
-     * @return a usage record with {@code totalTokens} summing all four counts
+     * @return a usage record of one request, with {@code totalTokens} summing all four counts and
+     *     {@code promptTokens} the three input counts
      * @throws IllegalArgumentException if a count is negative
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
     public static Usage of(int input, int output, int cacheCreation, int cacheRead) {
       return new Usage(
-          input, output, cacheCreation, cacheRead, sum(input, output, cacheCreation, cacheRead));
+          input,
+          output,
+          cacheCreation,
+          cacheRead,
+          sum(input, output, cacheCreation, cacheRead),
+          inputs(input, cacheCreation, cacheRead));
     }
 
     private static int sum(int input, int output, int cacheCreation, int cacheRead) {
       return Math.addExact(Math.addExact(input, output), Math.addExact(cacheCreation, cacheRead));
+    }
+
+    private static long inputs(int input, int cacheCreation, int cacheRead) {
+      return (long) input + cacheCreation + cacheRead;
     }
   }
 
