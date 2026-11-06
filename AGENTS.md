@@ -203,14 +203,16 @@ different one.
    test, the first turn that sends the replayed block), and a session that hits `maxTurns` is an
    accepted terminal unless the test is about that terminal.
 
-`.github/workflows/live.yml` runs every `*IntegrationTest` on `main` nightly (04:41 UTC) and on
-manual dispatch, never on a pull request. Its job deploys to the `live-providers` environment:
-no required reviewers, deployment branches "Selected branches" with exactly one rule, `main`,
-and the secrets `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` (`OPENAI_API_KEY` once a key exists),
-set only in the "Live tests" step's `env:`. A missing secret reaches the step empty, and its
-classes skip with a message naming the variable. Every run uploads the surefire XML, each pass,
-failure and skip with its message, as the `live-test-reports` artifact. A failure opens nothing:
-the red run and its reports are the signal.
+`.github/workflows/release.yml` runs every `*IntegrationTest` with real keys in its `live` job,
+only when a release is cut (a push to `release/**`, or a manual dispatch), never on `main` or a
+pull request: real calls cost money. The `deploy` job needs `live`, so a failing live test stops
+the release before anything reaches Maven Central. The job deploys to the `live-providers`
+environment: no required reviewers, deployment branches "Selected branches" with the rules
+`main` and `release/*`, and the secrets `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`
+(`OPENAI_API_KEY` once a key exists), set only in the "Live tests" step's `env:`. A missing
+secret reaches the step empty, and its classes skip with a message naming the variable. Every
+run uploads the surefire XML, each pass, failure and skip with its message, as the
+`live-test-reports` artifact.
 
 ### Running it
 
