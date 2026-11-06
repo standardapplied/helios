@@ -16,10 +16,17 @@ import java.util.List;
  *
  * <p>This is the substrate-only shape: sandbox factory, execution caps and host-function registry.
  *
- * @param sandboxFactory creates the sandbox for each session
- * @param executionTimeout default timeout per code execution
- * @param maxConcurrentSessions maximum concurrent sessions (enforced via semaphore)
- * @param hostFunctions additional host functions registered for each session
+ * @param sandboxFactory creates the sandbox for each session; must not be {@code null}
+ * @param executionTimeout the budget {@link ReplSession#execute(String)} gives a snippet; strictly
+ *     positive. Default {@link #DEFAULT_EXECUTION_TIMEOUT}
+ * @param maxConcurrentSessions the session cap a caller sizes the {@link
+ *     java.util.concurrent.Semaphore} it passes to {@link ReplSession#create} with; strictly
+ *     positive. {@code ReplSession} enforces only the semaphore it is given, and {@link
+ *     com.standardapplied.helios.repl.execution.JShellExecutionProvider} takes its own cap. Default
+ *     {@link #DEFAULT_MAX_CONCURRENT_SESSIONS}
+ * @param hostFunctions additional host functions registered, in order, in each session's registry;
+ *     must not be {@code null} or hold {@code null}, and names must be distinct (a repeat fails
+ *     {@link ReplSession#create})
  */
 public record ReplConfig(
     SandboxFactory sandboxFactory,
@@ -33,7 +40,14 @@ public record ReplConfig(
   /** Default max concurrent sessions. */
   public static final int DEFAULT_MAX_CONCURRENT_SESSIONS = 50;
 
-  /** Canonical constructor with full validation; defensively copies {@code hostFunctions}. */
+  /**
+   * Canonical constructor with full validation; defensively copies {@code hostFunctions}.
+   *
+   * @throws IllegalArgumentException if {@code sandboxFactory} is {@code null}, {@code
+   *     executionTimeout} is {@code null}, zero or negative, or {@code maxConcurrentSessions} is
+   *     not positive
+   * @throws NullPointerException if {@code hostFunctions} is or holds {@code null}
+   */
   public ReplConfig {
     if (sandboxFactory == null) {
       throw new IllegalArgumentException("Sandbox factory must not be null");
@@ -47,12 +61,17 @@ public record ReplConfig(
     hostFunctions = List.copyOf(hostFunctions);
   }
 
-  /** Start building a {@code ReplConfig}. */
+  /**
+   * Starts building a {@code ReplConfig} with no sandbox factory, the default timeout and session
+   * cap, and no host functions.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
 
-  /** Fluent builder for {@link ReplConfig}. */
+  /** Fluent, mutable, single-thread builder for {@link ReplConfig}. */
   public static class Builder {
     private SandboxFactory sandboxFactory;
     private Duration executionTimeout = DEFAULT_EXECUTION_TIMEOUT;
@@ -61,37 +80,74 @@ public record ReplConfig(
 
     private Builder() {}
 
-    /** Set the sandbox factory. Required. */
+    /**
+     * Sets the factory that creates each session's sandbox. Required; unset by default.
+     *
+     * @param sandboxFactory the factory; {@code null} is rejected by {@link #build()}
+     * @return this builder
+     */
     public Builder withSandboxFactory(SandboxFactory sandboxFactory) {
       this.sandboxFactory = sandboxFactory;
       return this;
     }
 
-    /** Set the per-execute timeout. Must be strictly positive. */
+    /**
+     * Sets the budget {@link ReplSession#execute(String)} gives a snippet; {@link
+     * #DEFAULT_EXECUTION_TIMEOUT} by default.
+     *
+     * @param executionTimeout a strictly positive duration; anything else is rejected by {@link
+     *     #build()}
+     * @return this builder
+     */
     public Builder withExecutionTimeout(Duration executionTimeout) {
       this.executionTimeout = executionTimeout;
       return this;
     }
 
-    /** Set the cap on concurrent sessions. Must be strictly positive. */
+    /**
+     * Sets the cap on concurrent sessions; {@link #DEFAULT_MAX_CONCURRENT_SESSIONS} by default. See
+     * {@link ReplConfig#maxConcurrentSessions()} for who enforces it.
+     *
+     * @param maxConcurrentSessions a positive cap; zero or negative is rejected by {@link #build()}
+     * @return this builder
+     */
     public Builder withMaxConcurrentSessions(int maxConcurrentSessions) {
       this.maxConcurrentSessions = maxConcurrentSessions;
       return this;
     }
 
-    /** Register one additional host function. Order is preserved across calls. */
+    /**
+     * Appends one host function to those every session registers. Order is preserved across calls.
+     *
+     * @param function the function; {@code null} is rejected by {@link #build()}
+     * @return this builder
+     */
     public Builder withHostFunction(HostFunction function) {
       this.hostFunctions.add(function);
       return this;
     }
 
-    /** Register several host functions in one call. */
+    /**
+     * Appends several host functions, in list order, to those every session registers.
+     *
+     * @param functions the functions; must not be {@code null}, and a {@code null} element is
+     *     rejected by {@link #build()}
+     * @return this builder
+     * @throws NullPointerException if {@code functions} is {@code null}
+     */
     public Builder withHostFunctions(List<HostFunction> functions) {
       this.hostFunctions.addAll(functions);
       return this;
     }
 
-    /** Build the immutable config. */
+    /**
+     * Builds the immutable config.
+     *
+     * @return a new config
+     * @throws IllegalArgumentException if the sandbox factory is unset, the timeout is not strictly
+     *     positive, or the session cap is not positive
+     * @throws NullPointerException if a registered host function is {@code null}
+     */
     public ReplConfig build() {
       return new ReplConfig(sandboxFactory, executionTimeout, maxConcurrentSessions, hostFunctions);
     }

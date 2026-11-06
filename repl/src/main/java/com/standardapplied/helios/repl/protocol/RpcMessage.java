@@ -24,6 +24,11 @@ public sealed interface RpcMessage {
    * @param params the method parameters (may be null)
    */
   record Request(String id, String method, Object params) implements RpcMessage {
+    /**
+     * Validates the id and method.
+     *
+     * @throws IllegalArgumentException if {@code id} or {@code method} is {@code null} or blank
+     */
     public Request {
       if (Strings.isBlank(id)) {
         throw new IllegalArgumentException("Request id must not be null or blank");
@@ -41,6 +46,11 @@ public sealed interface RpcMessage {
    * @param result the result value (may be null)
    */
   record Response(String id, Object result) implements RpcMessage {
+    /**
+     * Validates the id.
+     *
+     * @throws IllegalArgumentException if {@code id} is {@code null} or blank
+     */
     public Response {
       if (Strings.isBlank(id)) {
         throw new IllegalArgumentException("Response id must not be null or blank");
@@ -55,6 +65,11 @@ public sealed interface RpcMessage {
    * @param error the error details
    */
   record ErrorResponse(String id, RpcError error) implements RpcMessage {
+    /**
+     * Validates the error.
+     *
+     * @throws IllegalArgumentException if {@code error} is {@code null}
+     */
     public ErrorResponse {
       if (error == null) {
         throw new IllegalArgumentException("Error must not be null");
@@ -69,6 +84,11 @@ public sealed interface RpcMessage {
    * @param params the notification parameters (may be null)
    */
   record Notification(String method, Object params) implements RpcMessage {
+    /**
+     * Validates the method.
+     *
+     * @throws IllegalArgumentException if {@code method} is {@code null} or blank
+     */
     public Notification {
       if (Strings.isBlank(method)) {
         throw new IllegalArgumentException("Notification method must not be null or blank");

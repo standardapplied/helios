@@ -12,8 +12,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Mutable registry of host functions. Can be frozen to prevent further modifications after sandbox
- * startup.
+ * Mutable registry of host functions, kept in registration order. Can be frozen to prevent further
+ * modifications after sandbox startup.
+ *
+ * <p>Not thread-safe while it is being filled: register every function from one thread, then {@link
+ * #freeze()} it before other threads read it.
  */
 public final class HostFunctionRegistry {
 
@@ -29,6 +32,9 @@ public final class HostFunctionRegistry {
 
   private final Map<String, HostFunction> functions = new LinkedHashMap<>();
   private volatile boolean frozen;
+
+  /** Creates an empty, unfrozen registry. */
+  public HostFunctionRegistry() {}
 
   /**
    * Register a host function.
@@ -74,17 +80,28 @@ public final class HostFunctionRegistry {
     return Collections.unmodifiableCollection(functions.values());
   }
 
-  /** Number of registered functions. */
+  /**
+   * Returns the number of registered functions.
+   *
+   * @return the count, zero for an empty registry
+   */
   public int size() {
     return functions.size();
   }
 
-  /** Freeze the registry to prevent further modifications. */
+  /**
+   * Freezes the registry so every later {@link #register(HostFunction)} throws. Idempotent; a
+   * frozen registry is never unfrozen.
+   */
   public void freeze() {
     this.frozen = true;
   }
 
-  /** Whether the registry is frozen. */
+  /**
+   * Returns whether the registry is frozen.
+   *
+   * @return {@code true} once {@link #freeze()} has been called
+   */
   public boolean isFrozen() {
     return frozen;
   }

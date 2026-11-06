@@ -251,6 +251,9 @@ public final class PolicyBytecodeVerifier implements BytecodeVerifier {
    * checked in order and the first that matches names the violation: explicit denied classes,
    * denied packages, the categorical denies (reflection, native access, dynamic class definition,
    * filesystem access), then the allow-list default-deny.
+   *
+   * @param policy the policy to enforce; must not be {@code null}
+   * @throws IllegalArgumentException if {@code policy} is {@code null}
    */
   public PolicyBytecodeVerifier(SandboxPolicy policy) {
     if (policy == null) {

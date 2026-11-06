@@ -96,6 +96,8 @@ public sealed interface SubprocessModules
    * The default — no restriction. Equivalent to the launch behaviour before L3 landed: the
    * subprocess JVM inherits the full observable module set ({@code java.net.http}, {@code
    * java.sql}, {@code java.management}, etc. all reachable).
+   *
+   * @return the shared {@link Unrestricted} instance
    */
   static SubprocessModules unrestricted() {
     return Unrestricted.INSTANCE;
@@ -106,6 +108,8 @@ public sealed interface SubprocessModules
    * smartcard, JNDI, Kerberos, foreign linker, ... — becomes non-observable in the subprocess JVM.
    * Snippets that {@code import java.net.http.HttpClient} fail to compile inside JShell with a
    * clean diagnostic, before the L2 verifier even runs.
+   *
+   * @return a {@link Restricted} variant with no extra modules
    */
   static SubprocessModules minimal() {
     return new Restricted(Set.of());
@@ -116,6 +120,9 @@ public sealed interface SubprocessModules
    * need a specific JDK module — e.g. {@code allowingExtras("java.net.http")} for an HTTP-using
    * workload, {@code allowingExtras("java.net.http", "java.sql")} for HTTP+JDBC.
    *
+   * @param modules JDK module names to keep observable on top of the required roots; repeats are
+   *     collapsed, and no arguments is the same as {@link #minimal()}
+   * @return a {@link Restricted} variant holding the distinct extras
    * @throws IllegalArgumentException if {@code modules} is null, contains null, or contains blank
    *     entries
    */
@@ -142,6 +149,8 @@ public sealed interface SubprocessModules
    *
    * @param modulepathLaunch whether the parent JVM uses {@code --module-path} (i.e. the bootstrap
    *     module is observable as a named module in the subprocess)
+   * @return the comma-separated module list, without the flag itself; the empty string for {@link
+   *     Unrestricted}, which tells the launcher to omit the flag
    */
   String limitModulesArg(boolean modulepathLaunch);
 
@@ -160,8 +169,17 @@ public sealed interface SubprocessModules
    * #BOOTSTRAP_MODULE} when launched from modulepath, plus {@code extraModules}. Extras are
    * deduplicated against the required roots at argument-building time (configuring {@code extras =
    * {"java.base"}} is a no-op rather than an error — minor caller convenience).
+   *
+   * @param extraModules JDK module names kept observable beyond the required roots; empty for
+   *     {@link #minimal()}
    */
   record Restricted(Set<String> extraModules) implements SubprocessModules {
+    /**
+     * Validates the extras and stores an immutable copy.
+     *
+     * @throws IllegalArgumentException if {@code extraModules} is {@code null} or holds a {@code
+     *     null} or blank name
+     */
     public Restricted {
       if (extraModules == null) {
         throw new IllegalArgumentException("extraModules must not be null (use empty set instead)");
