@@ -31,6 +31,7 @@ import java.util.List;
  * @param thinking extended thinking configuration
  * @param outputConfig output-side controls (effort) — paired with {@code thinking.type=adaptive} on
  *     Opus 4.7+; omitted for legacy {@code thinking.type=enabled} models
+ * @param container the id of the code execution container to run code in; null starts a new one
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record MessagesRequest(
@@ -45,7 +46,8 @@ public record MessagesRequest(
     @JsonProperty("top_p") Double topP,
     @JsonProperty("stop_sequences") List<String> stopSequences,
     ThinkingConfig thinking,
-    @JsonProperty("output_config") OutputConfig outputConfig) {
+    @JsonProperty("output_config") OutputConfig outputConfig,
+    String container) {
 
   public static Builder newBuilder() {
     return new Builder();
@@ -55,12 +57,14 @@ public record MessagesRequest(
    * The pause_turn continuation shape: this request with the paused assistant content appended to
    * the conversation and {@code tool_choice} cleared — the API rejects a forced tool choice when
    * the final message is an assistant message, and any forced choice was already honoured by the
-   * paused segment.
+   * paused segment. It runs code in {@code container} when that is not null.
    *
    * @param messages the conversation including the trailing paused assistant entry; non-null
+   * @param container the id of the container the paused segment ran code in; null keeps this
+   *     request's
    * @return a copy sharing every other field, with {@code tool_choice} null
    */
-  public MessagesRequest continuationWith(List<MessageEntry> messages) {
+  public MessagesRequest continuationWith(List<MessageEntry> messages, String container) {
     return new MessagesRequest(
         model,
         maxTokens,
@@ -73,7 +77,8 @@ public record MessagesRequest(
         topP,
         stopSequences,
         thinking,
-        outputConfig);
+        outputConfig,
+        container != null ? container : this.container);
   }
 
   /**
@@ -115,6 +120,7 @@ public record MessagesRequest(
     private List<String> stopSequences;
     private ThinkingConfig thinking;
     private OutputConfig outputConfig;
+    private String container;
 
     private Builder() {}
 
@@ -191,6 +197,11 @@ public record MessagesRequest(
       return this;
     }
 
+    public Builder withContainer(String container) {
+      this.container = container;
+      return this;
+    }
+
     public MessagesRequest build() {
       return new MessagesRequest(
           model,
@@ -204,7 +215,8 @@ public record MessagesRequest(
           topP,
           stopSequences,
           thinking,
-          outputConfig);
+          outputConfig,
+          container);
     }
   }
 }

@@ -50,7 +50,7 @@ class SchemaPlusToolsBugReproTest {
 
   private static AnthropicRequestBuilder requests(ModelConfig config) {
     var model = AnthropicModelId.CLAUDE_SONNET_4_6;
-    return new AnthropicRequestBuilder(model.id(), model, config, CachePolicy.shortLived());
+    return AnthropicFixture.requests(model, config);
   }
 
   // ---------------------------------------------------------------------------------------------

@@ -7,13 +7,15 @@ package com.standardapplied.helios.anthropic.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.Instant;
 import java.util.Map;
 
 /**
  * Delta content in Claude SSE streaming events.
  *
  * <p>Used for both content_block_delta (text_delta, input_json_delta, thinking_delta,
- * signature_delta, citations_delta) and message_delta (stop_reason, stop_sequence) events.
+ * signature_delta, citations_delta) and message_delta (stop_reason, stop_sequence, container)
+ * events.
  *
  * @param type delta type: "text_delta", "input_json_delta", "thinking_delta", "signature_delta", or
  *     "citations_delta"
@@ -28,6 +30,8 @@ import java.util.Map;
  * @param stopSequence matched stop sequence from message_delta
  * @param stopDetails why a {@code refusal} stop happened, from message_delta; null for every other
  *     stop reason
+ * @param container the code execution container the turn ran in, from message_delta; null when it
+ *     ran no code
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ContentDelta(
@@ -39,7 +43,8 @@ public record ContentDelta(
     Map<String, Object> citation,
     @JsonProperty("stop_reason") String stopReason,
     @JsonProperty("stop_sequence") String stopSequence,
-    @JsonProperty("stop_details") StopDetails stopDetails) {
+    @JsonProperty("stop_details") StopDetails stopDetails,
+    Container container) {
 
   /**
    * Classifier detail attached to a {@code refusal} stop.
@@ -50,4 +55,12 @@ public record ContentDelta(
    * @param explanation human-readable description meant for display; null alongside a null category
    */
   public record StopDetails(String category, String explanation) {}
+
+  /**
+   * The code execution container a turn ran in.
+   *
+   * @param id the container's id, sent back as the request's {@code container}
+   * @param expiresAt when the API stops keeping it ready, a rolling value
+   */
+  public record Container(String id, @JsonProperty("expires_at") Instant expiresAt) {}
 }
