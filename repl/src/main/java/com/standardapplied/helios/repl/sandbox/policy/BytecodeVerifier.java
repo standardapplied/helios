@@ -41,6 +41,10 @@ public interface BytecodeVerifier {
    * Build a verifier for the given policy. Returns {@link #NO_OP} for {@link
    * SandboxPolicy#enforcesNothing() permissive} policies (no rules → no scanning needed) and a
    * {@link PolicyBytecodeVerifier} otherwise.
+   *
+   * @param policy the policy to enforce; must not be {@code null}
+   * @return a stateless verifier for {@code policy}
+   * @throws IllegalArgumentException if {@code policy} is {@code null}
    */
   static BytecodeVerifier forPolicy(SandboxPolicy policy) {
     if (policy == null) {

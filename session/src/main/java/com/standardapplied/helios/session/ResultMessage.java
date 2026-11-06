@@ -101,6 +101,11 @@ public sealed interface ResultMessage
    * Validate the five fields every subtype shares. Each record's canonical constructor calls this
    * before applying its own field-specific checks.
    *
+   * @param sessionId the session id; non-null, non-blank
+   * @param runId the run id; non-null, non-blank
+   * @param usage the run's accumulated token usage; non-null
+   * @param cost the run's accumulated cost; non-null
+   * @param duration the run's elapsed wall clock; non-null, non-negative
    * @throws NullPointerException if any argument is null
    * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
    *     duration} is negative
@@ -145,6 +150,14 @@ public sealed interface ResultMessage
       List<Citation> citations)
       implements ResultMessage {
 
+    /**
+     * Validates the result and copies {@code citations}.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code result}, {@code
+     *     usage}, {@code cost}, {@code duration}, {@code citations} or any citation is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     duration} is negative
+     */
     public Success {
       validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(result, "result must not be null");
@@ -173,6 +186,14 @@ public sealed interface ResultMessage
       Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code usage}, {@code cost}
+     *     or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, or {@code
+     *     duration} or {@code turnsUsed} is negative
+     */
     public ErrorMaxTurns {
       validateCommon(sessionId, runId, usage, cost, duration);
       if (turnsUsed < 0) {
@@ -200,6 +221,14 @@ public sealed interface ResultMessage
       Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code usage}, {@code cost}
+     *     or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, or {@code
+     *     duration} or {@code microUsdSpent} is negative
+     */
     public ErrorMaxBudgetUsd {
       validateCommon(sessionId, runId, usage, cost, duration);
       if (microUsdSpent < 0L) {
@@ -224,6 +253,14 @@ public sealed interface ResultMessage
       String sessionId, String runId, Usage usage, CostEstimate cost, Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code usage}, {@code cost}
+     *     or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     duration} is negative
+     */
     public ErrorMaxWallClock {
       validateCommon(sessionId, runId, usage, cost, duration);
     }
@@ -248,6 +285,14 @@ public sealed interface ResultMessage
       Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code error}, {@code
+     *     usage}, {@code cost} or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
+     *     duration} is negative
+     */
     public ErrorDuringExecution {
       validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(error, "error must not be null");
@@ -302,6 +347,14 @@ public sealed interface ResultMessage
       Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code providerName},
+     *     {@code error}, {@code usage}, {@code cost} or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code providerName}
+     *     is blank, {@code duration} is negative or {@code attemptsMade} is below 1
+     */
     public ErrorTransientStream {
       validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(providerName, "providerName must not be null");
@@ -349,6 +402,14 @@ public sealed interface ResultMessage
       String category)
       implements ResultMessage {
 
+    /**
+     * Validates the result; {@code category} is the one component that may be null.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code refusalText}, {@code
+     *     usage}, {@code cost} or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code refusalText}
+     *     is blank or {@code duration} is negative
+     */
     public Refusal {
       validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(refusalText, "refusalText must not be null");
@@ -387,6 +448,14 @@ public sealed interface ResultMessage
       Duration duration)
       implements ResultMessage {
 
+    /**
+     * Validates the result.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId}, {@code reason}, {@code
+     *     usage}, {@code cost} or {@code duration} is null
+     * @throws IllegalArgumentException if {@code sessionId}, {@code runId} or {@code reason} is
+     *     blank or {@code duration} is negative
+     */
     public Cancelled {
       validateCommon(sessionId, runId, usage, cost, duration);
       Objects.requireNonNull(reason, "reason must not be null");

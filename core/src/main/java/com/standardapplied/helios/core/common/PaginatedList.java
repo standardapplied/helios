@@ -19,6 +19,12 @@ import java.util.Objects;
  */
 public record PaginatedList<T>(List<T> items, boolean hasMore, Paginate paginate) {
 
+  /**
+   * Creates a builder with no items and no pagination set.
+   *
+   * @param <T> the type of items
+   * @return a new builder
+   */
   public static <T> Builder<T> newBuilder() {
     return new Builder<>();
   }
@@ -35,11 +41,26 @@ public record PaginatedList<T>(List<T> items, boolean hasMore, Paginate paginate
 
     private Builder() {}
 
+    /**
+     * Sets the items fetched for the page, which may hold one more than the page size so {@link
+     * #build()} can tell whether another page exists. The list is copied. Unset, the page is empty.
+     *
+     * @param items the fetched items; non-null
+     * @return this builder
+     * @throws NullPointerException if {@code items} is null
+     */
     public Builder<T> withItems(List<T> items) {
       this.items = new ArrayList<>(items);
       return this;
     }
 
+    /**
+     * Sets the pagination the items were fetched with; its {@link Paginate#safePageSize()} is the
+     * page size {@link #build()} cuts to. Required.
+     *
+     * @param paginate the pagination parameters; must be non-null by {@link #build()}
+     * @return this builder
+     */
     public Builder<T> withPaginate(Paginate paginate) {
       this.paginate = paginate;
       return this;
@@ -48,6 +69,9 @@ public record PaginatedList<T>(List<T> items, boolean hasMore, Paginate paginate
     /**
      * Builds the PaginatedList. If items.size() exceeds the page size, truncates the list and sets
      * hasMore to true.
+     *
+     * @return the page, its items an unmodifiable list of at most the page size
+     * @throws NullPointerException if no pagination was set, or an item is null
      */
     public PaginatedList<T> build() {
       if (items == null) {

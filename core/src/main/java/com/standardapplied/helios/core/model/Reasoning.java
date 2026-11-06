@@ -28,6 +28,8 @@ public sealed interface Reasoning {
   record Effort(Level level, Display display) implements Reasoning {
 
     /**
+     * Creates an effort request.
+     *
      * @throws NullPointerException if {@code level} or {@code display} is null
      */
     public Effort {

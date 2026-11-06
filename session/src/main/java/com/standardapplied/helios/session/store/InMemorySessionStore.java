@@ -16,6 +16,12 @@ public final class InMemorySessionStore implements SessionStore {
 
   private final Map<String, List<SessionEntry>> logs = new HashMap<>();
 
+  /**
+   * Creates an empty store, holding no session. It is safe to share between threads and between the
+   * sessions of one process; what it holds is lost when the process ends.
+   */
+  public InMemorySessionStore() {}
+
   @Override
   public StoredSession load(String sessionId) {
     var log = entries(sessionId);

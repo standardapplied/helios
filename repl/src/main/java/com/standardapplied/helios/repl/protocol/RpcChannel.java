@@ -161,7 +161,11 @@ public final class RpcChannel implements AutoCloseable {
     }
   }
 
-  /** Whether the channel is still active. */
+  /**
+   * Returns whether the channel is still active.
+   *
+   * @return {@code true} until {@link #close()} is called or the transport closes
+   */
   public boolean isActive() {
     return !closed.get() && transport.isOpen();
   }
@@ -309,12 +313,27 @@ public final class RpcChannel implements AutoCloseable {
     }
   }
 
-  /** Runtime exception for RPC channel errors. */
+  /**
+   * Runtime exception for RPC channel errors: thrown by a call or notification on a closed channel,
+   * when a send fails, when a call is interrupted or answered with an error, and used to fail the
+   * calls still pending when the channel closes.
+   */
   public static sealed class RpcException extends RuntimeException permits RpcTimeoutException {
+    /**
+     * Creates the exception with a message and no cause.
+     *
+     * @param message what failed
+     */
     public RpcException(String message) {
       super(message);
     }
 
+    /**
+     * Creates the exception with a message and the failure that caused it.
+     *
+     * @param message what failed
+     * @param cause the underlying failure; may be {@code null}
+     */
     public RpcException(String message, Throwable cause) {
       super(message, cause);
     }
@@ -322,6 +341,12 @@ public final class RpcChannel implements AutoCloseable {
 
   /** A call whose response did not arrive within its timeout. */
   public static final class RpcTimeoutException extends RpcException {
+    /**
+     * Creates the exception for a call that waited out its timeout.
+     *
+     * @param message what timed out, naming the timeout
+     * @param cause the wait's own timeout exception
+     */
     public RpcTimeoutException(String message, Throwable cause) {
       super(message, cause);
     }

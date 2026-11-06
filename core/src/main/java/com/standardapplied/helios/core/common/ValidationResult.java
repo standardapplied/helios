@@ -15,6 +15,12 @@ package com.standardapplied.helios.core.common;
  */
 public record ValidationResult(boolean ok, String message) {
 
+  /**
+   * Canonical constructor.
+   *
+   * @throws IllegalArgumentException if {@code ok} is {@code false} and {@code message} is null or
+   *     blank, or if {@code ok} is {@code true} and {@code message} is not null
+   */
   public ValidationResult {
     if (!ok && Strings.isBlank(message)) {
       throw new IllegalArgumentException("failure ValidationResult requires a message");
@@ -30,15 +36,20 @@ public record ValidationResult(boolean ok, String message) {
   private static final ValidationResult SUCCESS = new ValidationResult(true, null);
 
   /**
-   * @return a singleton success result
+   * Returns the shared success result.
+   *
+   * @return the singleton success result, whose {@code message} is {@code null}
    */
   public static ValidationResult success() {
     return SUCCESS;
   }
 
   /**
+   * Creates a failure result.
+   *
    * @param message model-readable explanation of the failure; required and must not be blank
    * @return a failure result carrying the given message
+   * @throws IllegalArgumentException if {@code message} is null or blank
    */
   public static ValidationResult failure(String message) {
     return new ValidationResult(false, message);

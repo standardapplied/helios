@@ -20,12 +20,21 @@ import java.util.stream.Collectors;
  * PostgreSQL-backed store for {@link Annotation}s, the structured judgments attached to a stored
  * trace or span. Writes insert or upsert the full record including {@code metadata}; reads find by
  * subject, by a batch of subjects, or page through all annotations under an optional SCIM filter.
+ *
+ * <p>Every method throws {@link PgException} when the database fails. Thread-safe: the store holds
+ * no mutable state, and each call runs its own statements through the shared {@code DbClient}.
  */
 public class PgAnnotationStore {
 
   private final PgConfig config;
   private final DbClient dbClient;
 
+  /**
+   * Creates a store over the {@code helios_annotations} table of {@code config}'s schema.
+   *
+   * @param config the database and schema; non-null
+   * @throws NullPointerException if {@code config} is null
+   */
   public PgAnnotationStore(PgConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     this.dbClient = config.dbClient();
@@ -34,7 +43,12 @@ public class PgAnnotationStore {
   /**
    * Stores an annotation, persisting the full record including {@code metadata}.
    *
+   * @param annotation the annotation to insert; non-null
    * @return the stored row
+   * @throws PgException if the insert fails, such as for an id already stored or, for an annotation
+   *     with an {@code authorId}, one already stored under its {@code (subjectId, facet, label,
+   *     authorId)} key
+   * @throws NullPointerException if {@code annotation} is null
    */
   public Annotation storeAnnotation(Annotation annotation) {
     try {
@@ -50,8 +64,11 @@ public class PgAnnotationStore {
    * facet, label, authorId)} key, the existing row is updated in place ({@code createdAt} is
    * preserved, {@code updatedAt} is advanced). Author-less annotations always insert.
    *
+   * @param annotation the annotation to insert or merge; non-null
    * @return the stored row: on an update, the existing {@code id} and {@code createdAt} with the
    *     new values and {@code updatedAt}
+   * @throws PgException if the write fails
+   * @throws NullPointerException if {@code annotation} is null
    */
   public Annotation upsertAnnotation(Annotation annotation) {
     try {
@@ -61,7 +78,13 @@ public class PgAnnotationStore {
     }
   }
 
-  /** Finds all annotations for a given subject (run or span), oldest first. */
+  /**
+   * Finds all annotations for a given subject (run or span), oldest first.
+   *
+   * @param subjectId the run id or span id
+   * @return the subject's annotations, empty when it has none
+   * @throws PgException if the query fails
+   */
   public List<Annotation> findAnnotationsBySubject(String subjectId) {
     try {
       return AnnotationMapper.mapAll(
@@ -73,7 +96,11 @@ public class PgAnnotationStore {
 
   /**
    * Finds all annotations for a batch of subjects in a single query. Returns an empty list for a
-   * null or empty input.
+   * null or empty input, without querying.
+   *
+   * @param subjectIds the run ids or span ids, or null for none
+   * @return the annotations of every listed subject, empty when they have none
+   * @throws PgException if the query fails
    */
   public List<Annotation> findAnnotationsBySubjects(List<String> subjectIds) {
     if (subjectIds == null || subjectIds.isEmpty()) {

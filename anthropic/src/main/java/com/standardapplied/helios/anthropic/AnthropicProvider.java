@@ -45,6 +45,14 @@ public class AnthropicProvider implements ModelProvider {
 
   private static final InstantSource SYSTEM_CLOCK = Clock.systemUTC();
 
+  /**
+   * Creates the provider. {@link java.util.ServiceLoader} calls this when it discovers the
+   * Anthropic provider on the module or class path; a caller may also construct it directly. The
+   * provider holds no state of its own, so one instance can create any number of models from any
+   * thread.
+   */
+  public AnthropicProvider() {}
+
   @Override
   public String name() {
     return PROVIDER_NAME;

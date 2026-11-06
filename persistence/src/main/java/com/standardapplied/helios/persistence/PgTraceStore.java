@@ -28,12 +28,21 @@ import java.util.Objects;
  * <p>A run's span rows are written as its steps end and its run row once the run itself ended, so
  * the span rows of a run the process died in exist with no run row: {@link #findById} returns null
  * for that run, and nothing cleans the rows up.
+ *
+ * <p>Every method throws {@link PgException} when the database fails. Thread-safe: the store holds
+ * no mutable state, and each call runs its own statements through the shared {@code DbClient}.
  */
 public class PgTraceStore {
 
   private final PgConfig config;
   private final DbClient dbClient;
 
+  /**
+   * Creates a store that reads the trace tables of {@code config}'s schema.
+   *
+   * @param config the database and schema; non-null
+   * @throws NullPointerException if {@code config} is null
+   */
   public PgTraceStore(PgConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     this.dbClient = config.dbClient();
@@ -42,6 +51,7 @@ public class PgTraceStore {
   /**
    * Finds a run by its id, with its spans ordered by start time, then id.
    *
+   * @param runId the run id, the {@link Trace#id()} the exporter stored
    * @return the run with its spans, or null if no run row was stored under {@code runId}
    */
   public Trace findById(String runId) {

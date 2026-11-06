@@ -47,6 +47,11 @@ public sealed interface ModelChunk
    */
   record TextDelta(String text) implements ModelChunk {
 
+    /**
+     * Creates a text fragment.
+     *
+     * @throws NullPointerException if {@code text} is null
+     */
     public TextDelta {
       Objects.requireNonNull(text, "text must not be null");
     }
@@ -61,6 +66,11 @@ public sealed interface ModelChunk
    */
   record ThinkingDelta(String text) implements ModelChunk {
 
+    /**
+     * Creates a thinking fragment.
+     *
+     * @throws NullPointerException if {@code text} is null
+     */
     public ThinkingDelta {
       Objects.requireNonNull(text, "text must not be null");
     }
@@ -75,6 +85,12 @@ public sealed interface ModelChunk
    */
   record ToolUseStart(String callId, String toolName) implements ModelChunk {
 
+    /**
+     * Creates the start of a tool call.
+     *
+     * @throws NullPointerException if {@code callId} or {@code toolName} is null
+     * @throws IllegalArgumentException if {@code callId} or {@code toolName} is blank
+     */
     public ToolUseStart {
       Objects.requireNonNull(callId, "callId must not be null");
       if (callId.isBlank()) {
@@ -97,6 +113,12 @@ public sealed interface ModelChunk
    */
   record ToolUseDelta(String callId, String argumentsDelta) implements ModelChunk {
 
+    /**
+     * Creates an argument fragment of an ongoing tool call.
+     *
+     * @throws NullPointerException if {@code callId} or {@code argumentsDelta} is null
+     * @throws IllegalArgumentException if {@code callId} is blank
+     */
     public ToolUseDelta {
       Objects.requireNonNull(callId, "callId must not be null");
       if (callId.isBlank()) {
@@ -114,6 +136,11 @@ public sealed interface ModelChunk
    */
   record ToolUseStop(ToolCall toolCall) implements ModelChunk {
 
+    /**
+     * Creates the end of a tool call.
+     *
+     * @throws NullPointerException if {@code toolCall} is null
+     */
     public ToolUseStop {
       Objects.requireNonNull(toolCall, "toolCall must not be null");
     }
@@ -145,6 +172,14 @@ public sealed interface ModelChunk
       String stopReason, Usage usage, Map<String, String> metadata, List<Citation> citations)
       implements ModelChunk {
 
+    /**
+     * Creates the terminal chunk, copying {@code metadata} and {@code citations} into unmodifiable
+     * collections.
+     *
+     * @throws NullPointerException if a component is null, or {@code metadata} or {@code citations}
+     *     holds a null
+     * @throws IllegalArgumentException if {@code stopReason} is blank
+     */
     public MessageStop {
       Objects.requireNonNull(stopReason, "stopReason must not be null");
       if (stopReason.isBlank()) {
@@ -157,7 +192,16 @@ public sealed interface ModelChunk
       citations = List.copyOf(citations);
     }
 
-    /** Convenience for callers that supply metadata but no grounding citations. */
+    /**
+     * Convenience for callers that supply metadata but no grounding citations.
+     *
+     * @param stopReason the provider-reported finish reason; non-null and non-blank
+     * @param usage final usage at message end; non-null
+     * @param metadata provider-specific assistant-message metadata; non-null, defensively copied,
+     *     may be empty
+     * @throws NullPointerException if a parameter is null, or {@code metadata} holds a null
+     * @throws IllegalArgumentException if {@code stopReason} is blank
+     */
     public MessageStop(String stopReason, Usage usage, Map<String, String> metadata) {
       this(stopReason, usage, metadata, List.of());
     }
@@ -205,6 +249,11 @@ public sealed interface ModelChunk
    */
   record UsageDelta(Usage usage) implements ModelChunk {
 
+    /**
+     * Creates a mid-stream usage update.
+     *
+     * @throws NullPointerException if {@code usage} is null
+     */
     public UsageDelta {
       Objects.requireNonNull(usage, "usage must not be null");
     }

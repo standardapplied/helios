@@ -81,6 +81,12 @@ public sealed interface Backoff permits Backoff.Fixed, Backoff.Exponential {
    * @param delay the constant delay between retries
    */
   record Fixed(Duration delay) implements Backoff {
+
+    /**
+     * Canonical constructor.
+     *
+     * @throws IllegalArgumentException if {@code delay} is null or negative
+     */
     public Fixed {
       if (delay == null || delay.isNegative()) {
         throw new IllegalArgumentException("delay must be non-negative");
@@ -109,6 +115,13 @@ public sealed interface Backoff permits Backoff.Fixed, Backoff.Exponential {
    */
   record Exponential(Duration initialDelay, double multiplier, Duration maxDelay)
       implements Backoff {
+
+    /**
+     * Canonical constructor.
+     *
+     * @throws IllegalArgumentException if {@code initialDelay} or {@code maxDelay} is null or
+     *     negative, or {@code multiplier} is below 1.0
+     */
     public Exponential {
       if (initialDelay == null || initialDelay.isNegative()) {
         throw new IllegalArgumentException("initialDelay must be non-negative");

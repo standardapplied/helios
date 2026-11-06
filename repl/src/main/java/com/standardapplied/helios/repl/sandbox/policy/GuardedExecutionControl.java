@@ -38,6 +38,13 @@ public final class GuardedExecutionControl extends LocalExecutionControl {
 
   private final BytecodeVerifier verifier;
 
+  /**
+   * Creates a local execution control that runs every loaded or redefined class through {@code
+   * verifier} first.
+   *
+   * @param verifier the verifier every class must pass; must not be {@code null}
+   * @throws IllegalArgumentException if {@code verifier} is {@code null}
+   */
   public GuardedExecutionControl(BytecodeVerifier verifier) {
     super();
     if (verifier == null) {
@@ -46,7 +53,11 @@ public final class GuardedExecutionControl extends LocalExecutionControl {
     this.verifier = verifier;
   }
 
-  /** Test/utility accessor — exposes the verifier for unit-level introspection. */
+  /**
+   * Test/utility accessor — exposes the verifier for unit-level introspection.
+   *
+   * @return the verifier given at construction, never {@code null}
+   */
   public BytecodeVerifier verifier() {
     return verifier;
   }

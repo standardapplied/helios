@@ -37,7 +37,10 @@ import java.util.Optional;
  */
 public class TransientStreamException extends RuntimeException {
 
+  /** The short identifier of the provider whose stream failed; never null or blank. */
   private final String providerName;
+
+  /** The wait the provider asked for before a retry, or {@code null} when it named none. */
   private final Duration retryAfter;
 
   /**

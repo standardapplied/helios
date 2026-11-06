@@ -59,6 +59,8 @@ public final class StructuredContentParser {
        * {@code json} as a map. Implementations should propagate library-specific exceptions; {@link
        * StructuredContentParser#parse} catches and falls back to the markdown-strip retry.
        *
+       * @param json the candidate JSON text, trimmed; never {@code null}
+       * @return the top-level object's members, in document order where the library keeps it
        * @throws Exception when the JSON is syntactically invalid
        */
       Map<String, Object> read(String json) throws Exception;
@@ -72,6 +74,9 @@ public final class StructuredContentParser {
        * {@code map} as an instance of {@code type}. For Jackson this is {@code
        * objectMapper.convertValue(map, type)}.
        *
+       * @param map the deserialized object, already validated against the schema
+       * @param type the class to coerce into
+       * @return an instance of {@code type}
        * @throws Exception when coercion fails (e.g., type mismatch on a record component)
        */
       Object convert(Map<String, Object> map, Class<?> type) throws Exception;
@@ -90,6 +95,8 @@ public final class StructuredContentParser {
     /**
      * {@code json} as a map, through the {@link #reader}.
      *
+     * @param json the JSON text to read
+     * @return the top-level object's members, as the reader returns them
      * @throws Exception when the JSON is syntactically invalid
      */
     public Map<String, Object> toMap(String json) throws Exception {
@@ -99,6 +106,10 @@ public final class StructuredContentParser {
     /**
      * {@code map} as an instance of {@code type}, through the {@link #converter}.
      *
+     * @param <T> the target type
+     * @param map the deserialized object to coerce
+     * @param type the class to coerce into; must not be {@code null}
+     * @return the converter's result, cast to {@code type}
      * @throws Exception when coercion fails
      * @throws ClassCastException when the converter returns another type
      */
@@ -127,7 +138,21 @@ public final class StructuredContentParser {
 
   /**
    * Parses structured output while applying an explicit raw-output retention policy to every retry
-   * and terminal parse or submit-validation failure.
+   * and terminal parse or submit-validation failure. Otherwise behaves as {@link #parse(String,
+   * OutputSchema, JsonAdapter)}; under {@link RawOutputCapturePolicy#DISABLED} a syntax failure's
+   * message reads {@code invalid JSON} instead of the library's message, which may quote the
+   * content.
+   *
+   * @param <T> the typed output
+   * @param content the raw model response; {@code null} or blank means no structured output
+   * @param schema the output schema describing the expected shape; must not be {@code null}
+   * @param adapter provider-supplied JSON adapter; must not be {@code null}
+   * @param capturePolicy whether a thrown exception keeps {@code content}; must not be {@code null}
+   * @return the typed output, or {@code null} when {@code content} was {@code null} or blank
+   * @throws NullPointerException if {@code capturePolicy} is {@code null}
+   * @throws StructuredOutputParseException if no candidate text parses as JSON, the JSON does not
+   *     match the schema, or the schema's submit validator rejects the typed value (as its {@link
+   *     SubmitValidationException} subtype)
    */
   public static <T> T parse(
       String content,
@@ -228,6 +253,10 @@ public final class StructuredContentParser {
    * Here is the final answer:\n\n{...}"}). The raw content fails JSON parsing because of the
    * leading prose; this helper extracts the {@code {...}} portion so the parser can recover without
    * changing the model output.
+   *
+   * @param content the text to scan; may be {@code null}
+   * @return the first <code>{</code> through its matching <code>}</code>, or {@code null} when
+   *     {@code content} is {@code null}, holds no <code>{</code> or the object never closes
    */
   public static String extractFirstJsonObject(String content) {
     if (content == null) {
@@ -277,6 +306,11 @@ public final class StructuredContentParser {
    * Strip one layer of {@code ```} / {@code ```json} markdown fences. Returns the input unchanged
    * when no fences are present, so callers can compare {@code stripped.equals(input)} to detect a
    * no-op.
+   *
+   * @param json the text to unwrap; must not be {@code null}
+   * @return the text without a leading {@code ```json} or {@code ```} and a trailing {@code ```},
+   *     trimmed
+   * @throws NullPointerException if {@code json} is {@code null}
    */
   public static String stripMarkdownWrapper(String json) {
     var result = json;

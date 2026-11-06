@@ -81,7 +81,10 @@ public final class PgSpanExporter implements SpanExporter {
   private final AtomicBoolean shutdown = new AtomicBoolean();
 
   /**
-   * @param config the database the spans are written to
+   * Creates an exporter that writes to the trace tables of {@code config}'s schema, redacting with
+   * its redactor.
+   *
+   * @param config the database the spans are written to; non-null
    * @throws NullPointerException if {@code config} is null
    */
   public PgSpanExporter(PgConfig config) {

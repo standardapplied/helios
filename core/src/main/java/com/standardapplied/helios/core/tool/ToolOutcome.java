@@ -27,6 +27,12 @@ public sealed interface ToolOutcome {
    */
   record Threw(String exceptionType) implements ToolOutcome {
 
+    /**
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if {@code exceptionType} is {@code null}
+     * @throws IllegalArgumentException if {@code exceptionType} is blank
+     */
     public Threw {
       requireNonBlank(exceptionType, "exceptionType");
     }
@@ -39,6 +45,12 @@ public sealed interface ToolOutcome {
    */
   record TimedOut(Duration limit) implements ToolOutcome {
 
+    /**
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if {@code limit} is {@code null}
+     * @throws IllegalArgumentException if {@code limit} is zero or negative
+     */
     public TimedOut {
       Validate.positiveDuration("limit", limit);
     }
@@ -54,6 +66,12 @@ public sealed interface ToolOutcome {
    */
   record Unknown(Duration limit) implements ToolOutcome {
 
+    /**
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if {@code limit} is {@code null}
+     * @throws IllegalArgumentException if {@code limit} is zero or negative
+     */
     public Unknown {
       Validate.positiveDuration("limit", limit);
     }
@@ -68,6 +86,12 @@ public sealed interface ToolOutcome {
    */
   record Rejected(String by, String reason) implements ToolOutcome {
 
+    /**
+     * Canonical constructor.
+     *
+     * @throws NullPointerException if {@code by} or {@code reason} is {@code null}
+     * @throws IllegalArgumentException if {@code by} or {@code reason} is blank
+     */
     public Rejected {
       requireNonBlank(by, "by");
       requireNonBlank(reason, "reason");

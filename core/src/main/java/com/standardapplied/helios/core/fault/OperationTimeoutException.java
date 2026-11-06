@@ -15,6 +15,7 @@ import java.time.Duration;
  */
 public class OperationTimeoutException extends Exception {
 
+  /** The time limit the operation exceeded, as configured on the envelope. */
   private final Duration timeout;
 
   /**

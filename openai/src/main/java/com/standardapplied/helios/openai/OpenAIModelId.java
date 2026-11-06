@@ -13,9 +13,13 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * Supported OpenAI model identifiers.
+ * Curated OpenAI model identifiers carrying known-good metadata.
  *
- * <p>Each enum constant maps to a specific model available through the Responses API.
+ * <p>Each enum constant maps to a specific model available through the Responses API and records
+ * what the request builder needs: its context window, its output ceiling and its {@link
+ * ReasoningRules}. Without a {@code ModelConfig.baseUrl()}, {@link OpenAIProvider} accepts only
+ * these ids; with one, any non-blank id is passed verbatim and judged by {@link
+ * ReasoningRules#UNCATALOGUED}.
  */
 public enum OpenAIModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
@@ -27,24 +31,59 @@ public enum OpenAIModelId {
   // defaulting to none; o-series take low..high; gpt-4.1 and gpt-4o do not reason. temperature /
   // top_p ride only at effort none on the GPT-5.4+ reasoning models, never on o-series or
   // gpt-6-astra/6.1-sol.
+  /** GPT-6 Astra: always reasons, effort {@code low} to {@code max}; rejects sampling. */
   GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
+  /** GPT-6.1 Sol: always reasons, effort {@code low} to {@code max}; rejects sampling. */
   GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
+  /** GPT-6 Sol: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-6 Luna: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_6_LUNA("gpt-6-luna", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-5.6: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_5_6("gpt-5.6", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-5.6 Sol: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_5_6_SOL("gpt-5.6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-5.6 Terra: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_5_6_TERRA("gpt-5.6-terra", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-5.6 Luna: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_5_6_LUNA("gpt-5.6-luna", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
+  /** GPT-5.5: effort {@code none} to {@code xhigh}; sampling only at {@code none}. */
   GPT_5_5("gpt-5.5", 1_050_000, 128_000, ReasoningRules.NONE_TO_XHIGH),
+  /**
+   * GPT-5.4: effort {@code none} (its default) to {@code xhigh}; sampling unless an effort is set.
+   */
   GPT_5_4("gpt-5.4", 1_050_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  /**
+   * GPT-5.4 mini, a 400,000-token window: effort {@code none} (its default) to {@code xhigh};
+   * sampling unless an effort is set.
+   */
   GPT_5_4_MINI("gpt-5.4-mini", 400_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  /**
+   * GPT-5.4 nano, a 400,000-token window: effort {@code none} (its default) to {@code xhigh};
+   * sampling unless an effort is set.
+   */
   GPT_5_4_NANO("gpt-5.4-nano", 400_000, 128_000, ReasoningRules.NONE_BY_DEFAULT_TO_XHIGH),
+  /** GPT-4.1: does not reason, so any effort is rejected; accepts sampling. */
   GPT_4_1("gpt-4.1", 1_000_000, 32_000, ReasoningRules.NOT_REASONING),
+  /** GPT-4.1 mini: does not reason, so any effort is rejected; accepts sampling. */
   GPT_4_1_MINI("gpt-4.1-mini", 1_000_000, 32_000, ReasoningRules.NOT_REASONING),
+  /**
+   * GPT-4.1 nano, at most 16,000 output tokens: does not reason, so any effort is rejected; accepts
+   * sampling.
+   */
   GPT_4_1_NANO("gpt-4.1-nano", 1_000_000, 16_000, ReasoningRules.NOT_REASONING),
+  /**
+   * GPT-4o, a 128,000-token window: does not reason, so any effort is rejected; accepts sampling.
+   */
   GPT_4O("gpt-4o", 128_000, 16_384, ReasoningRules.NOT_REASONING),
+  /**
+   * GPT-4o mini, a 128,000-token window: does not reason, so any effort is rejected; accepts
+   * sampling.
+   */
   GPT_4O_MINI("gpt-4o-mini", 128_000, 16_384, ReasoningRules.NOT_REASONING),
+  /** o3: always reasons, effort {@code low} to {@code high}; rejects sampling. */
   O3("o3", 200_000, 100_000, ReasoningRules.LOW_TO_HIGH),
+  /** o4-mini: always reasons, effort {@code low} to {@code high}; rejects sampling. */
   O4_MINI("o4-mini", 200_000, 100_000, ReasoningRules.LOW_TO_HIGH);
 
   /** How a model is told to stop reasoning. */

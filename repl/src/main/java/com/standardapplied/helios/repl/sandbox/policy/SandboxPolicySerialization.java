@@ -39,6 +39,11 @@ public final class SandboxPolicySerialization {
   /**
    * Encode {@code policy} as an argv-safe base64 string. The caller is responsible for passing this
    * via {@code --sandbox-policy=<encoded>} on the subprocess command line.
+   *
+   * @param policy the policy to encode; must not be {@code null}
+   * @return URL-safe base64 without padding; the same policy always encodes to the same string,
+   *     since set entries are written sorted
+   * @throws IllegalArgumentException if {@code policy} is {@code null}
    */
   public static String encode(SandboxPolicy policy) {
     if (policy == null) {
@@ -65,8 +70,12 @@ public final class SandboxPolicySerialization {
    * field so an older bootstrap reading a newer policy never crashes — it just under-enforces, and
    * the older bootstrap is the deployer's choice to ship.
    *
-   * @throws IllegalArgumentException if the input is not valid base64 or the decoded form contains
-   *     malformed field syntax
+   * @param encoded a string produced by {@link #encode(SandboxPolicy)}; must not be {@code null} or
+   *     blank
+   * @return the decoded policy
+   * @throws IllegalArgumentException if the input is {@code null}, blank or not valid base64, if
+   *     the decoded form contains malformed field syntax, or if {@code onViolation} names no {@link
+   *     ViolationAction}
    */
   public static SandboxPolicy decode(String encoded) {
     if (encoded == null || encoded.isBlank()) {
