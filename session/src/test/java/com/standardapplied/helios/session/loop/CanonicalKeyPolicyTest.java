@@ -105,7 +105,7 @@ final class CanonicalKeyPolicyTest {
 
   private DefaultPermissionEvaluator evaluatorWith(PermissionRule rule) {
     return new DefaultPermissionEvaluator(
-        new Permission(PermissionMode.DEFAULT, List.of(), List.of(), List.of(rule)),
+        new Permission(PermissionMode.DEFAULT, List.of(rule), List.of(), List.of()),
         tools,
         request -> PermissionDecision.deny("no approval in this test"),
         new SecretRegistry());
