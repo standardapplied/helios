@@ -54,7 +54,10 @@ class AnthropicModelIdTest {
             "claude-3-5-sonnet-20241022",
             "claude-3-opus-20240229",
             "claude-2.1",
-            "claude-instant-1.2")) {
+            "claude-instant-1.2",
+            "claude-v1",
+            "claude-v1.3",
+            "claude-instant-v1.0")) {
       assertTrue(AnthropicModelId.predatesClaude5(id), id);
     }
   }
@@ -67,6 +70,8 @@ class AnthropicModelIdTest {
             "claude-haiku-5-5-20261101",
             "claude-opus-6",
             "claude-opus-40",
+            "claude-v5",
+            "claude-v10",
             "claude-5",
             "claude-fable-10-1",
             "claude-some-future-model",
