@@ -11,7 +11,7 @@ Production-grade agentic framework for Java. Simple, explicit, no magic.
 
 1. **No magic** - Explicit wiring, no annotation-driven DI
 2. **Idiomatic Java** - Records, sealed types, pattern matching
-3. **Production from day 1** - Fault tolerance, observability, 100% test coverage
+3. **Production from day 1** - Fault tolerance, observability, one coverage gate (95% instruction / 90% branch) on every library module
 
 ## Libraries
 
