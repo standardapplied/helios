@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.session.PathToolSessions.ListedRule;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
@@ -22,6 +23,7 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionEffect;
 import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.test.QuestionAnswers;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,10 +34,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A tool that walks below its authorised path withholds every entry a DENY rule matches: of its own
- * tool, and of {@code Read} for {@code Grep}, which returns contents. It never descends into a
- * denied directory, names no withheld entry, and ends its output with how many it withheld. Only
- * DENY rules filter, in every mode.
+ * A tool that walks below its authorised path withholds, without asking, every entry a DENY rule of
+ * its own tool decides, an ASK rule of it unless the walk was approved through one, and, for {@code
+ * Grep}, which returns contents, a DENY or ASK rule of {@code Read}. It never descends into a
+ * withheld directory, names no withheld entry, and ends its output with how many it withheld. Only
+ * rules filter, in every mode.
  */
 final class WithheldEntriesTest {
 
@@ -64,15 +67,37 @@ final class WithheldEntriesTest {
     return output(run(sessions.options(permission), call(tool, args)));
   }
 
-  /** The output of a call under {@code permission}, which no event of its run shows a secret in. */
+  /** The output of a call under {@code permission}, which neither asks nor shows a secret. */
   private String withheldRun(Permission permission, String tool, Map<String, Object> args) {
     var run = run(sessions.options(permission), call(tool, args));
     assertNoSecretEmitted(run);
+    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
     return output(run);
   }
 
   private static Map<String, Object> grepTop() {
     return Map.of("pattern", "TOP", "path", ".");
+  }
+
+  private static Map<String, Object> grepSecrets() {
+    return Map.of("pattern", "TOP", "path", "./secrets");
+  }
+
+  private static ListedRule askSecrets(String tool) {
+    return rule(PermissionEffect.ASK, tool, "./secrets/**");
+  }
+
+  /**
+   * A run of {@code Grep} over {@code ./secrets} under {@code permission}, answered {@code label}.
+   */
+  private WriteToolSessions.Run grepSecretsAnswered(Permission permission, String label) {
+    var run =
+        run(
+            sessions.options(permission),
+            session -> QuestionAnswers.selecting(session, label),
+            call(GrepTool.NAME, grepSecrets()));
+    assertEquals(1, run.events().eventsOf(QueryEvent.QuestionAsked.class).size());
+    return run;
   }
 
   // ── each walking tool withholds what its own DENY rules match ────────────
@@ -163,19 +188,100 @@ final class WithheldEntriesTest {
     assertEquals("/memories/notes.md\n" + ONE_WITHHELD, out);
   }
 
-  // ── only DENY rules of the walking tool filter ───────────────────────────
+  // ── an ask rule of the walking tool withholds unless it approved the walk ─
 
   @Test
-  void anAskRuleBelowTheWalkFiltersNothingAndAsksNothing() {
-    var permission =
-        policy(PermissionMode.DEFAULT, rule(PermissionEffect.ASK, GrepTool.NAME, "./secrets/**"));
+  void anAskRuleBelowTheWalkWithholdsWithoutAsking() {
+    var out =
+        withheldRun(
+            policy(PermissionMode.DEFAULT, askSecrets(GrepTool.NAME)), GrepTool.NAME, grepTop());
 
-    var run = run(sessions.options(permission), call(GrepTool.NAME, grepTop()));
-
-    assertEquals(3, output(run).lines().filter(line -> line.endsWith(SECRET)).count());
-    assertFalse(output(run).contains("withheld"), output(run));
-    assertEquals(List.of(), run.events().eventsOf(QueryEvent.QuestionAsked.class));
+    assertEquals(ONE_WITHHELD, out);
   }
+
+  @Test
+  void aGlobAskRuleBelowTheWalkWithholdsWithoutAsking() {
+    var out =
+        withheldRun(
+            policy(PermissionMode.DEFAULT, askSecrets(GlobTool.NAME)),
+            GlobTool.NAME,
+            Map.of("pattern", "**"));
+
+    assertEquals("docs/a.txt\n" + ONE_WITHHELD, out);
+  }
+
+  @Test
+  void anLsAskRuleBelowTheListingWithholdsWithoutAsking() {
+    var out =
+        withheldRun(
+            policy(PermissionMode.DEFAULT, askSecrets(LsTool.NAME)),
+            LsTool.NAME,
+            Map.of("path", "."));
+
+    assertEquals("docs/\n" + TWO_WITHHELD, out);
+  }
+
+  @Test
+  void anApprovedAskCoversItsWalk() {
+    var run =
+        grepSecretsAnswered(policy(PermissionMode.DEFAULT, askSecrets(GrepTool.NAME)), "Allow");
+
+    assertEquals(
+        List.of(
+            "secrets/b.txt:1:TOPSECRET",
+            "secrets/key:1:TOPSECRET",
+            "secrets/sub/c.txt:1:TOPSECRET"),
+        output(run).lines().sorted().toList());
+  }
+
+  @Test
+  void aRefusedAskRunsNoWalk() {
+    var run =
+        grepSecretsAnswered(policy(PermissionMode.DEFAULT, askSecrets(GrepTool.NAME)), "Deny");
+
+    assertEquals(
+        new ToolOutcome.Rejected("Permission", "user denied Grep(./secrets)"),
+        run.onlyResult().outcome());
+    assertNoSecretEmitted(run);
+  }
+
+  @Test
+  void aDenyRuleStillWithholdsInsideAnApprovedWalk() {
+    var permission =
+        policy(
+            PermissionMode.DEFAULT,
+            askSecrets(GrepTool.NAME),
+            rule(PermissionEffect.DENY, GrepTool.NAME, "./secrets/key"));
+
+    var run = grepSecretsAnswered(permission, "Allow");
+
+    assertEquals(
+        List.of(
+            "[withheld by permission policy: 1]",
+            "secrets/b.txt:1:TOPSECRET",
+            "secrets/sub/c.txt:1:TOPSECRET"),
+        output(run).lines().sorted().toList());
+  }
+
+  @Test
+  void readsAskRulesStillWithholdInsideAnApprovedWalk() {
+    var permission =
+        policy(
+            PermissionMode.DEFAULT,
+            askSecrets(GrepTool.NAME),
+            rule(PermissionEffect.ASK, ReadTool.NAME, "./secrets/sub/**"));
+
+    var run = grepSecretsAnswered(permission, "Allow");
+
+    assertEquals(
+        List.of(
+            "[withheld by permission policy: 1]",
+            "secrets/b.txt:1:TOPSECRET",
+            "secrets/key:1:TOPSECRET"),
+        output(run).lines().sorted().toList());
+  }
+
+  // ── allow rules and mode defaults withhold nothing ───────────────────────
 
   @Test
   void allowRulesBelowTheWalkWithholdNothing() {

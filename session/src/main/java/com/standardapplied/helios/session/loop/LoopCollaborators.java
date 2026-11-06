@@ -25,7 +25,8 @@ import java.util.function.Function;
  *     ALLOW} decision runs the call, and anything else, {@code null} or a thrown exception refuses
  *     it
  * @param permission the session's policy; a tool walking below its path withholds every entry a
- *     DENY rule of its own decides, or a DENY or ASK rule of a tool whose content it returns
+ *     DENY rule of its own decides, an ASK rule of its own unless the walk was approved through
+ *     one, or a DENY or ASK rule of a tool whose content it returns
  * @param steeringQueue per-session inbox the loop drains and into which {@code Inject} outcomes
  *     queue synthetic user messages
  * @param eventSink consumer for every {@link QueryEvent} the loop emits
