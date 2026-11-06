@@ -24,6 +24,11 @@ import java.util.Objects;
 public record Tool(
     String name, String description, List<ToolParameter> parameters, ToolExecutor executor) {
 
+  /**
+   * Returns an empty builder: no name, description, parameter or executor.
+   *
+   * @return a new builder
+   */
   public static Builder newBuilder() {
     return new Builder();
   }
@@ -56,7 +61,11 @@ public record Tool(
     return false;
   }
 
-  /** Get required parameter names. */
+  /**
+   * Returns the names of the parameters marked required, in declared order.
+   *
+   * @return an unmodifiable list, empty when no parameter is required
+   */
   public List<String> requiredParameters() {
     return parameters.stream().filter(ToolParameter::required).map(ToolParameter::name).toList();
   }
@@ -64,6 +73,8 @@ public record Tool(
   /**
    * Convert parameters to JSON Schema format (for model APIs): keys {@code type}, {@code
    * properties} and {@code required}, with properties in declared parameter order.
+   *
+   * @return an unmodifiable schema map; {@code required} is omitted when no parameter is required
    */
   public Map<String, Object> parametersAsJsonSchema() {
     var properties = new LinkedHashMap<String, Object>();
@@ -89,31 +100,71 @@ public record Tool(
 
     private Builder() {}
 
+    /**
+     * Sets the name the model calls the tool by, unique among a session's tools. Required.
+     *
+     * @param name the tool name; {@link #build()} rejects {@code null} or blank
+     * @return this builder
+     */
     public Builder withName(String name) {
       this.name = name;
       return this;
     }
 
+    /**
+     * Sets what the tool does, as the model reads it when choosing a tool. Unset by default.
+     *
+     * @param description the description; may be {@code null}
+     * @return this builder
+     */
     public Builder withDescription(String description) {
       this.description = description;
       return this;
     }
 
+    /**
+     * Appends one parameter after those already added; the order is the order the schema lists them
+     * in.
+     *
+     * @param parameter the parameter; {@link #build()} rejects {@code null}
+     * @return this builder
+     */
     public Builder withParameter(ToolParameter parameter) {
       this.parameters.add(parameter);
       return this;
     }
 
+    /**
+     * Appends every parameter of {@code parameters}, in order, after those already added.
+     *
+     * @param parameters the parameters; must not be {@code null}, and {@link #build()} rejects a
+     *     {@code null} element
+     * @return this builder
+     * @throws NullPointerException if {@code parameters} is {@code null}
+     */
     public Builder withParameters(List<ToolParameter> parameters) {
       this.parameters.addAll(parameters);
       return this;
     }
 
+    /**
+     * Sets the function {@link Tool#execute} runs for each call. Required.
+     *
+     * @param executor the executor; {@link #build()} rejects {@code null}
+     * @return this builder
+     */
     public Builder withExecutor(ToolExecutor executor) {
       this.executor = executor;
       return this;
     }
 
+    /**
+     * Builds the tool with an unmodifiable copy of the parameters added so far.
+     *
+     * @return a new tool
+     * @throws IllegalStateException if the name is {@code null} or blank, or no executor is set
+     * @throws NullPointerException if a parameter added is {@code null}
+     */
     public Tool build() {
       if (Strings.isBlank(name)) {
         throw new IllegalStateException("Tool name is required");
