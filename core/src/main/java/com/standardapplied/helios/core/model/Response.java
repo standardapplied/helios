@@ -47,30 +47,71 @@ public record Response<T>(
    */
   public static final String REFUSAL_EXPLANATION_KEY = "refusal.explanation";
 
+  /**
+   * Starts a builder for an unstructured response, one whose {@link #parsed()} stays {@code null}.
+   *
+   * @return a new builder with every list and map empty and every other component {@code null}
+   */
   public static Builder<Void> newBuilder() {
     return new Builder<>();
   }
 
+  /**
+   * Starts a builder for a structured response whose parsed value is a {@code T}.
+   *
+   * @param <T> the type of the parsed structured output
+   * @param type the parsed value's class; it only fixes {@code T} and is not otherwise read, so it
+   *     may be null
+   * @return a new builder with every list and map empty and every other component {@code null}
+   */
   public static <T> Builder<T> newBuilder(Class<T> type) {
     return new Builder<>();
   }
 
+  /**
+   * Whether the model asked for at least one tool call, making this an intermediate turn.
+   *
+   * @return {@code true} if {@link #toolCalls()} is non-null and non-empty
+   */
   public boolean hasToolCalls() {
     return toolCalls != null && !toolCalls.isEmpty();
   }
 
+  /**
+   * Whether the response carries reasoning text.
+   *
+   * @return {@code true} if {@link #thinking()} is non-null and non-empty
+   */
   public boolean hasThinking() {
     return thinking != null && !thinking.isEmpty();
   }
 
+  /**
+   * Whether the response cites at least one source.
+   *
+   * @return {@code true} if {@link #citations()} is non-null and non-empty
+   */
   public boolean hasCitations() {
     return citations != null && !citations.isEmpty();
   }
 
+  /**
+   * Whether a structured output was parsed from the response.
+   *
+   * @return {@code true} if {@link #parsed()} is non-null
+   */
   public boolean hasParsed() {
     return parsed != null;
   }
 
+  /**
+   * Turns the response into the assistant message that records it in a conversation: its content,
+   * tool calls and metadata, so a provider's round-trip data travels with the turn. Parsed value,
+   * usage, thinking text and citations are not carried.
+   *
+   * @return a {@link Role#ASSISTANT} message
+   * @throws NullPointerException if {@link #toolCalls()} is null or holds a null element
+   */
   public Message toMessage() {
     return Message.assistant(content, toolCalls, metadata);
   }
@@ -226,6 +267,13 @@ public record Response<T>(
     }
   }
 
+  /**
+   * Builds a {@link Response}. The {@code with*} methods for lists and maps copy their argument and
+   * treat {@code null} as empty; every other setting is kept as given and nothing is validated. Not
+   * thread-safe.
+   *
+   * @param <T> the type of the parsed structured output
+   */
   public static class Builder<T> {
     private String content;
     private T parsed;
@@ -238,46 +286,107 @@ public record Response<T>(
 
     private Builder() {}
 
+    /**
+     * Sets the response's text. {@code null} by default, as for a turn that only calls tools.
+     *
+     * @param content the text; may be null
+     * @return this builder
+     */
     public Builder<T> withContent(String content) {
       this.content = content;
       return this;
     }
 
+    /**
+     * Sets the structured output parsed from the text. {@code null} by default, meaning nothing was
+     * parsed.
+     *
+     * @param parsed the parsed value; may be null
+     * @return this builder
+     */
     public Builder<T> withParsed(T parsed) {
       this.parsed = parsed;
       return this;
     }
 
+    /**
+     * Sets the tool calls the model requested. Empty by default.
+     *
+     * @param toolCalls the calls, copied; {@code null} is treated as empty
+     * @return this builder
+     * @throws NullPointerException if {@code toolCalls} holds a null element
+     */
     public Builder<T> withToolCalls(List<ToolCall> toolCalls) {
       this.toolCalls = toolCalls != null ? List.copyOf(toolCalls) : List.of();
       return this;
     }
 
+    /**
+     * Sets why the model stopped generating. {@code null} by default; a reader such as {@link
+     * ModelChunk.MessageStop#of(Response)} takes an unset reason as {@link FinishReason#STOP}.
+     *
+     * @param finishReason the finish reason; may be null
+     * @return this builder
+     */
     public Builder<T> withFinishReason(FinishReason finishReason) {
       this.finishReason = finishReason;
       return this;
     }
 
+    /**
+     * Sets the tokens the call consumed. {@code null} by default, meaning the provider reported
+     * none.
+     *
+     * @param usage the usage; may be null
+     * @return this builder
+     */
     public Builder<T> withUsage(Usage usage) {
       this.usage = usage;
       return this;
     }
 
+    /**
+     * Sets the reasoning text the model returned. {@code null} by default, meaning it returned
+     * none.
+     *
+     * @param thinking the reasoning text; may be null
+     * @return this builder
+     */
     public Builder<T> withThinking(String thinking) {
       this.thinking = thinking;
       return this;
     }
 
+    /**
+     * Sets the sources the response cites. Empty by default.
+     *
+     * @param citations the citations, copied; {@code null} is treated as empty
+     * @return this builder
+     * @throws NullPointerException if {@code citations} holds a null element
+     */
     public Builder<T> withCitations(List<Citation> citations) {
       this.citations = citations != null ? List.copyOf(citations) : List.of();
       return this;
     }
 
+    /**
+     * Sets the provider-specific round-trip data, such as thinking signatures or the {@link
+     * #REFUSAL_CATEGORY_KEY refusal keys}. Empty by default.
+     *
+     * @param metadata the metadata, copied; {@code null} is treated as empty
+     * @return this builder
+     * @throws NullPointerException if {@code metadata} holds a null key or value
+     */
     public Builder<T> withMetadata(Map<String, String> metadata) {
       this.metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
       return this;
     }
 
+    /**
+     * Builds the response from the settings as they stand; nothing is validated.
+     *
+     * @return the response
+     */
     public Response<T> build() {
       return new Response<>(
           content, parsed, toolCalls, finishReason, usage, thinking, citations, metadata);

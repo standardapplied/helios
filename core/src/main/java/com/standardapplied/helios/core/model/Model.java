@@ -108,13 +108,25 @@ public interface Model extends AutoCloseable {
     throw new UnsupportedOperationException("Structured output not supported by this model");
   }
 
-  /** The model identifier (e.g., "gemini-3.8-flash", "claude-sonnet-5-5"). */
+  /**
+   * The model identifier (e.g., "gemini-3.8-flash", "claude-sonnet-5-5").
+   *
+   * @return the id the provider sends as the model; never null
+   */
   String id();
 
-  /** The provider name (e.g., "gemini", "anthropic", "openai"). */
+  /**
+   * The provider name (e.g., "gemini", "anthropic", "openai").
+   *
+   * @return the provider's short identifier; never null
+   */
   String provider();
 
-  /** Context window size in tokens. Returns 0 if unknown (compaction disabled). */
+  /**
+   * Context window size in tokens. Returns 0 if unknown (compaction disabled).
+   *
+   * @return the window in tokens, or 0 when unknown
+   */
   default int contextWindow() {
     return 0;
   }
@@ -132,7 +144,12 @@ public interface Model extends AutoCloseable {
     return 0;
   }
 
-  /** Raw structured-output retention policy used by this model and its sessions. */
+  /**
+   * Raw structured-output retention policy used by this model and its sessions.
+   *
+   * @return whether a structured-output exception keeps the raw response; {@link
+   *     RawOutputCapturePolicy#ENABLED} unless the model overrides it
+   */
   default RawOutputCapturePolicy rawOutputCapturePolicy() {
     return RawOutputCapturePolicy.ENABLED;
   }

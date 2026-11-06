@@ -76,6 +76,8 @@ public sealed interface StreamEvent {
   record Error(String message, Exception cause, Response<Void> partial) implements StreamEvent {
 
     /**
+     * Creates the failure that ends a stream.
+     *
      * @throws NullPointerException if {@code message} or {@code partial} is null
      * @throws IllegalArgumentException if {@code partial} does not finish with {@link
      *     FinishReason#ERROR}
