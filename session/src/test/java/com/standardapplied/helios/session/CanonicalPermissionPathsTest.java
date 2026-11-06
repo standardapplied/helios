@@ -396,13 +396,40 @@ final class CanonicalPermissionPathsTest {
     var permission =
         policy(
             PermissionMode.DEFAULT,
-            rule(PermissionEffect.DENY, "Execute", "BASH/**rm **"),
-            rule(PermissionEffect.DENY, "Unregistered", "secrets/**"),
+            rule(PermissionEffect.ALLOW, "Execute", "BASH/**rm **"),
+            rule(PermissionEffect.ALLOW, "Unregistered", "secrets/**"),
             rule(PermissionEffect.DENY, "Read", "/etc/**"));
     var options =
         SessionOptions.newBuilder().withTools(sessions.tools(trusted)).withPermission(permission);
 
     try (var session = create(options)) {
+      assertFalse(session.isRunning());
+    }
+  }
+
+  @Test
+  void aDenyRuleNamingNoToolOfTheSessionFailsItsCreation() {
+    var options =
+        sessions.options(
+            policy(PermissionMode.DEFAULT, rule(PermissionEffect.DENY, "Exectue", "BASH/rm*")));
+
+    assertEquals(
+        "deny rule Exectue(BASH/rm*) names no tool of this session; tools: [Glob, Grep, LS,"
+            + " MemoryRead, MemoryWrite, Read]",
+        assertThrows(IllegalArgumentException.class, () -> create(options)).getMessage());
+  }
+
+  @Test
+  void anAskRuleNamingABuiltInToolBuildsAWorkspaceSession() {
+    var model = ScriptedModel.newBuilder().withTextTurn("done").build();
+    var options =
+        SessionPresets.workspace(model, sessions.root)
+            .withPermission(
+                policy(
+                    PermissionMode.DEFAULT,
+                    rule(PermissionEffect.ASK, "MemoryWrite", "/memories/**")));
+
+    try (var session = AgentSession.open(options.build())) {
       assertFalse(session.isRunning());
     }
   }
