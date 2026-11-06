@@ -108,13 +108,14 @@ import java.util.logging.Logger;
  * response bytes not yet sent, so a large answer, or one whose packet is lost, can arrive cut
  * short; each of Helios's refusals fits in one packet.
  *
- * <p>Helidon's own answers on the same server, an unmatched path or an {@code Error} a route lets
- * escape, are Helidon's to frame. {@link RuntimeServer} sets Helidon's {@code
- * maxPayloadSize(maxRequestBytes)} and {@code Http1Config.continueImmediately(true)}, and so must a
- * {@link io.helidon.webserver.WebServer} of your own that mounts this service. Then no body byte is
- * ever parsed as a request, and Helidon's own answers read at most {@code maxRequestBytes} of a
- * body. Without them, a request sent with {@code Expect: 100-continue} to an unmatched path has its
- * body parsed as the next request.
+ * <p>Helidon's own answers on the same server, such as an unmatched path's {@code 404}, the {@code
+ * 406} of an event stream the client does not accept, the {@code 400} of a malformed request, or
+ * the {@code 500} for an {@code Error} a route lets escape, are Helidon's to frame. {@link
+ * RuntimeServer} sets Helidon's {@code maxPayloadSize(maxRequestBytes)} and {@code
+ * Http1Config.continueImmediately(true)}, and so must a {@link io.helidon.webserver.WebServer} of
+ * your own that mounts this service. Then no body byte is ever parsed as a request, and Helidon's
+ * own answers read at most {@code maxRequestBytes} of a body. Without them, a request sent with
+ * {@code Expect: 100-continue} to an unmatched path has its body parsed as the next request.
  *
  * <p>The {@code optionsFactory} is the seam through which deployments choose how a new session is
  * configured: it is given a {@link SessionRequest} of the generated session id and the {@link
