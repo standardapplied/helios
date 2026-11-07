@@ -17,6 +17,38 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ChildJvmTest {
 
+  /**
+   * Blocks a virtual thread in a pipe read, which asks the scheduler for a spare carrier, then
+   * reports the scheduler's parallelism and how many carriers it has.
+   */
+  private static final String CARRIER_PROBE =
+      """
+      import com.standardapplied.helios.core.test.Await;
+      import java.io.IOException;
+      import java.io.UncheckedIOException;
+      import java.lang.management.ManagementFactory;
+      import java.util.Arrays;
+      import jdk.management.VirtualThreadSchedulerMXBean;
+
+      public class CarrierProbe {
+        public static void main(String[] args) throws Exception {
+          var cat = new ProcessBuilder("cat").start();
+          var reader = Thread.ofVirtual().start(() -> {
+            try {
+              cat.getInputStream().read();
+            } catch (IOException e) {
+              throw new UncheckedIOException(e);
+            }
+          });
+          Await.until("the read to block", () -> Arrays.stream(reader.getStackTrace())
+              .anyMatch(frame -> frame.getMethodName().equals("readBytes")));
+          var scheduler = ManagementFactory.getPlatformMXBean(VirtualThreadSchedulerMXBean.class);
+          System.out.println(scheduler.getParallelism() + " " + scheduler.getPoolSize());
+          cat.destroyForcibly();
+        }
+      }
+      """;
+
   @TempDir Path dir;
 
   @Test
@@ -63,6 +95,13 @@ class ChildJvmTest {
       Thread.interrupted();
       PidFile.destroy(pidFile);
     }
+  }
+
+  @Test
+  void oneCarrierLeavesAVirtualThreadBlockedInAPipeReadWithNoSpareCarrier() throws IOException {
+    var source = Files.writeString(dir.resolve("CarrierProbe.java"), CARRIER_PROBE);
+
+    assertEquals("1 1\n", ChildJvm.output(dir, ChildJvm.ONE_CARRIER, source.toString()));
   }
 
   private static boolean runsBlocks(ProcessHandle child) {
