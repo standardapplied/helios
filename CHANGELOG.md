@@ -1468,6 +1468,9 @@ price table asked for a model it does not hold, both used to count the call as f
   Pipes are now read and written on platform daemon threads (`helios-sandbox-stdout-reader`,
   `helios-process-stdout-reader`, `helios-process-stderr-reader`, `helios-process-stdin-writer`),
   one per pipe, each ending with its pipe: up to three platform threads per running process.
+  When one cannot start, at a thread or pid limit, its child process or sandbox JVM is killed
+  and the `OutOfMemoryError` propagates; a sandbox start that fails with any `Error` now releases
+  what it acquired, as one that fails with an exception does.
 - **`interrupt()` right after a `send` no longer lets that message be answered.** A `send` that
   arrived once the run in progress had decided to end queued the next run, and `interrupt()`
   cancelled only the ending run, so the queued run started and called the model. `interrupt()`

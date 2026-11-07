@@ -27,19 +27,16 @@ class ThreadBudgetTest {
     public static void main(String[] args) throws Exception {
       var release = new CountDownLatch(1);
       Runnable held = () -> Await.latch("the release", release);
-      ThreadBudget.run(
-          2,
-          () -> {
-            Thread.ofPlatform().start(held);
-            Thread.ofPlatform().start(held);
-            System.out.println("started 2");
-            try {
-              Thread.ofPlatform().start(held);
-            } catch (OutOfMemoryError e) {
-              System.out.println("refused: " + e.getClass().getSimpleName());
-            }
-            return null;
-          });
+      try (var ignored = ThreadBudget.of(2)) {
+        Thread.ofPlatform().start(held);
+        Thread.ofPlatform().start(held);
+        System.out.println("started 2");
+        try {
+          Thread.ofPlatform().start(held);
+        } catch (OutOfMemoryError e) {
+          System.out.println("refused: " + e.getClass().getSimpleName());
+        }
+      }
       Thread.ofPlatform().start(held);
       System.out.println("started after the cap");
       release.countDown();

@@ -141,8 +141,7 @@ public final class JvmSandbox implements Sandbox {
    * LOCAL_PEERCRED} (BSD/macOS) verification on accept; until then, do not run Helios alongside
    * untrusted workloads under a shared UID.
    *
-   * <p>If any step throws an exception, what the earlier steps acquired is released, latest first.
-   * An {@link Error} propagates without that release and can leave the sandbox subprocess running.
+   * <p>If any step fails, what the earlier steps acquired is released, latest first.
    *
    * @param config the sandbox configuration
    * @param registry the host function registry
@@ -188,7 +187,7 @@ public final class JvmSandbox implements Sandbox {
     } catch (IOException e) {
       acquired.forEach(Runnable::run);
       throw new ReplException("Failed to start JVM sandbox subprocess", e);
-    } catch (RuntimeException e) {
+    } catch (RuntimeException | Error e) {
       acquired.forEach(Runnable::run);
       throw e;
     }
