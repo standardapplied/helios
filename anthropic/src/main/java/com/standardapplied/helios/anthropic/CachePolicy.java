@@ -5,8 +5,6 @@
 
 package com.standardapplied.helios.anthropic;
 
-import com.standardapplied.helios.anthropic.api.CacheControl;
-
 /**
  * Anthropic prompt-caching policy for a model the {@link AnthropicProvider} creates. Supply a
  * policy through {@link AnthropicProvider#create(String,
@@ -87,15 +85,6 @@ public sealed interface CachePolicy
    */
   boolean enabled();
 
-  /**
-   * The {@link CacheControl} breakpoint to attach to each cacheable slot (system, last tool, last
-   * message) when this policy is enabled. Returns {@code null} when {@link #enabled()} is {@code
-   * false} so callers can skip annotation entirely.
-   *
-   * @return the breakpoint, or {@code null} when caching is disabled
-   */
-  CacheControl breakpoint();
-
   /** Disabled-caching singleton; emits no {@code cache_control} on the request. */
   record Disabled() implements CachePolicy {
 
@@ -104,11 +93,6 @@ public sealed interface CachePolicy
     @Override
     public boolean enabled() {
       return false;
-    }
-
-    @Override
-    public CacheControl breakpoint() {
-      return null;
     }
   }
 
@@ -121,11 +105,6 @@ public sealed interface CachePolicy
     public boolean enabled() {
       return true;
     }
-
-    @Override
-    public CacheControl breakpoint() {
-      return CacheControl.ephemeral();
-    }
   }
 
   /** Long-lived (1h) caching singleton. */
@@ -136,11 +115,6 @@ public sealed interface CachePolicy
     @Override
     public boolean enabled() {
       return true;
-    }
-
-    @Override
-    public CacheControl breakpoint() {
-      return CacheControl.ephemeral(CacheControl.TTL_1_HOUR);
     }
   }
 }
