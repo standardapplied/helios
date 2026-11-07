@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ChildJvm;
+import com.standardapplied.helios.core.test.ThreadBudget;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.repl.host.HostFunction;
 import com.standardapplied.helios.repl.host.HostFunctionRegistry;
@@ -21,6 +23,7 @@ import com.standardapplied.helios.repl.protocol.RpcChannel;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.lang.management.ManagementFactory;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -30,12 +33,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * No test depends on how long a subprocess takes. A sandbox launched for real gets {@link
@@ -1045,6 +1053,21 @@ class JvmSandboxTest {
   }
 
   /**
+   * The cap is set once the RPC connection is accepted, so the subprocess JVM starts uncapped and
+   * the stdout reader is the first thread that cannot start. The JVM has one carrier, which the
+   * accept started ({@link ChildJvm#ONE_CARRIER}), so the release starts no carrier under the cap.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aLaunchThatCannotStartItsStdoutReaderRethrowsAndLeavesNothingBehind(@TempDir Path dir) {
+    var options = Stream.concat(ChildJvm.ONE_CARRIER.stream(), ThreadBudget.OPTIONS.stream());
+
+    assertEquals(
+        "OutOfMemoryError\nthe sandbox ended\nits directories: []\n",
+        ChildJvm.output(dir, options.toList(), LaunchesWithNoThreadLeft.class.getName()));
+  }
+
+  /**
    * A sandbox over a child that only sleeps, with a stop grace and call timeout of a millisecond
    * and {@code executionTimeout} as the default budget; its channel's own timeout is beyond the
    * hang guard.
@@ -1069,5 +1092,48 @@ class JvmSandboxTest {
         .withExecutionTimeout(BEYOND_HANG_GUARD)
         .withStopGrace(stopGrace)
         .build();
+  }
+
+  static final class LaunchesWithNoThreadLeft {
+    public static void main(String[] args) throws IOException {
+      var budget = new AtomicReference<ThreadBudget>();
+      var sandbox = new AtomicReference<ProcessHandle>();
+      var directories = new ArrayList<Path>();
+      try {
+        JvmSandbox.create(
+            END_TO_END,
+            new HostFunctionRegistry(),
+            rpc -> {
+              var child = ProcessHandle.current().children().findFirst().orElseThrow();
+              sandbox.set(child);
+              directories.add(socketDirectory(rpc));
+              directories.add(workingDirectory(child));
+              budget.set(ThreadBudget.of(0));
+            });
+      } catch (OutOfMemoryError e) {
+        System.out.println(e.getClass().getSimpleName());
+      } finally {
+        budget.get().close();
+      }
+      Await.value("the sandbox to end", sandbox.get().onExit());
+      System.out.println("the sandbox ended");
+      System.out.println("its directories: " + directories.stream().filter(Files::exists).toList());
+    }
+
+    private static Path socketDirectory(SandboxRpc rpc) {
+      try {
+        return ((UnixDomainSocketAddress) rpc.socket().getLocalAddress()).getPath().getParent();
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+
+    private static Path workingDirectory(ProcessHandle child) {
+      try {
+        return Files.readSymbolicLink(Path.of("/proc", Long.toString(child.pid()), "cwd"));
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
   }
 }

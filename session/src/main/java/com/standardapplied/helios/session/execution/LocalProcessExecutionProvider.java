@@ -231,8 +231,8 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
 
   private ExecutionResult awaitProcess(
       ExecutionRequest request, BoundedProcess process, CancellationToken cancellation) {
-    inflight.track(process);
     var stdinFeeder = StdinFeeder.start(process, request.stdin().orElse(null));
+    inflight.track(process);
     ProcessOutcome outcome;
     try {
       outcome = process.await(cancellation);
@@ -292,21 +292,35 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
     inflight.close();
   }
 
+  /**
+   * Writes a call's stdin to the child on a platform daemon thread of its own. A pipe write blocks
+   * its carrier, so on a virtual thread a few dozen blocked writes can starve the virtual-thread
+   * scheduler. When the thread cannot start, the child is killed before the error propagates.
+   */
   private record StdinFeeder(Thread thread) {
 
     static StdinFeeder start(BoundedProcess process, String stdin) {
-      return new StdinFeeder(
-          Thread.startVirtualThread(
-              () -> {
-                try (OutputStream out = process.stdin()) {
-                  if (stdin != null) {
-                    out.write(stdin.getBytes(StandardCharsets.UTF_8));
-                    out.flush();
-                  }
-                } catch (IOException ignored) {
-                  // Child closed its stdin or exited before we finished writing — both expected.
-                }
-              }));
+      try {
+        return new StdinFeeder(
+            Thread.ofPlatform()
+                .daemon()
+                .name("helios-process-stdin-writer")
+                .start(() -> write(process, stdin)));
+      } catch (OutOfMemoryError e) {
+        process.kill();
+        throw e;
+      }
+    }
+
+    private static void write(BoundedProcess process, String stdin) {
+      try (OutputStream out = process.stdin()) {
+        if (stdin != null) {
+          out.write(stdin.getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        }
+      } catch (IOException ignored) {
+        // Child closed its stdin or exited before the write ended: both expected.
+      }
     }
 
     void join() {

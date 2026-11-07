@@ -141,8 +141,7 @@ public final class JvmSandbox implements Sandbox {
    * LOCAL_PEERCRED} (BSD/macOS) verification on accept; until then, do not run Helios alongside
    * untrusted workloads under a shared UID.
    *
-   * <p>If any step throws an exception, what the earlier steps acquired is released, latest first.
-   * An {@link Error} propagates without that release and can leave the sandbox subprocess running.
+   * <p>If any step fails, what the earlier steps acquired is released, latest first.
    *
    * @param config the sandbox configuration
    * @param registry the host function registry
@@ -188,7 +187,7 @@ public final class JvmSandbox implements Sandbox {
     } catch (IOException e) {
       acquired.forEach(Runnable::run);
       throw new ReplException("Failed to start JVM sandbox subprocess", e);
-    } catch (RuntimeException e) {
+    } catch (RuntimeException | Error e) {
       acquired.forEach(Runnable::run);
       throw e;
     }
@@ -242,7 +241,7 @@ public final class JvmSandbox implements Sandbox {
    *       when the subprocess's stdout pipe closes, which it does once {@link
    *       Process#destroyForcibly} takes effect. A subprocess stuck in uninterruptible kernel sleep
    *       (D-state) keeps the pipe open until the kernel unblocks it; the join then times out and
-   *       the reader virtual thread leaks. Bounded to one orphan thread per stuck session — does
+   *       the reader platform thread leaks. Bounded to one orphan thread per stuck session — does
    *       not compound across sessions.
    * </ul>
    */

@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.core.test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -226,6 +227,11 @@ class AwaitTest {
       process.destroyForcibly();
     }
     Await.termination("the killed child process", process);
+  }
+
+  @Test
+  void timedParkReturnsOnceTheParkedVirtualThreadHasEnded() {
+    assertDoesNotThrow(Await::timedPark);
   }
 
   @Test

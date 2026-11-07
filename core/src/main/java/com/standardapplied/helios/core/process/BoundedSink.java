@@ -28,10 +28,14 @@ final class BoundedSink {
     this.max = max;
   }
 
-  /** A sink of at most {@code max} bytes that drains {@code in} on a virtual thread of its own. */
-  static BoundedSink draining(InputStream in, int max) {
+  /**
+   * A sink of at most {@code max} bytes that drains {@code in} on a platform daemon thread named
+   * {@code name}. A pipe read blocks its carrier, so on a virtual thread a few dozen blocked drains
+   * can starve the virtual-thread scheduler.
+   */
+  static BoundedSink draining(InputStream in, int max, String name) {
     var sink = new BoundedSink(max);
-    sink.drainer = Thread.startVirtualThread(() -> sink.drain(in));
+    sink.drainer = Thread.ofPlatform().daemon().name(name).start(() -> sink.drain(in));
     return sink;
   }
 

@@ -1,0 +1,240 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+package com.standardapplied.helios.session.execution;
+
+import static java.util.stream.Collectors.toMap;
+import static java.util.stream.Collectors.toSet;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ChildJvm;
+import com.standardapplied.helios.core.test.PidFile;
+import com.standardapplied.helios.core.test.ThreadBudget;
+import com.standardapplied.helios.core.tool.SessionContext;
+import com.standardapplied.helios.session.test.ExecutionCall;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * The threads that read a call's output and write its stdin leave the virtual-thread scheduler free
+ * while they block, and none outlives the call, whether it completes, times out or is cancelled.
+ */
+final class LocalProcessExecutionProviderPipeThreadsTest {
+
+  private static final SessionContext CTX = SessionContext.forTesting("pipe-threads");
+
+  private static final Duration BEYOND_HANG_GUARD = Await.HANG_GUARD.multipliedBy(5);
+
+  private static final Set<String> PIPE_THREADS =
+      Set.of(
+          "helios-process-stdout-reader",
+          "helios-process-stderr-reader",
+          "helios-process-stdin-writer");
+
+  private Set<Thread> before;
+
+  @BeforeEach
+  void requireBash() {
+    assumeTrue(Files.isExecutable(Path.of("/bin/bash")), "/bin/bash is required");
+    before = pipeThreads();
+  }
+
+  @AfterEach
+  void noChildOutlivesItsTest() {
+    ProcessHandle.current().descendants().forEach(ProcessHandle::destroyForcibly);
+  }
+
+  @Test
+  void aTimedParkEndsWhileAWriteToAChildsStdinIsBlocked(@TempDir Path dir) {
+    var options =
+        Stream.concat(ChildJvm.ONE_CARRIER.stream(), Stream.of("-Dready=" + dir.resolve("ready")));
+
+    assertEquals(
+        "parked\n" + CancellationException.class.getName() + "\n",
+        ChildJvm.output(dir, options.toList(), BlockedStdinProbe.class.getName()));
+  }
+
+  @Test
+  void noPipeThreadOutlivesACallThatCompletes() {
+    var result =
+        Await.value(
+            "the call",
+            ExecutionCall.start(
+                    provider(), CTX, request("cat; echo err >&2", "in"), new CancellationToken())
+                .outcome());
+
+    assertEquals("in", result.stdout());
+    assertEquals("err\n", result.stderr());
+    assertEquals(Set.of(), leftBehind());
+  }
+
+  @Test
+  void noPipeThreadOutlivesACallThatTimesOut() {
+    var request =
+        ExecutionRequest.newBuilder()
+            .withRuntime(Runtime.BASH)
+            .withScript("exec sleep 600")
+            .withStdin("in")
+            .withTimeout(Duration.ofMillis(150))
+            .build();
+
+    var result =
+        Await.value(
+            "the call",
+            ExecutionCall.start(provider(), CTX, request, new CancellationToken()).outcome());
+
+    assertTrue(result.timedOut());
+    assertEquals(Set.of(), leftBehind());
+  }
+
+  @Test
+  void noPipeThreadOutlivesACallThatIsCancelled(@TempDir Path dir) {
+    var pidFile = dir.resolve("pid");
+    var token = new CancellationToken();
+    var call =
+        ExecutionCall.start(
+            provider(), CTX, request("echo $$ > " + pidFile + "; exec sleep 600", "in"), token);
+    var child = PidFile.await("the child to write its pid", pidFile);
+
+    token.cancel("test");
+
+    assertInstanceOf(
+        CancellationException.class, Await.failure("the cancelled call", call.outcome()));
+    assertFalse(child.isAlive());
+    assertEquals(Set.of(), leftBehind());
+  }
+
+  /**
+   * The call runs on a platform thread that is not a daemon: a new thread inherits its creator's
+   * daemon status, and every virtual thread is a daemon. The child closes its stdout, so the stdout
+   * reader ends while the stderr reader and the blocked stdin writer stay.
+   */
+  @Test
+  void eachPipeThreadIsAPlatformDaemonThreadNamedForItsStream(@TempDir Path dir) {
+    var pidFile = dir.resolve("pid");
+    var token = new CancellationToken();
+    var request =
+        request(
+            "head -c 1 > /dev/null; exec >&-; echo $$ > " + pidFile + "; exec sleep 600",
+            "x".repeat(1 << 20));
+    var call =
+        CompletableFuture.supplyAsync(
+            () -> provider().execute(CTX, request, token),
+            task -> Thread.ofPlatform().daemon(false).start(task));
+    PidFile.await("the child to close its stdout", pidFile);
+    Await.until(
+        "the stdout reader to end",
+        () ->
+            leftBehind().stream()
+                .noneMatch(thread -> thread.getName().equals("helios-process-stdout-reader")));
+
+    var daemons = leftBehind().stream().collect(toMap(Thread::getName, Thread::isDaemon));
+    token.cancel("test");
+    Await.failure("the cancelled call", call);
+
+    assertEquals(
+        Map.of("helios-process-stderr-reader", true, "helios-process-stdin-writer", true), daemons);
+  }
+
+  /**
+   * The child runs {@code cat}, which never ends while its stdin is open; both output drains start
+   * and the stdin writer cannot.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCallThatCannotStartItsStdinWriterKillsTheChild(@TempDir Path dir) {
+    assertEquals(
+        "OutOfMemoryError\n0 in flight\nthe child ended\n",
+        ChildJvm.output(dir, ThreadBudget.OPTIONS, RunsWithTwoThreadsLeft.class.getName()));
+  }
+
+  private static LocalProcessExecutionProvider provider() {
+    return LocalProcessExecutionProvider.newBuilder()
+        .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
+        .withMaxTimeout(BEYOND_HANG_GUARD)
+        .withShutdownHook(false)
+        .build();
+  }
+
+  private static ExecutionRequest request(String script, String stdin) {
+    return ExecutionRequest.newBuilder()
+        .withRuntime(Runtime.BASH)
+        .withScript(script)
+        .withStdin(stdin)
+        .withTimeout(BEYOND_HANG_GUARD)
+        .build();
+  }
+
+  private Set<Thread> leftBehind() {
+    var alive = new HashSet<>(pipeThreads());
+    alive.removeAll(before);
+    return alive;
+  }
+
+  private static Set<Thread> pipeThreads() {
+    return Thread.getAllStackTraces().keySet().stream()
+        .filter(thread -> PIPE_THREADS.contains(thread.getName()))
+        .collect(toSet());
+  }
+
+  /**
+   * Runs a call whose child reads one byte of a 1 MiB stdin and then sleeps, so the write of the
+   * rest blocks for as long as the child lives. The probe JVM has one carrier and no spare ({@link
+   * ChildJvm#ONE_CARRIER}): a write blocked on a virtual thread would hold that carrier, the
+   * probe's 100 ms timed park would never end, and the wait for the probe would fail at the hang
+   * guard (60 s).
+   */
+  static final class BlockedStdinProbe {
+    public static void main(String[] args) {
+      var ready = Path.of(System.getProperty("ready"));
+      var token = new CancellationToken();
+      var call =
+          ExecutionCall.start(
+              provider(),
+              CTX,
+              request(
+                  "head -c 1 > /dev/null && touch " + ready + " && exec sleep 600",
+                  "x".repeat(1 << 20)),
+              token);
+      Await.until("the child to read its stdin", () -> Files.exists(ready));
+      Await.timedPark();
+      System.out.println("parked");
+      token.cancel("probe done");
+      System.out.println(Await.failure("the cancelled call", call.outcome()).getClass().getName());
+    }
+  }
+
+  static final class RunsWithTwoThreadsLeft {
+    public static void main(String[] args) throws Exception {
+      var provider = provider();
+      var request = request("cat", "in");
+      try (var ignored = ThreadBudget.of(2)) {
+        provider.execute(CTX, request, new CancellationToken());
+      } catch (OutOfMemoryError e) {
+        System.out.println(e.getClass().getSimpleName());
+      }
+      System.out.println(provider.inflightCount() + " in flight");
+      ProcessHandle.current()
+          .children()
+          .forEach(child -> Await.value("the child to end", child.onExit()));
+      System.out.println("the child ended");
+    }
+  }
+}

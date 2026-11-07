@@ -67,7 +67,7 @@ class BoundedSinkTest {
   @Test
   void anInterruptPendingOnEntryThrowsEvenWhenTheDrainHasEnded() {
     var drainer = new CompletableFuture<Thread>();
-    var sink = BoundedSink.draining(new EndingAt(drainer), 100);
+    var sink = BoundedSink.draining(new EndingAt(drainer), 100, "drain");
     Await.termination("the drain", Await.value("the drain to start", drainer));
 
     Thread.currentThread().interrupt();

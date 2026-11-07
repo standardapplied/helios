@@ -99,7 +99,11 @@ provider module; `session` does not depend on a provider, `runtime` or `persiste
 in `session.loop.SessionJson`; nothing depends on `java.util.concurrent.Flow` or
 `SubmissionPublisher`, since a stream is pulled (`core.model.CloseableIterator`,
 `session.EventStream`); in `session` outside `files`, `memory` and `execution`, no class
-creates an executor (its loop, wall clock and bounded waits run on virtual threads); a
+creates an executor (its loop, wall clock and bounded waits run on virtual threads); a thread
+that reads or writes a child-process pipe is a platform daemon thread, since a pipe read or write
+blocks its carrier and a few dozen on virtual threads starve the scheduler (in `core.process`,
+`session.execution` and `repl.sandbox`, no method that starts a virtual thread reads or writes a
+stream, in its own body or through a method of its class it calls); a
 `java.net.http.HttpClient` is built only by `core.common.HttpClientFactory`, whose clients never
 follow a redirect except the unauthenticated download client `createForDownloads()`, which only
 the `onnx` module may call; `java.lang.ProcessBuilder` is used only by `core.process` (whose
