@@ -241,7 +241,7 @@ public final class JvmSandbox implements Sandbox {
    *       when the subprocess's stdout pipe closes, which it does once {@link
    *       Process#destroyForcibly} takes effect. A subprocess stuck in uninterruptible kernel sleep
    *       (D-state) keeps the pipe open until the kernel unblocks it; the join then times out and
-   *       the reader virtual thread leaks. Bounded to one orphan thread per stuck session — does
+   *       the reader platform thread leaks. Bounded to one orphan thread per stuck session — does
    *       not compound across sessions.
    * </ul>
    */
