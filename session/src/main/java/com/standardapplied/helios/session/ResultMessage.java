@@ -110,7 +110,7 @@ public sealed interface ResultMessage
    * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
    *     duration} is negative
    */
-  static void validateCommon(
+  private static void validateCommon(
       String sessionId, String runId, Usage usage, CostEstimate cost, Duration duration) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {

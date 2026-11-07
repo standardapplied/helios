@@ -31,11 +31,10 @@ import java.util.Objects;
  * strings.
  *
  * <p>Every subtype carries the same four common fields ({@code sessionId}, {@code runId}, {@code
- * turnIndex}, {@code timestamp}) plus subtype-specific detail. Common-field validation lives in
- * {@link #validateCommon(String, String, long, Instant)} so the record bodies stay tight. A session
- * is one stream of events across its runs: {@link RunStarted} and {@link RunEnded} bracket each
- * run, and every event names the run it belongs to, so the events of one run are a filter on {@code
- * runId}.
+ * turnIndex}, {@code timestamp}) plus subtype-specific detail. Common-field validation lives in a
+ * private helper so the record bodies stay tight. A session is one stream of events across its
+ * runs: {@link RunStarted} and {@link RunEnded} bracket each run, and every event names the run it
+ * belongs to, so the events of one run are a filter on {@code runId}.
  *
  * <p>The subtypes cover every observable lifecycle event the agent loop emits — run boundaries,
  * assistant output (text, thinking, grounding citations), user input, model calls ({@link
@@ -106,7 +105,8 @@ public sealed interface QueryEvent
    * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank or {@code
    *     turnIndex} is negative
    */
-  static void validateCommon(String sessionId, String runId, long turnIndex, Instant timestamp) {
+  private static void validateCommon(
+      String sessionId, String runId, long turnIndex, Instant timestamp) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {
       throw new IllegalArgumentException("sessionId must not be blank");

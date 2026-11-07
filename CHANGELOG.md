@@ -13,6 +13,7 @@ the request rules only they used.
 |---|---|
 | `AnthropicModelId.CLAUDE_OPUS_4_8`, `CLAUDE_OPUS_4_7`, `CLAUDE_OPUS_4_6`, `CLAUDE_SONNET_4_6`, `CLAUDE_HAIKU_4_5`; `ReasoningRules.OFF_WHEN_OMITTED`, `WITHOUT_XHIGH`, `WITHOUT_EFFORT`; `Off.OMITTED`, `Sampling.ONE_OF`; `acceptsProgrammaticToolCalling()` | a Claude 5 model: `CLAUDE_SONNET_5_5` for a general model, `CLAUDE_HAIKU_5_5` for a small one. A `claude…` id before generation 5 (`claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022`, `claude-2.1`) makes `AnthropicProvider.create` throw `IllegalArgumentException` naming the id and the catalogued ids, and `supports` returns false for it; `AnthropicModelId.predatesClaude5(id)` tells which |
 | `anthropic.api.ToolDefinition(type, name, description, inputSchema, cacheControl, allowedCallers)`, `directOnly()` | `ToolDefinition(type, name, description, inputSchema, cacheControl)`: web search takes the API's default callers on every model |
+| `CachePolicy.breakpoint()` | removed: it returned `anthropic.api.CacheControl`, from a package the module does not export, so no caller outside the module could use it; the provider maps the policy to its breakpoint itself |
 
 **Runs are traced with OpenTelemetry; the Postgres trace store is an exporter.** A session emits
 live spans through the OpenTelemetry API, and `PgSpanExporter` writes Helios's spans to the trace
@@ -242,7 +243,8 @@ secret registry, the execution provider and the memory backend stay per session.
 | `interrupt(reason)` queued `"[interrupted by user: …]"` | `interrupt()` cancels the run in progress (`Cancelled`, reason `"interrupted"`) and keeps the session |
 | `isStarted()` | `isRunning()`: whether a run is in progress; `currentTurnIndex()` is that run's, `0` between runs |
 | `QueryEvent.LoopEnded` | `QueryEvent.RunEnded`, the last event of each run; `QueryEvent.RunStarted` is the first |
-| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as do `QueryEvent.validateCommon`, `ResultMessage.validateCommon` and the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
+| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as does the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
+| `QueryEvent.validateCommon`, `ResultMessage.validateCommon` | private: only the records nested in each interface call them |
 | `ResultMessage.ErrorProviderUnavailable` | `AgentSession.open` throws `SessionUnavailableException` (message: the provider and its redacted reason; cause: the provider's exception) |
 | `ErrorDuringExecution` kind `EmptyHistory` | kind `NoUserMessage`: every message queued for a run's first turn was blocked |
 | `send` on a terminal session threw `IllegalStateException("session is terminal")` | it starts the next run; `send` on a session a host `Error` failed throws `IllegalStateException("session failed: <Error class>")` |
@@ -1405,6 +1407,13 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Changed
 
+- **A module that exposes another module's types requires it transitively,** so a JPMS application
+  requires only the modules it uses directly. `helios-session`, `helios-anthropic`, `helios-gemini`,
+  `helios-openai`, `helios-onnx`, `helios-persistence`, `helios-repl` and `helios-testing` require
+  `helios-core` transitively, and `helios-runtime`, `helios-persistence` and `helios-repl` require
+  `helios-session`. Likewise `helios-core` requires `java.net.http`, `helios-repl` `jdk.jshell`,
+  `helios-runtime` `io.helidon.webserver`, and `helios-persistence` `io.helidon.dbclient` and
+  `io.opentelemetry.sdk.common`. The build compiles with `-Xlint:exports`.
 - **The context check counts from the provider's reported input tokens** plus an estimate of the
   messages added since, so inline files, the system prompt and tool definitions count. After each
   turn of the session's model `ConversationHistory` records the request's message count and its
