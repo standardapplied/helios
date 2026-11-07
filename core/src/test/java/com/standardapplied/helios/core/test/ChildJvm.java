@@ -65,7 +65,8 @@ public final class ChildJvm {
 
   /**
    * What {@code main} prints to standard output in a fresh JVM, which must exit with status 0. A
-   * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running.
+   * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running,
+   * and so is every process it started, before killing it makes them unreachable.
    *
    * @param dir a directory for the captured output
    * @param main the main class name or Java source file to launch
@@ -97,6 +98,7 @@ public final class ChildJvm {
         assertEquals(0, process.exitValue(), () -> read(stderr));
         return Files.readString(stdout);
       } finally {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
       }
     } catch (IOException e) {
