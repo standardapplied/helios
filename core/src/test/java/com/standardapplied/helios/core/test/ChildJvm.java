@@ -22,12 +22,22 @@ public final class ChildJvm {
 
   private static final int RUNS = 3;
 
+  /**
+   * JVM options that give virtual threads one carrier and no spare: a virtual thread that blocks
+   * its carrier then stops every other virtual thread, timed parks included.
+   */
+  public static final List<String> ONE_CARRIER =
+      List.of(
+          "-Djdk.virtualThreadScheduler.parallelism=1",
+          "-Djdk.virtualThreadScheduler.maxPoolSize=1");
+
   private ChildJvm() {}
 
-  private static List<String> command(String main) {
+  private static List<String> command(List<String> options, String main) {
     var command = new ArrayList<String>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
     command.addAll(coverageAgent());
+    command.addAll(options);
     var classpath = new ArrayList<String>();
     for (var arg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
       if (arg.startsWith("--module-path=")) {
@@ -55,18 +65,31 @@ public final class ChildJvm {
 
   /**
    * What {@code main} prints to standard output in a fresh JVM, which must exit with status 0. A
-   * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running.
+   * JVM that outlives the wait, by a timeout or an interrupt, is killed rather than left running,
+   * and so is every process it started, before killing it makes them unreachable.
    *
    * @param dir a directory for the captured output
    * @param main the main class name or Java source file to launch
    * @return the standard output, exactly
    */
   public static String output(Path dir, String main) {
+    return output(dir, List.of(), main);
+  }
+
+  /**
+   * As {@link #output(Path, String)}, in a JVM started with {@code options} before the main class.
+   *
+   * @param dir a directory for the captured output
+   * @param options JVM options, such as system properties
+   * @param main the main class name or Java source file to launch
+   * @return the standard output, exactly
+   */
+  public static String output(Path dir, List<String> options, String main) {
     try {
       var stdout = Files.createTempFile(dir, "stdout", ".txt");
       var stderr = Files.createTempFile(dir, "stderr", ".txt");
       var process =
-          new ProcessBuilder(command(main))
+          new ProcessBuilder(command(options, main))
               .redirectOutput(stdout.toFile())
               .redirectError(stderr.toFile())
               .start();
@@ -75,6 +98,7 @@ public final class ChildJvm {
         assertEquals(0, process.exitValue(), () -> read(stderr));
         return Files.readString(stdout);
       } finally {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
       }
     } catch (IOException e) {
