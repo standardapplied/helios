@@ -225,8 +225,8 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
     public static void main(String[] args) throws Exception {
       var provider = provider();
       var request = request("cat", "in");
-      try {
-        ThreadBudget.run(2, () -> provider.execute(CTX, request, new CancellationToken()));
+      try (var ignored = ThreadBudget.of(2)) {
+        provider.execute(CTX, request, new CancellationToken());
       } catch (OutOfMemoryError e) {
         System.out.println(e.getClass().getSimpleName());
       }

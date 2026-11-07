@@ -7,28 +7,27 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
-import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 /**
  * A Linux JVM in which only a given number of further Java threads can start, for code whose {@link
  * Thread#start()} fails with {@code OutOfMemoryError: unable to create native thread}, as it does
  * when a container's pid limit is reached. The JVM runs with {@link #OPTIONS}, under which every
- * Java thread reserves 1 GiB of stack; {@link #run} caps the address space for the action.
+ * Java thread reserves 1 GiB of stack; {@link #of} caps the address space until {@link #close()}.
  */
-public final class ThreadBudget {
+public final class ThreadBudget implements AutoCloseable {
 
   /**
-   * The JVM options {@link #run} needs: 1 GiB stacks, compiler threads that all start with the JVM
-   * so none takes address space during the action, no warning on standard output for a refused
-   * thread, and native access for {@code setrlimit}.
+   * The JVM options {@link #of} needs: 1 GiB stacks, compiler threads that all start with the JVM
+   * so none takes address space under the cap, no warning on standard output for a refused thread,
+   * and native access for {@code setrlimit}.
    */
   public static final List<String> OPTIONS =
       List.of(
@@ -51,23 +50,25 @@ public final class ThreadBudget {
   private ThreadBudget() {}
 
   /**
-   * Runs {@code action} while at most {@code threads} more Java threads can start, then lifts the
-   * cap. The threads it starts must outlive the action, since one that ends frees its stack.
+   * Caps this JVM's address space so that at most {@code threads} more Java threads can start,
+   * until the budget is closed. The threads started under the cap must outlive it, since one that
+   * ends frees its stack.
    *
-   * @return what {@code action} returned
-   * @throws Exception what {@code action} threw
+   * @return the budget, which lifts the cap when closed
    */
-  public static <T> T run(int threads, Callable<T> action) throws Exception {
-    try (var arena = Arena.ofConfined()) {
-      var limit = arena.allocate(2 * JAVA_LONG.byteSize());
-      limit.set(JAVA_LONG, JAVA_LONG.byteSize(), UNLIMITED);
-      setAddressSpace(limit, addressSpace() + threads * STACK + HEADROOM);
-      try {
-        return action.call();
-      } finally {
-        setAddressSpace(limit, UNLIMITED);
-      }
+  public static ThreadBudget of(int threads) {
+    try {
+      setAddressSpace(addressSpace() + threads * STACK + HEADROOM);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
+    return new ThreadBudget();
+  }
+
+  /** Lifts the cap. */
+  @Override
+  public void close() {
+    setAddressSpace(UNLIMITED);
   }
 
   private static long addressSpace() throws IOException {
@@ -79,10 +80,12 @@ public final class ThreadBudget {
         * 1024;
   }
 
-  private static void setAddressSpace(MemorySegment limit, long bytes) {
-    limit.set(JAVA_LONG, 0, bytes);
+  private static void setAddressSpace(long bytes) {
     int result;
-    try {
+    try (var arena = Arena.ofConfined()) {
+      var limit = arena.allocate(2 * JAVA_LONG.byteSize());
+      limit.set(JAVA_LONG, 0, bytes);
+      limit.set(JAVA_LONG, JAVA_LONG.byteSize(), UNLIMITED);
       result = (int) SETRLIMIT.invokeExact(RLIMIT_AS, limit);
     } catch (Throwable e) {
       throw new IllegalStateException(e);

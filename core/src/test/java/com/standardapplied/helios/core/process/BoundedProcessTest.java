@@ -576,8 +576,8 @@ class BoundedProcessTest {
   static final class StartsWithOneThreadLeft {
     public static void main(String[] args) throws Exception {
       var builder = BoundedProcess.newBuilder(List.of("cat"));
-      try {
-        ThreadBudget.run(1, builder::start);
+      try (var ignored = ThreadBudget.of(1)) {
+        builder.start();
       } catch (OutOfMemoryError e) {
         System.out.println(e.getClass().getSimpleName());
       }
