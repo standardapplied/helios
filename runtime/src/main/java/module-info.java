@@ -11,9 +11,9 @@
  * SDK; the SDK itself never depends on Helidon.
  */
 module com.standardapplied.helios.runtime {
-  requires com.standardapplied.helios.session;
+  requires transitive com.standardapplied.helios.session;
   requires com.standardapplied.helios.core;
-  requires io.helidon.webserver;
+  requires transitive io.helidon.webserver;
   requires io.helidon.webserver.sse;
   requires io.helidon.http;
   requires io.helidon.http.sse;

@@ -10,7 +10,7 @@
  * multi-turn conversations and SSE streaming support.
  */
 module com.standardapplied.helios.anthropic {
-  requires com.standardapplied.helios.core;
+  requires transitive com.standardapplied.helios.core;
   requires java.net.http;
   requires tools.jackson.databind;
   requires com.fasterxml.jackson.annotation;

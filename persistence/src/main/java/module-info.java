@@ -12,16 +12,16 @@
  * session's spans for {@link com.standardapplied.helios.persistence.PgTraceStore} to read.
  */
 module com.standardapplied.helios.persistence {
-  requires com.standardapplied.helios.core;
-  requires com.standardapplied.helios.session;
+  requires transitive com.standardapplied.helios.core;
+  requires transitive com.standardapplied.helios.session;
   requires com.standardapplied.scimsql;
-  requires io.helidon.dbclient;
+  requires transitive io.helidon.dbclient;
   requires io.helidon.common.mapper;
   requires tools.jackson.databind;
   requires java.sql;
   requires java.logging;
   requires transitive io.opentelemetry.sdk.trace;
-  requires io.opentelemetry.sdk.common;
+  requires transitive io.opentelemetry.sdk.common;
 
   exports com.standardapplied.helios.persistence;
 
