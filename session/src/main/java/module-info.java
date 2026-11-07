@@ -21,7 +21,7 @@
  * com.standardapplied.helios.session.loop}, which is not exported.
  */
 module com.standardapplied.helios.session {
-  requires com.standardapplied.helios.core;
+  requires transitive com.standardapplied.helios.core;
   requires java.logging;
   requires tools.jackson.databind;
   requires transitive io.opentelemetry.api;

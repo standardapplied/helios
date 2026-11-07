@@ -10,7 +10,7 @@
  * HuggingFace and runs embedding generation locally.
  */
 module com.standardapplied.helios.onnx {
-  requires com.standardapplied.helios.core;
+  requires transitive com.standardapplied.helios.core;
   requires java.logging;
   requires java.net.http;
   requires tools.jackson.databind;
