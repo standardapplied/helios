@@ -13,6 +13,7 @@ the request rules only they used.
 |---|---|
 | `AnthropicModelId.CLAUDE_OPUS_4_8`, `CLAUDE_OPUS_4_7`, `CLAUDE_OPUS_4_6`, `CLAUDE_SONNET_4_6`, `CLAUDE_HAIKU_4_5`; `ReasoningRules.OFF_WHEN_OMITTED`, `WITHOUT_XHIGH`, `WITHOUT_EFFORT`; `Off.OMITTED`, `Sampling.ONE_OF`; `acceptsProgrammaticToolCalling()` | a Claude 5 model: `CLAUDE_SONNET_5_5` for a general model, `CLAUDE_HAIKU_5_5` for a small one. A `claude…` id before generation 5 (`claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022`, `claude-2.1`) makes `AnthropicProvider.create` throw `IllegalArgumentException` naming the id and the catalogued ids, and `supports` returns false for it; `AnthropicModelId.predatesClaude5(id)` tells which |
 | `anthropic.api.ToolDefinition(type, name, description, inputSchema, cacheControl, allowedCallers)`, `directOnly()` | `ToolDefinition(type, name, description, inputSchema, cacheControl)`: web search takes the API's default callers on every model |
+| `CachePolicy.breakpoint()` | removed: it returned `anthropic.api.CacheControl`, from a package the module does not export, so no caller outside the module could use it; the provider maps the policy to its breakpoint itself |
 
 **Runs are traced with OpenTelemetry; the Postgres trace store is an exporter.** A session emits
 live spans through the OpenTelemetry API, and `PgSpanExporter` writes Helios's spans to the trace

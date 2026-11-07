@@ -35,18 +35,26 @@ final class PromptCache {
       String system,
       AnthropicTools tools,
       List<MessageEntry> messages) {
-    if (!policy.enabled()) {
+    var breakpoint = breakpoint(policy);
+    if (breakpoint == null) {
       request.withSystem(system);
       request.withTools(tools.all());
       request.withMessages(messages);
       return;
     }
-    var breakpoint = policy.breakpoint();
     request.withSystem(cachedSystem(system, breakpoint));
     request.withTools(tools.followedByServerTools(withCachedTail(tools.client(), breakpoint)));
     var marked = new ArrayList<>(messages);
     markLastMessages(marked, breakpoint);
     request.withMessages(List.copyOf(marked));
+  }
+
+  private static CacheControl breakpoint(CachePolicy policy) {
+    return switch (policy) {
+      case CachePolicy.Disabled _ -> null;
+      case CachePolicy.ShortLived _ -> CacheControl.ephemeral();
+      case CachePolicy.LongLived _ -> CacheControl.ephemeral(CacheControl.TTL_1_HOUR);
+    };
   }
 
   /**

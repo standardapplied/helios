@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.anthropic.api.CacheControl;
 import com.standardapplied.helios.anthropic.api.ContentBlock;
 import com.standardapplied.helios.anthropic.api.MessagesRequest;
 import com.standardapplied.helios.anthropic.api.SystemContent;
@@ -142,8 +143,7 @@ class AnthropicRequestPartsTest {
 
     assertEquals("again", entries.getLast().content());
     var marked = (List<?>) request.build().messages().getLast().content();
-    assertEquals(
-        CachePolicy.shortLived().breakpoint(), ((ContentBlock) marked.getFirst()).cacheControl());
+    assertEquals(CacheControl.ephemeral(), ((ContentBlock) marked.getFirst()).cacheControl());
   }
 
   @Test
