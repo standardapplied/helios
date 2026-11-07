@@ -14,7 +14,6 @@ import com.standardapplied.helios.repl.sandbox.JvmSandboxConfig;
 import com.standardapplied.helios.session.execution.ExecutionRequest;
 import com.standardapplied.helios.session.execution.Runtime;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
@@ -44,54 +43,11 @@ final class JShellExecutionProviderPipeThreadsTest {
    */
   private static final int SESSIONS = Math.max(8, 2 * CPUS);
 
-  /**
-   * Starts a session's sandbox, whose subprocess prints nothing to stdout once started. The probe
-   * JVM has one carrier and no spare ({@link ChildJvm#ONE_CARRIER}): a stdout read blocked on a
-   * virtual thread would hold that carrier, the sandbox start and the probe's 100 ms timed park
-   * would never end, and the wait for the probe would fail at the hang guard (60 s).
-   */
-  private static final String PROBE =
-      """
-      import com.standardapplied.helios.core.tool.SessionContext;
-      import com.standardapplied.helios.repl.ReplConfig;
-      import com.standardapplied.helios.repl.execution.JShellExecutionProvider;
-      import com.standardapplied.helios.repl.sandbox.JvmSandbox;
-      import com.standardapplied.helios.repl.sandbox.JvmSandboxConfig;
-      import java.time.Duration;
-
-      public class SilentSandboxProbe {
-        public static void main(String[] args) throws Exception {
-          var beyondHangGuard = Duration.ofMinutes(5);
-          var sandboxes = JvmSandbox.factory(JvmSandboxConfig.newBuilder()
-              .withSubprocessStartupTimeout(beyondHangGuard)
-              .withCallTimeout(beyondHangGuard)
-              .build());
-          try (var provider = JShellExecutionProvider.newBuilder()
-              .withReplConfig(ReplConfig.newBuilder().withSandboxFactory(sandboxes).build())
-              .withShutdownHook(false)
-              .build()) {
-            System.out.println(provider.onSessionStart(SessionContext.forTesting("probe")));
-            var park = Thread.ofVirtual().start(() -> {
-              try {
-                Thread.sleep(100);
-              } catch (InterruptedException e) {
-                throw new IllegalStateException(e);
-              }
-            });
-            park.join();
-            System.out.println("parked");
-          }
-        }
-      }
-      """;
-
   @Test
-  void aTimedParkEndsWhileASandboxsStdoutIsOpenAndSilent(@TempDir Path dir) throws Exception {
-    var source = Files.writeString(dir.resolve("SilentSandboxProbe.java"), PROBE);
-
+  void aTimedParkEndsWhileASandboxsStdoutIsOpenAndSilent(@TempDir Path dir) {
     assertEquals(
         SessionStartOutcome.accept() + "\nparked\n",
-        ChildJvm.output(dir, ChildJvm.ONE_CARRIER, source.toString()));
+        ChildJvm.output(dir, ChildJvm.ONE_CARRIER, SilentSandboxProbe.class.getName()));
   }
 
   /**
@@ -103,23 +59,11 @@ final class JShellExecutionProviderPipeThreadsTest {
   @Test
   void moreSandboxesThanCarriersRunASnippetEachAndLeaveNoReaderBehind() {
     var before = stdoutReaders();
-    var sandboxes =
-        JvmSandbox.factory(
-            JvmSandboxConfig.newBuilder()
-                .withSubprocessStartupTimeout(BEYOND_HANG_GUARD)
-                .withCallTimeout(BEYOND_HANG_GUARD)
-                .build());
     var sessions =
         IntStream.range(0, SESSIONS)
             .mapToObj(i -> SessionContext.forTesting("session-" + i))
             .toList();
-    try (var provider =
-            JShellExecutionProvider.newBuilder()
-                .withReplConfig(ReplConfig.newBuilder().withSandboxFactory(sandboxes).build())
-                .withMaxConcurrentSessions(SESSIONS)
-                .withMaxTimeout(BEYOND_HANG_GUARD)
-                .withShutdownHook(false)
-                .build();
+    try (var provider = provider(SESSIONS);
         var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       for (var wave = 0; wave < SESSIONS; wave += CPUS) {
         var starts =
@@ -149,6 +93,21 @@ final class JShellExecutionProviderPipeThreadsTest {
     assertEquals(Set.of(), leftBehind);
   }
 
+  private static JShellExecutionProvider provider(int sessions) {
+    var sandboxes =
+        JvmSandbox.factory(
+            JvmSandboxConfig.newBuilder()
+                .withSubprocessStartupTimeout(BEYOND_HANG_GUARD)
+                .withCallTimeout(BEYOND_HANG_GUARD)
+                .build());
+    return JShellExecutionProvider.newBuilder()
+        .withReplConfig(ReplConfig.newBuilder().withSandboxFactory(sandboxes).build())
+        .withMaxConcurrentSessions(sessions)
+        .withMaxTimeout(BEYOND_HANG_GUARD)
+        .withShutdownHook(false)
+        .build();
+  }
+
   private static String run(JShellExecutionProvider provider, SessionContext session) {
     var request =
         ExecutionRequest.newBuilder()
@@ -163,5 +122,21 @@ final class JShellExecutionProviderPipeThreadsTest {
     return Thread.getAllStackTraces().keySet().stream()
         .filter(thread -> thread.getName().equals(STDOUT_READER))
         .collect(toSet());
+  }
+
+  /**
+   * Starts a session's sandbox, whose subprocess prints nothing to stdout once started. The probe
+   * JVM has one carrier and no spare ({@link ChildJvm#ONE_CARRIER}): a stdout read blocked on a
+   * virtual thread would hold that carrier, the sandbox start and the probe's 100 ms timed park
+   * would never end, and the wait for the probe would fail at the hang guard (60 s).
+   */
+  static final class SilentSandboxProbe {
+    public static void main(String[] args) {
+      try (var provider = provider(1)) {
+        System.out.println(provider.onSessionStart(SessionContext.forTesting("probe")));
+        Await.timedPark();
+        System.out.println("parked");
+      }
+    }
   }
 }
