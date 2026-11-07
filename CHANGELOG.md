@@ -238,10 +238,11 @@ secret registry, the execution provider and the memory backend stay per session.
 | `AgentSession.create(options)` | `AgentSession.open(options)`; `AgentSessionImpl`'s constructor is no longer public |
 | `void send(message)`, then `result()` | `CompletableFuture<ResultMessage> send(message)`: the future of the run the message is part of |
 | `result()` | removed: the future `send` returns |
+| `AgentSession.JacksonJsonAdapter` | removed; it had no public instance. A typed `runBlocking` parses through the session's own adapter |
 | `interrupt(reason)` queued `"[interrupted by user: …]"` | `interrupt()` cancels the run in progress (`Cancelled`, reason `"interrupted"`) and keeps the session |
 | `isStarted()` | `isRunning()`: whether a run is in progress; `currentTurnIndex()` is that run's, `0` between runs |
 | `QueryEvent.LoopEnded` | `QueryEvent.RunEnded`, the last event of each run; `QueryEvent.RunStarted` is the first |
-| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`; `HookContext` gains `runId()` |
+| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as do `QueryEvent.validateCommon`, `ResultMessage.validateCommon` and the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
 | `ResultMessage.ErrorProviderUnavailable` | `AgentSession.open` throws `SessionUnavailableException` (message: the provider and its redacted reason; cause: the provider's exception) |
 | `ErrorDuringExecution` kind `EmptyHistory` | kind `NoUserMessage`: every message queued for a run's first turn was blocked |
 | `send` on a terminal session threw `IllegalStateException("session is terminal")` | it starts the next run; `send` on a session a host `Error` failed throws `IllegalStateException("session failed: <Error class>")` |
@@ -282,9 +283,10 @@ with `com.standardapplied.helios.` in imports, `requires` clauses and
 classpath location `com/standardapplied/helios/persistence/schema.sql`. There is no relocation
 pom and no bridging artifact; the 2.x line stays on `ai.singlr`.
 
-One `ai.singlr` name remains: `helios-persistence` depends on the separately released
-`ai.singlr:scim-sql:1.0.0` (JPMS module `ai.singlr.scimsql`), which is not part of this repository
-and keeps its published coordinates until that library is migrated.
+`helios-persistence` depends on `com.standardapplied:scim-sql:2.0.0` (JPMS module
+`com.standardapplied.scimsql`) instead of `ai.singlr:scim-sql:1.0.0` (`ai.singlr.scimsql`); an
+application that names the module in a `requires` clause or the package in an import renames it the
+same way.
 
 Persisted data is not migrated: class-name strings recorded by 2.x (for example
 `SerializedError.kind`) are opaque and may carry `ai.singlr` names. Table names (`helios_*`) do
@@ -1686,6 +1688,10 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Security
 
+- **A SCIM filter that is not one complete filter is refused.** `PgTraceStore.list` and
+  `PgAnnotationStore.listAnnotations` read `name eq "a") or (name pr` as `name eq "a"`, ignoring
+  what followed, so a typo or a filter wrapped in client text could silently change which rows
+  matched. scim-sql 2.0.0 throws `FilterSyntaxException`, which the stores wrap in `PgException`.
 - **`QueryEvent.MessageBlocked.reason` is redacted against the session's secrets and bounded**, as
   `ToolBlocked.reason` is.
 - **A deny rule on a path can no longer be bypassed.** It was bypassed by spelling the path

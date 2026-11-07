@@ -3,12 +3,14 @@
 package com.standardapplied.helios.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Paginate;
+import com.standardapplied.scimsql.FilterSyntaxException;
 import io.opentelemetry.api.common.Attributes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -208,6 +210,16 @@ class PgAnnotationStoreTest {
     assertThrows(
         PgException.class,
         () -> store.listAnnotations(Paginate.of(), "invalid filter gibberish!!!"));
+  }
+
+  @Test
+  void listAnnotationsRefusesFilterWithTrailingInput() {
+    var e =
+        assertThrows(
+            PgException.class,
+            () -> store.listAnnotations(Paginate.of(), "label eq \"quality\") or (label pr"));
+
+    assertInstanceOf(FilterSyntaxException.class, e.getCause());
   }
 
   @Test

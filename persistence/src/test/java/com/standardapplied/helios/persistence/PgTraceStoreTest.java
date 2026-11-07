@@ -9,12 +9,14 @@ import static com.standardapplied.helios.persistence.ExportedSpans.run;
 import static com.standardapplied.helios.persistence.ExportedSpans.step;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.scimsql.FilterSyntaxException;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import java.util.List;
@@ -171,5 +173,17 @@ class PgTraceStoreTest {
   @Test
   void listWithInvalidFilterThrows() {
     assertThrows(PgException.class, () -> store.list(Paginate.of(), "invalid filter gibberish!!!"));
+  }
+
+  @Test
+  void listRefusesFilterWithTrailingInput() {
+    seed(0, "my-agent", "scripted");
+
+    var e =
+        assertThrows(
+            PgException.class,
+            () -> store.list(Paginate.of(), "name eq \"my-agent\") or (name pr"));
+
+    assertInstanceOf(FilterSyntaxException.class, e.getCause());
   }
 }
