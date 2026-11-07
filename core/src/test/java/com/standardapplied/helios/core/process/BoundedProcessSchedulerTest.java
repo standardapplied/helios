@@ -1,0 +1,53 @@
+/* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
+
+package com.standardapplied.helios.core.process;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.standardapplied.helios.core.test.ChildJvm;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * A process whose output pipes stay open and silent leaves the virtual-thread scheduler free. The
+ * probe JVM has one carrier and no spare ({@link ChildJvm#ONE_CARRIER}); a drain blocked on a
+ * virtual thread would hold that carrier, the probe's 100 ms timed park would never end, and the
+ * wait for the probe would fail at the hang guard (60 s).
+ */
+@DisabledOnOs(OS.WINDOWS)
+class BoundedProcessSchedulerTest {
+
+  private static final String PROBE =
+      """
+      import com.standardapplied.helios.core.process.BoundedProcess;
+      import java.util.List;
+
+      public class SilentPipesProbe {
+        public static void main(String[] args) throws Exception {
+          try (var process = BoundedProcess.newBuilder(List.of("cat")).start()) {
+            var park = Thread.ofVirtual().start(() -> {
+              try {
+                Thread.sleep(100);
+              } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+              }
+            });
+            park.join();
+            System.out.println("parked");
+            process.kill();
+          }
+        }
+      }
+      """;
+
+  @Test
+  void aTimedParkEndsWhileAChildsOutputPipesAreOpenAndSilent(@TempDir Path dir) throws Exception {
+    var source = Files.writeString(dir.resolve("SilentPipesProbe.java"), PROBE);
+
+    assertEquals("parked\n", ChildJvm.output(dir, ChildJvm.ONE_CARRIER, source.toString()));
+  }
+}

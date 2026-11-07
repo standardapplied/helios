@@ -12,11 +12,13 @@ import java.util.function.Supplier;
 
 /**
  * What the sandbox subprocess printed since the last execute. A launched sandbox reads its
- * subprocess's stdout in chunks on a virtual thread of its own, so output with no newline is
- * bounded by the {@link ProcessTransport#MAX_CAPTURED_OUTPUT_CHARS} cap of {@link CapturedOutput}
- * too, and the stream is read to its end so the subprocess never blocks on a full pipe; RPC travels
- * over the socket and never through this stream. A sandbox wired directly to a {@link
- * ProcessTransport} drains the lines that transport set aside as not being RPC.
+ * subprocess's stdout in chunks on a platform daemon thread of its own, so output with no newline
+ * is bounded by the {@link ProcessTransport#MAX_CAPTURED_OUTPUT_CHARS} cap of {@link
+ * CapturedOutput} too, and the stream is read to its end so the subprocess never blocks on a full
+ * pipe; RPC travels over the socket and never through this stream. A pipe read blocks its carrier,
+ * so on a virtual thread a few dozen blocked readers can starve the virtual-thread scheduler. A
+ * sandbox wired directly to a {@link ProcessTransport} drains the lines that transport set aside as
+ * not being RPC.
  */
 final class StdoutCapture {
 
@@ -34,7 +36,8 @@ final class StdoutCapture {
   static StdoutCapture start(Process process) {
     var buffer = new CapturedOutput();
     var reader =
-        Thread.ofVirtual()
+        Thread.ofPlatform()
+            .daemon()
             .name("helios-sandbox-stdout-reader")
             .start(() -> readChunks(process, buffer));
     return new StdoutCapture(() -> withoutFinalNewline(buffer.take()), reader);

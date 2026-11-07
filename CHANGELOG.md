@@ -1461,6 +1461,13 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Fixed
 
+- **A few dozen sessions running `Execute` at once no longer freeze every session, timeouts
+  included.** Each child process's output was read, and its stdin written, on a virtual thread
+  that blocked its carrier for the life of the process; enough of them left the virtual-thread
+  scheduler with no carrier to run anything, so no socket read completed and no timeout fired.
+  Pipes are now read and written on platform daemon threads (`helios-sandbox-stdout-reader`,
+  `helios-process-stdout-reader`, `helios-process-stderr-reader`, `helios-process-stdin-writer`),
+  one per pipe, each ending with its pipe: up to three platform threads per running process.
 - **`interrupt()` right after a `send` no longer lets that message be answered.** A `send` that
   arrived once the run in progress had decided to end queued the next run, and `interrupt()`
   cancelled only the ending run, so the queued run started and called the model. `interrupt()`
