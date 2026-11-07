@@ -4,9 +4,11 @@ package com.standardapplied.helios.core.process;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ChildJvm;
-import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -21,33 +23,18 @@ import org.junit.jupiter.api.io.TempDir;
 @DisabledOnOs(OS.WINDOWS)
 class BoundedProcessSchedulerTest {
 
-  private static final String PROBE =
-      """
-      import com.standardapplied.helios.core.process.BoundedProcess;
-      import java.util.List;
-
-      public class SilentPipesProbe {
-        public static void main(String[] args) throws Exception {
-          try (var process = BoundedProcess.newBuilder(List.of("cat")).start()) {
-            var park = Thread.ofVirtual().start(() -> {
-              try {
-                Thread.sleep(100);
-              } catch (InterruptedException e) {
-                throw new IllegalStateException(e);
-              }
-            });
-            park.join();
-            System.out.println("parked");
-            process.kill();
-          }
-        }
-      }
-      """;
-
   @Test
-  void aTimedParkEndsWhileAChildsOutputPipesAreOpenAndSilent(@TempDir Path dir) throws Exception {
-    var source = Files.writeString(dir.resolve("SilentPipesProbe.java"), PROBE);
+  void aTimedParkEndsWhileAChildsOutputPipesAreOpenAndSilent(@TempDir Path dir) {
+    assertEquals("parked\n", ChildJvm.output(dir, ChildJvm.ONE_CARRIER, Probe.class.getName()));
+  }
 
-    assertEquals("parked\n", ChildJvm.output(dir, ChildJvm.ONE_CARRIER, source.toString()));
+  static final class Probe {
+    public static void main(String[] args) throws IOException {
+      try (var process = BoundedProcess.newBuilder(List.of("cat")).start()) {
+        Await.timedPark();
+        System.out.println("parked");
+        process.kill();
+      }
+    }
   }
 }

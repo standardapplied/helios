@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -145,6 +146,16 @@ public final class Await {
 
   static void termination(String description, Process process, Duration limit) {
     guarded(description, limit, nanos -> happened(process.waitFor(nanos, TimeUnit.NANOSECONDS)));
+  }
+
+  /**
+   * Waits until a new virtual thread has parked for 100 ms and ended: the proof that the
+   * virtual-thread scheduler still runs virtual threads and fires their timers.
+   */
+  public static void timedPark() {
+    termination(
+        "a virtual thread's 100 ms timed park",
+        Thread.ofVirtual().start(() -> LockSupport.parkNanos(Duration.ofMillis(100).toNanos())));
   }
 
   /**

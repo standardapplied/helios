@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,61 +42,6 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
           "helios-process-stderr-reader",
           "helios-process-stdin-writer");
 
-  /**
-   * Runs a call whose child reads one byte of a 1 MiB stdin and then sleeps, so the write of the
-   * rest blocks for as long as the child lives. The probe JVM has one carrier and no spare ({@link
-   * ChildJvm#ONE_CARRIER}): a write blocked on a virtual thread would hold that carrier, the
-   * probe's 100 ms timed park would never end, and the wait for the probe would fail at the hang
-   * guard (60 s).
-   */
-  private static final String PROBE =
-      """
-      import com.standardapplied.helios.core.model.CancellationToken;
-      import com.standardapplied.helios.core.test.Await;
-      import com.standardapplied.helios.core.tool.SessionContext;
-      import com.standardapplied.helios.session.execution.ExecutionRequest;
-      import com.standardapplied.helios.session.execution.LocalProcessExecutionProvider;
-      import com.standardapplied.helios.session.execution.Runtime;
-      import com.standardapplied.helios.session.test.ExecutionCall;
-      import java.nio.file.Files;
-      import java.time.Duration;
-
-      public class BlockedStdinProbe {
-        public static void main(String[] args) throws Exception {
-          var dir = Files.createTempDirectory("blocked-stdin");
-          var ready = dir.resolve("ready");
-          var provider = LocalProcessExecutionProvider.newBuilder()
-              .withRuntime(Runtime.BASH, LocalProcessExecutionProvider.RuntimeHandler.dashC("bash"))
-              .withMaxTimeout(Duration.ofMinutes(10))
-              .withShutdownHook(false)
-              .build();
-          var request = ExecutionRequest.newBuilder()
-              .withRuntime(Runtime.BASH)
-              .withScript("head -c 1 > /dev/null && touch ready && exec sleep 600")
-              .withWorkingDirectory(dir)
-              .withStdin("x".repeat(1 << 20))
-              .withTimeout(Duration.ofMinutes(10))
-              .build();
-          var token = new CancellationToken();
-          var call = ExecutionCall.start(provider, SessionContext.forTesting("probe"), request, token);
-          Await.until("the child to read its stdin", () -> Files.exists(ready));
-          var park = Thread.ofVirtual().start(() -> {
-            try {
-              Thread.sleep(100);
-            } catch (InterruptedException e) {
-              throw new IllegalStateException(e);
-            }
-          });
-          park.join();
-          System.out.println("parked");
-          token.cancel("probe done");
-          System.out.println(Await.failure("the cancelled call", call.outcome()).getClass().getName());
-          Files.delete(ready);
-          Files.delete(dir);
-        }
-      }
-      """;
-
   private Set<Thread> before;
 
   @BeforeEach
@@ -110,12 +56,13 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
   }
 
   @Test
-  void aTimedParkEndsWhileAWriteToAChildsStdinIsBlocked(@TempDir Path dir) throws Exception {
-    var source = Files.writeString(dir.resolve("BlockedStdinProbe.java"), PROBE);
+  void aTimedParkEndsWhileAWriteToAChildsStdinIsBlocked(@TempDir Path dir) {
+    var options =
+        Stream.concat(ChildJvm.ONE_CARRIER.stream(), Stream.of("-Dready=" + dir.resolve("ready")));
 
     assertEquals(
         "parked\n" + CancellationException.class.getName() + "\n",
-        ChildJvm.output(dir, ChildJvm.ONE_CARRIER, source.toString()));
+        ChildJvm.output(dir, options.toList(), BlockedStdinProbe.class.getName()));
   }
 
   @Test
@@ -195,5 +142,32 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
     return Thread.getAllStackTraces().keySet().stream()
         .filter(thread -> PIPE_THREADS.contains(thread.getName()))
         .collect(toSet());
+  }
+
+  /**
+   * Runs a call whose child reads one byte of a 1 MiB stdin and then sleeps, so the write of the
+   * rest blocks for as long as the child lives. The probe JVM has one carrier and no spare ({@link
+   * ChildJvm#ONE_CARRIER}): a write blocked on a virtual thread would hold that carrier, the
+   * probe's 100 ms timed park would never end, and the wait for the probe would fail at the hang
+   * guard (60 s).
+   */
+  static final class BlockedStdinProbe {
+    public static void main(String[] args) {
+      var ready = Path.of(System.getProperty("ready"));
+      var token = new CancellationToken();
+      var call =
+          ExecutionCall.start(
+              provider(),
+              CTX,
+              request(
+                  "head -c 1 > /dev/null && touch " + ready + " && exec sleep 600",
+                  "x".repeat(1 << 20)),
+              token);
+      Await.until("the child to read its stdin", () -> Files.exists(ready));
+      Await.timedPark();
+      System.out.println("parked");
+      token.cancel("probe done");
+      System.out.println(Await.failure("the cancelled call", call.outcome()).getClass().getName());
+    }
   }
 }
