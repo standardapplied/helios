@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.session.execution;
 
+import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,8 +20,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -119,6 +122,38 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
   }
 
   /**
+   * The call runs on a platform thread that is not a daemon: a new thread inherits its creator's
+   * daemon status, and every virtual thread is a daemon. The child closes its stdout, so the stdout
+   * reader ends while the stderr reader and the blocked stdin writer stay.
+   */
+  @Test
+  void eachPipeThreadIsAPlatformDaemonThreadNamedForItsStream(@TempDir Path dir) {
+    var pidFile = dir.resolve("pid");
+    var token = new CancellationToken();
+    var request =
+        request(
+            "head -c 1 > /dev/null; exec >&-; echo $$ > " + pidFile + "; exec sleep 600",
+            "x".repeat(1 << 20));
+    var call =
+        CompletableFuture.supplyAsync(
+            () -> provider().execute(CTX, request, token),
+            task -> Thread.ofPlatform().daemon(false).start(task));
+    PidFile.await("the child to close its stdout", pidFile);
+    Await.until(
+        "the stdout reader to end",
+        () ->
+            leftBehind().stream()
+                .noneMatch(thread -> thread.getName().equals("helios-process-stdout-reader")));
+
+    var daemons = leftBehind().stream().collect(toMap(Thread::getName, Thread::isDaemon));
+    token.cancel("test");
+    Await.failure("the cancelled call", call);
+
+    assertEquals(
+        Map.of("helios-process-stderr-reader", true, "helios-process-stdin-writer", true), daemons);
+  }
+
+  /**
    * The child runs {@code cat}, which never ends while its stdin is open; both output drains start
    * and the stdin writer cannot.
    */
@@ -128,23 +163,6 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
     assertEquals(
         "OutOfMemoryError\n0 in flight\nthe child ended\n",
         ChildJvm.output(dir, ThreadBudget.OPTIONS, RunsWithTwoThreadsLeft.class.getName()));
-  }
-
-  static final class RunsWithTwoThreadsLeft {
-    public static void main(String[] args) throws Exception {
-      var provider = provider();
-      var request = request("cat", "in");
-      try {
-        ThreadBudget.run(2, () -> provider.execute(CTX, request, new CancellationToken()));
-      } catch (OutOfMemoryError e) {
-        System.out.println(e.getClass().getSimpleName());
-      }
-      System.out.println(provider.inflightCount() + " in flight");
-      ProcessHandle.current()
-          .children()
-          .forEach(child -> Await.value("the child to end", child.onExit()));
-      System.out.println("the child ended");
-    }
   }
 
   private static LocalProcessExecutionProvider provider() {
@@ -200,6 +218,23 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
       System.out.println("parked");
       token.cancel("probe done");
       System.out.println(Await.failure("the cancelled call", call.outcome()).getClass().getName());
+    }
+  }
+
+  static final class RunsWithTwoThreadsLeft {
+    public static void main(String[] args) throws Exception {
+      var provider = provider();
+      var request = request("cat", "in");
+      try {
+        ThreadBudget.run(2, () -> provider.execute(CTX, request, new CancellationToken()));
+      } catch (OutOfMemoryError e) {
+        System.out.println(e.getClass().getSimpleName());
+      }
+      System.out.println(provider.inflightCount() + " in flight");
+      ProcessHandle.current()
+          .children()
+          .forEach(child -> Await.value("the child to end", child.onExit()));
+      System.out.println("the child ended");
     }
   }
 }
