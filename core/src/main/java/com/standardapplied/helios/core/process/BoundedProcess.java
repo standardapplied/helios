@@ -307,9 +307,12 @@ public final class BoundedProcess implements AutoCloseable {
      * @return the running process
      * @throws IOException if the directory cannot be created or the child cannot be started; a
      *     directory created for this call is removed first
+     * @throws OutOfMemoryError if a thread to capture the output cannot be started; the child is
+     *     killed and a directory created for this call is removed first
      */
     public BoundedProcess start() throws IOException {
       var owned = workingDirectory == null ? Files.createTempDirectory(tempDirectoryPrefix) : null;
+      Process child = null;
       var started = false;
       try {
         var pb = new ProcessBuilder(argv);
@@ -318,10 +321,14 @@ public final class BoundedProcess implements AutoCloseable {
         pb.directory((owned != null ? owned : workingDirectory).toFile());
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         var startNanos = System.nanoTime();
-        var process = new BoundedProcess(pb.start(), owned, this, startNanos);
+        child = pb.start();
+        var process = new BoundedProcess(child, owned, this, startNanos);
         started = true;
         return process;
       } finally {
+        if (!started && child != null) {
+          child.destroyForcibly();
+        }
         if (!started && owned != null) {
           deleteRecursively(owned);
         }
