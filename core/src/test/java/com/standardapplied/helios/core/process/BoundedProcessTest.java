@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.ChildJvm;
 import com.standardapplied.helios.core.test.PidFile;
+import com.standardapplied.helios.core.test.ThreadBudget;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -555,6 +558,33 @@ class BoundedProcessTest {
       assertTrue(entries.noneMatch(p -> p.getFileName().toString().startsWith(prefix)));
     } catch (IOException e) {
       throw new AssertionError(e);
+    }
+  }
+
+  /**
+   * The child runs {@code cat}, which never ends while its stdin is open; the stdout drain starts
+   * and the stderr drain cannot.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aStartThatCannotStartADrainKillsTheChild(@TempDir Path tmp) {
+    assertEquals(
+        "OutOfMemoryError\nthe child ended\n",
+        ChildJvm.output(tmp, ThreadBudget.OPTIONS, StartsWithOneThreadLeft.class.getName()));
+  }
+
+  static final class StartsWithOneThreadLeft {
+    public static void main(String[] args) throws Exception {
+      var builder = BoundedProcess.newBuilder(List.of("cat"));
+      try {
+        ThreadBudget.run(1, builder::start);
+      } catch (OutOfMemoryError e) {
+        System.out.println(e.getClass().getSimpleName());
+      }
+      ProcessHandle.current()
+          .children()
+          .forEach(child -> Await.value("the child to end", child.onExit()));
+      System.out.println("the child ended");
     }
   }
 
