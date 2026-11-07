@@ -1410,8 +1410,10 @@ price table asked for a model it does not hold, both used to count the call as f
 - **A module that exposes another module's types requires it transitively,** so a JPMS application
   requires only the modules it uses directly. `helios-session`, `helios-anthropic`, `helios-gemini`,
   `helios-openai`, `helios-onnx`, `helios-persistence`, `helios-repl` and `helios-testing` require
-  `helios-core` transitively; `helios-runtime`, `helios-persistence` and `helios-repl` require
-  `helios-session` transitively. The build compiles with `-Xlint:exports`.
+  `helios-core` transitively, and `helios-runtime`, `helios-persistence` and `helios-repl` require
+  `helios-session`. Likewise `helios-core` requires `java.net.http`, `helios-repl` `jdk.jshell`,
+  `helios-runtime` `io.helidon.webserver`, and `helios-persistence` `io.helidon.dbclient` and
+  `io.opentelemetry.sdk.common`. The build compiles with `-Xlint:exports`.
 - **The context check counts from the provider's reported input tokens** plus an estimate of the
   messages added since, so inline files, the system prompt and tool definitions count. After each
   turn of the session's model `ConversationHistory` records the request's message count and its
