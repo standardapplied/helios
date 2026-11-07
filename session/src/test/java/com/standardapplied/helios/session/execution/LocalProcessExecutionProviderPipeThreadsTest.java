@@ -12,6 +12,7 @@ import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.ChildJvm;
 import com.standardapplied.helios.core.test.PidFile;
+import com.standardapplied.helios.core.test.ThreadBudget;
 import com.standardapplied.helios.core.tool.SessionContext;
 import com.standardapplied.helios.session.test.ExecutionCall;
 import java.nio.file.Files;
@@ -24,6 +25,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -113,6 +116,35 @@ final class LocalProcessExecutionProviderPipeThreadsTest {
         CancellationException.class, Await.failure("the cancelled call", call.outcome()));
     assertFalse(child.isAlive());
     assertEquals(Set.of(), leftBehind());
+  }
+
+  /**
+   * The child runs {@code cat}, which never ends while its stdin is open; both output drains start
+   * and the stdin writer cannot.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCallThatCannotStartItsStdinWriterKillsTheChild(@TempDir Path dir) {
+    assertEquals(
+        "OutOfMemoryError\n0 in flight\nthe child ended\n",
+        ChildJvm.output(dir, ThreadBudget.OPTIONS, RunsWithTwoThreadsLeft.class.getName()));
+  }
+
+  static final class RunsWithTwoThreadsLeft {
+    public static void main(String[] args) throws Exception {
+      var provider = provider();
+      var request = request("cat", "in");
+      try {
+        ThreadBudget.run(2, () -> provider.execute(CTX, request, new CancellationToken()));
+      } catch (OutOfMemoryError e) {
+        System.out.println(e.getClass().getSimpleName());
+      }
+      System.out.println(provider.inflightCount() + " in flight");
+      ProcessHandle.current()
+          .children()
+          .forEach(child -> Await.value("the child to end", child.onExit()));
+      System.out.println("the child ended");
+    }
   }
 
   private static LocalProcessExecutionProvider provider() {
