@@ -2,7 +2,7 @@
 
 All notable changes to Helios are documented here. Versions follow [SemVer](https://semver.org/).
 
-## Unreleased
+## [3.0.0] — 2026-11-07 — com.standardapplied coordinates, durable sessions, OpenTelemetry tracing and Claude 5
 
 ### Breaking
 
