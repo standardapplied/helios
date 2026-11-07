@@ -37,14 +37,15 @@ class StdoutCaptureTest {
   }
 
   @Test
-  void theReaderRunsOnAVirtualThreadOfItsOwn() {
+  void theReaderRunsOnAPlatformDaemonThreadOfItsOwn() {
     var process = new ReadRecordingProcess(InputStream.nullInputStream());
     var capture = StdoutCapture.start(process);
 
     capture.awaitEnd(Await.HANG_GUARD);
 
     assertEquals("helios-sandbox-stdout-reader", process.reader.getName());
-    assertTrue(process.reader.isVirtual());
+    assertFalse(process.reader.isVirtual());
+    assertTrue(process.reader.isDaemon());
   }
 
   @Test

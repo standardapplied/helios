@@ -64,8 +64,12 @@ public final class BoundedProcess implements AutoCloseable {
     this.secrets = builder.secrets;
     this.startNanos = startNanos;
     this.tree = new ProcessTree(process);
-    this.stdoutSink = BoundedSink.draining(process.getInputStream(), builder.maxOutputBytes);
-    this.stderrSink = BoundedSink.draining(process.getErrorStream(), builder.maxOutputBytes);
+    this.stdoutSink =
+        BoundedSink.draining(
+            process.getInputStream(), builder.maxOutputBytes, "helios-process-stdout-reader");
+    this.stderrSink =
+        BoundedSink.draining(
+            process.getErrorStream(), builder.maxOutputBytes, "helios-process-stderr-reader");
   }
 
   /**

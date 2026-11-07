@@ -29,14 +29,21 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.CompositeArchRule;
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
+import java.io.Writer;
 import java.lang.module.ModuleFinder;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -47,6 +54,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -120,6 +128,29 @@ class ArchitectureRulesTest {
       describe(
           "a constructor or static initialiser",
           unit -> unit.isConstructor() || unit instanceof JavaStaticInitializer);
+
+  private static final Set<Class<?>> STREAM_TYPES =
+      Set.of(InputStream.class, OutputStream.class, Reader.class, Writer.class);
+
+  private static final DescribedPredicate<JavaCodeUnit> START_A_VIRTUAL_THREAD =
+      describe(
+          "start a virtual thread",
+          unit ->
+              unit.getMethodCallsFromSelf().stream()
+                  .anyMatch(ArchitectureRulesTest::startsAVirtualThread));
+
+  private static final DescribedPredicate<JavaCodeUnit> READ_OR_WRITE_A_STREAM =
+      describe(
+          "read or write a byte or character stream, in their own body or in a method of their"
+              + " class they call or reference",
+          unit ->
+              readsOrWritesAStream(unit)
+                  || Stream.<JavaCodeUnitAccess<?>>concat(
+                          unit.getCallsFromSelf().stream(),
+                          unit.getCodeUnitReferencesFromSelf().stream())
+                      .filter(access -> access.getTargetOwner().equals(unit.getOwner()))
+                      .flatMap(access -> access.getTarget().resolveMember().stream())
+                      .anyMatch(ArchitectureRulesTest::readsOrWritesAStream));
 
   private static final Set<String> JDK_PACKAGES =
       ModuleFinder.ofSystem().findAll().stream()
@@ -518,6 +549,23 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void childProcessPipesAreReadAndWrittenOnPlatformThreads() {
+    noCodeUnits()
+        .that()
+        .areDeclaredInClassesThat()
+        .resideInAnyPackage(
+            HELIOS + ".core.process..", HELIOS + ".session.execution..", HELIOS + ".repl.sandbox..")
+        .and(START_A_VIRTUAL_THREAD)
+        .should(ArchCondition.from(READ_OR_WRITE_A_STREAM))
+        .because(
+            "a read or write on a child-process pipe blocks its carrier, so on a virtual thread a"
+                + " few dozen of them starve the virtual-thread scheduler: a thread that reads or"
+                + " writes a child-process pipe is a platform daemon thread,"
+                + " Thread.ofPlatform().daemon()")
+        .check(LIBRARY);
+  }
+
+  @Test
   void processBuilderIsUsedOnlyByCoreProcessAndTheSandboxLauncher() {
     noClasses()
         .that()
@@ -607,5 +655,24 @@ class ArchitectureRulesTest {
             "a builder step is named withX(...): a fluent method on a *Builder that returns the"
                 + " builder starts with \"with\"")
         .check(LIBRARY);
+  }
+
+  private static boolean startsAVirtualThread(JavaMethodCall call) {
+    var owner = call.getTargetOwner();
+    return switch (call.getName()) {
+      case "startVirtualThread", "ofVirtual" -> owner.isEquivalentTo(Thread.class);
+      case "newVirtualThreadPerTaskExecutor" -> owner.isEquivalentTo(Executors.class);
+      default -> false;
+    };
+  }
+
+  private static boolean readsOrWritesAStream(JavaCodeUnit unit) {
+    return unit.getMethodCallsFromSelf().stream()
+        .anyMatch(
+            call ->
+                STREAM_TYPES.stream().anyMatch(call.getTargetOwner()::isAssignableTo)
+                    && (call.getName().startsWith("read")
+                        || call.getName().startsWith("write")
+                        || call.getName().equals("transferTo")));
   }
 }
