@@ -77,7 +77,6 @@ If any of these is a deal-breaker for your use case, open an issue — prioritis
 JPMS:
 
 ```java
-requires com.standardapplied.helios.core;
 requires com.standardapplied.helios.session;
 requires com.standardapplied.helios.anthropic;
 ```

@@ -30,7 +30,7 @@
  */
 module com.standardapplied.helios.core {
   requires java.logging;
-  requires java.net.http;
+  requires transitive java.net.http;
 
   exports com.standardapplied.helios.core.common;
   exports com.standardapplied.helios.core.context;

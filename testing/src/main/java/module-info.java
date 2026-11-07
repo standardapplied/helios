@@ -12,7 +12,7 @@
  * ModelStreams} builds the chunk streams a stream turn answers with.
  */
 module com.standardapplied.helios.testing {
-  requires com.standardapplied.helios.core;
+  requires transitive com.standardapplied.helios.core;
   requires tools.jackson.databind;
 
   exports com.standardapplied.helios.testing;

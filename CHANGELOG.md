@@ -242,7 +242,8 @@ secret registry, the execution provider and the memory backend stay per session.
 | `interrupt(reason)` queued `"[interrupted by user: …]"` | `interrupt()` cancels the run in progress (`Cancelled`, reason `"interrupted"`) and keeps the session |
 | `isStarted()` | `isRunning()`: whether a run is in progress; `currentTurnIndex()` is that run's, `0` between runs |
 | `QueryEvent.LoopEnded` | `QueryEvent.RunEnded`, the last event of each run; `QueryEvent.RunStarted` is the first |
-| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as do `QueryEvent.validateCommon`, `ResultMessage.validateCommon` and the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
+| every `QueryEvent` and `ResultMessage` record | gains `String runId` after `sessionId`, as does the `DefaultHookContext` constructor; `HookContext` gains `runId()` |
+| `QueryEvent.validateCommon`, `ResultMessage.validateCommon` | private: only the records nested in each interface call them |
 | `ResultMessage.ErrorProviderUnavailable` | `AgentSession.open` throws `SessionUnavailableException` (message: the provider and its redacted reason; cause: the provider's exception) |
 | `ErrorDuringExecution` kind `EmptyHistory` | kind `NoUserMessage`: every message queued for a run's first turn was blocked |
 | `send` on a terminal session threw `IllegalStateException("session is terminal")` | it starts the next run; `send` on a session a host `Error` failed throws `IllegalStateException("session failed: <Error class>")` |
@@ -1405,6 +1406,11 @@ price table asked for a model it does not hold, both used to count the call as f
 
 ### Changed
 
+- **A module that exposes another module's types requires it transitively,** so a JPMS application
+  requires only the modules it uses directly. `helios-session`, `helios-anthropic`, `helios-gemini`,
+  `helios-openai`, `helios-onnx`, `helios-persistence`, `helios-repl` and `helios-testing` require
+  `helios-core` transitively; `helios-runtime`, `helios-persistence` and `helios-repl` require
+  `helios-session` transitively. The build compiles with `-Xlint:exports`.
 - **The context check counts from the provider's reported input tokens** plus an estimate of the
   messages added since, so inline files, the system prompt and tool definitions count. After each
   turn of the session's model `ConversationHistory` records the request's message count and its
