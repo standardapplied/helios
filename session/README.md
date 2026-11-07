@@ -54,6 +54,7 @@ A `Model` from `helios-core` plugs in; the session owns everything else.
 JPMS:
 
 ```java
+requires com.standardapplied.helios.core;
 requires com.standardapplied.helios.session;
 requires com.standardapplied.helios.anthropic;
 ```

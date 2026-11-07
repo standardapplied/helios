@@ -19,9 +19,10 @@ import java.util.logging.Logger;
  * How a session ends early: its one cancellation path, and the one sink of every {@link Error}
  * caught on a thread the session runs work on — the loop, tool workers, cancellation callbacks of
  * the session's token and of each tool call's token, the model stream's reader and its close, the
- * compaction summary call, and {@code onSessionStart} and {@code onSessionEnd}. Recording an {@code
- * Error} cancels the session. The session settles its result by {@link #seal() sealing} the sink;
- * an {@code Error} recorded after that is logged at {@code SEVERE} and changes nothing. Threads the
+ * compaction summary call, a run's wall clock, and {@code onSessionStart} and {@code onSessionEnd}.
+ * Recording an {@code Error} cancels the session, and the first one recorded fails the future
+ * {@code send} returned for the run in progress. The teardown {@link #seal() seals} the sink; an
+ * {@code Error} recorded after that is logged at {@code SEVERE} and changes nothing. Threads the
  * session does not own are outside it: their {@code Error}s reach their thread's uncaught-exception
  * handler. Safe for concurrent use.
  */

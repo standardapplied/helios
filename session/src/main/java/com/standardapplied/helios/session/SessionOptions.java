@@ -530,6 +530,19 @@ public record SessionOptions(
      * text it reports. Pass the same registry to every component that registers or needs secrets,
      * such as {@code CommandGrant.Builder.withSecretRegistry}. Defaults to a new empty registry.
      *
+     * <p>The session redacts each tool result's text once, before its {@link
+     * QueryEvent.ToolResult}, {@code PostToolUse} hooks and the history see it: every tool's,
+     * success or failure, the results the loop substitutes and a {@code MutateResult}'s text. It
+     * also redacts the arguments its tool events carry, a {@code ToolBlocked} reason and the
+     * message of every error it reports or logs. Each pass reads the registry afresh, so a secret
+     * registered mid-session counts from the next result on. Not covered: text that does not come
+     * from tools (user messages, the system prompt, a hook's {@code Inject} text, the model's own
+     * output), {@code Read}'s image and PDF attachments, the runtime's HTTP error bodies, span
+     * attributes other than the content {@link TraceDetail#VERBOSE} adds, which {@code
+     * PgSpanExporter} stores verbatim unless its {@code PgConfig} has a redactor, what your own
+     * instrumentation records under a Helios span, and a secret the model rebuilds from pieces:
+     * redaction matches exact text.
+     *
      * @param secretRegistry non-null registry
      * @return this builder
      * @throws NullPointerException if {@code secretRegistry} is null
