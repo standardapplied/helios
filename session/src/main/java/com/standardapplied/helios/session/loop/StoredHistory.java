@@ -22,11 +22,12 @@ import java.util.concurrent.CompletionException;
  * conversation after the system prompt; {@link #write} appends what the history gained since the
  * last write, as one batch: one {@link SessionEntry.HistoryReplaced} with the whole history when it
  * was replaced since, otherwise one {@link SessionEntry.MessageAdded} per message added, leading
- * {@code SYSTEM} messages never included, and nothing when nothing is new. {@link #end} appends the
- * same batch followed by the run's {@link SessionEntry.RunEnded}, so it is never empty. Each append
- * names the last sequence number read or written. Once the store refuses a write, nothing more is
- * written and {@link #refused()} holds, so the session closes itself: its memory and its store no
- * longer agree.
+ * {@code SYSTEM} messages never included, and nothing when nothing is new. The loop calls it after
+ * each turn the run goes on from; {@link #end} appends the same batch followed by the run's {@link
+ * SessionEntry.RunEnded}, so it is never empty, and so the turn that ends a run is stored only with
+ * the run's end. Each append names the last sequence number read or written. Once the store refuses
+ * a write, nothing more is written and {@link #refused()} holds, so the session closes itself: its
+ * memory and its store no longer agree.
  *
  * <h2>Thread-safety</h2>
  *

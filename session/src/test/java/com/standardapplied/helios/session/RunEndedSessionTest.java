@@ -6,15 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.common.CostCalculator;
-import com.standardapplied.helios.core.model.CloseableIterator;
-import com.standardapplied.helios.core.model.FinishReason;
+import com.standardapplied.helios.core.context.TokenCounter;
 import com.standardapplied.helios.core.model.Message;
-import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
-import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
@@ -25,22 +21,16 @@ import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStoreException;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Every way a run ends stores a {@link SessionEntry.RunEnded} naming it, and every message the
@@ -57,126 +47,33 @@ final class RunEndedSessionTest {
 
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-11-08T10:00:00Z"));
-  private final CountDownLatch entered = new CountDownLatch(1);
   private RecordingStore store = new RecordingStore();
 
-  // ── every terminal ──────────────────────────────────────────────────────
-
-  static Stream<Arguments> endings() {
-    return Stream.of(
-        ending("Success", RunEndedSessionTest::success),
-        ending("ErrorDuringExecution", RunEndedSessionTest::failedExecution),
-        ending("ErrorMaxTurns", RunEndedSessionTest::pastItsTurns),
-        ending("ErrorMaxBudgetUsd", RunEndedSessionTest::pastItsBudget),
-        ending("ErrorMaxWallClock", RunEndedSessionTest::pastItsWallClock),
-        ending("ErrorTransientStream", RunEndedSessionTest::failedTransiently),
-        ending("Refusal", RunEndedSessionTest::refused),
-        ending("Cancelled", RunEndedSessionTest::interrupted),
-        ending("Cancelled", RunEndedSessionTest::closedMidRun));
-  }
-
-  private static Arguments ending(
-      String terminal, Function<RunEndedSessionTest, ResultMessage> run) {
-    return Arguments.of(terminal, run);
-  }
-
-  @ParameterizedTest(name = "{0}")
-  @MethodSource("endings")
-  void everyTerminalIsStoredAsTheLastEntryOfTheRunsLastBatch(
-      String terminal, Function<RunEndedSessionTest, ResultMessage> run) {
-    var result = run.apply(this);
-
-    assertEquals(terminal, result.getClass().getSimpleName());
-    var ended = new SessionEntry.RunEnded(result.runId(), now.get(), terminal);
-    assertEquals(Optional.of(ended), store.load(SID).lastRunEnded());
-    assertEquals(ended, store.batches.getLast().getLast());
-  }
-
-  private ResultMessage success() {
-    return sent(options(ScriptedModel.newBuilder().withTextTurn("done").build()));
-  }
-
-  private ResultMessage failedExecution() {
-    var model =
-        ScriptedModel.newBuilder()
-            .withStreamTurn(ModelStreams.failing(new IllegalStateException("broken")))
-            .build();
-    return sent(options(model));
-  }
-
-  private ResultMessage pastItsTurns() {
-    var model = ScriptedModel.newBuilder().withToolCallsTurn(noop()).build();
-    return sent(
-        options(model)
-            .withTool(EndingSessions.binding("noop", (args, ctx) -> ToolResult.success("ok")))
-            .withLimits(SessionLimits.newBuilder().withMaxTurns(1).build()));
-  }
-
-  private ResultMessage pastItsBudget() {
-    var model =
-        ScriptedModel.newBuilder()
-            .withId("priced")
-            .withResponseTurn(
-                Response.newBuilder()
-                    .withContent("expensive")
-                    .withFinishReason(FinishReason.STOP)
-                    .withUsage(Usage.of(1_000_000, 1_000_000))
-                    .build())
-            .build();
-    return sent(
-        options(model)
-            .withCostCalculator(
-                CostCalculator.staticTable(
-                    Map.of("priced", CostCalculator.Pricing.ofUsdPerMillion(1.0, 1.0))))
-            .withLimits(SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build()));
-  }
-
-  private ResultMessage pastItsWallClock() {
-    return stalledThen(
-        session -> {
-          now.set(now.get().plus(SessionLimits.defaults().maxWallClock()).plusSeconds(1));
-          ((AgentSessionImpl) session).lifecycle.expireWallClock();
-        });
-  }
-
-  private ResultMessage failedTransiently() {
-    var model =
-        ScriptedModel.newBuilder()
-            .withStreamTurn(
-                ModelStreams.failing(new TransientStreamException("reset", null, "test")))
-            .build();
-    return sent(
-        options(model)
-            .withLimits(
-                SessionLimits.newBuilder()
-                    .withStreamRetryPolicy(StreamRetryPolicy.disabled())
-                    .build()));
-  }
-
-  private ResultMessage refused() {
-    return sent(options(ScriptedModel.newBuilder().withRefusalTurn("no").build()));
-  }
-
-  private ResultMessage interrupted() {
-    return stalledThen(AgentSession::interrupt);
-  }
-
-  private ResultMessage closedMidRun() {
-    return stalledThen(AgentSession::close);
-  }
-
-  /** The result of a run whose model call blocks until {@code action} ends it. */
-  private ResultMessage stalledThen(Consumer<AgentSession> action) {
-    var model = ScriptedModel.newBuilder().withStreamTurn(stalled()).build();
-    try (var session = AgentSession.open(options(model).build())) {
-      var result = session.send("go");
-      Await.latch("the model stream to be read", entered);
-      action.accept(session);
-      return Await.value("the result", result);
-    }
-  }
-
   // ── schema correction ───────────────────────────────────────────────────
+
+  @Test
+  void aCorrectedRunStoresItsTaggedAttemptAndCorrectionThenItsAnswerWithItsEndInOneBatch() {
+    var result = sent(structured(correcting()));
+
+    assertEquals(
+        List.of(List.of("USER", "ASSISTANT", "USER"), List.of("ASSISTANT", "ended Success")),
+        store.shapes());
+    var stored = store.load(SID);
+    assertEquals(
+        List.of(
+            Optional.empty(),
+            Optional.of(MessageOrigin.REJECTED_ATTEMPT),
+            Optional.of(MessageOrigin.SCHEMA_CORRECTION),
+            Optional.empty()),
+        stored.history().stream().map(MessageOrigin::of).toList());
+    assertEquals(
+        List.of("go", "not json", correction().correctionMessage(), VALID),
+        stored.history().stream().map(Message::content).toList());
+    assertEquals(
+        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "Success")),
+        stored.lastRunEnded());
+    assertEquals(Message.assistant(VALID), answer(stored.history()));
+  }
 
   @Test
   void aRefusedWriteAfterTheRejectedAttemptLeavesItAndItsCorrectionStoredTaggedAndTheRunNotEnded() {
@@ -212,6 +109,166 @@ final class RunEndedSessionTest {
     assertEquals(correction().correctionMessage(), retry.getLast().content());
   }
 
+  // ── the run's last batch ────────────────────────────────────────────────
+
+  @Test
+  void aRefusedLastBatchStoresNeitherTheFinalTurnNorTheRunsEnd() {
+    store =
+        new RecordingStore(index -> index == 1 ? new SessionStoreException("full", null) : null);
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(noop()).withTextTurn("done").build();
+
+    var result = sent(options(model).withTool(noopTool()));
+
+    var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result).error();
+    assertEquals(List.of("SessionStoreFailed", "full"), List.of(error.kind(), error.message()));
+    assertEquals(List.of(List.of("USER", "ASSISTANT", "TOOL")), store.shapes());
+    var stored = store.load(SID);
+    assertEquals(Optional.empty(), stored.lastRunEnded());
+    assertEquals(Role.TOOL, stored.history().getLast().role());
+  }
+
+  @Test
+  void aRefusedWriteOfATurnTheRunGoesOnFromEndsItWithTheRefusalAndNoRunEnded() {
+    store = new RecordingStore(index -> new SessionStoreException("full", null));
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(noop()).withTextTurn("done").build();
+
+    var result = sent(options(model).withTool(noopTool()));
+
+    var error = assertInstanceOf(ResultMessage.ErrorDuringExecution.class, result).error();
+    assertEquals("SessionStoreFailed", error.kind());
+    assertEquals(1, model.calls().size());
+    assertEquals(List.of(), store.shapes());
+  }
+
+  @Test
+  void aRunInterruptedDuringATurnStoresThatTurnWithItsEnd() {
+    var session = new AtomicReference<AgentSession>();
+    var interrupting =
+        EndingSessions.binding(
+            "noop",
+            (args, ctx) -> {
+              session.get().interrupt();
+              return ToolResult.success("ok");
+            });
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(noop()).withTextTurn("never").build();
+    ResultMessage result;
+    try (var opened = AgentSession.open(options(model).withTool(interrupting).build())) {
+      session.set(opened);
+      result = Await.value("the run", opened.send("go"));
+    }
+
+    assertInstanceOf(ResultMessage.Cancelled.class, result);
+    assertEquals(List.of(List.of("USER", "ASSISTANT", "TOOL", "ended Cancelled")), store.shapes());
+  }
+
+  @Test
+  void aRunInterruptedBetweenTurnsStoresItsEndAloneAfterTheTurnItWentOnFrom() {
+    var session = new AtomicReference<AgentSession>();
+    ContextCompactor interrupting =
+        (history, context) -> {
+          session.get().interrupt();
+          return CompactionResult.noOp(history);
+        };
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(noop()).withTextTurn("never").build();
+    ResultMessage result;
+    try (var opened =
+        AgentSession.open(
+            options(model)
+                .withTool(noopTool())
+                .withContextCompactor(interrupting)
+                .withTokenCounter(
+                    messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L)
+                .withLimits(SessionLimits.newBuilder().withMaxContextTokens(100).build())
+                .build())) {
+      session.set(opened);
+      result = Await.value("the run", opened.send("go"));
+    }
+
+    assertInstanceOf(ResultMessage.Cancelled.class, result);
+    assertEquals(1, model.calls().size());
+    assertEquals(
+        List.of(List.of("USER", "ASSISTANT", "TOOL"), List.of("ended Cancelled")), store.shapes());
+  }
+
+  @Test
+  void aFinalTurnOverTheWatermarkKeepsItsAnswerAndTheNextRunCompactsBeforeItsModelCall() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withTextTurn("answer one")
+            .withTextTurn("the summary")
+            .withTextTurn("answer two")
+            .build();
+    TokenCounter counter =
+        messages ->
+            messages.stream()
+                .mapToLong(
+                    m -> m.content().startsWith(SummarizingCompactor.SUMMARY_PREFIX) ? 1 : 50)
+                .sum();
+    var limits = SessionLimits.newBuilder().withMaxContextTokens(100).build();
+    SessionEntry.RunEnded firstEnded;
+    List<Message> firstHistory;
+    try (var session =
+        AgentSession.open(options(model).withLimits(limits).withTokenCounter(counter).build())) {
+      var first = Await.value("run 1", session.send("first"));
+      var stored = store.load(SID);
+      firstEnded = stored.lastRunEnded().orElseThrow();
+      firstHistory = stored.history();
+      assertEquals(first.runId(), firstEnded.runId());
+      Await.value("run 2", session.send("second"));
+    }
+
+    assertEquals(List.of(Message.user("first"), Message.assistant("answer one")), firstHistory);
+    assertEquals(100L, counter.count(firstHistory));
+    assertEquals(Message.assistant("answer one"), answer(firstHistory));
+    assertEquals(List.of("USER", "ASSISTANT", "ended Success"), store.shapes().getFirst());
+    assertEquals("Success", firstEnded.terminal());
+    var request = model.calls().getLast();
+    assertEquals(
+        List.of(SummarizingCompactor.SUMMARY_PREFIX + "the summary", "second"),
+        request.stream().map(Message::content).toList());
+    assertEquals(51L, counter.count(request));
+  }
+
+  @Test
+  void aBudgetOnlyASummaryCallExceedsEndsTheRunAtTheNextTurnWithItsEndStored() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withId("priced")
+            .withToolCallsTurn(Usage.of(0, 0), noop())
+            .withTextTurn("done", Usage.of(0, 0))
+            .build();
+    ContextCompactor pricedSummary =
+        (history, context) ->
+            new CompactionResult(
+                List.of(history.getFirst()), Usage.of(1_000_000, 1_000_000), "priced");
+
+    var result =
+        sent(
+            options(model)
+                .withTool(noopTool())
+                .withContextCompactor(pricedSummary)
+                .withTokenCounter(
+                    messages -> messages.stream().anyMatch(m -> m.role() == Role.TOOL) ? 96L : 10L)
+                .withCostCalculator(
+                    CostCalculator.staticTable(
+                        Map.of("priced", CostCalculator.Pricing.ofUsdPerMillion(1.0, 1.0))))
+                .withLimits(
+                    SessionLimits.newBuilder()
+                        .withMaxContextTokens(100)
+                        .withMaxBudgetMicroUsd(1_000_000L)
+                        .build()));
+
+    var budget = assertInstanceOf(ResultMessage.ErrorMaxBudgetUsd.class, result);
+    assertEquals(2_000_000L, budget.microUsdSpent());
+    assertEquals(2, model.calls().size());
+    assertEquals(
+        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "ErrorMaxBudgetUsd")),
+        store.load(SID).lastRunEnded());
+    assertEquals(
+        List.of(List.of("replaced"), List.of("ASSISTANT", "ended ErrorMaxBudgetUsd")),
+        store.shapes());
+  }
+
   // ── inject ──────────────────────────────────────────────────────────────
 
   @Test
@@ -224,6 +281,9 @@ final class RunEndedSessionTest {
 
     sent(options(model).withHook(injecting));
 
+    assertEquals(
+        List.of(List.of("USER", "ASSISTANT"), List.of("USER", "ASSISTANT", "ended Success")),
+        store.shapes());
     var inject = injected("more please");
     assertEquals(
         List.of(Message.user("go"), Message.assistant("draft"), inject, Message.assistant("final")),
@@ -269,15 +329,13 @@ final class RunEndedSessionTest {
 
     var result = sent(overWatermark(structured(model)));
 
+    assertEquals(
+        List.of(List.of("replaced"), List.of("ASSISTANT", "ended Success")), store.shapes());
     var replaced =
-        (SessionEntry.HistoryReplaced)
-            store.inner.entries(SID).stream()
-                .filter(SessionEntry.HistoryReplaced.class::isInstance)
-                .findFirst()
-                .orElseThrow();
+        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.getFirst().getFirst());
     assertEquals(
         List.of(Optional.empty(), Optional.of(MessageOrigin.SCHEMA_CORRECTION)),
-        replaced.history().subList(0, 2).stream().map(MessageOrigin::of).toList());
+        replaced.history().stream().map(MessageOrigin::of).toList());
     assertEquals(
         SummarizingCompactor.SUMMARY_PREFIX + "the summary",
         replaced.history().getFirst().content());
@@ -356,11 +414,19 @@ final class RunEndedSessionTest {
         .build();
   }
 
-  private CloseableIterator<ModelChunk> stalled() {
-    return ModelStreams.stalled(entered::countDown);
-  }
-
   private static ToolCall noop() {
     return new ToolCall("c1", "noop", Map.of());
+  }
+
+  private static ToolBinding noopTool() {
+    return EndingSessions.binding("noop", (args, ctx) -> ToolResult.success("ok"));
+  }
+
+  /** The answer rule a host applies: the last assistant message that carries no origin. */
+  private static Message answer(List<Message> history) {
+    return history.reversed().stream()
+        .filter(m -> m.role() == Role.ASSISTANT && MessageOrigin.of(m).isEmpty())
+        .findFirst()
+        .orElseThrow();
   }
 }

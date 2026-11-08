@@ -160,7 +160,7 @@ class DefaultCompactionSessionTest {
             .withContextCompactor(observing));
 
     assertEquals(
-        List.of("compacting:1", "compacting:2", "compacting:2"),
+        List.of("compacting:1", "compacting:2"),
         contexts.stream().map(c -> c.sessionId() + ":" + c.turnIndex()).toList());
     assertSame(model, contexts.getFirst().model());
   }
