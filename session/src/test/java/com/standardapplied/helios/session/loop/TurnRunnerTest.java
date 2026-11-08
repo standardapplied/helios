@@ -417,7 +417,6 @@ final class TurnRunnerTest {
             .map(MessageOrigin::of)
             .toList());
     assertEquals(
-        List.of("pre-existing"),
-        saturatedQueue.drain().stream().map(pending -> pending.message().text()).toList());
+        List.of("pre-existing"), saturatedQueue.drain().stream().map(UserMessage::text).toList());
   }
 }

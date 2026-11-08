@@ -31,8 +31,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   passes through the steering queue, fires no `OnUserMessage` hook and emits no
   `UserMessageReceived`, and its "steering queue full" failure is gone.
 - A hook's `Inject` is never composed with the caller's messages: it is a user message of its own,
-  in the order it was queued. `SteeringQueue` gains `offer(message, origin)`, and `drain()`
-  returns `SteeringQueue.Pending` elements, each message with its origin.
+  in the order it was queued. `SteeringQueue` gains `offer(message, origin)` and `drainPending()`,
+  which returns `SteeringQueue.Pending` elements, each message with its origin; `drain()` is
+  unchanged.
 - A turn is stored only once its run goes on, with the next turn's start; the turn that ends a
   run is stored with the run's end. The watermark and compaction step after a turn runs only when
   the run goes on, so the final turn is not compacted at the run's end, the budget check for a

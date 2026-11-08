@@ -87,12 +87,25 @@ public final class SteeringQueue {
   }
 
   /**
-   * Atomically drain every pending message into a fresh list. The returned list reflects the
-   * drained snapshot; messages enqueued after {@code drain()} returns are not included.
+   * Atomically drain every pending message into a fresh list, without their origins. The returned
+   * list reflects the drained snapshot; messages enqueued after {@code drain()} returns are not
+   * included.
    *
    * @return a new list of drained messages in FIFO order; empty if nothing was queued
    */
-  public List<Pending> drain() {
+  public List<UserMessage> drain() {
+    var messages = new ArrayList<UserMessage>();
+    drainPending().forEach(pending -> messages.add(pending.message()));
+    return messages;
+  }
+
+  /**
+   * Atomically drain every pending message, each with its origin, into a fresh list, as {@link
+   * #drain()} does.
+   *
+   * @return a new list of drained elements in FIFO order; empty if nothing was queued
+   */
+  public List<Pending> drainPending() {
     var batch = new ArrayList<Pending>();
     queue.drainTo(batch);
     return batch;

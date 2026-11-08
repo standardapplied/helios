@@ -43,7 +43,7 @@ final class SteeringDrain {
    * @return whether a user message was appended to the history
    */
   boolean drainInto(SessionState state) {
-    var drained = collaborators.steeringQueue().drain();
+    var drained = collaborators.steeringQueue().drainPending();
     if (drained.isEmpty()) {
       return false;
     }
