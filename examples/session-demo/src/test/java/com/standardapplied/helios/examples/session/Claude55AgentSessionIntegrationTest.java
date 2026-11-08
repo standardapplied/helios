@@ -30,7 +30,6 @@ import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.store.FileSessionStore;
-import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.session.test.QuestionAnswers;
 import com.standardapplied.helios.session.test.SpanCapture;
@@ -215,10 +214,7 @@ final class Claude55AgentSessionIntegrationTest {
           "My project's code name is Heliotrope. Read profile p7 with get_profile, then reason"
               + " carefully about whether that person fits a climate-hardware seed round, and tell"
               + " me in one sentence.");
-      var stored =
-          store.entries("live-stored-chat").stream()
-              .map(entry -> ((SessionEntry.MessageAdded) entry).message())
-              .toList();
+      var stored = store.load("live-stored-chat").history();
       requests.clear();
       runOnce(options, "What is my project's code name?");
 
