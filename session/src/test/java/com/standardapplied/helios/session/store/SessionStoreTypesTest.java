@@ -64,6 +64,9 @@ final class SessionStoreTypesTest {
     assertEquals(
         Optional.empty(), StoredSession.fold("chat-1", 4, tail.subList(0, 4)).lastRunEnded());
     assertEquals(Optional.empty(), StoredSession.fold("chat-1", 0, List.of()).lastRunEnded());
+    assertEquals(
+        Optional.empty(),
+        StoredSession.fold("chat-1", 2, List.of(ended("run-1"), replaced("s"))).lastRunEnded());
   }
 
   @Test
