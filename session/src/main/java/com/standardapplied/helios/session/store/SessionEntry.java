@@ -4,14 +4,16 @@ package com.standardapplied.helios.session.store;
 
 import com.standardapplied.helios.core.common.Validate;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.session.ResultMessage;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * One entry of a session's stored log, written by the run {@link #runId()} at {@link #at()}: a
- * message the model received, or a replacement of the model's whole view. A later kind is a new
- * subtype, which a reader that does not know it refuses.
+ * message the model received, a replacement of the model's whole view, or the end of the run. A
+ * later kind is a new subtype, which a reader that does not know it refuses.
  */
 public sealed interface SessionEntry {
 
@@ -71,6 +73,60 @@ public sealed interface SessionEntry {
       Validate.notBlank("runId", runId);
       Objects.requireNonNull(at, "at must not be null");
       history = List.copyOf(Objects.requireNonNull(history, "history must not be null"));
+    }
+  }
+
+  /**
+   * The end of run {@code runId}, appended in the same batch as the last messages the run added, so
+   * a store holds both or neither. {@code terminal} names the run's terminal as the run decided it.
+   * A store that refuses that batch holds no {@code RunEnded} for the run, whose terminal is then
+   * the refusal. A host {@link Error} recorded after the batch was written, while the run waits for
+   * its tool calls to stop, fails the run's future but leaves this entry as written. A run an
+   * {@code Error} ends before its end writes none.
+   *
+   * @param runId the run that ended; non-blank
+   * @param at when it ended; non-null
+   * @param terminal the simple name of the run's {@link ResultMessage} record, such as {@code
+   *     Success} or {@code ErrorMaxTurns}, the spelling a run's span records as {@code
+   *     helios.terminal}
+   */
+  record RunEnded(String runId, Instant at, String terminal) implements SessionEntry {
+
+    private static final List<String> TERMINALS =
+        Arrays.stream(ResultMessage.class.getPermittedSubclasses())
+            .map(Class::getSimpleName)
+            .sorted()
+            .toList();
+
+    /**
+     * Validates the entry.
+     *
+     * @throws NullPointerException if a component is null
+     * @throws IllegalArgumentException if {@code runId} is blank, or {@code terminal} names no
+     *     {@link ResultMessage} subtype
+     */
+    public RunEnded {
+      Validate.notBlank("runId", runId);
+      Objects.requireNonNull(at, "at must not be null");
+      Objects.requireNonNull(terminal, "terminal must not be null");
+      if (!TERMINALS.contains(terminal)) {
+        throw new IllegalArgumentException(
+            "terminal must name a ResultMessage subtype " + TERMINALS + ", got '" + terminal + "'");
+      }
+    }
+
+    /**
+     * The end of run {@code runId} with {@code terminal}.
+     *
+     * @param runId the run that ended; non-blank
+     * @param at when it ended; non-null
+     * @param terminal the run's terminal; non-null
+     * @return the entry
+     * @throws NullPointerException if an argument is null
+     * @throws IllegalArgumentException if {@code runId} is blank
+     */
+    public static RunEnded of(String runId, Instant at, ResultMessage terminal) {
+      return new RunEnded(runId, at, terminal.getClass().getSimpleName());
     }
   }
 }

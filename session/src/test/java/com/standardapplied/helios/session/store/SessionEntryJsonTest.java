@@ -8,9 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.session.test.SessionStoreContract;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,6 +32,36 @@ final class SessionEntryJsonTest {
     assertEquals(replaced, SessionEntryJson.read(SessionEntryJson.write(replaced)));
     var emptied = new SessionEntry.HistoryReplaced("run-3", AT, List.of());
     assertEquals(emptied, SessionEntryJson.read(SessionEntryJson.write(emptied)));
+  }
+
+  @Test
+  void aRunEndedIsWrittenAsTypeEndedAndReadsBack() {
+    var ended = new SessionEntry.RunEnded("run-1", AT, "ErrorMaxWallClock");
+    var json = SessionEntryJson.write(ended);
+
+    assertEquals(
+        "{\"type\":\"ended\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00.123456Z\","
+            + "\"terminal\":\"ErrorMaxWallClock\"}",
+        json);
+    assertEquals(ended, SessionEntryJson.read(json));
+  }
+
+  @Test
+  void aTaggedMessageReadsBackWithItsOrigin() {
+    var correction =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("fix the fields")
+            .withMetadata(MessageOrigin.SCHEMA_CORRECTION.metadata())
+            .build();
+    var added = new SessionEntry.MessageAdded("run-1", AT, correction);
+
+    var read =
+        assertInstanceOf(
+            SessionEntry.MessageAdded.class, SessionEntryJson.read(SessionEntryJson.write(added)));
+
+    assertEquals(added, read);
+    assertEquals(Optional.of(MessageOrigin.SCHEMA_CORRECTION), MessageOrigin.of(read.message()));
   }
 
   @Test
@@ -75,7 +107,9 @@ final class SessionEntryJsonTest {
         "{\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\"}",
         "{\"type\":\"message\",\"runId\":\"run-1\",\"at\":\"yesterday\",\"message\":{}}",
         "{\"type\":\"message\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\"}",
-        "{\"type\":\"replaced\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\",\"history\":3}"
+        "{\"type\":\"replaced\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\",\"history\":3}",
+        "{\"type\":\"ended\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\"}",
+        "{\"type\":\"ended\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00Z\",\"terminal\":\"Done\"}"
       })
   void jsonThatIsNoEntryFailsAsAStoreFailure(String json) {
     var thrown = assertThrows(SessionStoreException.class, () -> SessionEntryJson.read(json));

@@ -110,7 +110,9 @@ final class TurnStagesTest {
     }
 
     assertEquals(FinishReason.TOOL_CALLS, outcome.finishReason());
-    assertEquals(List.of("occupying"), queue.drain().stream().map(UserMessage::text).toList());
+    assertEquals(
+        List.of("occupying"),
+        queue.drain().stream().map(pending -> pending.message().text()).toList());
     var warning = records.getFirst();
     assertEquals(Level.WARNING, warning.getLevel());
     assertEquals(TurnRunner.class.getName(), warning.getLoggerName());

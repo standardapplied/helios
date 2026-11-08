@@ -25,6 +25,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -387,7 +388,7 @@ final class TurnRunnerTest {
    * error surface (returns {@link FinishReason#ERROR}) rather than silently swallowing it.
    */
   @Test
-  void parseFailureWithFullSteeringQueueFallsThroughToErrorOutcome() {
+  void aParseFailureIsCorrectedEvenWhenTheSteeringQueueIsFull() {
     var schema = OutputSchema.of(Sample.class);
     var saturatedQueue = new SteeringQueue(1);
     saturatedQueue.offer(UserMessage.text("pre-existing"));
@@ -402,10 +403,21 @@ final class TurnRunnerTest {
             model,
             CostCalculator.ZERO,
             schema);
-    var outcome = runner.runTurn(freshState(), SessionLimits.defaults());
+    var state = freshState();
+
+    var outcome = runner.runTurn(state, SessionLimits.defaults());
+
+    assertEquals(FinishReason.TOOL_CALLS, outcome.finishReason());
     assertEquals(
-        FinishReason.ERROR,
-        outcome.finishReason(),
-        "queue-full fallthrough: parse error must surface, not be silently swallowed");
+        List.of(
+            Optional.of(MessageOrigin.REJECTED_ATTEMPT),
+            Optional.of(MessageOrigin.SCHEMA_CORRECTION)),
+        state.history().snapshot().stream()
+            .skip(state.history().snapshot().size() - 2)
+            .map(MessageOrigin::of)
+            .toList());
+    assertEquals(
+        List.of("pre-existing"),
+        saturatedQueue.drain().stream().map(pending -> pending.message().text()).toList());
   }
 }

@@ -35,7 +35,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.IntFunction;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -80,7 +79,7 @@ final class DurableSessionTest {
             options(first, store).withSystemPrompt("old").withTools(List.of(echo())).build())) {
       Await.value("run 1", session.send("first"));
     }
-    var stored = messages(store.entries(SID));
+    var stored = store.load(SID).history();
     var second = ScriptedModel.newBuilder().withTextTurn("two").build();
     try (var session = AgentSession.open(options(second, store).withSystemPrompt("new").build())) {
       Await.value("run 2", session.send("second"));
@@ -102,7 +101,7 @@ final class DurableSessionTest {
     expected.add(Message.user("second"));
     assertEquals(expected, second.calls().getFirst());
     assertEquals(List.of(Message.system("new"), Message.user("hello")), other.calls().getFirst());
-    var reopened = messages(store.entries(SID));
+    var reopened = store.load(SID).history();
     assertEquals(expected.subList(1, expected.size()), reopened.subList(0, reopened.size() - 1));
     assertEquals("two", reopened.getLast().content());
   }
@@ -125,12 +124,17 @@ final class DurableSessionTest {
       Await.value("run", session.send("go"));
     }
 
-    assertEquals(List.of(3, 2, 1), store.batches.stream().map(List::size).toList());
+    assertEquals(
+        List.of(
+            List.of("USER", "ASSISTANT", "TOOL"),
+            List.of("ASSISTANT", "TOOL"),
+            List.of("ASSISTANT"),
+            List.of("ended Success")),
+        store.shapes());
     var last = model.calls().getLast();
     var expected = new ArrayList<>(last.subList(1, last.size()));
-    expected.add(messages(store.batches.getLast()).getFirst());
-    assertEquals(expected, messages(store.inner.entries(SID)));
-    assertEquals("done", expected.getLast().content());
+    expected.add(Message.assistant("done"));
+    assertEquals(expected, store.load(SID).history());
   }
 
   @Test
@@ -151,7 +155,13 @@ final class DurableSessionTest {
       Await.value("run 2", session.send("second"));
     }
 
-    assertEquals(List.of(2, 1, 2), store.batches.stream().map(List::size).toList());
+    assertEquals(
+        List.of(
+            List.of("USER", "ASSISTANT"),
+            List.of("replaced", "ended Success"),
+            List.of("USER", "ASSISTANT"),
+            List.of("ended Success")),
+        store.shapes());
     var replaced =
         assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
     assertEquals(List.of(Message.user("summary")), replaced.history());
@@ -186,20 +196,28 @@ final class DurableSessionTest {
       Await.value("run 3", session.send("third"));
     }
 
-    assertEquals(List.of(2, 1, 2), store.batches.stream().map(List::size).toList());
+    assertEquals(
+        List.of(
+            List.of("USER", "ASSISTANT"),
+            List.of("ended Success"),
+            List.of("replaced"),
+            List.of("ended Success"),
+            List.of("USER", "ASSISTANT"),
+            List.of("ended Success")),
+        store.shapes());
     var replaced =
-        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
+        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(2).get(0));
     var request = model.calls().get(1);
     assertEquals(List.of(Message.system("sys"), Message.user("rewritten")), request);
     assertEquals(
         List.of(Message.user("rewritten"), "two"),
         List.of(replaced.history().get(0), replaced.history().get(1).content()));
     assertEquals(2, replaced.history().size());
-    assertEquals(Message.user("third"), messages(store.batches.get(2)).getFirst());
+    assertEquals(Message.user("third"), messages(store.batches.get(4)).getFirst());
   }
 
   @Test
-  void aRunThatAddsNothingWritesNothing() {
+  void aRunThatAddsNothingWritesOnlyItsEnd() {
     var store = new RecordingStore();
     var model = ScriptedModel.newBuilder().withTextTurn("unused").build();
     OnUserMessageHook blocking = (message, ctx) -> HookOutcome.block("not allowed");
@@ -211,7 +229,10 @@ final class DurableSessionTest {
           "NoUserMessage",
           assertInstanceOf(ResultMessage.ErrorDuringExecution.class, terminal).error().kind());
     }
-    assertEquals(List.of(), store.batches);
+    assertEquals(List.of(List.of("ended ErrorDuringExecution")), store.shapes());
+    var ended = store.load(SID).lastRunEnded().orElseThrow();
+    assertEquals(List.of(), store.load(SID).history());
+    assertEquals(store.batches.getFirst().getFirst(), ended);
   }
 
   // ── 4. conflict ──────────────────────────────────────────────────────────
@@ -233,15 +254,14 @@ final class DurableSessionTest {
       assertEquals("SessionConflict", error.kind());
       assertEquals(
           "session chat-1 was written by another writer: the append expected last sequence"
-              + " number 0, the store holds 2",
+              + " number 0, the store holds 3",
           error.message());
       var refused = assertThrows(IllegalStateException.class, () -> loser.send("again"));
       assertEquals("session is closed: its store refused a write", refused.getMessage());
       assertEquals(1, provider.ends.get());
     }
     assertEquals(
-        List.of("a", "a reply"),
-        messages(store.entries(SID)).stream().map(Message::content).toList());
+        List.of("a", "a reply"), store.load(SID).history().stream().map(Message::content).toList());
   }
 
   // ── 5. store failures ────────────────────────────────────────────────────
@@ -362,10 +382,9 @@ final class DurableSessionTest {
       Await.value("run", session.send("go"));
     }
 
-    assertEquals(1, store.batches.size());
     assertEquals(
-        List.of(notRun(ECHO), notRun(ECHO_TWO)), messages(store.batches.getFirst()).subList(2, 4));
-    assertEquals(4, store.batches.getFirst().size());
+        List.of(List.of("USER", "ASSISTANT", "TOOL", "TOOL", "ended Success")), store.shapes());
+    assertEquals(List.of(notRun(ECHO), notRun(ECHO_TWO)), store.load(SID).history().subList(2, 4));
   }
 
   @Test
@@ -417,8 +436,7 @@ final class DurableSessionTest {
     assertEquals(List.of(Message.user("summary"), Message.user("new")), model.calls().getFirst());
     var replaced =
         assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.getFirst().getFirst());
-    assertEquals(1, store.batches.size());
-    assertEquals(1, store.batches.getFirst().size());
+    assertEquals(List.of(List.of("replaced"), List.of("ended Success")), store.shapes());
     assertEquals(
         List.of(Message.user("summary"), Message.user("new"), "answer"),
         List.of(
@@ -497,41 +515,6 @@ final class DurableSessionTest {
     return entries.stream()
         .map(entry -> assertInstanceOf(SessionEntry.MessageAdded.class, entry).message())
         .toList();
-  }
-
-  /**
-   * An in-memory store that records each batch it accepts and throws, for the append of each index,
-   * what {@code failure} returns, if anything.
-   */
-  private static class RecordingStore implements SessionStore {
-
-    final InMemorySessionStore inner = new InMemorySessionStore();
-    final List<List<SessionEntry>> batches = new CopyOnWriteArrayList<>();
-    private final IntFunction<RuntimeException> failure;
-    private final AtomicInteger appends = new AtomicInteger();
-
-    RecordingStore() {
-      this(index -> null);
-    }
-
-    RecordingStore(IntFunction<RuntimeException> failure) {
-      this.failure = failure;
-    }
-
-    @Override
-    public StoredSession load(String sessionId) {
-      return inner.load(sessionId);
-    }
-
-    @Override
-    public void append(String sessionId, long expectedLastSeq, List<SessionEntry> entries) {
-      var thrown = failure.apply(appends.getAndIncrement());
-      if (thrown != null) {
-        throw thrown;
-      }
-      inner.append(sessionId, expectedLastSeq, entries);
-      batches.add(entries);
-    }
   }
 
   @Test

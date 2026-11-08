@@ -5,10 +5,15 @@ package com.standardapplied.helios.session.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.session.ResultMessage;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /** The value types of the store SPI: what they accept and the one load rule. */
@@ -22,6 +27,10 @@ final class SessionStoreTypesTest {
 
   private static SessionEntry replaced(String text) {
     return new SessionEntry.HistoryReplaced("run-1", AT, List.of(Message.user(text)));
+  }
+
+  private static SessionEntry.RunEnded ended(String runId) {
+    return new SessionEntry.RunEnded(runId, AT, "Success");
   }
 
   @Test
@@ -40,6 +49,32 @@ final class SessionStoreTypesTest {
   }
 
   @Test
+  void theLastRunEndedIsTheLogsLastEntryWhenItIsOneAndAddsNoMessage() {
+    var tail = List.of(added("a"), ended("run-1"), added("b"), replaced("s"), ended("run-2"));
+
+    assertEquals(
+        new StoredSession("chat-1", 5, List.of(Message.user("s")), Optional.of(ended("run-2"))),
+        StoredSession.fold("chat-1", 5, tail));
+    assertEquals(
+        new StoredSession("chat-1", 2, List.of(Message.user("a")), Optional.of(ended("run-1"))),
+        StoredSession.fold("chat-1", 2, tail.subList(0, 2)));
+    assertEquals(
+        Optional.empty(), StoredSession.fold("chat-1", 3, tail.subList(0, 3)).lastRunEnded());
+    assertEquals(
+        Optional.empty(), StoredSession.fold("chat-1", 4, tail.subList(0, 4)).lastRunEnded());
+    assertEquals(Optional.empty(), StoredSession.fold("chat-1", 0, List.of()).lastRunEnded());
+  }
+
+  @Test
+  void aLogWithoutRunEndedFoldsAsBeforeWithNoLastRunEnded() {
+    var tail = List.of(added("a"), added("b"), replaced("s"), added("c"));
+
+    assertEquals(
+        new StoredSession("chat-1", 4, List.of(Message.user("s"), Message.user("c"))),
+        StoredSession.fold("chat-1", 4, tail));
+  }
+
+  @Test
   void aStoredSessionValidatesAndCopies() {
     var history = new ArrayList<>(List.of(Message.user("a")));
     var stored = new StoredSession("chat-1", 1, history);
@@ -49,6 +84,11 @@ final class SessionStoreTypesTest {
     assertThrows(IllegalArgumentException.class, () -> new StoredSession(" ", 0, List.of()));
     assertThrows(IllegalArgumentException.class, () -> new StoredSession("chat-1", -1, List.of()));
     assertThrows(NullPointerException.class, () -> new StoredSession("chat-1", 0, null));
+    assertEquals(
+        "lastRunEnded must not be null",
+        assertThrows(
+                NullPointerException.class, () -> new StoredSession("chat-1", 0, List.of(), null))
+            .getMessage());
     assertThrows(NullPointerException.class, () -> StoredSession.fold("chat-1", 0, null));
     var withNull = new ArrayList<SessionEntry>();
     withNull.add(null);
@@ -75,6 +115,46 @@ final class SessionStoreTypesTest {
     var replaced = new SessionEntry.HistoryReplaced("run-1", AT, history);
     history.clear();
     assertEquals(List.of(message), replaced.history());
+  }
+
+  @Test
+  void aRunEndedNamesAResultMessageSubtype() {
+    assertEquals(
+        List.of(
+            "runId must not be blank",
+            "at must not be null",
+            "terminal must not be null",
+            "terminal must name a ResultMessage subtype [Cancelled, ErrorDuringExecution,"
+                + " ErrorMaxBudgetUsd, ErrorMaxTurns, ErrorMaxWallClock, ErrorTransientStream,"
+                + " Refusal, Success], got 'Done'"),
+        List.of(
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> new SessionEntry.RunEnded(" ", AT, "Success"))
+                .getMessage(),
+            assertThrows(
+                    NullPointerException.class,
+                    () -> new SessionEntry.RunEnded("run-1", null, "Success"))
+                .getMessage(),
+            assertThrows(
+                    NullPointerException.class, () -> new SessionEntry.RunEnded("run-1", AT, null))
+                .getMessage(),
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> new SessionEntry.RunEnded("run-1", AT, "Done"))
+                .getMessage()));
+  }
+
+  @Test
+  void aRunEndedOfATerminalNamesItsRecord() {
+    var terminal =
+        new ResultMessage.ErrorMaxTurns(
+            "sess-1", "run-1", 3, Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
+
+    assertEquals(
+        new SessionEntry.RunEnded("run-1", AT, "ErrorMaxTurns"),
+        SessionEntry.RunEnded.of("run-1", AT, terminal));
+    assertThrows(NullPointerException.class, () -> SessionEntry.RunEnded.of("run-1", AT, null));
   }
 
   @Test

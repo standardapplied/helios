@@ -6,6 +6,7 @@ import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookPhase;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,14 +34,14 @@ final class HookEffects {
   }
 
   /**
-   * Announce the {@code Inject} and offer its message to the steering queue. Logs a WARNING if the
-   * queue rejects it (e.g. full at capacity) — without this, hook authors believe their {@code
-   * Inject} took effect but the loop never sees the message, producing impossible-to-debug
-   * cascading bugs.
+   * Announce the {@code Inject} and offer its message to the steering queue, tagged {@link
+   * MessageOrigin#HOOK_INJECT}. Logs a WARNING if the queue rejects it (e.g. full at capacity) —
+   * without this, hook authors believe their {@code Inject} took effect but the loop never sees the
+   * message, producing impossible-to-debug cascading bugs.
    */
   void inject(SessionState state, String hookName, HookPhase phase, HookOutcome.Inject inject) {
     emitter.emitHookFired(state, hookName, phase, inject);
-    if (!steeringQueue.offer(UserMessage.text(inject.userMessage()))) {
+    if (!steeringQueue.offer(UserMessage.text(inject.userMessage()), MessageOrigin.HOOK_INJECT)) {
       LOGGER.log(
           Level.WARNING,
           "{0} hook ''{1}'' Inject was dropped: steering queue full; session continues without"

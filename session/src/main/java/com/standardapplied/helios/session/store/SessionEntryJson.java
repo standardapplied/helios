@@ -13,10 +13,11 @@ import java.util.concurrent.Callable;
 
 /**
  * The one JSON form of a {@link SessionEntry}, which every store that writes JSON uses: {@code
- * {"type":"message","runId":…,"at":…,"message":{…}}} and {@code
- * {"type":"replaced","runId":…,"at":…,"history":[…]}}, {@code at} an ISO-8601 instant and each
- * {@link Message} written by Jackson's defaults. A lone UTF-16 surrogate is escaped, and a decimal
- * reads back as a {@link Double} only when that is its exact value, otherwise as a {@link
+ * {"type":"message","runId":…,"at":…,"message":{…}}}, {@code
+ * {"type":"replaced","runId":…,"at":…,"history":[…]}} and {@code
+ * {"type":"ended","runId":…,"at":…,"terminal":…}}, {@code at} an ISO-8601 instant and each {@link
+ * Message} written by Jackson's defaults. A lone UTF-16 surrogate is escaped, and a decimal reads
+ * back as a {@link Double} only when that is its exact value, otherwise as a {@link
  * java.math.BigDecimal}, so an entry reads back as the same JSON value it was written as. A number
  * keeps its value but not always its Java type: a {@code Long} that fits reads back as an {@code
  * Integer}, a {@code Float} as a {@code Double}, a {@code BigDecimal} {@code 1.50} as {@code 1.5}.
@@ -32,6 +33,10 @@ public final class SessionEntryJson {
   private static final String REPLACED = "replaced";
 
   private static final String HISTORY = "history";
+
+  private static final String ENDED = "ended";
+
+  private static final String TERMINAL = "terminal";
 
   private SessionEntryJson() {}
 
@@ -111,6 +116,10 @@ public final class SessionEntryJson {
         stamp(fields, REPLACED, entry);
         fields.put(HISTORY, replaced.history());
       }
+      case SessionEntry.RunEnded ended -> {
+        stamp(fields, ENDED, entry);
+        fields.put(TERMINAL, ended.terminal());
+      }
     }
     return fields;
   }
@@ -132,6 +141,7 @@ public final class SessionEntryJson {
               runId,
               at,
               ((List<?>) fields.get(HISTORY)).stream().map(SessionEntryJson::message).toList());
+      case ENDED -> new SessionEntry.RunEnded(runId, at, (String) fields.get(TERMINAL));
       default -> throw new SessionStoreException("unknown session entry type '" + type + "'", null);
     };
   }
