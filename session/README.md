@@ -274,7 +274,9 @@ with fresh limits.
 Long sessions outgrow the model's context window. The session loop counts context fill from the
 input size the provider reported for the last request plus a pluggable `TokenCounter`'s estimate
 (default: `TokenCounter.charBased()`, a cheap ~4-chars-per-token heuristic) of the messages added
-since; with no report to start from, the estimate covers the whole history. It reacts at two
+since; with no report to start from, the estimate covers the whole history. It checks before
+every model turn and after every turn the run goes on from, never after the turn that ends a run,
+so a run's final answer is stored before any compaction summarises it. It reacts at two
 watermarks:
 
 - **0.85** — emits `QueryEvent.ContextWarning(usagePct)` once, so UIs and audit consumers can

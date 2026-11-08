@@ -10,11 +10,11 @@ import java.util.List;
 
 /**
  * Shrinks a long conversation history so the next model turn fits inside the provider's context
- * window. Invoked by the agent loop before and after a model turn when the next request's tokens,
- * counted from the provider's last report, reach 0.95 of the session's limit (the {@code
- * QueryEvent.ContextWarning} watermark at 0.85 fires earlier as a heads-up). It is not invoked
- * while what the {@code TokenCounter} cannot see of the request, such as inline files and tool
- * definitions, reaches 0.95 by itself.
+ * window. Invoked by the agent loop before a model turn, and after a turn the run goes on from,
+ * when the next request's tokens, counted from the provider's last report, reach 0.95 of the
+ * session's limit (the {@code QueryEvent.ContextWarning} watermark at 0.85 fires earlier as a
+ * heads-up). It is not invoked while what the {@code TokenCounter} cannot see of the request, such
+ * as inline files and tool definitions, reaches 0.95 by itself.
  *
  * <p>Implementations are free to drop, merge, summarise, or vector-recall. The contract is minimal:
  *
