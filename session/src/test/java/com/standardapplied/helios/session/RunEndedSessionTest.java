@@ -277,18 +277,28 @@ final class RunEndedSessionTest {
     PreStopHook injecting =
         (response, ctx) ->
             fires.incrementAndGet() == 1 ? HookOutcome.inject("more please") : HookOutcome.cont();
+    var storedBeforeSecondCall = new AtomicReference<List<Message>>();
+    PreModelTurnHook observing =
+        (history, ctx) -> {
+          if (ctx.turnIndex() == 2) {
+            storedBeforeSecondCall.set(store.load(SID).history());
+          }
+          return HookOutcome.cont();
+        };
     var model = ScriptedModel.newBuilder().withTextTurn("draft").withTextTurn("final").build();
 
-    sent(options(model).withHook(injecting));
+    sent(options(model).withHook(injecting).withHook(observing));
 
     assertEquals(
-        List.of(List.of("USER", "ASSISTANT"), List.of("USER", "ASSISTANT", "ended Success")),
+        List.of(List.of("USER", "ASSISTANT", "USER"), List.of("ASSISTANT", "ended Success")),
         store.shapes());
     var inject = injected("more please");
+    var beforeSecondCall = List.of(Message.user("go"), Message.assistant("draft"), inject);
+    assertEquals(beforeSecondCall, storedBeforeSecondCall.get());
+    assertEquals(beforeSecondCall, model.calls().getLast());
     assertEquals(
         List.of(Message.user("go"), Message.assistant("draft"), inject, Message.assistant("final")),
         store.load(SID).history());
-    assertEquals(inject, model.calls().getLast().getLast());
   }
 
   @Test

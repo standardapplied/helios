@@ -34,11 +34,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   in the order it was queued. `SteeringQueue` gains `offer(message, origin)` and `drainPending()`,
   which returns `SteeringQueue.Pending` elements, each message with its origin; `drain()` is
   unchanged.
-- A turn is stored only once its run goes on, with the next turn's start; the turn that ends a
-  run is stored with the run's end. The watermark and compaction step after a turn runs only when
-  the run goes on, so the final turn is not compacted at the run's end, the budget check for a
-  post-turn summary call moves to the next turn's classification, and the `ContextWarning` after
-  a final turn moves to the next run's pre-turn check.
+- A turn is stored only once its run goes on, with the next turn's start and the messages
+  drained for it, before its model call; the turn that ends a run is stored with the run's end.
+  The watermark and compaction step after a turn runs only when the run goes on, so the final
+  turn is not compacted at the run's end, the budget check for a post-turn summary call moves to
+  the next turn's classification, and the `ContextWarning` after a final turn moves to the next
+  run's pre-turn check.
 
 ### Compatibility
 
