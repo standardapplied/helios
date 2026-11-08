@@ -4,7 +4,7 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
-## [3.0.1] — Unreleased — The session store records how each run ended
+## [3.0.1] — 2026-11-08 — The session store records how each run ended
 
 ### Added
 
