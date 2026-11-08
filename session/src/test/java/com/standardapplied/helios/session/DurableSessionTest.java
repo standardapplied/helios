@@ -142,16 +142,22 @@ final class DurableSessionTest {
     var model = ScriptedModel.newBuilder().withToolCallsTurn(ECHO).withTextTurn("done").build();
     PreModelTurnHook nudging =
         (history, ctx) -> ctx.turnIndex() == 2 ? HookOutcome.inject("nudge") : HookOutcome.cont();
+    OnUserMessageHook blockingTheNudge =
+        (message, ctx) ->
+            message.text().equals("nudge") ? HookOutcome.block("no nudges") : HookOutcome.cont();
 
     try (var session =
         AgentSession.open(
-            options(model, store).withTools(List.of(echo())).withHook(nudging).build())) {
+            options(model, store)
+                .withTools(List.of(echo()))
+                .withHook(nudging)
+                .withHook(blockingTheNudge)
+                .build())) {
       Await.value("run", session.send("go"));
     }
 
     assertEquals(
-        List.of(
-            List.of("USER", "ASSISTANT", "TOOL"), List.of("USER", "ASSISTANT", "ended Success")),
+        List.of(List.of("USER", "ASSISTANT", "TOOL"), List.of("ASSISTANT", "ended Success")),
         store.shapes());
     assertEquals(2, model.calls().size());
   }
