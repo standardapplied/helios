@@ -7,18 +7,24 @@
  *
  * <p><b>Entry kinds.</b> A store holds an append-only log of {@link
  * com.standardapplied.helios.session.store.SessionEntry entries}, numbered from {@code 1} without
- * gaps: {@code MessageAdded}, one message exactly as the model received it, and {@code
- * HistoryReplaced}, the model's whole view after compaction or a {@code MutateHistory} hook.
- * Nothing is rewritten, so the full transcript stays readable. The system prompt is never stored;
- * it comes from the options that open the session.
+ * gaps: {@code MessageAdded}, one message exactly as the model received it, {@code
+ * HistoryReplaced}, the model's whole view after compaction or a {@code MutateHistory} hook, and
+ * {@code RunEnded}, the end of a run, the terminal it ended with and a {@code Success}'s result. A
+ * message the session wrote itself carries its {@link
+ * com.standardapplied.helios.session.store.MessageOrigin} in its metadata. Nothing is rewritten, so
+ * the full transcript stays readable. The system prompt is never stored; it comes from the options
+ * that open the session.
  *
  * <p><b>Load rule.</b> {@link com.standardapplied.helios.session.store.StoredSession#fold}: the
- * view of the last {@code HistoryReplaced}, followed by every message added after it.
+ * view of the last {@code HistoryReplaced}, followed by every message added after it; the log's
+ * last entry, when it is a {@code RunEnded}, is the session's {@link
+ * com.standardapplied.helios.session.store.StoredSession#lastRunEnded()}.
  *
- * <p><b>Write rule.</b> A session appends one batch at the end of each turn's tool round and one at
- * the end of each run: a {@code HistoryReplaced} with the whole history when it was replaced since
- * the last write, otherwise a {@code MessageAdded} per message added, and nothing when nothing is
- * new.
+ * <p><b>Write rule.</b> A session appends one batch after each turn its run goes on from, and one
+ * at the end of each run: a {@code HistoryReplaced} with the whole history when it was replaced
+ * since the last write, otherwise a {@code MessageAdded} per message added, and nothing when
+ * nothing is new; the batch at the run's end, never empty, ends with the run's {@code RunEnded}, so
+ * the turn that ends a run is stored with its end or not at all.
  *
  * <p><b>Concurrency rule.</b> Each append names the last sequence number its writer read or wrote;
  * a store holding another refuses the whole batch with {@link

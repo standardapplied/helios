@@ -26,9 +26,11 @@ import com.standardapplied.helios.session.store.StoredSession;
 import com.standardapplied.helios.session.test.SessionStoreContract;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.io.IOException;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -116,6 +118,23 @@ final class PgSessionStoreTest extends SessionStoreContract {
     assertFalse(store.delete(SID));
     assertEquals(List.of(), store.entries(SID));
     assertEquals(1, store.load("chat-2").lastSeq());
+  }
+
+  @Test
+  void eachEntryKindIsStoredUnderItsJsonType() {
+    var ended =
+        new SessionEntry.RunEnded(
+            "run-1", Instant.parse("2026-10-27T10:00:00Z"), "Success", Optional.of("done"));
+    store().append(SID, 0, List.of(added(Message.user("a")), replaced(Message.user("s")), ended));
+
+    var types =
+        PgTestSupport.dbClient()
+            .execute()
+            .query("SELECT type FROM helios_session_entries WHERE session_id = ? ORDER BY seq", SID)
+            .map(row -> row.column("type").getString())
+            .toList();
+
+    assertEquals(List.of("message", "replaced", "ended"), types);
   }
 
   @Test

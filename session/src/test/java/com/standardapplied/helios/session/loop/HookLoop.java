@@ -84,6 +84,20 @@ final class HookLoop {
       Hook... hooks) {
     var queue = new SteeringQueue(8);
     queue.offer(message);
+    return run(model, tools, authorization, queue, hooks);
+  }
+
+  /** Runs the loop over what {@code queue} holds with {@code hooks} and no tools. */
+  ResultMessage run(Model model, SteeringQueue queue, Hook... hooks) {
+    return run(model, ToolRegistry.empty(), Authorizations.ADMIT_ALL, queue, hooks);
+  }
+
+  private ResultMessage run(
+      Model model,
+      ToolRegistry tools,
+      Function<ToolBinding.CanonicalCall, PermissionDecision> authorization,
+      SteeringQueue queue,
+      Hook... hooks) {
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(List.of(hooks), secrets),

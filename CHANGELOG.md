@@ -4,6 +4,53 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.0.1] — Unreleased — The session store records how each run ended
+
+### Added
+
+- `SessionEntry.RunEnded(runId, at, terminal, result)`, the end of a run, committed in the same
+  batch as the run's last messages; `terminal` is the simple name of its `ResultMessage` record
+  (`Success`, `ErrorMaxTurns`, ..., `Cancelled`), and `result`, present on `Success` only, is
+  the run's answer as `Success.result()` returned it: the one field of the `ResultMessage` that
+  is stored; usage, cost and errors are not. `SessionEntryJson` writes it as type `ended`,
+  which `PgSessionStore` stores in the existing `type` column: no DDL change.
+- `StoredSession.lastRunEnded()`: the log's last entry when it is a `RunEnded`, so a host that
+  reopens a session after a crash can tell whether its run ended, how, and with what answer.
+- `store.MessageOrigin` (`SCHEMA_CORRECTION`, `REJECTED_ATTEMPT`, `HOOK_INJECT`), the tag the
+  session writes in `Message.metadata()` under `helios.origin` on the messages it adds itself;
+  `MessageOrigin.of(message)` reads it. No provider sends it.
+
+### Fixed
+
+- A crash after a rejected structured output no longer leaves a tail that looks like a finished
+  run: the rejected attempt and its correction are stored in the same batch, both tagged.
+- A crash after a run's answer was stored no longer hides that the run ended: the answer and
+  the run's `RunEnded` are stored together or not at all.
+
+### Changed
+
+- The schema correction joins the history directly after the rejected attempt: it no longer
+  passes through the steering queue, fires no `OnUserMessage` hook and emits no
+  `UserMessageReceived`, and its "steering queue full" failure is gone.
+- A hook's `Inject` is never composed with the caller's messages: it is a user message of its own,
+  in the order it was queued. `SteeringQueue` gains `offer(message, origin)` and `drainPending()`,
+  which returns `SteeringQueue.Pending` elements, each message with its origin; `drain()` is
+  unchanged.
+- A turn is stored only once its run goes on, with the next turn's start and the messages
+  drained for it, before its model call; the turn that ends a run is stored with the run's end.
+  The watermark and compaction step after a turn runs only when the run goes on, so the final
+  turn is not compacted at the run's end, the budget check for a post-turn summary call moves to
+  the next turn's classification, and the `ContextWarning` after a final turn moves to the next
+  run's pre-turn check.
+
+### Compatibility
+
+- A log a 3.0.1 session wrote is refused by a 3.0.0 reader, which does not know type `ended`. A
+  3.0.0 log, with no `RunEnded`, loads with `lastRunEnded()` empty.
+- A `switch` over `SessionEntry` gains a case. `StoredSession` gains a fourth record component;
+  its three-argument constructor remains, and record deconstruction patterns need the extra
+  binding.
+
 ## [3.0.0] — 2026-11-07 — com.standardapplied coordinates, durable sessions, OpenTelemetry tracing and Claude 5
 
 ### Breaking

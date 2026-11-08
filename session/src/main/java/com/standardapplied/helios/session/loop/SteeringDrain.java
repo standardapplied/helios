@@ -7,18 +7,23 @@ import com.standardapplied.helios.core.model.InlineFile;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.SteeringQueue.Pending;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookPhase;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Drains the steering queue into the history at an iteration boundary. Each pending {@link
  * UserMessage} fires the on-user-message hooks — {@link HookOutcome.Block Block} drops the message,
  * {@link HookOutcome.MutateText MutateText} rewrites its text, {@link HookOutcome.Stop Stop} ends
- * the run. Surviving messages emit {@link QueryEvent.UserMessageReceived} and compose, with their
- * attachments and file references, into a single user-role message.
+ * the run. Surviving messages emit {@link QueryEvent.UserMessageReceived} and join the history in
+ * the order they were queued: each run of the caller's messages composes, with their attachments
+ * and file references, into one user-role message, and a message the session queued itself, such as
+ * a hook's {@code Inject}, is a user-role message of its own, tagged with its {@link
+ * com.standardapplied.helios.session.store.MessageOrigin}, never composed with the caller's.
  */
 final class SteeringDrain {
 
@@ -38,39 +43,66 @@ final class SteeringDrain {
    * @return whether a user message was appended to the history
    */
   boolean drainInto(SessionState state) {
-    var drained = collaborators.steeringQueue().drain();
+    var drained = collaborators.steeringQueue().drainPending();
     if (drained.isEmpty()) {
       return false;
     }
-    var accepted = new ArrayList<UserMessage>();
-    for (var message : drained) {
+    var accepted = new ArrayList<Pending>();
+    for (var pending : drained) {
+      var message = pending.message();
       var decision =
           collaborators.hooks().fireOnUserMessage(message, collaborators.hookContext(state));
       var hookName = decision.firingHookName();
       switch (decision.outcome()) {
         case HookOutcome.MutateText mutate ->
-            accepted.add(mutateText(state, message, hookName, mutate));
+            accepted.add(
+                new Pending(mutateText(state, message, hookName, mutate), pending.origin()));
         case HookOutcome.Block block -> block(state, message, hookName, block);
         case HookOutcome.Stop stop -> {
           effects.stop(state, hookName, HookPhase.ON_USER_MESSAGE, stop);
           return false;
         }
-        case HookOutcome.Continue _ -> accepted.add(receive(state, message));
+        case HookOutcome.Continue _ ->
+            accepted.add(new Pending(receive(state, message), pending.origin()));
       }
     }
-    if (accepted.isEmpty()) {
-      return false;
+    appendInOrder(state, accepted);
+    return !accepted.isEmpty();
+  }
+
+  /**
+   * Append {@code accepted} in order: each run of the caller's messages composed into one message,
+   * each message with an origin as one of its own.
+   */
+  private static void appendInOrder(SessionState state, List<Pending> accepted) {
+    var callers = new ArrayList<UserMessage>();
+    for (var pending : accepted) {
+      if (pending.origin().isEmpty()) {
+        callers.add(pending.message());
+        continue;
+      }
+      appendComposed(state, callers, Map.of());
+      callers.clear();
+      appendComposed(state, List.of(pending.message()), pending.origin().get().metadata());
+    }
+    appendComposed(state, callers, Map.of());
+  }
+
+  private static void appendComposed(
+      SessionState state, List<UserMessage> messages, Map<String, String> metadata) {
+    if (messages.isEmpty()) {
+      return;
     }
     state
         .history()
         .append(
             Message.newBuilder()
                 .withRole(Role.USER)
-                .withContent(composeContent(accepted))
-                .withInlineFiles(collectAttachments(accepted))
-                .withFileReferences(collectFileReferences(accepted))
+                .withContent(composeContent(messages))
+                .withInlineFiles(collectAttachments(messages))
+                .withFileReferences(collectFileReferences(messages))
+                .withMetadata(metadata)
                 .build());
-    return true;
   }
 
   private UserMessage receive(SessionState state, UserMessage message) {

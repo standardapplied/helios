@@ -38,16 +38,20 @@ import java.util.logging.Logger;
  *   <li>Before the run's first turn, if no message reached the history (every one was blocked) and
  *       none was sent meanwhile, end with {@link ResultMessage.ErrorDuringExecution} of kind {@code
  *       NoUserMessage}: a run calls the model only after a user message of its own.
- *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)},
- *       then append what the turn added to the session's store, if it has one ({@link
- *       StoredHistory}).
+ *   <li>After a turn the run went on from, append what the history gained since the last write,
+ *       that turn and the messages just drained, to the session's store, if it has one ({@link
+ *       StoredHistory}), so they are stored before the next model call.
+ *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)}.
  *   <li>If the turn left a terminal value on {@link SessionState} (hook-driven stop), respect it.
  *       Otherwise hand the outcome to {@link StopClassifier}; if it returns terminal, fire {@link
  *       HookRegistry#firePreStop pre-stop hooks} — {@link HookOutcome.Inject Inject} cancels the
  *       termination and queues a synthetic user message, and the turn is classified again as one
  *       with a message queued, so the run's limits still apply; {@link HookOutcome.Stop Stop}
  *       overrides the success text; {@link HookOutcome.Continue Continue} confirms the stop.
- *   <li>Otherwise iterate.
+ *   <li>Otherwise the run goes on: run the watermark and compaction step and iterate. A turn that
+ *       ends the run is neither compacted nor written there: the run's end writes it with the run's
+ *       {@link com.standardapplied.helios.session.store.SessionEntry.RunEnded}, so a store holds a
+ *       run's last turn only together with its end.
  * </ol>
  *
  * <p>Every terminal is decided through the session's {@link RunBoundary}, under the lock {@code
@@ -55,18 +59,19 @@ import java.util.logging.Logger;
  * sent meanwhile, and the run goes on with it. Once decided, the run ends: an assistant message
  * whose tool calls are not all answered gets a "not run" tool message per unanswered call, in call
  * order, so the next run's history is one a provider accepts; what the history gained is appended
- * to the session's store, a refused write ending the run with {@link
- * ResultMessage.ErrorDuringExecution} of kind {@code SessionConflict} or {@code SessionStoreFailed}
- * instead; the run's token is cancelled, and its callbacks and the tool calls still running are
- * awaited until one deadline, {@link SessionLimits#stopGrace()} away, each one still running then
- * logged; then {@link QueryEvent.RunEnded} is emitted.
+ * to the session's store with the run's {@link
+ * com.standardapplied.helios.session.store.SessionEntry.RunEnded}, in one batch, a refused write
+ * ending the run with {@link ResultMessage.ErrorDuringExecution} of kind {@code SessionConflict} or
+ * {@code SessionStoreFailed} instead; the run's token is cancelled, and its callbacks and the tool
+ * calls still running are awaited until one deadline, {@link SessionLimits#stopGrace()} away, each
+ * one still running then logged; then {@link QueryEvent.RunEnded} is emitted.
  *
  * <p>Every emitted {@link QueryEvent} fires {@link HookRegistry#fireOnStreamEvent stream-event
  * hooks} for observe-only consumers.
  *
- * <p>Draining the queue is {@link SteeringDrain}, the watermark and compaction step before and
- * after every turn is {@link ContextCompaction}, and the pre-stop decision is {@link
- * PreStopDecision}; this class keeps the iteration.
+ * <p>Draining the queue is {@link SteeringDrain}, the watermark and compaction step before every
+ * turn and after every turn the run goes on from is {@link ContextCompaction}, and the pre-stop
+ * decision is {@link PreStopDecision}; this class keeps the iteration.
  *
  * <h2>Thread-safety</h2>
  *
@@ -174,6 +179,12 @@ public final class AgentLoop {
       return Optional.of(
           finished(state, limits, StopClassifier.errorDuringExecution(state, noUserMessage)));
     }
+    if (state.currentTurnIndex() > 0) {
+      var refusal = stored(state, boundary);
+      if (refusal.isPresent()) {
+        return refusal;
+      }
+    }
     state.beginTurn();
     compaction.check(state, limits);
     if (state.cancellation().isCancelled()) {
@@ -184,15 +195,27 @@ public final class AgentLoop {
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
+    var ended = classify(state, limits, boundary, outcome);
+    if (ended.isPresent()) {
+      return ended;
+    }
+    compaction.check(state, limits);
+    return Optional.empty();
+  }
+
+  /**
+   * Append the turn the run went on from, and the messages drained after it, to the store before
+   * the next turn; a refused write ends the run, decided through {@code boundary}, with the refusal
+   * as its terminal.
+   */
+  private Optional<ResultMessage> stored(SessionState state, RunBoundary boundary) {
     var refusal =
         storedHistory.write(
             state, collaborators.clock().instant(), collaborators.secrets().redactor());
     if (refusal.isPresent()) {
       boundary.end(false);
-      return refusal;
     }
-    compaction.check(state, limits);
-    return classify(state, limits, boundary, outcome);
+    return refusal;
   }
 
   /**
@@ -250,9 +273,9 @@ public final class AgentLoop {
   }
 
   /**
-   * End the decided run: close an open tool round, append what the history gained to the store,
-   * cancel the run's token, wait up to {@code stopGrace} for its tool calls still running, then
-   * emit {@link QueryEvent.RunEnded}.
+   * End the decided run: close an open tool round, append what the history gained and the run's end
+   * to the store, cancel the run's token, wait up to {@code stopGrace} for its tool calls still
+   * running, then emit {@link QueryEvent.RunEnded}.
    */
   private ResultMessage end(SessionState state, SessionLimits limits, ResultMessage decided) {
     // An interrupt host code left on this thread is no request to cut the run's waits short.
@@ -260,7 +283,8 @@ public final class AgentLoop {
     state.history().closeOpenRound(NOT_RUN);
     var terminal =
         storedHistory
-            .write(state, collaborators.clock().instant(), collaborators.secrets().redactor())
+            .end(
+                state, decided, collaborators.clock().instant(), collaborators.secrets().redactor())
             .orElse(decided);
     var deadline = System.nanoTime() + limits.stopGrace().toNanos();
     var run = "run " + state.runId() + " of session " + state.sessionId();

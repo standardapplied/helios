@@ -12,6 +12,7 @@ import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.store.SessionStoreException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
@@ -21,9 +22,12 @@ import java.util.concurrent.CompletionException;
  * conversation after the system prompt; {@link #write} appends what the history gained since the
  * last write, as one batch: one {@link SessionEntry.HistoryReplaced} with the whole history when it
  * was replaced since, otherwise one {@link SessionEntry.MessageAdded} per message added, leading
- * {@code SYSTEM} messages never included, and nothing when nothing is new. Each append names the
- * last sequence number read or written. Once the store refuses a write, nothing more is written and
- * {@link #refused()} holds, so the session closes itself: its memory and its store no longer agree.
+ * {@code SYSTEM} messages never included, and nothing when nothing is new. The loop calls it after
+ * each turn the run goes on from; {@link #end} appends the same batch followed by the run's {@link
+ * SessionEntry.RunEnded}, so it is never empty, and so the turn that ends a run is stored only with
+ * the run's end. Each append names the last sequence number read or written. Once the store refuses
+ * a write, nothing more is written and {@link #refused()} holds, so the session closes itself: its
+ * memory and its store no longer agree.
  *
  * <h2>Thread-safety</h2>
  *
@@ -90,13 +94,33 @@ public final class StoredHistory {
    *     failure, never a refusal
    */
   Optional<ResultMessage> write(SessionState state, Instant at, Redactor redactor) {
+    return writeBatch(state, at, redactor, List.of());
+  }
+
+  /**
+   * Append what {@code state}'s history gained since the last write and the run's end with {@code
+   * terminal}, in one batch, as {@link #write} does.
+   *
+   * @return the refusal, which writes neither; empty when the write succeeded
+   * @throws Error an {@link Error} the store threw, as itself or as a joined future's cause: a host
+   *     failure, never a refusal
+   */
+  Optional<ResultMessage> end(
+      SessionState state, ResultMessage terminal, Instant at, Redactor redactor) {
+    return writeBatch(
+        state, at, redactor, List.of(SessionEntry.RunEnded.of(state.runId(), at, terminal)));
+  }
+
+  private Optional<ResultMessage> writeBatch(
+      SessionState state, Instant at, Redactor redactor, List<SessionEntry> closing) {
     if (store.isEmpty() || refused) {
       return Optional.empty();
     }
     var history = state.history();
     var replaced = history.replacements();
     var snapshot = history.snapshot();
-    var entries = entries(snapshot, replaced != replacements, state.runId(), at);
+    var entries = new ArrayList<>(entries(snapshot, replaced != replacements, state.runId(), at));
+    entries.addAll(closing);
     if (entries.isEmpty()) {
       return Optional.empty();
     }
