@@ -9,10 +9,11 @@
  * com.standardapplied.helios.session.store.SessionEntry entries}, numbered from {@code 1} without
  * gaps: {@code MessageAdded}, one message exactly as the model received it, {@code
  * HistoryReplaced}, the model's whole view after compaction or a {@code MutateHistory} hook, and
- * {@code RunEnded}, the end of a run and the terminal it ended with. A message the session wrote
- * itself carries its {@link com.standardapplied.helios.session.store.MessageOrigin} in its
- * metadata. Nothing is rewritten, so the full transcript stays readable. The system prompt is never
- * stored; it comes from the options that open the session.
+ * {@code RunEnded}, the end of a run, the terminal it ended with and a {@code Success}'s result. A
+ * message the session wrote itself carries its {@link
+ * com.standardapplied.helios.session.store.MessageOrigin} in its metadata. Nothing is rewritten, so
+ * the full transcript stays readable. The system prompt is never stored; it comes from the options
+ * that open the session.
  *
  * <p><b>Load rule.</b> {@link com.standardapplied.helios.session.store.StoredSession#fold}: the
  * view of the last {@code HistoryReplaced}, followed by every message added after it; the log's

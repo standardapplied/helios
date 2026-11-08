@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 final class SessionStoreTypesTest {
 
   private static final Instant AT = Instant.parse("2026-10-27T10:00:00Z");
+  private static final Optional<String> DONE = Optional.of("done");
 
   private static SessionEntry added(String text) {
     return new SessionEntry.MessageAdded("run-1", AT, Message.user(text));
@@ -30,7 +31,7 @@ final class SessionStoreTypesTest {
   }
 
   private static SessionEntry.RunEnded ended(String runId) {
-    return new SessionEntry.RunEnded(runId, AT, "Success");
+    return new SessionEntry.RunEnded(runId, AT, "Success", Optional.of("done"));
   }
 
   @Test
@@ -124,24 +125,47 @@ final class SessionStoreTypesTest {
             "runId must not be blank",
             "at must not be null",
             "terminal must not be null",
+            "result must not be null",
             "terminal must name a ResultMessage subtype [Cancelled, ErrorDuringExecution,"
                 + " ErrorMaxBudgetUsd, ErrorMaxTurns, ErrorMaxWallClock, ErrorTransientStream,"
                 + " Refusal, Success], got 'Done'"),
         List.of(
             assertThrows(
                     IllegalArgumentException.class,
-                    () -> new SessionEntry.RunEnded(" ", AT, "Success"))
+                    () -> new SessionEntry.RunEnded(" ", AT, "Success", DONE))
                 .getMessage(),
             assertThrows(
                     NullPointerException.class,
-                    () -> new SessionEntry.RunEnded("run-1", null, "Success"))
+                    () -> new SessionEntry.RunEnded("run-1", null, "Success", DONE))
                 .getMessage(),
             assertThrows(
-                    NullPointerException.class, () -> new SessionEntry.RunEnded("run-1", AT, null))
+                    NullPointerException.class,
+                    () -> new SessionEntry.RunEnded("run-1", AT, null, DONE))
+                .getMessage(),
+            assertThrows(
+                    NullPointerException.class,
+                    () -> new SessionEntry.RunEnded("run-1", AT, "Success", null))
                 .getMessage(),
             assertThrows(
                     IllegalArgumentException.class,
-                    () -> new SessionEntry.RunEnded("run-1", AT, "Done"))
+                    () -> new SessionEntry.RunEnded("run-1", AT, "Done", DONE))
+                .getMessage()));
+  }
+
+  @Test
+  void aRunEndedCarriesAResultExactlyWhenItIsASuccess() {
+    assertEquals(
+        List.of(
+            "result must be present exactly when terminal is Success, got none on Success",
+            "result must be present exactly when terminal is Success, got one on Cancelled"),
+        List.of(
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> new SessionEntry.RunEnded("run-1", AT, "Success", Optional.empty()))
+                .getMessage(),
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> new SessionEntry.RunEnded("run-1", AT, "Cancelled", DONE))
                 .getMessage()));
   }
 
@@ -152,7 +176,7 @@ final class SessionStoreTypesTest {
             "sess-1", "run-1", 3, Usage.of(0, 0), CostEstimate.zero(), Duration.ZERO);
 
     assertEquals(
-        new SessionEntry.RunEnded("run-1", AT, "ErrorMaxTurns"),
+        new SessionEntry.RunEnded("run-1", AT, "ErrorMaxTurns", Optional.empty()),
         SessionEntry.RunEnded.of("run-1", AT, terminal));
     assertThrows(NullPointerException.class, () -> SessionEntry.RunEnded.of("run-1", AT, null));
   }

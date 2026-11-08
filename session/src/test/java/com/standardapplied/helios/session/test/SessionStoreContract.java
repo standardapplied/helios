@@ -171,7 +171,7 @@ public abstract class SessionStoreContract {
   @Test
   void aRunEndedRoundTripsAndIsTheLastRunEndedOnlyWhileItIsTheLastEntry() {
     var store = store();
-    var ended = new SessionEntry.RunEnded("run-1", AT, "Success");
+    var ended = new SessionEntry.RunEnded("run-1", AT, "Success", Optional.of("done"));
     var correction =
         Message.newBuilder()
             .withRole(Role.USER)
@@ -194,7 +194,7 @@ public abstract class SessionStoreContract {
   @Test
   void aRunEndedAfterTheLastHistoryReplacedIsRead() {
     var store = store();
-    var ended = new SessionEntry.RunEnded("run-2", AT, "Cancelled");
+    var ended = new SessionEntry.RunEnded("run-2", AT, "Cancelled", Optional.empty());
     store.append(SID, 0, List.of(added(Message.user("a"))));
     store.append(SID, 1, List.of(replaced(Message.user("summary")), ended));
 

@@ -15,10 +15,8 @@ import java.util.Optional;
  * ended.
  *
  * <p>A host that runs turns from a durable queue tells after a crash whether its run {@code runId}
- * ended with {@code lastRunEnded().filter(ended -> ended.runId().equals(runId))}. When that names
- * {@code Success}, the run's answer is the last {@link
- * com.standardapplied.helios.core.model.Role#ASSISTANT ASSISTANT} message of {@link #history()}
- * that carries no {@link MessageOrigin}.
+ * ended with {@code lastRunEnded().filter(ended -> ended.runId().equals(runId))}, and when that
+ * names {@code Success}, its answer is that entry's {@link SessionEntry.RunEnded#result()}.
  *
  * @param sessionId the session id; non-blank
  * @param lastSeq the last sequence number, {@code 0} for a session never written; non-negative

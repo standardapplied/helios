@@ -8,12 +8,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Added
 
-- `SessionEntry.RunEnded(runId, at, terminal)`, the end of a run, committed in the same batch as
-  the run's last messages; `terminal` is the simple name of its `ResultMessage` record
-  (`Success`, `ErrorMaxTurns`, ..., `Cancelled`). `SessionEntryJson` writes it as type `ended`,
+- `SessionEntry.RunEnded(runId, at, terminal, result)`, the end of a run, committed in the same
+  batch as the run's last messages; `terminal` is the simple name of its `ResultMessage` record
+  (`Success`, `ErrorMaxTurns`, ..., `Cancelled`), and `result`, present on `Success` only, is
+  the run's answer as `Success.result()` returned it: the one field of the `ResultMessage` that
+  is stored; usage, cost and errors are not. `SessionEntryJson` writes it as type `ended`,
   which `PgSessionStore` stores in the existing `type` column: no DDL change.
 - `StoredSession.lastRunEnded()`: the log's last entry when it is a `RunEnded`, so a host that
-  reopens a session after a crash can tell whether its run ended, and how.
+  reopens a session after a crash can tell whether its run ended, how, and with what answer.
 - `store.MessageOrigin` (`SCHEMA_CORRECTION`, `REJECTED_ATTEMPT`, `HOOK_INJECT`), the tag the
   session writes in `Message.metadata()` under `helios.origin` on the messages it adds itself;
   `MessageOrigin.of(message)` reads it. No provider sends it.
