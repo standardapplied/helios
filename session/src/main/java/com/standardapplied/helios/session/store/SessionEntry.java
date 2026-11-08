@@ -82,8 +82,10 @@ public sealed interface SessionEntry {
    * a store holds both or neither. {@code terminal} names the run's terminal as the run decided it.
    * A store that refuses that batch holds no {@code RunEnded} for the run, whose terminal is then
    * the refusal. A host {@link Error} recorded after the batch was written, while the run waits for
-   * its tool calls to stop, fails the run's future but leaves this entry as written. A run an
-   * {@code Error} ends before its end writes none.
+   * its tool calls to stop, fails the run's future but leaves this entry as written. An {@code
+   * Error} thrown on the run's own thread ends it before its end, so it writes none; one the
+   * session records from another thread cancels the run, which still writes this entry while its
+   * future fails with the {@code Error}.
    *
    * @param runId the run that ended; non-blank
    * @param at when it ended; non-null
