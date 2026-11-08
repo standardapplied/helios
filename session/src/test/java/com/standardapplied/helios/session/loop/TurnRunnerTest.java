@@ -383,9 +383,8 @@ final class TurnRunnerTest {
   }
 
   /**
-   * Defensive: when {@link StructuredOutputParseException} fires <i>and</i> the steering queue is
-   * full so the correction message can't be enqueued, the runner must let the underlying parse
-   * error surface (returns {@link FinishReason#ERROR}) rather than silently swallowing it.
+   * The correction joins the history right after the rejected attempt, never the steering queue, so
+   * a full queue neither drops it nor loses what it holds.
    */
   @Test
   void aParseFailureIsCorrectedEvenWhenTheSteeringQueueIsFull() {
