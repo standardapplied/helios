@@ -16,9 +16,10 @@ import java.util.concurrent.LinkedBlockingQueue;
  *
  * <p>The agent loop drains this queue at iteration boundary — after a turn ends, before the next
  * one begins. Each element carries its {@link MessageOrigin}: none for the caller's messages, which
- * the loop composes into one user message, {@link MessageOrigin#HOOK_INJECT} for a hook's {@code
- * Inject}, which it adds as a message of its own. This is the only steering-input mechanism into a
- * running session; tools, model output, and cancellation flow through other channels.
+ * the loop composes into one user message while they follow each other, {@link
+ * MessageOrigin#HOOK_INJECT} for a hook's {@code Inject}, which it adds as a message of its own.
+ * This is the only steering-input mechanism into a running session; tools, model output, and
+ * cancellation flow through other channels.
  *
  * <p>The queue is bounded by {@code capacity}; {@link #offer(UserMessage)} returns {@code false}
  * immediately when full so the caller can surface backpressure (typically HTTP 429). Drops are

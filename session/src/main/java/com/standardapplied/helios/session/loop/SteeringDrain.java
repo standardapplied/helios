@@ -19,11 +19,11 @@ import java.util.Map;
  * Drains the steering queue into the history at an iteration boundary. Each pending {@link
  * UserMessage} fires the on-user-message hooks — {@link HookOutcome.Block Block} drops the message,
  * {@link HookOutcome.MutateText MutateText} rewrites its text, {@link HookOutcome.Stop Stop} ends
- * the run. Surviving messages emit {@link QueryEvent.UserMessageReceived}. The caller's messages
- * compose, with their attachments and file references, into one user-role message; a message the
- * session queued itself, such as a hook's {@code Inject}, is a user-role message of its own, tagged
- * with its {@link com.standardapplied.helios.session.store.MessageOrigin}, never composed with the
- * caller's. The messages keep the order they were queued in.
+ * the run. Surviving messages emit {@link QueryEvent.UserMessageReceived} and join the history in
+ * the order they were queued: each run of the caller's messages composes, with their attachments
+ * and file references, into one user-role message, and a message the session queued itself, such as
+ * a hook's {@code Inject}, is a user-role message of its own, tagged with its {@link
+ * com.standardapplied.helios.session.store.MessageOrigin}, never composed with the caller's.
  */
 final class SteeringDrain {
 
