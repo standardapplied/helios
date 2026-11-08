@@ -80,7 +80,7 @@ final class SteeringQueueTest {
 
     var drained = q.drain();
 
-    assertEquals(List.of("one", "two", "three"), texts(drained));
+    assertEquals(List.of("one", "two", "three"), drained.stream().map(UserMessage::text).toList());
     assertEquals(0, q.size());
     assertTrue(q.drain().isEmpty(), "second drain must yield empty");
   }
@@ -95,7 +95,7 @@ final class SteeringQueueTest {
     assertEquals(2, q.size());
     assertFalse(q.offer(UserMessage.text("d")));
     var second = q.drain();
-    assertEquals(List.of("b", "c"), texts(second));
+    assertEquals(List.of("b", "c"), second.stream().map(UserMessage::text).toList());
   }
 
   @Test
@@ -140,8 +140,8 @@ final class SteeringQueueTest {
     assertEquals(accepted.get(), drained.size(), "drain returns every accepted message");
 
     var unique = new HashSet<String>();
-    for (var text : texts(drained)) {
-      assertTrue(unique.add(text), "no duplicates in drained batch: " + text);
+    for (var m : drained) {
+      assertTrue(unique.add(m.text()), "no duplicates in drained batch: " + m.text());
     }
   }
 
@@ -156,7 +156,22 @@ final class SteeringQueueTest {
             new SteeringQueue.Pending(UserMessage.text("caller"), Optional.empty()),
             new SteeringQueue.Pending(
                 UserMessage.text("hook"), Optional.of(MessageOrigin.HOOK_INJECT))),
-        q.drain());
+        q.drainPending());
+    assertTrue(q.drain().isEmpty());
+  }
+
+  @Test
+  void drainReturnsEveryQueuedMessageWithoutItsOriginInAListTheCallerOwns() {
+    var q = new SteeringQueue(4);
+    q.offer(UserMessage.text("caller"));
+    q.offer(UserMessage.text("hook"), MessageOrigin.HOOK_INJECT);
+
+    List<UserMessage> drained = q.drain();
+    drained.add(UserMessage.text("mine"));
+
+    assertEquals(
+        List.of("caller", "hook", "mine"), drained.stream().map(UserMessage::text).toList());
+    assertTrue(q.drainPending().isEmpty());
   }
 
   @Test
@@ -182,9 +197,5 @@ final class SteeringQueueTest {
                 .getMessage(),
             assertThrows(NullPointerException.class, () -> new SteeringQueue.Pending(message, null))
                 .getMessage()));
-  }
-
-  private static List<String> texts(List<SteeringQueue.Pending> drained) {
-    return drained.stream().map(pending -> pending.message().text()).toList();
   }
 }
