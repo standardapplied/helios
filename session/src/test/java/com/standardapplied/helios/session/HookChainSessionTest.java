@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -61,7 +63,13 @@ final class HookChainSessionTest {
 
     assertEquals("done", assertInstanceOf(ResultMessage.Success.class, result).result());
     assertEquals(List.of(2L), secondRanOnTurns);
-    assertEquals(Message.user("injected"), model.calls().getLast().getLast());
+    assertEquals(
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("injected")
+            .withMetadata(MessageOrigin.HOOK_INJECT.metadata())
+            .build(),
+        model.calls().getLast().getLast());
   }
 
   @Test

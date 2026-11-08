@@ -407,7 +407,7 @@ final class ContextCompactionTest {
 
     run(fixture.loop(collaborators, runner, recording, ContextCompactor.disabled()), 1_000_000L);
 
-    assertEquals(state.history().snapshot().subList(1, 2), counted.get(1));
+    assertEquals(state.history().snapshot().subList(1, 3), counted.get(1));
   }
 
   @Test

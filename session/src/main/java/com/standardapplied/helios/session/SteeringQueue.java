@@ -4,18 +4,21 @@
  */
 package com.standardapplied.helios.session;
 
+import com.standardapplied.helios.session.store.MessageOrigin;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Bounded per-session inbox for user messages produced mid-run by {@code AgentSession.send(...)}.
  *
  * <p>The agent loop drains this queue at iteration boundary — after a turn ends, before the next
- * one begins. The drained batch is concatenated into a single composite {@link UserMessage} by the
- * loop. This is the only steering-input mechanism into a running session; tools, model output, and
- * cancellation flow through other channels.
+ * one begins. Each element carries its {@link MessageOrigin}: none for the caller's messages, which
+ * the loop composes into one user message, {@link MessageOrigin#HOOK_INJECT} for a hook's {@code
+ * Inject}, which it adds as a message of its own. This is the only steering-input mechanism into a
+ * running session; tools, model output, and cancellation flow through other channels.
  *
  * <p>The queue is bounded by {@code capacity}; {@link #offer(UserMessage)} returns {@code false}
  * immediately when full so the caller can surface backpressure (typically HTTP 429). Drops are
@@ -30,7 +33,7 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public final class SteeringQueue {
 
-  private final LinkedBlockingQueue<UserMessage> queue;
+  private final LinkedBlockingQueue<Pending> queue;
   private final int capacity;
 
   /**
@@ -57,15 +60,29 @@ public final class SteeringQueue {
   }
 
   /**
-   * Non-blocking enqueue. Returns immediately whether or not the queue accepted the message.
+   * Non-blocking enqueue of the caller's message. Returns immediately whether or not the queue
+   * accepted the message.
    *
    * @param message the user message; non-null
    * @return {@code true} if accepted; {@code false} if the queue was already at {@code capacity}
    * @throws NullPointerException if {@code message} is null
    */
   public boolean offer(UserMessage message) {
-    Objects.requireNonNull(message, "message must not be null");
-    return queue.offer(message);
+    return queue.offer(new Pending(message, Optional.empty()));
+  }
+
+  /**
+   * Non-blocking enqueue of a message the session writes itself, tagged with {@code origin}.
+   *
+   * @param message the user message; non-null
+   * @param origin who wrote it; non-null
+   * @return {@code true} if accepted; {@code false} if the queue was already at {@code capacity}
+   * @throws NullPointerException if an argument is null
+   */
+  public boolean offer(UserMessage message, MessageOrigin origin) {
+    return queue.offer(
+        new Pending(
+            message, Optional.of(Objects.requireNonNull(origin, "origin must not be null"))));
   }
 
   /**
@@ -74,8 +91,8 @@ public final class SteeringQueue {
    *
    * @return a new list of drained messages in FIFO order; empty if nothing was queued
    */
-  public List<UserMessage> drain() {
-    var batch = new ArrayList<UserMessage>();
+  public List<Pending> drain() {
+    var batch = new ArrayList<Pending>();
     queue.drainTo(batch);
     return batch;
   }
@@ -88,5 +105,24 @@ public final class SteeringQueue {
    */
   public int size() {
     return queue.size();
+  }
+
+  /**
+   * One queued message and who wrote it.
+   *
+   * @param message the user message; non-null
+   * @param origin who wrote it; empty for the caller; non-null
+   */
+  public record Pending(UserMessage message, Optional<MessageOrigin> origin) {
+
+    /**
+     * Validates the element.
+     *
+     * @throws NullPointerException if a component is null
+     */
+    public Pending {
+      Objects.requireNonNull(message, "message must not be null");
+      Objects.requireNonNull(origin, "origin must not be null");
+    }
   }
 }

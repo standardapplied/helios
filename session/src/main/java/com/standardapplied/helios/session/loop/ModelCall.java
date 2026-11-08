@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
@@ -16,15 +17,13 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SerializedError;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.StreamRetryPolicy;
-import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import io.opentelemetry.context.Context;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -254,18 +253,19 @@ final class ModelCall {
    * StructuredOutputParseException}. Provider IO errors still terminate via {@link
    * com.standardapplied.helios.core.model.FinishReason#ERROR}.
    *
-   * <p>Recovery: append the model's wrong attempt to history as an assistant message so the model
-   * sees its own response through conversation context on the retry, then enqueue {@link
-   * StructuredOutputParseException#correctionMessage()} as a synthetic user turn — that's the
-   * field-level diff only, no rawContent echo (per the exception's class-level note on retry cost).
-   * The overall retry count is bounded by {@link SessionLimits#maxTurns()} — no dedicated
-   * parse-retry ceiling.
+   * <p>Recovery: append the model's wrong attempt to history as an assistant message tagged {@link
+   * MessageOrigin#REJECTED_ATTEMPT} so the model sees its own response through conversation context
+   * on the retry, then {@link StructuredOutputParseException#correctionMessage()} as a user message
+   * tagged {@link MessageOrigin#SCHEMA_CORRECTION} — that's the field-level diff only, no
+   * rawContent echo (per the exception's class-level note on retry cost). Both join the history in
+   * the same turn, so the store writes them in one batch, and the correction, which is no caller
+   * input, fires no on-user-message hook. The overall retry count is bounded by {@link
+   * SessionLimits#maxTurns()} — no dedicated parse-retry ceiling.
    *
-   * @return {@code true} when the correction was queued and the turn ends as a tool-calls turn so
+   * @return {@code true} when the correction was appended and the turn ends as a tool-calls turn so
    *     the loop iterates; {@code false} when the stream's error is not a {@link
-   *     StructuredOutputParseException} (or there is no error, or the steering queue rejected the
-   *     correction message), so the underlying error surfaces as {@link
-   *     com.standardapplied.helios.session.ResultMessage.ErrorDuringExecution}
+   *     StructuredOutputParseException} (or there is no error), so the underlying error surfaces as
+   *     {@link com.standardapplied.helios.session.ResultMessage.ErrorDuringExecution}
    */
   boolean selfCorrectSchema(SessionState state, TurnOutcome turn) {
     if (!(turn.streamError() instanceof StructuredOutputParseException parseFailure)) {
@@ -278,15 +278,20 @@ final class ModelCall {
       wrongAttempt = turn.assistantContent();
     }
     if (!wrongAttempt.isEmpty()) {
-      state.history().append(Message.assistant(wrongAttempt, List.of(), Map.of()));
+      state
+          .history()
+          .append(
+              Message.assistant(
+                  wrongAttempt, List.of(), MessageOrigin.REJECTED_ATTEMPT.metadata()));
     }
-    if (!collaborators.steeringQueue().offer(UserMessage.text(parseFailure.correctionMessage()))) {
-      LOGGER.log(
-          Level.WARNING,
-          "schema-correction message was dropped: steering queue full; the loop will terminate"
-              + " on the underlying parse error");
-      return false;
-    }
+    state
+        .history()
+        .append(
+            Message.newBuilder()
+                .withRole(Role.USER)
+                .withContent(parseFailure.correctionMessage())
+                .withMetadata(MessageOrigin.SCHEMA_CORRECTION.metadata())
+                .build());
     return true;
   }
 

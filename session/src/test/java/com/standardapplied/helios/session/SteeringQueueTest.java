@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -78,7 +80,7 @@ final class SteeringQueueTest {
 
     var drained = q.drain();
 
-    assertEquals(List.of("one", "two", "three"), drained.stream().map(UserMessage::text).toList());
+    assertEquals(List.of("one", "two", "three"), texts(drained));
     assertEquals(0, q.size());
     assertTrue(q.drain().isEmpty(), "second drain must yield empty");
   }
@@ -93,7 +95,7 @@ final class SteeringQueueTest {
     assertEquals(2, q.size());
     assertFalse(q.offer(UserMessage.text("d")));
     var second = q.drain();
-    assertEquals(List.of("b", "c"), second.stream().map(UserMessage::text).toList());
+    assertEquals(List.of("b", "c"), texts(second));
   }
 
   @Test
@@ -138,8 +140,51 @@ final class SteeringQueueTest {
     assertEquals(accepted.get(), drained.size(), "drain returns every accepted message");
 
     var unique = new HashSet<String>();
-    for (var m : drained) {
-      assertTrue(unique.add(m.text()), "no duplicates in drained batch: " + m.text());
+    for (var text : texts(drained)) {
+      assertTrue(unique.add(text), "no duplicates in drained batch: " + text);
     }
+  }
+
+  @Test
+  void eachDrainedMessageKeepsItsOriginInTheOrderItWasQueued() {
+    var q = new SteeringQueue(4);
+    q.offer(UserMessage.text("caller"));
+    q.offer(UserMessage.text("hook"), MessageOrigin.HOOK_INJECT);
+
+    assertEquals(
+        List.of(
+            new SteeringQueue.Pending(UserMessage.text("caller"), Optional.empty()),
+            new SteeringQueue.Pending(
+                UserMessage.text("hook"), Optional.of(MessageOrigin.HOOK_INJECT))),
+        q.drain());
+  }
+
+  @Test
+  void anOriginIsRequired() {
+    var q = new SteeringQueue(1);
+    var message = UserMessage.text("hook");
+
+    var ex = assertThrows(NullPointerException.class, () -> q.offer(message, null));
+
+    assertEquals("origin must not be null", ex.getMessage());
+    assertEquals(0, q.size());
+  }
+
+  @Test
+  void aPendingMessageNeedsAMessageAndAnOrigin() {
+    var message = UserMessage.text("hook");
+    Optional<MessageOrigin> none = Optional.empty();
+
+    assertEquals(
+        List.of("message must not be null", "origin must not be null"),
+        List.of(
+            assertThrows(NullPointerException.class, () -> new SteeringQueue.Pending(null, none))
+                .getMessage(),
+            assertThrows(NullPointerException.class, () -> new SteeringQueue.Pending(message, null))
+                .getMessage()));
+  }
+
+  private static List<String> texts(List<SteeringQueue.Pending> drained) {
+    return drained.stream().map(pending -> pending.message().text()).toList();
   }
 }

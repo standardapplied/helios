@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.session.store.SessionConflictException;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
@@ -165,6 +166,41 @@ public abstract class SessionStoreContract {
     store.append(SID, history.size(), List.of(replaced(history.toArray(Message[]::new))));
 
     assertEquals(new StoredSession(SID, history.size() + 1, history), store.load(SID));
+  }
+
+  @Test
+  void aRunEndedRoundTripsAndIsTheLastRunEndedOnlyWhileItIsTheLastEntry() {
+    var store = store();
+    var ended = new SessionEntry.RunEnded("run-1", AT, "Success");
+    var correction =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("fix the fields")
+            .withMetadata(MessageOrigin.SCHEMA_CORRECTION.metadata())
+            .build();
+    store.append(SID, 0, List.of(added(Message.user("a")), added(correction), ended));
+
+    var loaded = store.load(SID);
+    store.append(SID, 3, List.of(added(Message.user("b"))));
+
+    assertEquals(
+        new StoredSession(SID, 3, List.of(Message.user("a"), correction), Optional.of(ended)),
+        loaded);
+    assertEquals(
+        Optional.of(MessageOrigin.SCHEMA_CORRECTION), MessageOrigin.of(loaded.history().get(1)));
+    assertEquals(Optional.empty(), store.load(SID).lastRunEnded());
+  }
+
+  @Test
+  void aRunEndedAfterTheLastHistoryReplacedIsRead() {
+    var store = store();
+    var ended = new SessionEntry.RunEnded("run-2", AT, "Cancelled");
+    store.append(SID, 0, List.of(added(Message.user("a"))));
+    store.append(SID, 1, List.of(replaced(Message.user("summary")), ended));
+
+    assertEquals(
+        new StoredSession(SID, 3, List.of(Message.user("summary")), Optional.of(ended)),
+        store.load(SID));
   }
 
   @Test
