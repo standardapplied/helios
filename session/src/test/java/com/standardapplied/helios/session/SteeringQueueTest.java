@@ -168,6 +168,8 @@ final class SteeringQueueTest {
 
     List<UserMessage> drained = q.drain();
     drained.add(UserMessage.text("mine"));
+    q.offer(UserMessage.text("later"));
+    q.drain();
 
     assertEquals(
         List.of("caller", "hook", "mine"), drained.stream().map(UserMessage::text).toList());
