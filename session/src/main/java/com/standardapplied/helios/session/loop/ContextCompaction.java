@@ -12,10 +12,11 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The context watermark and compaction step the {@link AgentLoop} runs before and after every turn:
- * counts the tokens of the next request ({@link ConversationHistory#tokens(TokenCounter)}), fires
- * {@link QueryEvent.ContextWarning} on the first crossing of {@link #CONTEXT_WARNING_WATERMARK},
- * and on crossings of {@link #CONTEXT_COMPACT_WATERMARK} runs the {@link ContextCompactor}.
+ * The context watermark and compaction step the {@link AgentLoop} runs before every turn and after
+ * every turn the run goes on from, never after the turn that ends it: counts the tokens of the next
+ * request ({@link ConversationHistory#tokens(TokenCounter)}), fires {@link
+ * QueryEvent.ContextWarning} on the first crossing of {@link #CONTEXT_WARNING_WATERMARK}, and on
+ * crossings of {@link #CONTEXT_COMPACT_WATERMARK} runs the {@link ContextCompactor}.
  */
 final class ContextCompaction {
 
@@ -32,8 +33,9 @@ final class ContextCompaction {
    * reported for the last request, system prompt and tool definitions included, plus the {@link
    * TokenCounter}'s estimate of the messages appended since; with no such report, the estimate of
    * <em>every message currently in the conversation history</em>. Either way it is the size of the
-   * whole next request, never just what one turn added. The watermark check runs both before and
-   * after every turn so the trigger fires as soon as the cumulative history crosses the threshold.
+   * whole next request, never just what one turn added. The watermark check runs before every turn
+   * and after every turn the run goes on from, so the trigger fires before the next request once
+   * the cumulative history crosses the threshold.
    */
   static final double CONTEXT_WARNING_WATERMARK = 0.85;
 

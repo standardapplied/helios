@@ -176,7 +176,6 @@ class SessionRunCharacterizationTest {
           "AssistantText turn=3 not json",
           "ModelCallEnded turn=3 attempt=1 ERROR tokens=0 error=true",
           "TurnEnded turn=3 TOOL_CALLS",
-          "UserMessageReceived turn=3 Your structured output did not match the schema. Fix the listed fields and re-emit the structured output:\\n  - answer is required but missing\\n files=0",
           "AssistantText turn=4 {\"answer\":\"draft\"}",
           "ModelCallEnded turn=4 attempt=1 STOP tokens=26 error=false",
           "TurnEnded turn=4 STOP",

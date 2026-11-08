@@ -107,11 +107,15 @@ final class ContextCompactionTest {
 
   /** Two turns, the second reporting {@code second}, a message steered in during the first. */
   private Model twoTurns(Usage second) {
+    return twoTurns(FIRST_TURN, second);
+  }
+
+  /**
+   * Two turns reporting {@code first} and {@code second}, a message steered in during the first.
+   */
+  private Model twoTurns(Usage first, Usage second) {
     var script =
-        ScriptedModel.newBuilder()
-            .withTextTurn("one", FIRST_TURN)
-            .withTextTurn("two", second)
-            .build();
+        ScriptedModel.newBuilder().withTextTurn("one", first).withTextTurn("two", second).build();
     return LoopModels.onEachCall(
         script,
         call -> {
@@ -243,6 +247,7 @@ final class ContextCompactionTest {
   @Test
   void aReportedTurnAnchorsTheCountOnItsInputAndEstimatesOnlyWhatFollowed() {
     run(loop(twoTurns(Usage.of(6_000, 7)), ContextCompactor.disabled()), 6_400L);
+    state.history().tokens(recording);
 
     var history = state.history().snapshot();
     assertEquals(
@@ -279,6 +284,7 @@ final class ContextCompactionTest {
             new CompactionResult(List.of(history.getLast()), Usage.of(9_000, 1), "summary");
 
     run(loop(twoTurns(Usage.of(50, 7)), toLastMessage), LIMIT_OF_THE_LAST_REACHABLE_REPORT);
+    state.history().tokens(recording);
 
     var history = state.history().snapshot();
     assertEquals(
@@ -292,24 +298,24 @@ final class ContextCompactionTest {
 
   @Test
   void aSummaryCallsUsageOnARejectedResultLeavesTheModelsAnchor() {
-    var script = ScriptedModel.newBuilder().withTextTurn("one", FIRST_TURN).build();
-    var compactions = new AtomicInteger();
+    var counts = new ArrayList<Long>();
     ContextCompactor reporting =
         (history, context) -> {
-          compactions.incrementAndGet();
+          counts.add(state.history().tokens(recording));
           return new CompactionResult(history, Usage.of(9_000, 1), "summary");
         };
 
-    run(loop(script, reporting), LIMIT_OF_THE_LAST_REACHABLE_REPORT);
+    run(loop(twoTurns(Usage.of(6_000, 7)), reporting), LIMIT_OF_THE_LAST_REACHABLE_REPORT);
 
-    assertEquals(1, compactions.get());
-    assertEquals(FIRST_TURN_INPUT + TOKENS_PER_MESSAGE, state.history().tokens(recording));
+    assertEquals(
+        List.of(FIRST_TURN_INPUT + TOKENS_PER_MESSAGE, FIRST_TURN_INPUT + 2 * TOKENS_PER_MESSAGE),
+        counts);
   }
 
   @Test
   void aPausedTurnCountsFromItsLastSegmentsRequestAndDoesNotCompact() {
     var paused = Usage.of(100_000, 10).plus(Usage.of(110_000, 20));
-    var script = ScriptedModel.newBuilder().withTextTurn("one", paused).build();
+    var script = twoTurns(paused, paused);
     var compactions = new AtomicInteger();
     ContextCompactor counting =
         (history, context) -> {
@@ -326,7 +332,7 @@ final class ContextCompactionTest {
 
   @Test
   void noCompactorRunsWhileWhatItCannotSeeReachesTheWatermarkByItself() {
-    var script = ScriptedModel.newBuilder().withTextTurn("one", FIRST_TURN).build();
+    var script = twoTurns(FIRST_TURN);
     var compactions = new AtomicInteger();
     ContextCompactor counting =
         (history, context) -> {
@@ -338,7 +344,7 @@ final class ContextCompactionTest {
 
     assertEquals(0, compactions.get());
     assertEquals(
-        List.of("first", "one"),
+        List.of("first", "one", "second", "two"),
         state.history().snapshot().stream().map(Message::content).toList());
   }
 
@@ -386,8 +392,8 @@ final class ContextCompactionTest {
 
     var history = state.history().snapshot();
     assertEquals(2, history.size());
-    assertEquals(history.subList(1, 2), counted.getLast());
     assertEquals(6_000L + TOKENS_PER_MESSAGE, state.history().tokens(recording));
+    assertEquals(history.subList(1, 2), counted.getLast());
   }
 
   @Test
@@ -407,7 +413,7 @@ final class ContextCompactionTest {
 
     run(fixture.loop(collaborators, runner, recording, ContextCompactor.disabled()), 1_000_000L);
 
-    assertEquals(state.history().snapshot().subList(1, 2), counted.get(1));
+    assertEquals(state.history().snapshot().subList(1, 3), counted.get(1));
   }
 
   @Test
@@ -423,6 +429,7 @@ final class ContextCompactionTest {
   void aTurnReportingNoInputClearsTheAnchor() {
     run(loop(twoTurns(Usage.of(0, 7)), ContextCompactor.disabled()), 1_000_000L);
 
+    assertEquals(4 * TOKENS_PER_MESSAGE, state.history().tokens(recording));
     assertEquals(state.history().snapshot(), counted.getLast());
   }
 

@@ -8,13 +8,17 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FileReference;
+import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -96,5 +100,44 @@ final class OnUserMessageHookIntegrationTest {
     assertTrue(
         loop.eventsOf(QueryEvent.HookFired.class).isEmpty(),
         "Continue outcomes must not emit HookFired");
+  }
+
+  @Test
+  void anInjectedMessageIsNeverComposedWithTheCallersAndKeepsItsPlaceInTheQueue() {
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("one"));
+    queue.offer(UserMessage.text("hook"), MessageOrigin.HOOK_INJECT);
+    queue.offer(UserMessage.text("two"));
+    queue.offer(UserMessage.text("three"));
+
+    loop.run(ScriptedModel.newBuilder().withTextTurn("ok").build(), queue);
+
+    assertEquals(
+        List.of(
+            Message.user("one"),
+            injected("hook"),
+            Message.user("[messages composed: 2]\ntwo\nthree"),
+            Message.assistant("ok")),
+        loop.history());
+    assertEquals(4, loop.eventsOf(QueryEvent.UserMessageReceived.class).size());
+  }
+
+  @Test
+  void aRewrittenInjectedMessageKeepsItsTag() {
+    OnUserMessageHook rewriting = (msg, ctx) -> HookOutcome.mutateText("rewritten");
+    var queue = new SteeringQueue(8);
+    queue.offer(UserMessage.text("hook"), MessageOrigin.HOOK_INJECT);
+
+    loop.run(ScriptedModel.newBuilder().withTextTurn("ok").build(), queue, rewriting);
+
+    assertEquals(List.of(injected("rewritten"), Message.assistant("ok")), loop.history());
+  }
+
+  private static Message injected(String text) {
+    return Message.newBuilder()
+        .withRole(Role.USER)
+        .withContent(text)
+        .withMetadata(MessageOrigin.HOOK_INJECT.metadata())
+        .build();
   }
 }

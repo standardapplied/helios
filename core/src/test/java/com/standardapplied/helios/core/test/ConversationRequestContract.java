@@ -3,9 +3,11 @@
 package com.standardapplied.helios.core.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Role;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -100,6 +102,30 @@ public abstract class ConversationRequestContract {
                 Message.user(turns.get(2))));
 
     assertEquals(turns, turnTexts(request));
+  }
+
+  /**
+   * Two user messages in a row, the second tagged by the session as an injected one, as a session
+   * stores a caller's message followed by a hook's {@code Inject}: both texts are sent in order,
+   * and the tag, metadata only the session reads, is not.
+   */
+  @Test
+  void twoUserMessagesInARowAreBothSentWithoutTheSessionsTag() {
+    var injected =
+        Message.newBuilder()
+            .withRole(Role.USER)
+            .withContent("Answer in one word.")
+            .withMetadata(Map.of("helios.origin", "hook-inject"))
+            .build();
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model -> model.chat(List.of(Message.user("What is my name?"), injected), List.of()));
+
+    var body = requests.getFirst().body();
+    assertEquals(List.of("What is my name?", "Answer in one word."), turnTexts(parse(body)));
+    assertFalse(body.contains("helios.origin") || body.contains("hook-inject"), body);
   }
 
   @Test

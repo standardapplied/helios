@@ -8,8 +8,9 @@ import java.util.Objects;
 /**
  * Where a session's conversation lives between processes: an append-only log of {@link SessionEntry
  * entries} per session id, numbered from {@code 1} without gaps. A session loads the log when it
- * opens and appends one batch per turn; the store refuses a batch written against a last sequence
- * number it no longer holds, so two writers to one session are detected, never merged.
+ * opens and appends one batch per turn its run goes on from and one at the run's end; the store
+ * refuses a batch written against a last sequence number it no longer holds, so two writers to one
+ * session are detected, never merged.
  *
  * <p>Implementations are thread-safe.
  */

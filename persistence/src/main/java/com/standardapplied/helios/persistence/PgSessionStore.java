@@ -224,6 +224,7 @@ public final class PgSessionStore implements SessionStore {
       return switch (entry) {
         case SessionEntry.MessageAdded _ -> "message";
         case SessionEntry.HistoryReplaced _ -> "replaced";
+        case SessionEntry.RunEnded _ -> "ended";
       };
     }
   }

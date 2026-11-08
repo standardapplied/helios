@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
@@ -28,6 +29,7 @@ import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import java.io.IOException;
@@ -117,16 +119,25 @@ final class ModelCallTest {
   }
 
   @Test
-  void aParseFailureWithNothingToEchoQueuesOnlyTheCorrection() {
+  void aParseFailureWithNothingToEchoAppendsOnlyTheTaggedCorrection() {
     var parseFailure =
         new StructuredOutputParseException(List.of("answer is required but missing"), null);
     var call = modelCall(failing(cancellation -> parseFailure));
+    var before = state.history().snapshot().size();
 
     var attempts = call.stream(state, SessionLimits.defaults(), List.of());
 
     assertTrue(call.selfCorrectSchema(state, attempts));
-    assertEquals(1, state.history().snapshot().size());
-    assertEquals(parseFailure.correctionMessage(), queue.drain().getFirst().text());
+    var added = state.history().snapshot().subList(before, state.history().snapshot().size());
+    assertEquals(
+        List.of(
+            Message.newBuilder()
+                .withRole(Role.USER)
+                .withContent(parseFailure.correctionMessage())
+                .withMetadata(MessageOrigin.SCHEMA_CORRECTION.metadata())
+                .build()),
+        added);
+    assertEquals(0, queue.size());
   }
 
   @Test
