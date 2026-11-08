@@ -324,9 +324,7 @@ final class DurableSessionTest {
 
     var turn =
         endedRun(
-            options(
-                ScriptedModel.newBuilder().withTextTurn("reply").build(),
-                joiningFailed(atTurnEnd)));
+            options(goingOnFromAToolRound(), joiningFailed(atTurnEnd)).withTools(List.of(echo())));
     var run =
         endedRun(
             options(
@@ -457,9 +455,9 @@ final class DurableSessionTest {
               session.get().interrupt();
               return refusal;
             });
-    var model = ScriptedModel.newBuilder().withTextTurn("reply").build();
+    var model = goingOnFromAToolRound();
 
-    try (var opened = AgentSession.open(options(model, store).build())) {
+    try (var opened = AgentSession.open(options(model, store).withTools(List.of(echo())).build())) {
       session.set(opened);
       var error = errorOf(Await.value("run", opened.send("go")));
 
@@ -485,6 +483,11 @@ final class DurableSessionTest {
       events.awaitDone();
       return Map.entry(failure, events.eventsOf(QueryEvent.RunEnded.class));
     }
+  }
+
+  /** A model whose run goes on from a tool round, so its first write is a turn's, not the end's. */
+  private static ScriptedModel goingOnFromAToolRound() {
+    return ScriptedModel.newBuilder().withToolCallsTurn(ECHO).withTextTurn("reply").build();
   }
 
   private static ScriptedModel threeTurns() {
@@ -550,11 +553,13 @@ final class DurableSessionTest {
   void afterARefusedWriteNothingMoreIsWritten() {
     var store =
         new RecordingStore(index -> index == 0 ? new SessionStoreException("full", null) : null);
-    var model = ScriptedModel.newBuilder().withTextTurn("reply").build();
+    var model = goingOnFromAToolRound();
 
-    try (var session = AgentSession.open(options(model, store).build())) {
+    try (var session =
+        AgentSession.open(options(model, store).withTools(List.of(echo())).build())) {
       assertEquals("SessionStoreFailed", errorOf(Await.value("run", session.send("go"))).kind());
     }
     assertEquals(List.of(), store.batches);
+    assertEquals(1, model.calls().size());
   }
 }
