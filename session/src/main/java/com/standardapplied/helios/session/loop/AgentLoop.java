@@ -38,16 +38,18 @@ import java.util.logging.Logger;
  *   <li>Before the run's first turn, if no message reached the history (every one was blocked) and
  *       none was sent meanwhile, end with {@link ResultMessage.ErrorDuringExecution} of kind {@code
  *       NoUserMessage}: a run calls the model only after a user message of its own.
- *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)},
- *       then append what the turn added to the session's store, if it has one ({@link
- *       StoredHistory}).
+ *   <li>Advance the turn counter and call {@link TurnRunner#runTurn(SessionState, SessionLimits)}.
  *   <li>If the turn left a terminal value on {@link SessionState} (hook-driven stop), respect it.
  *       Otherwise hand the outcome to {@link StopClassifier}; if it returns terminal, fire {@link
  *       HookRegistry#firePreStop pre-stop hooks} — {@link HookOutcome.Inject Inject} cancels the
  *       termination and queues a synthetic user message, and the turn is classified again as one
  *       with a message queued, so the run's limits still apply; {@link HookOutcome.Stop Stop}
  *       overrides the success text; {@link HookOutcome.Continue Continue} confirms the stop.
- *   <li>Otherwise iterate.
+ *   <li>Otherwise the run goes on: run the watermark and compaction step, append what the history
+ *       gained to the session's store, if it has one ({@link StoredHistory}), and iterate. A turn
+ *       that ends the run is neither compacted nor written here: the run's end writes it with the
+ *       run's {@link com.standardapplied.helios.session.store.SessionEntry.RunEnded}, so a store
+ *       holds a run's last turn only together with its end.
  * </ol>
  *
  * <p>Every terminal is decided through the session's {@link RunBoundary}, under the lock {@code
@@ -65,9 +67,9 @@ import java.util.logging.Logger;
  * <p>Every emitted {@link QueryEvent} fires {@link HookRegistry#fireOnStreamEvent stream-event
  * hooks} for observe-only consumers.
  *
- * <p>Draining the queue is {@link SteeringDrain}, the watermark and compaction step before and
- * after every turn is {@link ContextCompaction}, and the pre-stop decision is {@link
- * PreStopDecision}; this class keeps the iteration.
+ * <p>Draining the queue is {@link SteeringDrain}, the watermark and compaction step before every
+ * turn and after every turn the run goes on from is {@link ContextCompaction}, and the pre-stop
+ * decision is {@link PreStopDecision}; this class keeps the iteration.
  *
  * <h2>Thread-safety</h2>
  *
@@ -185,15 +187,26 @@ public final class AgentLoop {
     if (state.isTerminal()) {
       return Optional.of(decided(state, limits, boundary, state.terminal().orElseThrow()));
     }
+    var ended = classify(state, limits, boundary, outcome);
+    if (ended.isPresent()) {
+      return ended;
+    }
+    compaction.check(state, limits);
+    return stored(state, boundary);
+  }
+
+  /**
+   * Append the turn the run goes on from to the store; a refused write ends the run, decided
+   * through {@code boundary}, with the refusal as its terminal.
+   */
+  private Optional<ResultMessage> stored(SessionState state, RunBoundary boundary) {
     var refusal =
         storedHistory.write(
             state, collaborators.clock().instant(), collaborators.secrets().redactor());
     if (refusal.isPresent()) {
       boundary.end(false);
-      return refusal;
     }
-    compaction.check(state, limits);
-    return classify(state, limits, boundary, outcome);
+    return refusal;
   }
 
   /**

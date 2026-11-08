@@ -128,8 +128,7 @@ final class DurableSessionTest {
         List.of(
             List.of("USER", "ASSISTANT", "TOOL"),
             List.of("ASSISTANT", "TOOL"),
-            List.of("ASSISTANT"),
-            List.of("ended Success")),
+            List.of("ASSISTANT", "ended Success")),
         store.shapes());
     var last = model.calls().getLast();
     var expected = new ArrayList<>(last.subList(1, last.size()));
@@ -138,14 +137,40 @@ final class DurableSessionTest {
   }
 
   @Test
+  void aTurnThatAddsNothingWritesNoBatch() {
+    var store = new RecordingStore();
+    var model = ScriptedModel.newBuilder().withToolCallsTurn(ECHO).withTextTurn("done").build();
+    PreModelTurnHook nudging =
+        (history, ctx) -> ctx.turnIndex() == 2 ? HookOutcome.inject("nudge") : HookOutcome.cont();
+
+    try (var session =
+        AgentSession.open(
+            options(model, store).withTools(List.of(echo())).withHook(nudging).build())) {
+      Await.value("run", session.send("go"));
+    }
+
+    assertEquals(
+        List.of(
+            List.of("USER", "ASSISTANT", "TOOL"), List.of("USER", "ASSISTANT", "ended Success")),
+        store.shapes());
+    assertEquals(2, model.calls().size());
+  }
+
+  @Test
   void aCompactionIsWrittenAsOneHistoryReplacedAndAppendsResumeAfterIt() {
     var store = new RecordingStore();
-    var model = ScriptedModel.newBuilder().withTextTurn("one").withTextTurn("two").build();
+    var model =
+        ScriptedModel.newBuilder()
+            .withTextTurn("one")
+            .withTextTurn("two")
+            .withTextTurn("three")
+            .build();
     var compactions = new AtomicInteger();
     ContextCompactor compactor =
         (history, context) ->
             compactions.incrementAndGet() == 2
-                ? CompactionResult.noOp(List.of(Message.system("sys"), Message.user("summary")))
+                ? CompactionResult.noOp(
+                    List.of(Message.system("sys"), Message.user("summary"), history.getLast()))
                 : CompactionResult.noOp(history);
 
     try (var session =
@@ -153,22 +178,28 @@ final class DurableSessionTest {
             overWatermark(options(model, store).withSystemPrompt("sys"), compactor).build())) {
       Await.value("run 1", session.send("first"));
       Await.value("run 2", session.send("second"));
+      Await.value("run 3", session.send("third"));
     }
 
     assertEquals(
         List.of(
-            List.of("USER", "ASSISTANT"),
+            List.of("USER", "ASSISTANT", "ended Success"),
             List.of("replaced", "ended Success"),
-            List.of("USER", "ASSISTANT"),
-            List.of("ended Success")),
+            List.of("USER", "ASSISTANT", "ended Success")),
         store.shapes());
     var replaced =
         assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
-    assertEquals(List.of(Message.user("summary")), replaced.history());
-    assertEquals(List.of(Message.user("second")), messages(store.batches.get(2)).subList(0, 1));
     assertEquals(
-        List.of(Message.user("summary"), Message.user("second")),
-        store.load(SID).history().subList(0, 2));
+        List.of(Message.user("summary"), Message.user("second"), Message.assistant("two")),
+        replaced.history());
+    assertEquals(
+        List.of(
+            Message.user("summary"),
+            Message.user("second"),
+            Message.assistant("two"),
+            Message.user("third"),
+            Message.assistant("three")),
+        store.load(SID).history());
   }
 
   @Test
@@ -198,22 +229,22 @@ final class DurableSessionTest {
 
     assertEquals(
         List.of(
-            List.of("USER", "ASSISTANT"),
-            List.of("ended Success"),
-            List.of("replaced"),
-            List.of("ended Success"),
-            List.of("USER", "ASSISTANT"),
-            List.of("ended Success")),
+            List.of("USER", "ASSISTANT", "ended Success"),
+            List.of("replaced", "ended Success"),
+            List.of("USER", "ASSISTANT", "ended Success")),
         store.shapes());
     var replaced =
-        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(2).get(0));
+        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
     var request = model.calls().get(1);
     assertEquals(List.of(Message.system("sys"), Message.user("rewritten")), request);
     assertEquals(
         List.of(Message.user("rewritten"), "two"),
         List.of(replaced.history().get(0), replaced.history().get(1).content()));
     assertEquals(2, replaced.history().size());
-    assertEquals(Message.user("third"), messages(store.batches.get(4)).getFirst());
+    assertEquals(
+        Message.user("third"),
+        assertInstanceOf(SessionEntry.MessageAdded.class, store.batches.get(2).getFirst())
+            .message());
   }
 
   @Test
@@ -436,7 +467,7 @@ final class DurableSessionTest {
     assertEquals(List.of(Message.user("summary"), Message.user("new")), model.calls().getFirst());
     var replaced =
         assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.getFirst().getFirst());
-    assertEquals(List.of(List.of("replaced"), List.of("ended Success")), store.shapes());
+    assertEquals(List.of(List.of("replaced", "ended Success")), store.shapes());
     assertEquals(
         List.of(Message.user("summary"), Message.user("new"), "answer"),
         List.of(

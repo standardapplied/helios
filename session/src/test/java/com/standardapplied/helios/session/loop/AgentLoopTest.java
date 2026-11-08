@@ -361,15 +361,12 @@ final class AgentLoopTest {
     var state = freshState();
     var adaptive =
         LoopModels.onEachCall(
-            steps(2),
+            steps(3),
             n -> {
-              if (n == 1) {
-                // Turn 1 enqueues a follow-up so the loop runs a second turn after the
-                // watermark fires for the first time.
+              if (n < 3) {
                 queue.offer(UserMessage.text("again"));
-              } else if (n == 2) {
-                // Turn 2 replaces the history, as a compaction does, before the watermark
-                // check fires again for this turn.
+              }
+              if (n == 2) {
                 state.history().replace(state.history().snapshot());
               }
             });
@@ -416,8 +413,10 @@ final class AgentLoopTest {
           compactorCalled.incrementAndGet();
           return CompactionResult.noOp(List.of(history.get(history.size() - 1)));
         };
+    var state = freshState();
+    state.history().append(Message.assistant("earlier"));
     buildLoopWith(fixedModel("ok", FinishReason.STOP, Usage.of(0, 1)), queue, perMessage, shrinking)
-        .run(freshState(), limits, natural -> true);
+        .run(state, limits, natural -> true);
     assertEquals(1, compactorCalled.get(), "compactor must be invoked at 0.95");
     var edits = events.stream().filter(e -> e instanceof QueryEvent.ContextEdited).toList();
     assertEquals(1, edits.size(), "ContextEdited must fire after a successful compaction");
@@ -743,17 +742,21 @@ final class AgentLoopTest {
     // SHOULD trip only when the history has accumulated ≥ 2 messages — exactly what a cumulative
     // implementation does. A buggy per-turn-only implementation would never trip, because no
     // single message reaches 85% of 100. The first turn appends a user message AND an assistant
-    // reply, so the post-turn check sees a 2-message history (100 tokens total, 100% utilisation).
+    // reply and queues a follow-up, so the next check sees at least two 50-token messages.
     final var perMessageTokens = 50L;
     TokenCounter cumulative = msgs -> perMessageTokens * msgs.size();
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("first"));
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
-    buildLoopWith(
-            fixedModel("ok", FinishReason.STOP, Usage.of(0, 0)),
-            queue,
-            cumulative,
-            ContextCompactor.disabled())
+    var followedUp =
+        LoopModels.onEachCall(
+            steps(2),
+            n -> {
+              if (n == 1) {
+                queue.offer(UserMessage.text("again"));
+              }
+            });
+    buildLoopWith(followedUp, queue, cumulative, ContextCompactor.disabled())
         .run(freshState(), limits, natural -> true);
     assertTrue(
         events.stream().anyMatch(e -> e instanceof QueryEvent.ContextWarning),
@@ -766,8 +769,8 @@ final class AgentLoopTest {
   void compactionCostPricedAgainstCompactorModelNotMainLoop() {
     var queue = new SteeringQueue(8);
     queue.offer(UserMessage.text("hi"));
-    // Stateful counter: first call (pre-turn) sits below 0.85; subsequent calls (post-turn)
-    // cross the 0.95 watermark exactly once so the compactor fires deterministically.
+    // Stateful counter: first call (pre-turn) sits below 0.85; subsequent calls (after the turn
+    // the run goes on from) cross the 0.95 watermark so the compactor fires deterministically.
     var watermarkCalls = new AtomicInteger(0);
     TokenCounter staged = msgs -> watermarkCalls.getAndIncrement() == 0 ? 50L : 96L * msgs.size();
     var limits = SessionLimits.newBuilder().withMaxContextTokens(100L).build();
@@ -786,10 +789,17 @@ final class AgentLoopTest {
                 Usage.of(1_000_000, 100_000),
                 "summary-model");
     var model =
-        ScriptedModel.newBuilder()
-            .withId("test")
-            .withResponseTurn(LoopModels.response("ok", FinishReason.STOP, Usage.of(0, 0)))
-            .build();
+        LoopModels.onEachCall(
+            ScriptedModel.newBuilder()
+                .withId("test")
+                .withResponseTurn(LoopModels.response("ok", FinishReason.STOP, Usage.of(0, 0)))
+                .withResponseTurn(LoopModels.response("done", FinishReason.STOP, Usage.of(0, 0)))
+                .build(),
+            n -> {
+              if (n == 1) {
+                queue.offer(UserMessage.text("again"));
+              }
+            });
     var collaborators = fixture.collaborators(hooks, dispatch, queue);
     var loop =
         fixture.loop(
