@@ -16,6 +16,7 @@ import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnUserMessageHook;
 import com.standardapplied.helios.session.hooks.PreModelTurnHook;
 import com.standardapplied.helios.session.hooks.PreStopHook;
 import com.standardapplied.helios.session.store.MessageOrigin;
@@ -70,9 +71,9 @@ final class RunEndedSessionTest {
         List.of("go", "not json", correction().correctionMessage(), VALID),
         stored.history().stream().map(Message::content).toList());
     assertEquals(
-        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "Success")),
+        Optional.of(
+            new SessionEntry.RunEnded(result.runId(), now.get(), "Success", Optional.of(VALID))),
         stored.lastRunEnded());
-    assertEquals(Message.assistant(VALID), answer(stored.history()));
   }
 
   @Test
@@ -219,9 +220,9 @@ final class RunEndedSessionTest {
 
     assertEquals(List.of(Message.user("first"), Message.assistant("answer one")), firstHistory);
     assertEquals(100L, counter.count(firstHistory));
-    assertEquals(Message.assistant("answer one"), answer(firstHistory));
     assertEquals(List.of("USER", "ASSISTANT", "ended Success"), store.shapes().getFirst());
     assertEquals("Success", firstEnded.terminal());
+    assertEquals(Optional.of("answer one"), firstEnded.result());
     var request = model.calls().getLast();
     assertEquals(
         List.of(SummarizingCompactor.SUMMARY_PREFIX + "the summary", "second"),
@@ -262,11 +263,67 @@ final class RunEndedSessionTest {
     assertEquals(2_000_000L, budget.microUsdSpent());
     assertEquals(2, model.calls().size());
     assertEquals(
-        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "ErrorMaxBudgetUsd")),
+        Optional.of(
+            new SessionEntry.RunEnded(
+                result.runId(), now.get(), "ErrorMaxBudgetUsd", Optional.empty())),
         store.load(SID).lastRunEnded());
     assertEquals(
         List.of(List.of("replaced"), List.of("ASSISTANT", "ended ErrorMaxBudgetUsd")),
         store.shapes());
+  }
+
+  // ── the run's answer ────────────────────────────────────────────────────
+
+  @Test
+  void aPreStopStopStoresItsTextAsTheRunsResultAndAddsNoMessage() {
+    PreStopHook stopping = (response, ctx) -> HookOutcome.stop("hook answer");
+    var model = ScriptedModel.newBuilder().withTextTurn("model draft").build();
+
+    var result = sent(options(model).withHook(stopping));
+
+    var stored = store.load(SID);
+    assertEquals(
+        Optional.of(
+            new SessionEntry.RunEnded(
+                result.runId(), now.get(), "Success", Optional.of("hook answer"))),
+        stored.lastRunEnded());
+    assertEquals(List.of(Message.user("go"), Message.assistant("model draft")), stored.history());
+  }
+
+  @Test
+  void anOnUserMessageStopStoresItsTextAsTheRunsResultWithoutAModelCall() {
+    OnUserMessageHook stopping = (message, ctx) -> HookOutcome.stop("handled");
+    var model = ScriptedModel.newBuilder().withTextTurn("never").build();
+
+    var result = sent(options(model).withHook(stopping));
+
+    assertEquals(List.of(), model.calls());
+    assertEquals(List.of(List.of("ended Success")), store.shapes());
+    assertEquals(
+        Optional.of(
+            new SessionEntry.RunEnded(
+                result.runId(), now.get(), "Success", Optional.of("handled"))),
+        store.load(SID).lastRunEnded());
+  }
+
+  @Test
+  void anEmptyReplyStoresAnEmptyResultThoughAnEarlierRunsAnswerIsTheLastAssistantMessage() {
+    var model = ScriptedModel.newBuilder().withTextTurn("first answer").withTextTurn("").build();
+
+    ResultMessage second;
+    try (var session = AgentSession.open(options(model).build())) {
+      Await.value("the first run", session.send("one"));
+      second = Await.value("the second run", session.send("two"));
+    }
+
+    var stored = store.load(SID);
+    assertEquals(
+        Optional.of(
+            new SessionEntry.RunEnded(second.runId(), now.get(), "Success", Optional.of(""))),
+        stored.lastRunEnded());
+    assertEquals(
+        List.of(Message.user("one"), Message.assistant("first answer"), Message.user("two")),
+        stored.history());
   }
 
   // ── inject ──────────────────────────────────────────────────────────────
@@ -350,7 +407,8 @@ final class RunEndedSessionTest {
         SummarizingCompactor.SUMMARY_PREFIX + "the summary",
         replaced.history().getFirst().content());
     assertEquals(
-        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "Success")),
+        Optional.of(
+            new SessionEntry.RunEnded(result.runId(), now.get(), "Success", Optional.of(VALID))),
         store.load(SID).lastRunEnded());
   }
 
@@ -372,7 +430,8 @@ final class RunEndedSessionTest {
             Optional.empty()),
         stored.history().stream().map(MessageOrigin::of).toList());
     assertEquals(
-        Optional.of(new SessionEntry.RunEnded(result.runId(), now.get(), "Success")),
+        Optional.of(
+            new SessionEntry.RunEnded(result.runId(), now.get(), "Success", Optional.of(VALID))),
         stored.lastRunEnded());
   }
 
@@ -430,13 +489,5 @@ final class RunEndedSessionTest {
 
   private static ToolBinding noopTool() {
     return EndingSessions.binding("noop", (args, ctx) -> ToolResult.success("ok"));
-  }
-
-  /** The answer rule a host applies: the last assistant message that carries no origin. */
-  private static Message answer(List<Message> history) {
-    return history.reversed().stream()
-        .filter(m -> m.role() == Role.ASSISTANT && MessageOrigin.of(m).isEmpty())
-        .findFirst()
-        .orElseThrow();
   }
 }

@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * One entry of a session's stored log, written by the run {@link #runId()} at {@link #at()}: a
@@ -89,8 +90,14 @@ public sealed interface SessionEntry {
    * @param terminal the simple name of the run's {@link ResultMessage} record, such as {@code
    *     Success} or {@code ErrorMaxTurns}, the spelling a run's span records as {@code
    *     helios.terminal}
+   * @param result the run's answer, {@link ResultMessage.Success#result()} as the run returned it,
+   *     whether the model's reply, a hook's {@code Stop} text or empty; present exactly when {@code
+   *     terminal} is {@code Success}; non-null
    */
-  record RunEnded(String runId, Instant at, String terminal) implements SessionEntry {
+  record RunEnded(String runId, Instant at, String terminal, Optional<String> result)
+      implements SessionEntry {
+
+    private static final String SUCCESS = ResultMessage.Success.class.getSimpleName();
 
     private static final List<String> TERMINALS =
         Arrays.stream(ResultMessage.class.getPermittedSubclasses())
@@ -102,16 +109,25 @@ public sealed interface SessionEntry {
      * Validates the entry.
      *
      * @throws NullPointerException if a component is null
-     * @throws IllegalArgumentException if {@code runId} is blank, or {@code terminal} names no
-     *     {@link ResultMessage} subtype
+     * @throws IllegalArgumentException if {@code runId} is blank, {@code terminal} names no {@link
+     *     ResultMessage} subtype, or {@code result} is present on any terminal but {@code Success}
+     *     or empty on {@code Success}
      */
     public RunEnded {
       Validate.notBlank("runId", runId);
       Objects.requireNonNull(at, "at must not be null");
       Objects.requireNonNull(terminal, "terminal must not be null");
+      Objects.requireNonNull(result, "result must not be null");
       if (!TERMINALS.contains(terminal)) {
         throw new IllegalArgumentException(
             "terminal must name a ResultMessage subtype " + TERMINALS + ", got '" + terminal + "'");
+      }
+      if (terminal.equals(SUCCESS) != result.isPresent()) {
+        throw new IllegalArgumentException(
+            "result must be present exactly when terminal is Success, got "
+                + (result.isPresent() ? "one" : "none")
+                + " on "
+                + terminal);
       }
     }
 
@@ -120,13 +136,18 @@ public sealed interface SessionEntry {
      *
      * @param runId the run that ended; non-blank
      * @param at when it ended; non-null
-     * @param terminal the run's terminal; non-null
+     * @param terminal the run's terminal, whose result the entry keeps when it is a {@code
+     *     Success}; non-null
      * @return the entry
      * @throws NullPointerException if an argument is null
      * @throws IllegalArgumentException if {@code runId} is blank
      */
     public static RunEnded of(String runId, Instant at, ResultMessage terminal) {
-      return new RunEnded(runId, at, terminal.getClass().getSimpleName());
+      var result =
+          terminal instanceof ResultMessage.Success success
+              ? Optional.of(success.result())
+              : Optional.<String>empty();
+      return new RunEnded(runId, at, terminal.getClass().getSimpleName(), result);
     }
   }
 }

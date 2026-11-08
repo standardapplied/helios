@@ -36,12 +36,24 @@ final class SessionEntryJsonTest {
 
   @Test
   void aRunEndedIsWrittenAsTypeEndedAndReadsBack() {
-    var ended = new SessionEntry.RunEnded("run-1", AT, "ErrorMaxWallClock");
+    var ended = new SessionEntry.RunEnded("run-1", AT, "ErrorMaxWallClock", Optional.empty());
     var json = SessionEntryJson.write(ended);
 
     assertEquals(
         "{\"type\":\"ended\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00.123456Z\","
             + "\"terminal\":\"ErrorMaxWallClock\"}",
+        json);
+    assertEquals(ended, SessionEntryJson.read(json));
+  }
+
+  @Test
+  void aSuccessfulRunEndedIsWrittenWithItsResultAndReadsBack() {
+    var ended = new SessionEntry.RunEnded("run-1", AT, "Success", Optional.of(""));
+    var json = SessionEntryJson.write(ended);
+
+    assertEquals(
+        "{\"type\":\"ended\",\"runId\":\"run-1\",\"at\":\"2026-10-27T10:00:00.123456Z\","
+            + "\"terminal\":\"Success\",\"result\":\"\"}",
         json);
     assertEquals(ended, SessionEntryJson.read(json));
   }

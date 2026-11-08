@@ -46,7 +46,7 @@ final class RunEndedTerminalsTest {
 
   static Stream<Arguments> endings() {
     return Stream.of(
-        ending("Success", RunEndedTerminalsTest::success),
+        ending("Success", Optional.of("done"), RunEndedTerminalsTest::success),
         ending("ErrorDuringExecution", RunEndedTerminalsTest::failedExecution),
         ending("ErrorMaxTurns", RunEndedTerminalsTest::pastItsTurns),
         ending("ErrorMaxBudgetUsd", RunEndedTerminalsTest::pastItsBudget),
@@ -59,17 +59,26 @@ final class RunEndedTerminalsTest {
 
   private static Arguments ending(
       String terminal, Function<RunEndedTerminalsTest, ResultMessage> run) {
-    return Arguments.of(terminal, run);
+    return ending(terminal, Optional.empty(), run);
+  }
+
+  private static Arguments ending(
+      String terminal,
+      Optional<String> result,
+      Function<RunEndedTerminalsTest, ResultMessage> run) {
+    return Arguments.of(terminal, result, run);
   }
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("endings")
   void everyTerminalIsStoredAsTheLastEntryOfTheRunsLastBatch(
-      String terminal, Function<RunEndedTerminalsTest, ResultMessage> run) {
+      String terminal,
+      Optional<String> answer,
+      Function<RunEndedTerminalsTest, ResultMessage> run) {
     var result = run.apply(this);
 
     assertEquals(terminal, result.getClass().getSimpleName());
-    var ended = new SessionEntry.RunEnded(result.runId(), now.get(), terminal);
+    var ended = new SessionEntry.RunEnded(result.runId(), now.get(), terminal, answer);
     assertEquals(Optional.of(ended), store.load(SID).lastRunEnded());
     assertEquals(ended, store.batches.getLast().getLast());
   }
