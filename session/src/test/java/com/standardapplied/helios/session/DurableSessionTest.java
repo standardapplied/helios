@@ -159,12 +159,7 @@ final class DurableSessionTest {
   @Test
   void aCompactionIsWrittenAsOneHistoryReplacedAndAppendsResumeAfterIt() {
     var store = new RecordingStore();
-    var model =
-        ScriptedModel.newBuilder()
-            .withTextTurn("one")
-            .withTextTurn("two")
-            .withTextTurn("three")
-            .build();
+    var model = threeTurns();
     var compactions = new AtomicInteger();
     ContextCompactor compactor =
         (history, context) ->
@@ -173,22 +168,9 @@ final class DurableSessionTest {
                     List.of(Message.system("sys"), Message.user("summary"), history.getLast()))
                 : CompactionResult.noOp(history);
 
-    try (var session =
-        AgentSession.open(
-            overWatermark(options(model, store).withSystemPrompt("sys"), compactor).build())) {
-      Await.value("run 1", session.send("first"));
-      Await.value("run 2", session.send("second"));
-      Await.value("run 3", session.send("third"));
-    }
-
-    assertEquals(
-        List.of(
-            List.of("USER", "ASSISTANT", "ended Success"),
-            List.of("replaced", "ended Success"),
-            List.of("USER", "ASSISTANT", "ended Success")),
-        store.shapes());
     var replaced =
-        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
+        replacedInTheSecondOfThreeRuns(
+            overWatermark(options(model, store).withSystemPrompt("sys"), compactor), store);
     assertEquals(
         List.of(Message.user("summary"), Message.user("second"), Message.assistant("two")),
         replaced.history());
@@ -205,12 +187,7 @@ final class DurableSessionTest {
   @Test
   void aMutateHistoryHookIsWrittenAsOneHistoryReplacedAndAppendsResumeAfterIt() {
     var store = new RecordingStore();
-    var model =
-        ScriptedModel.newBuilder()
-            .withTextTurn("one")
-            .withTextTurn("two")
-            .withTextTurn("three")
-            .build();
+    var model = threeTurns();
     var fires = new AtomicInteger();
     PreModelTurnHook rewriting =
         (history, ctx) ->
@@ -219,22 +196,9 @@ final class DurableSessionTest {
                     List.of(Message.system("sys"), Message.user("rewritten")))
                 : HookOutcome.cont();
 
-    try (var session =
-        AgentSession.open(
-            options(model, store).withSystemPrompt("sys").withHook(rewriting).build())) {
-      Await.value("run 1", session.send("first"));
-      Await.value("run 2", session.send("second"));
-      Await.value("run 3", session.send("third"));
-    }
-
-    assertEquals(
-        List.of(
-            List.of("USER", "ASSISTANT", "ended Success"),
-            List.of("replaced", "ended Success"),
-            List.of("USER", "ASSISTANT", "ended Success")),
-        store.shapes());
     var replaced =
-        assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
+        replacedInTheSecondOfThreeRuns(
+            options(model, store).withSystemPrompt("sys").withHook(rewriting), store);
     var request = model.calls().get(1);
     assertEquals(List.of(Message.system("sys"), Message.user("rewritten")), request);
     assertEquals(
@@ -515,6 +479,34 @@ final class DurableSessionTest {
       events.awaitDone();
       return Map.entry(failure, events.eventsOf(QueryEvent.RunEnded.class));
     }
+  }
+
+  private static ScriptedModel threeTurns() {
+    return ScriptedModel.newBuilder()
+        .withTextTurn("one")
+        .withTextTurn("two")
+        .withTextTurn("three")
+        .build();
+  }
+
+  /**
+   * The {@code HistoryReplaced} the second of three runs of {@code options} wrote, each run's turn
+   * stored with its end and the second's replaced view with its own.
+   */
+  private static SessionEntry.HistoryReplaced replacedInTheSecondOfThreeRuns(
+      SessionOptions.Builder options, RecordingStore store) {
+    try (var session = AgentSession.open(options.build())) {
+      Await.value("run 1", session.send("first"));
+      Await.value("run 2", session.send("second"));
+      Await.value("run 3", session.send("third"));
+    }
+    assertEquals(
+        List.of(
+            List.of("USER", "ASSISTANT", "ended Success"),
+            List.of("replaced", "ended Success"),
+            List.of("USER", "ASSISTANT", "ended Success")),
+        store.shapes());
+    return assertInstanceOf(SessionEntry.HistoryReplaced.class, store.batches.get(1).get(0));
   }
 
   private static SessionOptions.Builder options(ScriptedModel model, SessionStore store) {
