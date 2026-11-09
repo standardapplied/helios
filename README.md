@@ -780,7 +780,7 @@ WebServer.builder()
 ```bash
 mvn package
 mvn spotless:apply                # auto-format (Google Java Format, 2-space indent)
-./mvnw -B clean verify javadoc:jar   # what CI runs: tests, coverage and the quality gate
+./mvnw -B clean verify   # what CI runs: tests, coverage and the quality gate
 ```
 
 ### Contributing

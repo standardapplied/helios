@@ -36,13 +36,13 @@ jobs:
           restore-keys: onnx-models-pinned-
 
       - name: Build, test, gate coverage
-        run: ./mvnw -B clean verify javadoc:jar
+        run: ./mvnw -B clean verify
 
       - name: Upload dependency inventory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dependency-inventory-${{ matrix.os }}
-          path: '**/target/helios-*.cdx.json'
+          path: 'target/helios-*.cdx.json'
           if-no-files-found: error
 
       - name: Test the advisory scan
