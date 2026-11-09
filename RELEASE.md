@@ -130,15 +130,16 @@ git push origin release/3.0.0
 
 The **Release** workflow will automatically:
 - Run the live provider tests (`live` job)
-- Check that the **CI** workflow passed on the same commit, and stop if it has not
+- Check that the **CI** workflow passed on this commit when it was pushed to `main`, and stop if it has not
 - Build, keeping formatting, PMD/CPD and the doc gate
 - Generate sources and javadoc JARs
 - Sign all artifacts with the project GPG key
 - Upload the bundle to the Central Portal
 
 The deploy runs no tests: it relies on CI, which ran the offline suite and the coverage gate on
-this commit, and on the `live` job, which ran the live tests. A release branch with a commit of its
-own has no CI run, so its deploy fails; the version change goes through `main` as in step 1.
+this commit when it reached `main`, and on the `live` job, which ran the live tests. A release
+branch with a commit of its own, or cut from a pull request's head, has no CI run on `main`, so its
+deploy fails; the version change goes through `main` as in step 1.
 
 ### 3. Publish the deployment
 

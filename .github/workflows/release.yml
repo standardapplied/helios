@@ -59,12 +59,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PASSED="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')"
+          PASSED="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&branch=main&status=success&per_page=1" --jq '.total_count')"
           if ! [ "$PASSED" -gt 0 ]; then
-            echo "::error::CI has no successful run for commit ${GITHUB_SHA}; the deploy runs no tests, so it waits for CI to pass on the commit it publishes."
+            echo "::error::CI has no successful push run on main for commit ${GITHUB_SHA}; the deploy runs no tests, so it publishes only a main commit CI has passed."
             exit 1
           fi
-          echo "CI passed on ${GITHUB_SHA}; proceeding."
+          echo "CI passed on main at ${GITHUB_SHA}; proceeding."
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -92,6 +92,9 @@ jobs:
             exit 1
           fi
           echo "helios ${V} is not on Maven Central yet; proceeding."
+
+      - name: Refuse duplicated code
+        run: ./mvnw -B pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check
 
       - name: Deploy to Maven Central
         run: ./mvnw -B clean deploy -Prelease -DskipTests -Djacoco.skip=true -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
