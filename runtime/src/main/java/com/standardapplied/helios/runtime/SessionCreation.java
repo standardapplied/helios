@@ -11,6 +11,7 @@ import io.helidon.webserver.http.ServerResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -23,7 +24,8 @@ import java.util.logging.Logger;
  * that fails, or returns options for another id, is answered {@code 500}; an execution provider
  * that does not accept the session ({@link SessionUnavailableException}), {@code 503} with a fixed
  * body, its redacted reason logged; an identity that ended meanwhile, {@code 401}. On every answer
- * but {@code 201} the reservation is given back.
+ * but {@code 201} the reservation is given back before the answer is sent, so a client that retries
+ * as soon as it reads the answer finds the capacity free.
  */
 final class SessionCreation {
 
@@ -57,34 +59,33 @@ final class SessionCreation {
       Overload.reject(resp, e);
       return;
     }
-    try {
-      register(reservation, caller, resp);
-    } finally {
-      reservation.close();
+    Consumer<ServerResponse> answer;
+    try (reservation) {
+      answer = register(reservation, caller);
     }
+    answer.accept(resp);
   }
 
-  private void register(SessionReservation reservation, Caller caller, ServerResponse resp) {
+  /** Register the session, or say why not; the answer is sent once the reservation is settled. */
+  private Consumer<ServerResponse> register(SessionReservation reservation, Caller caller) {
     var sessionId = "sess-" + Ids.newId();
     var options = options(new SessionRequest(sessionId, caller.principal()));
     if (options.isEmpty()) {
-      JsonBody.send(resp, Status.INTERNAL_SERVER_ERROR_500, FACTORY_FAILED);
-      return;
+      return resp -> JsonBody.send(resp, Status.INTERNAL_SERVER_ERROR_500, FACTORY_FAILED);
     }
-    if (caller.answeredAsEnded(resp)) {
-      return;
+    if (!caller.valid()) {
+      return caller::answeredAsEnded;
     }
     try {
       reservation.register(options.get());
     } catch (SessionUnavailableException e) {
       LOGGER.log(Level.WARNING, "session " + sessionId + " unavailable: " + e.getMessage());
-      JsonBody.send(resp, Status.SERVICE_UNAVAILABLE_503, UNAVAILABLE);
-      return;
+      return resp -> JsonBody.send(resp, Status.SERVICE_UNAVAILABLE_503, UNAVAILABLE);
     }
     var created = new LinkedHashMap<String, String>();
     created.put("sessionId", sessionId);
     created.put("eventsUrl", eventsPathPrefix + "/sessions/" + sessionId + "/events");
-    JsonBody.send(resp, Status.CREATED_201, created);
+    return resp -> JsonBody.send(resp, Status.CREATED_201, created);
   }
 
   /** The options factory's options for {@code request}; empty, and logged, if it failed. */
