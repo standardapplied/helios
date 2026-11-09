@@ -5,17 +5,20 @@ package com.standardapplied.helios.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.standardapplied.helios.core.test.Await;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
  * A stream counts the events its full buffer misses in a row and marks the gap with one {@link
  * QueryEvent.EventsDropped}, carrying the first missed event's common fields, just before the next
- * event it takes, or at its end; a closed stream marks nothing. Each test offers and reads on the
- * test thread, so the buffer's state at each step is the one the test built.
+ * event it takes, or at its end; a closed stream marks nothing. Each test but the interrupted offer
+ * offers and reads on the test thread, so the buffer's state at each step is the one the test
+ * built; that one holds the stream's lock to close it between the interrupt and the offer's return.
  */
 final class BufferedEventStreamTest {
 
@@ -54,11 +57,13 @@ final class BufferedEventStreamTest {
     var accepted = stream.offer(text("accepted"), 0);
     var overflow = stream.offer(text("overflow"), 0);
     stream.end();
+    var endedSize = stream.size();
 
     var read = new ArrayList<QueryEvent>();
     events.forEachRemaining(read::add);
     assertEquals(0, accepted);
     assertEquals(2, overflow);
+    assertEquals(CAPACITY + 1, endedSize);
     assertEquals(burst().subList(1, CAPACITY), read.subList(0, CAPACITY - 1));
     assertEquals(
         List.of(
@@ -66,6 +71,28 @@ final class BufferedEventStreamTest {
             text("accepted"),
             new QueryEvent.EventsDropped("sess", "run-1", 0, AT, 1)),
         read.subList(CAPACITY - 1, read.size()));
+  }
+
+  @Test
+  void anOfferInterruptedAsTheStreamClosesCountsNothing() {
+    var stream = filled();
+    var offered = new CompletableFuture<Long>();
+    var producer =
+        Thread.ofPlatform()
+            .start(() -> offered.complete(stream.offer(text("late"), Long.MAX_VALUE)));
+    Await.until(
+        "the offer to wait for room", () -> producer.getState() == Thread.State.TIMED_WAITING);
+
+    stream.lock.lock();
+    try {
+      producer.interrupt();
+      Await.until("the offer to wait for the lock", () -> stream.lock.hasQueuedThread(producer));
+      stream.close();
+    } finally {
+      stream.lock.unlock();
+    }
+
+    assertEquals(0L, Await.value("the interrupted offer to return", offered));
   }
 
   @Test
