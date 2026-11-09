@@ -51,7 +51,9 @@ import java.util.logging.Logger;
  *   <li>{@code GET /sessions/{sessionId}/events} — opens an SSE stream of {@link QueryEvent}s of
  *       every run of the session. The handler reads the session's {@link
  *       com.standardapplied.helios.session.EventStream} on the request thread until the session is
- *       closed, the client disconnects, or the caller's identity ends.
+ *       closed, the client disconnects, or the caller's identity ends. Each event is named by its
+ *       type; a client that falls behind reads {@code event: EventsDropped} where its stream missed
+ *       events, and replaces the turn's partial text with the run's result.
  *   <li>{@code GET /sessions/{sessionId}/result?timeout=<seconds>} — long-poll for the terminal
  *       {@link com.standardapplied.helios.session.ResultMessage ResultMessage} of the latest run:
  *       the run in progress; else the last run, at once; else, for a session that never ran, its

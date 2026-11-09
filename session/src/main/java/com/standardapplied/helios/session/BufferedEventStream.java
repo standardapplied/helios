@@ -15,48 +15,58 @@ import java.util.function.Consumer;
  * SessionEventPublisher} offers into on the emitting thread and the reader drains on its own. An
  * offer waits for room only as long as it is told to; {@link #end} marks the session's end, after
  * which the reader drains what is buffered and stops.
+ *
+ * <p>The events a full buffer misses in a row are a gap, counted, and marked by one {@link
+ * QueryEvent.EventsDropped} buffered just before the next event the stream takes, or at {@link
+ * #end} if none comes. A miss only happens to a full buffer, so the gap is always at its tail, and
+ * the marker may take the buffer one past its capacity rather than displace an event. A marker that
+ * {@link #end} finds no such room for waits until the reader takes an event.
  */
 final class BufferedEventStream implements EventStream {
 
   static final int CAPACITY = 256;
 
   private final Consumer<BufferedEventStream> onClose;
-  private final ReentrantLock lock = new ReentrantLock();
+  final ReentrantLock lock = new ReentrantLock();
   private final Condition changed = lock.newCondition();
   private final ArrayDeque<QueryEvent> buffer = new ArrayDeque<>(CAPACITY);
   private final AtomicBoolean read = new AtomicBoolean();
   private boolean ended;
   private boolean closed;
+  private long misses;
+  private long gapLength;
+  private QueryEvent gapStart;
 
   BufferedEventStream(Consumer<BufferedEventStream> onClose) {
     this.onClose = onClose;
   }
 
   /**
-   * Buffer {@code event}, waiting up to {@code waitNanos} for room; an interrupt of the waiting
-   * thread ends the wait, its interrupt status kept.
+   * Buffer {@code event}, behind the marker of the gap before it, waiting up to {@code waitNanos}
+   * for room; an interrupt of the waiting thread ends the wait, its interrupt status kept.
    *
-   * @return {@code false} if the stream missed the event, {@code true} if it was buffered or the
-   *     stream is closed
+   * @return how many events the stream has missed, this one included, or {@code 0} if it was
+   *     buffered or the stream is closed
    */
-  boolean offer(QueryEvent event, long waitNanos) {
+  long offer(QueryEvent event, long waitNanos) {
     lock.lock();
     try {
       var remaining = waitNanos;
-      while (!closed && buffer.size() == CAPACITY) {
+      while (!closed && buffer.size() >= CAPACITY) {
         if (remaining <= 0) {
-          return false;
+          return miss(event);
         }
         remaining = changed.awaitNanos(remaining);
       }
       if (!closed) {
+        markGap();
         buffer.add(event);
         changed.signalAll();
       }
-      return true;
+      return 0;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return false;
+      return closed ? 0 : miss(event);
     } finally {
       lock.unlock();
     }
@@ -67,7 +77,17 @@ final class BufferedEventStream implements EventStream {
     lock.lock();
     try {
       ended = true;
+      markGap();
       changed.signalAll();
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  int size() {
+    lock.lock();
+    try {
+      return buffer.size();
     } finally {
       lock.unlock();
     }
@@ -82,6 +102,7 @@ final class BufferedEventStream implements EventStream {
       }
       closed = true;
       buffer.clear();
+      gapLength = 0;
       changed.signalAll();
     } finally {
       lock.unlock();
@@ -111,6 +132,28 @@ final class BufferedEventStream implements EventStream {
     };
   }
 
+  private long miss(QueryEvent event) {
+    if (gapLength == 0) {
+      gapStart = event;
+    }
+    gapLength++;
+    return ++misses;
+  }
+
+  private void markGap() {
+    if (gapLength > 0 && buffer.size() <= CAPACITY) {
+      buffer.add(
+          new QueryEvent.EventsDropped(
+              gapStart.sessionId(),
+              gapStart.runId(),
+              gapStart.turnIndex(),
+              gapStart.timestamp(),
+              gapLength));
+      gapLength = 0;
+      gapStart = null;
+    }
+  }
+
   /**
    * Wait until an event is buffered or the stream has ended, then return the next event, removed
    * from the buffer if {@code take}, or {@code null} at the end. An interrupted reader closes the
@@ -123,11 +166,7 @@ final class BufferedEventStream implements EventStream {
         changed.await();
       }
       if (!Thread.currentThread().isInterrupted()) {
-        if (take) {
-          changed.signalAll();
-          return buffer.poll();
-        }
-        return buffer.peek();
+        return take ? poll() : buffer.peek();
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -136,5 +175,14 @@ final class BufferedEventStream implements EventStream {
     }
     close();
     return null;
+  }
+
+  private QueryEvent poll() {
+    var event = buffer.poll();
+    if (ended) {
+      markGap();
+    }
+    changed.signalAll();
+    return event;
   }
 }

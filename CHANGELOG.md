@@ -4,6 +4,28 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- `QueryEvent.EventsDropped(sessionId, runId, turnIndex, timestamp, count)`: a reader's stream
+  that misses events, routine or critical after their 30 s wait, counts them and buffers one marker
+  just before the next event it takes, or before its iteration ends once the session closes. Its
+  common fields are those of the first missed event. Only the stream that missed the events
+  carries it: hooks, traces and other streams never see it. The SSE route sends it as `event:
+  EventsDropped`. A reader that keeps up never reads one.
+
+### Changed
+
+- A full event stream's first miss is logged as a WARNING naming the session and the event type,
+  once per stream; later routine misses stay at FINE and a missed `RunEnded`, `QuestionAsked` or
+  `Error` stays a WARNING. Each missing stream logs its own line, where one line used to count the
+  streams.
+
+### Compatibility
+
+- A `switch` over `QueryEvent` that lists every type without a `default` must add a case for
+  `EventsDropped`. This is the only source change; `EventStream` and `AgentSession` keep their
+  signatures.
+
 ### Fixed
 
 - `POST /sessions` gives a refused create's capacity back before it answers `500`, `503` or

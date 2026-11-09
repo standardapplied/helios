@@ -25,7 +25,12 @@ final class LogCapture extends Handler implements AutoCloseable {
   }
 
   static LogCapture of(Class<?> owner) {
-    return new LogCapture(Logger.getLogger(owner.getName()));
+    return of(owner.getName());
+  }
+
+  /** For a class this module cannot name, such as a package-private one of the session's. */
+  static LogCapture of(String loggerName) {
+    return new LogCapture(Logger.getLogger(loggerName));
   }
 
   List<LogRecord> records() {

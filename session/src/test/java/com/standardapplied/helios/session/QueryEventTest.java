@@ -543,9 +543,37 @@ final class QueryEventTest {
   // ── Sealed-hierarchy contract ─────────────────────────────────────────────
 
   @Test
-  void sealedInterfaceHasNineteenPermittedSubclasses() {
+  void sealedInterfaceHasTwentyPermittedSubclasses() {
     var permits = QueryEvent.class.getPermittedSubclasses();
-    assertEquals(19, permits.length);
+    assertEquals(20, permits.length);
+  }
+
+  // ── EventsDropped ─────────────────────────────────────────────────────────
+
+  @Test
+  void eventsDroppedConstructsAndExposesFields() {
+    var e = new QueryEvent.EventsDropped(SID, "run-1", TURN, TS, 3);
+    assertEquals(
+        List.of(SID, "run-1", TURN, TS, 3L),
+        List.of(e.sessionId(), e.runId(), e.turnIndex(), e.timestamp(), e.count()));
+  }
+
+  @Test
+  void eventsDroppedValidatesItsCommonFieldsFirst() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.EventsDropped(SID, " ", TURN, TS, 0));
+    assertEquals("runId must not be blank", ex.getMessage());
+  }
+
+  @Test
+  void eventsDroppedRejectsANonPositiveCount() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new QueryEvent.EventsDropped(SID, "run-1", TURN, TS, 0));
+    assertEquals("count must be positive, got 0", ex.getMessage());
   }
 
   @Test
@@ -606,7 +634,8 @@ final class QueryEventTest {
             modelCall("m", 1, FinishReason.STOP, Usage.of(0, 0), Duration.ZERO),
             new QueryEvent.RunStarted(SID, "run-1", TS),
             new QueryEvent.RunEnded(SID, "run-1", TURN, TS, result),
-            new QueryEvent.Error(SID, "run-1", TURN, TS, SerializedError.of("k", "m")));
+            new QueryEvent.Error(SID, "run-1", TURN, TS, SerializedError.of("k", "m")),
+            new QueryEvent.EventsDropped(SID, "run-1", TURN, TS, 1));
     for (var e : all) {
       var tag =
           switch (e) {
@@ -629,6 +658,7 @@ final class QueryEventTest {
             case QueryEvent.RunStarted rs -> "run-start";
             case QueryEvent.RunEnded re -> "run-end";
             case QueryEvent.Error err -> "error";
+            case QueryEvent.EventsDropped d -> "events-dropped";
           };
       assertTrue(tag != null && !tag.isEmpty());
     }
