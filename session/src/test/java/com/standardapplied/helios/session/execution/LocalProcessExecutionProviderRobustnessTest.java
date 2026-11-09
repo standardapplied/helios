@@ -263,7 +263,9 @@ final class LocalProcessExecutionProviderRobustnessTest {
 
   /**
    * The grandchild ignores SIGTERM and the child dies of it, which re-parents the grandchild; the
-   * reaping still reaches it, forcibly, before {@code close()} returns.
+   * reaping still reaches it, forcibly, before {@code close()} returns. Nothing else signals it, so
+   * its end proves the kill; the end itself is awaited, since its new parent reaps it, and a
+   * process killed but not yet reaped is still alive.
    */
   @Test
   void closeForciblyKillsADescendantIgnoringSigtermWhoseParentDied(@TempDir Path cwd) {
@@ -278,10 +280,11 @@ final class LocalProcessExecutionProviderRobustnessTest {
                     .build(),
                 new CancellationToken());
         var grandchild = PidFile.await("the grandchild's trap to be set", cwd.resolve("pid"));
+        awaitInflight(provider, 1);
 
         provider.close();
 
-        assertFalse(grandchild.isAlive());
+        Await.value("the grandchild to end", grandchild.onExit());
         assertEquals(KILLED_BY_SIGTERM, Await.value("the reaped call", call).exitCode());
       } finally {
         PidFile.destroy(cwd.resolve("pid"));
