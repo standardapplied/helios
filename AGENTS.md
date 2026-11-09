@@ -210,9 +210,11 @@ different one.
 `.github/workflows/release.yml` runs every `*IntegrationTest` with real keys in its `live` job,
 only when a release is cut (a push to `release/**`, or a manual dispatch), never on `main` or a
 pull request: real calls cost money. The `deploy` job needs `live`, so a failing live test stops
-the release before anything reaches Maven Central. The job deploys to the `live-providers`
-environment: no required reviewers, deployment branches "Selected branches" with the rules
-`main` and `release/*`, and the secrets `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`
+the release before anything reaches Maven Central. `deploy` runs no tests: its first step asks the
+GitHub API, with a token that reads Actions and contents and writes nothing, for a successful `CI`
+run on the commit and refuses the commit without one, so a release branch is pushed at a `main`
+commit CI passed. The `live` job deploys to the `live-providers` environment: no required
+reviewers, deployment branches "Selected branches" with the rules `main` and `release/*`, and the secrets `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`
 (`OPENAI_API_KEY` once a key exists), set only in the "Live tests" step's `env:`. A missing
 secret reaches the step empty, and its classes skip with a message naming the variable. Every
 run uploads the surefire XML, each pass, failure and skip with its message, as the
@@ -221,13 +223,21 @@ run uploads the surefire XML, each pass, failure and skip with its message, as t
 ### Running it
 
 ```bash
-mvn -B clean verify javadoc:jar                                                      # everything, as CI does
+mvn -B clean verify                                                                  # everything, as CI does
+mvn -B -T 1 clean verify                                                             # the same, one module at a time, for debugging
 mvn -B verify -Dtest=ArchitectureRulesTest -Dsurefire.failIfNoSpecifiedTests=false   # the gate, without the test suite
 mvn -B verify -DskipTests                                                            # PMD and CPD only
 mvn -B -fae -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DfailWhenNoMutations=false -Dspotless.check.skip=true -Dpmd.skip=true -Dcpd.skip=true   # mutation score, by hand
 ```
 
 Repl's sandbox code runs in a child JVM that loads the unmutated classes, so no mutant reaches it.
+
+The reactor builds in parallel: `.mvn/maven.config` holds `-T1C`, one thread per core, so `mvn`
+and `./mvnw` build modules that do not depend on each other side by side, and their logs
+interleave. `-T 1` on the command line overrides it and builds one module at a time, for reading a
+log or bisecting a failure. A test that fails only when modules build side by side shares
+something with another module's tests (a port, a path, a cache, the machine's load) and is fixed
+at that cause; a module is never serialised to hide it.
 
 CI runs the same build through `./mvnw`, which downloads Maven 3.9.14 and checks its SHA-256. The
 wrapper needs `unzip`: without it, the script fetches the `.tar.gz` and refuses it because the
@@ -260,8 +270,8 @@ sources of the modules in the reactor, so only a whole-reactor build checks dupl
   dependency so the rules see it.
 
 The rule sets and the exclusion file are resolved through `${maven.multiModuleProjectDirectory}`,
-which Maven sets to the nearest ancestor directory holding `.mvn/` — that is why the otherwise
-empty `.mvn/maven.config` is checked in. The plugin wiring constraints are commented in the root
+which Maven sets to the nearest ancestor directory holding `.mvn/`, where `.mvn/maven.config`
+is checked in. The plugin wiring constraints are commented in the root
 `pom.xml`.
 
 ## Supply-chain gate
@@ -270,15 +280,14 @@ CI inventories every dependency the build resolves and fails on a known advisory
 
 | Piece | Does | Where |
 |---|---|---|
-| Inventory (`cyclonedx-maven-plugin`, `verify` phase) | Writes two aggregate CycloneDX files at the reactor root, plus the same pair per module | plugin configuration in the root `pom.xml` |
+| Inventory (`cyclonedx-maven-plugin`, `verify` phase) | Writes two aggregate CycloneDX files at the reactor root, once per build (the executions are not inherited by the modules) | plugin configuration in the root `pom.xml` |
 | Scan (OSV-Scanner, pinned and checksum-verified) | Looks every inventoried component up in osv.dev | `config/security/advisory_scan.py`, tested by `advisory_scan_test.py` |
 | Exceptions | Silences one advisory until a date | `config/security/advisory-exceptions.toml` |
 
 `target/helios-runtime.cdx.json` is what the deployed modules ship: compile- and runtime-scope
 dependencies, direct and transitive, with hashes and licenses. `target/helios-build.cdx.json` adds
 test scope and the undeployed `architecture` and example modules. A component that appears only
-in the second is never shipped. CI uploads both, and the per-module pairs, as the
-`dependency-inventory-<os>` artifact.
+in the second is never shipped. CI uploads both as the `dependency-inventory-<os>` artifact.
 
 ### Policy
 
@@ -401,7 +410,7 @@ Core exports public API; providers register via ServiceLoader SPI.
 | **Session tracing** | OpenTelemetry spans through the API only: `withOpenTelemetry` (default `GlobalOpenTelemetry`), `withTraceDetail` (`STANDARD` no content, `VERBOSE` redacted content). Each run is an `invoke_agent` span, a child of the context of the `send` that started it, with a `chat` span per model attempt, an `execute_tool` span per call and a zero-length `hook` span per `HookFired`; `RunSpans` owns every span name and attribute. A span call that throws a `RuntimeException` is logged and changes no run. `persistence.PgSpanExporter` stores them |
 | **SessionRegistry (helios-runtime)** | In-memory registry of the sessions a process serves, each owned by one `Principal`: `find` and `close` act only for the owner and answer anyone else as for an unknown id. `create` takes capacity atomically before the factory runs: at most 16 sessions per principal and 256 per registry, evicting the owner's own longest-idle session to make room, else `SessionCapacityException` (`429` / `503`). `sweep()`, which `RuntimeServer` runs every 30 s, closes a session idle past its retention (15 min) |
 | **AgentHttpService (helios-runtime)** | Helidon `HttpService` of eight routes: create, message, interrupt, SSE events, result long poll, questions, answer, delete. Each runs the deployer's `Authenticator` first (`AuthenticationGate`: `401` with its challenge, `503` if it throws), and a foreign session is the same `404` as an unknown id. Admission then caps a body at 256 KiB (`413`) and a principal at 32 requests in flight (`429`); a refusal answers without reading the body and closes the connection. A `WebServer` of your own sets Helidon's `maxPayloadSize` and `continueImmediately` as `RuntimeServer` does |
-| **Coverage gate** | Every library module (core, session, runtime, gemini, anthropic, openai, persistence, onnx, repl, testing) enforces JaCoCo `INSTRUCTION ≥ 95% / BRANCH ≥ 90%` through the one `coverage-gate` check execution in the root `pom.xml`, bound to the `verify` phase; `architecture` and the examples set `jacoco.skip`. A module's coverage comes from its offline suite: provider modules run against recorded transcripts and stub servers, never live keys. A module below the gate is raised with behaviour tests, never by lowering the limit or excluding classes. CI runs `./mvnw -B clean verify javadoc:jar` |
+| **Coverage gate** | Every library module (core, session, runtime, gemini, anthropic, openai, persistence, onnx, repl, testing) enforces JaCoCo `INSTRUCTION ≥ 95% / BRANCH ≥ 90%` through the one `coverage-gate` check execution in the root `pom.xml`, bound to the `verify` phase; `architecture` and the examples set `jacoco.skip`. A module's coverage comes from its offline suite: provider modules run against recorded transcripts and stub servers, never live keys. A module below the gate is raised with behaviour tests, never by lowering the limit or excluding classes. CI runs `./mvnw -B clean verify` |
 
 ## Cross-cutting framework primitives (`helios-core`)
 
