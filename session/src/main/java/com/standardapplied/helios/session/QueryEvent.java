@@ -63,7 +63,8 @@ public sealed interface QueryEvent
         QueryEvent.ModelCallEnded,
         QueryEvent.RunStarted,
         QueryEvent.RunEnded,
-        QueryEvent.Error {
+        QueryEvent.Error,
+        QueryEvent.EventsDropped {
 
   /**
    * The stable identifier of the session that produced this event.
@@ -868,6 +869,41 @@ public sealed interface QueryEvent
     public QuestionAsked {
       validateCommon(sessionId, runId, turnIndex, timestamp);
       Objects.requireNonNull(request, "request must not be null");
+    }
+  }
+
+  /**
+   * This reader's stream missed events here: its buffer was full while the session emitted them.
+   * The marker sits exactly where the missed events would have been, and its four common fields are
+   * those of the first one missed. Only the stream that missed them carries it; the session never
+   * emits it, so hooks, traces and other streams never see it.
+   *
+   * <p>The text, thinking and tool activity around the gap are incomplete: a subscriber that
+   * concatenates {@link AssistantText} holds a partial turn. The run's answer is its {@link
+   * ResultMessage}, from the future {@code send} returned or the stored session.
+   *
+   * @param sessionId the session id of the first missed event
+   * @param runId the run id of the first missed event
+   * @param turnIndex the turn index of the first missed event
+   * @param timestamp the timestamp of the first missed event
+   * @param count the number of events the stream missed in a row; positive
+   */
+  record EventsDropped(
+      String sessionId, String runId, long turnIndex, Instant timestamp, long count)
+      implements QueryEvent {
+
+    /**
+     * Validates the event.
+     *
+     * @throws NullPointerException if {@code sessionId}, {@code runId} or {@code timestamp} is null
+     * @throws IllegalArgumentException if {@code sessionId} or {@code runId} is blank, {@code
+     *     turnIndex} is negative, or {@code count} is not positive
+     */
+    public EventsDropped {
+      validateCommon(sessionId, runId, turnIndex, timestamp);
+      if (count <= 0) {
+        throw new IllegalArgumentException("count must be positive, got " + count);
+      }
     }
   }
 }

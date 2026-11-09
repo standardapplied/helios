@@ -15,10 +15,11 @@ import java.util.logging.Logger;
  * ends every stream, and a stream opened after it ends at once; the lock that admits a stream is
  * never held while an event is offered.
  *
- * <p>A routine event never waits: a stream whose buffer is full misses it, and the number of
- * streams that missed it is logged at FINE. The critical control events ({@code RunEnded}, {@link
- * QueryEvent.QuestionAsked}, {@link QueryEvent.Error}) wait up to 30 s for room in each full
- * stream, and a drop is logged as a WARNING.
+ * <p>A routine event never waits: a stream whose buffer is full misses it. The critical control
+ * events ({@code RunEnded}, {@link QueryEvent.QuestionAsked}, {@link QueryEvent.Error}) wait up to
+ * 30 s for room in each full stream, then are missed. A stream marks what it missed with a {@link
+ * QueryEvent.EventsDropped} of its own, which is never emitted here. A stream's first miss, and
+ * every miss of a critical event, is logged as a WARNING; a later routine miss at FINE.
  */
 final class SessionEventPublisher {
 
@@ -62,17 +63,11 @@ final class SessionEventPublisher {
     }
     var critical = isCritical(event);
     var waitNanos = critical ? criticalWaitNanos : 0;
-    var missed = targets.stream().filter(stream -> !stream.offer(event, waitNanos)).count();
-    if (missed > 0) {
-      LOGGER.log(
-          critical ? Level.WARNING : Level.FINE,
-          () ->
-              "dropped "
-                  + event.getClass().getSimpleName()
-                  + " for "
-                  + missed
-                  + " full event stream(s) on session "
-                  + sessionId);
+    for (var stream : targets) {
+      var misses = stream.offer(event, waitNanos);
+      if (misses > 0) {
+        logMiss(event, critical || misses == 1 ? Level.WARNING : Level.FINE);
+      }
     }
   }
 
@@ -100,6 +95,17 @@ final class SessionEventPublisher {
     synchronized (admission) {
       streams.remove(stream);
     }
+  }
+
+  private void logMiss(QueryEvent event, Level level) {
+    LOGGER.log(
+        level,
+        () ->
+            "a full event stream missed "
+                + event.getClass().getSimpleName()
+                + " on session "
+                + sessionId
+                + "; its reader reads EventsDropped at the gap");
   }
 
   private static boolean isCritical(QueryEvent event) {
