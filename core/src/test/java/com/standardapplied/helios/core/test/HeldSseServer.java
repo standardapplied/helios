@@ -79,7 +79,10 @@ public final class HeldSseServer implements AutoCloseable {
       await("the client closing the connection", clientClosed);
     }
 
-    /** Waits until every part has been written. */
+    /**
+     * Waits until every part has been written, whether or not the client stays to read the chunked
+     * body's terminator that follows.
+     */
     public void awaitFinished() {
       await("the whole reply written", finished);
     }
@@ -123,18 +126,26 @@ public final class HeldSseServer implements AutoCloseable {
         if (i > 0 && !awaitGate(++gate)) {
           return;
         }
-        var bytes = parts.get(i).getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > 0) {
-          out.write(
-              (Integer.toHexString(bytes.length) + "\r\n").getBytes(StandardCharsets.US_ASCII));
-          out.write(bytes);
-          out.write("\r\n".getBytes(StandardCharsets.US_ASCII));
+        var part = parts.get(i);
+        if (!part.isEmpty()) {
+          out.write(chunk(part));
           out.flush();
         }
       }
+      finished.countDown();
       out.write("0\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
       out.flush();
-      finished.countDown();
+    }
+
+    /**
+     * A part's whole chunk, written in one call: a client that closes the connection once it has
+     * read the last part, as a stream reader does on its final event, can make the next write fail,
+     * so nothing a reply needs to finish may follow the part's own write.
+     */
+    private static byte[] chunk(String part) {
+      var length = part.getBytes(StandardCharsets.UTF_8).length;
+      return (Integer.toHexString(length) + "\r\n" + part + "\r\n")
+          .getBytes(StandardCharsets.UTF_8);
     }
   }
 
