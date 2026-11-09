@@ -7,7 +7,7 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | **CI** | Push to `main`, pull requests | Build, test, coverage, quality gate |
-| **Release** | Push to `release/**`, manual dispatch | Live provider tests with real keys (the `live-providers` environment), then build, test, sign, deploy to Central Portal; a failing live test stops the deploy |
+| **Release** | Push to `release/**`, manual dispatch | Live provider tests with real keys (the `live-providers` environment), then build, sign, deploy to Central Portal; a failing live test stops the deploy, and so does a commit CI has not passed |
 
 ## Published Modules
 
@@ -103,44 +103,45 @@ Snapshots are not published to Maven Central. Use `mvn install` for local testin
 
 ## Release Process
 
-### 1. Verify main is clean
+### 1. Set the release version on main
+
+Open a pull request from `main` that sets the release version and dates the `CHANGELOG.md` entry:
 
 ```bash
 git checkout main
 git pull
-mvn clean verify
-```
-
-All tests must pass.
-
-### 2. Create a release branch
-
-```bash
-git checkout -b release/3.0.0
-```
-
-### 3. Set the release version
-
-```bash
+git checkout -b release-prep-3.0.0
 mvn versions:set -DnewVersion=3.0.0
 mvn versions:commit
-git add pom.xml */pom.xml
+git add pom.xml */pom.xml examples/*/pom.xml CHANGELOG.md
 git commit -m "Release 3.0.0"
 ```
 
-### 4. Push — CI handles the rest
+Merge it once CI passes, and wait for the **CI** run on the merge commit to pass too.
+
+### 2. Push the release branch at that merge commit
 
 ```bash
+git checkout main
+git pull
+git checkout -b release/3.0.0
 git push origin release/3.0.0
 ```
 
 The **Release** workflow will automatically:
-- Build and run all tests
+- Run the live provider tests (`live` job)
+- Check that the **CI** workflow passed on this commit when it was pushed to `main`, and stop if it has not
+- Build, keeping formatting, PMD/CPD and the doc gate
 - Generate sources and javadoc JARs
 - Sign all artifacts with the project GPG key
 - Upload the bundle to the Central Portal
 
-### 5. Publish the deployment
+The deploy runs no tests: it relies on CI, which ran the offline suite and the coverage gate on
+this commit when it reached `main`, and on the `live` job, which ran the live tests. A release
+branch with a commit of its own, or cut from a pull request's head, has no CI run on `main`, so its
+deploy fails; the version change goes through `main` as in step 1.
+
+### 3. Publish the deployment
 
 1. Go to [central.sonatype.com](https://central.sonatype.com) → **Deployments**
 2. Find your deployment (status: **Validated**)
@@ -164,16 +165,14 @@ https://repo1.maven.org/maven2/com/standardapplied/helios-testing/3.0.0/
 
 To skip this manual step, add `<autoPublish>true</autoPublish>` to the `central-publishing-maven-plugin` configuration in `pom.xml`.
 
-### 6. Tag and merge
+### 4. Tag the release
 
 ```bash
 git tag v3.0.0
 git push origin v3.0.0
 ```
 
-Merge the release branch back to main via pull request.
-
-### 7. Bump main to next snapshot
+### 5. Bump main to next snapshot
 
 ```bash
 git checkout main
