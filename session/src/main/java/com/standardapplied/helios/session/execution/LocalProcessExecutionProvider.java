@@ -285,7 +285,9 @@ public final class LocalProcessExecutionProvider implements ExecutionProvider, A
    * calls throw an {@link IllegalStateException}. Safe to call from any thread; subsequent calls
    * are no-ops. Close and the shutdown hook reap one process after another, each taking up to two
    * {@link BoundedProcess#GRACE}s when it ignores SIGTERM, so a host stopped within less than their
-   * sum can exit with processes still running.
+   * sum can exit with processes still running. A call launching its process while {@code close()}
+   * runs reaps that process itself, but a JVM that exits before that call runs again leaves the
+   * process running, since {@code close()} has already removed the shutdown hook.
    */
   @Override
   public void close() {
