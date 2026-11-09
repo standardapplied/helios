@@ -15,6 +15,11 @@ import java.util.function.Consumer;
  * SessionEventPublisher} offers into on the emitting thread and the reader drains on its own. An
  * offer waits for room only as long as it is told to; {@link #end} marks the session's end, after
  * which the reader drains what is buffered and stops.
+ *
+ * <p>The events a full buffer misses in a row are a gap, counted, and marked by one {@link
+ * QueryEvent.EventsDropped} buffered just before the next event the stream takes, or at {@link
+ * #end} if none comes. A miss only happens to a full buffer, so the gap is always at its tail, and
+ * the marker may take the buffer one past its capacity rather than displace an event.
  */
 final class BufferedEventStream implements EventStream {
 
@@ -27,36 +32,40 @@ final class BufferedEventStream implements EventStream {
   private final AtomicBoolean read = new AtomicBoolean();
   private boolean ended;
   private boolean closed;
+  private long misses;
+  private long gapLength;
+  private QueryEvent gapStart;
 
   BufferedEventStream(Consumer<BufferedEventStream> onClose) {
     this.onClose = onClose;
   }
 
   /**
-   * Buffer {@code event}, waiting up to {@code waitNanos} for room; an interrupt of the waiting
-   * thread ends the wait, its interrupt status kept.
+   * Buffer {@code event}, behind the marker of the gap before it, waiting up to {@code waitNanos}
+   * for room; an interrupt of the waiting thread ends the wait, its interrupt status kept.
    *
-   * @return {@code false} if the stream missed the event, {@code true} if it was buffered or the
-   *     stream is closed
+   * @return how many events the stream has missed, this one included, or {@code 0} if it was
+   *     buffered or the stream is closed
    */
-  boolean offer(QueryEvent event, long waitNanos) {
+  long offer(QueryEvent event, long waitNanos) {
     lock.lock();
     try {
       var remaining = waitNanos;
-      while (!closed && buffer.size() == CAPACITY) {
+      while (!closed && buffer.size() >= CAPACITY) {
         if (remaining <= 0) {
-          return false;
+          return miss(event);
         }
         remaining = changed.awaitNanos(remaining);
       }
       if (!closed) {
+        markGap();
         buffer.add(event);
         changed.signalAll();
       }
-      return true;
+      return 0;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return false;
+      return miss(event);
     } finally {
       lock.unlock();
     }
@@ -67,6 +76,9 @@ final class BufferedEventStream implements EventStream {
     lock.lock();
     try {
       ended = true;
+      if (!closed) {
+        markGap();
+      }
       changed.signalAll();
     } finally {
       lock.unlock();
@@ -109,6 +121,28 @@ final class BufferedEventStream implements EventStream {
         return event;
       }
     };
+  }
+
+  private long miss(QueryEvent event) {
+    if (gapLength == 0) {
+      gapStart = event;
+    }
+    gapLength++;
+    return ++misses;
+  }
+
+  private void markGap() {
+    if (gapLength > 0) {
+      buffer.add(
+          new QueryEvent.EventsDropped(
+              gapStart.sessionId(),
+              gapStart.runId(),
+              gapStart.turnIndex(),
+              gapStart.timestamp(),
+              gapLength));
+      gapLength = 0;
+      gapStart = null;
+    }
   }
 
   /**

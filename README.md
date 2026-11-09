@@ -45,7 +45,7 @@ Helios is used in production but has documented limitations that you should unde
 - **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
 - **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
 - **One secret registry per session, applied where tool output enters it.** The session redacts every tool result and every error it reports against `SessionOptions.withSecretRegistry(registry)`, and output cut at a size cap loses any trailing start of a secret. See [Secret redaction](#secret-redaction-secretregistry--redactor).
-- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once, with a FINE log. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are dropped for that reader with a WARNING. A slow or paused SSE client cannot pin the agent loop.
+- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are missed too. A reader is never left guessing: one `QueryEvent.EventsDropped(count)` sits where its missed events would have been, and its stream's first miss is logged as a WARNING. A slow or paused SSE client cannot pin the agent loop.
 - **Test coverage.** One JaCoCo gate in the root `pom.xml` holds every library module (`helios-core`, `-session`, `-runtime`, `-gemini`, `-anthropic`, `-openai`, `-persistence`, `-onnx`, `-repl`, `-testing`) at 95% instruction / 90% branch. Tests across the project: about 7,900, run on every build. The provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) run their live-API tests only when a provider key is set; CI runs everything else, and gates coverage, without those keys.
 
 ### Known limitations
@@ -354,10 +354,17 @@ The loop terminates when the model's `FinishReason` indicates the session is don
 ### Event delivery semantics
 
 `AgentSession.events()` opens a new `EventStream` per call, spanning every run until the session closes, with its own 256-event buffer.
-The loop never waits for a reader on a routine event: a full stream misses it at once (logged at FINE). `RunEnded`, `QuestionAsked`
-and `Error` wait up to 30 s for room, then are dropped there with a WARNING; a dropped terminal stays readable through the future
-`send` returned, a dropped question through `pendingQuestions()`. The session never waits for readers, so a reader that must have
-handled `RunEnded` before that future completes synchronises with its own thread. Details: `EventStream` javadoc.
+The loop never waits for a reader on a routine event: a full stream misses it at once. `RunEnded`, `QuestionAsked` and `Error`
+wait up to 30 s for room, then are missed too; a missed terminal stays readable through the future `send` returned, a missed
+question through `pendingQuestions()`. The events a stream misses in a row are marked by one `QueryEvent.EventsDropped`, read
+where they would have been (before the next event, or before the iteration ends) and carrying their `count` and the first one's
+run, turn and timestamp; a stream's first miss is logged as a WARNING, later ones at FINE, a missed control event always as a
+WARNING. A reader that keeps up never reads a marker. The session never waits for readers, so a reader that must have handled
+`RunEnded` before that future completes synchronises with its own thread. Details: `EventStream` javadoc.
+
+A host that forwards the stream to a browser forwards the marker too (the SSE route names it `event: EventsDropped`). On
+`EventsDropped`, the turn's partial text is incomplete: replace it with the run's result, from the future `send` returned, the
+`/result` long poll or the stored session.
 
 ### Context compaction
 
