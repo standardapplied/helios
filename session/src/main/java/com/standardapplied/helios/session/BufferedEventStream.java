@@ -19,14 +19,15 @@ import java.util.function.Consumer;
  * <p>The events a full buffer misses in a row are a gap, counted, and marked by one {@link
  * QueryEvent.EventsDropped} buffered just before the next event the stream takes, or at {@link
  * #end} if none comes. A miss only happens to a full buffer, so the gap is always at its tail, and
- * the marker may take the buffer one past its capacity rather than displace an event.
+ * the marker may take the buffer one past its capacity rather than displace an event. A marker that
+ * {@link #end} finds no such room for waits until the reader takes an event.
  */
 final class BufferedEventStream implements EventStream {
 
   static final int CAPACITY = 256;
 
   private final Consumer<BufferedEventStream> onClose;
-  private final ReentrantLock lock = new ReentrantLock();
+  final ReentrantLock lock = new ReentrantLock();
   private final Condition changed = lock.newCondition();
   private final ArrayDeque<QueryEvent> buffer = new ArrayDeque<>(CAPACITY);
   private final AtomicBoolean read = new AtomicBoolean();
@@ -65,7 +66,7 @@ final class BufferedEventStream implements EventStream {
       return 0;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return miss(event);
+      return closed ? 0 : miss(event);
     } finally {
       lock.unlock();
     }
@@ -76,10 +77,17 @@ final class BufferedEventStream implements EventStream {
     lock.lock();
     try {
       ended = true;
-      if (!closed) {
-        markGap();
-      }
+      markGap();
       changed.signalAll();
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  int size() {
+    lock.lock();
+    try {
+      return buffer.size();
     } finally {
       lock.unlock();
     }
@@ -94,6 +102,7 @@ final class BufferedEventStream implements EventStream {
       }
       closed = true;
       buffer.clear();
+      gapLength = 0;
       changed.signalAll();
     } finally {
       lock.unlock();
@@ -132,7 +141,7 @@ final class BufferedEventStream implements EventStream {
   }
 
   private void markGap() {
-    if (gapLength > 0) {
+    if (gapLength > 0 && buffer.size() <= CAPACITY) {
       buffer.add(
           new QueryEvent.EventsDropped(
               gapStart.sessionId(),
@@ -157,11 +166,7 @@ final class BufferedEventStream implements EventStream {
         changed.await();
       }
       if (!Thread.currentThread().isInterrupted()) {
-        if (take) {
-          changed.signalAll();
-          return buffer.poll();
-        }
-        return buffer.peek();
+        return take ? poll() : buffer.peek();
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -170,5 +175,14 @@ final class BufferedEventStream implements EventStream {
     }
     close();
     return null;
+  }
+
+  private QueryEvent poll() {
+    var event = buffer.poll();
+    if (ended) {
+      markGap();
+    }
+    changed.signalAll();
+    return event;
   }
 }
