@@ -427,8 +427,8 @@
             <plugin>
                 <!--
                   Documentation gate, documented in AGENTS.md: the doclint configuration in
-                  pluginManagement applies here, to javadoc:jar in CI and to the release, so a
-                  local verify fails on the warnings CI fails on. The no-fork goal reuses the
+                  pluginManagement applies here and to the release's javadoc jars, so a local
+                  verify fails on the warnings CI and the release fail on. The no-fork goal reuses the
                   sources this lifecycle already generated. architecture and the examples set
                   maven.javadoc.skip.
                 -->
@@ -451,7 +451,8 @@
                   deployed modules ship (compile and runtime scope), helios-build adds test scope
                   and the undeployed architecture and example modules, so a component only in
                   the second is never shipped. The files are CI evidence, not release artifacts,
-                  hence skipAttach.
+                  hence skipAttach. The goal aggregates at the execution root and writes a
+                  module-only file anywhere else, so the executions are not inherited.
                 -->
                 <groupId>org.cyclonedx</groupId>
                 <artifactId>cyclonedx-maven-plugin</artifactId>
@@ -465,6 +466,7 @@
                     <execution>
                         <id>inventory-runtime</id>
                         <phase>verify</phase>
+                        <inherited>false</inherited>
                         <goals>
                             <goal>makeAggregateBom</goal>
                         </goals>
@@ -475,6 +477,7 @@
                     <execution>
                         <id>inventory-build</id>
                         <phase>verify</phase>
+                        <inherited>false</inherited>
                         <goals>
                             <goal>makeAggregateBom</goal>
                         </goals>
