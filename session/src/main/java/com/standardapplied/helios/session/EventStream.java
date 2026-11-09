@@ -30,10 +30,13 @@ package com.standardapplied.helios.session;
  * whose buffer is full misses it. {@link QueryEvent.RunEnded}, {@link QueryEvent.QuestionAsked} and
  * {@link QueryEvent.Error} wait up to 30 s for room, then are dropped from that stream with a
  * WARNING; a run's terminal stays readable through the future {@link AgentSession#send} returned
- * and an open question through {@link AgentSession#pendingQuestions()}. Every emitted event is in
- * each open stream's buffer, or missed by it, before the run's future completes; the session never
- * waits for a reader to read it, so a reader that must have handled an event before the future
- * completes synchronises with its own reading thread.
+ * and an open question through {@link AgentSession#pendingQuestions()}. The events a stream misses
+ * in a row are marked, where they would have been, by one {@link QueryEvent.EventsDropped} that
+ * counts them, read before the next event or, at the session's end, before the iteration ends; a
+ * stream's first miss is logged as a WARNING. A reader that keeps up never reads one. Every emitted
+ * event is in each open stream's buffer, or missed by it, before the run's future completes; the
+ * session never waits for a reader to read it, so a reader that must have handled an event before
+ * the future completes synchronises with its own reading thread.
  */
 public interface EventStream extends Iterable<QueryEvent>, AutoCloseable {
 

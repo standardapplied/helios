@@ -30,6 +30,7 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.FutureTask;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -82,11 +83,58 @@ final class SessionEventPublisherTest {
     }
     publisher.close();
 
-    assertEquals(burst.subList(0, CAPACITY), readToEnd(stream));
-    assertEquals(CAPACITY, logged.size());
+    var read = readToEnd(stream);
+    assertEquals(burst.subList(0, CAPACITY), read.subList(0, CAPACITY));
     assertEquals(
-        "FINE dropped AssistantText for 1 full event stream(s) on session " + SID,
-        describe(logged.getFirst()));
+        List.of(dropped(burst.get(CAPACITY), CAPACITY)), read.subList(CAPACITY, read.size()));
+    assertEquals(CAPACITY, logged.size());
+  }
+
+  @Test
+  void aStreamsFirstMissIsAWarningItsLaterMissesAreFineAndAnotherStreamWarnsOnItsOwn() {
+    var publisher = new SessionEventPublisher(SID);
+    publisher.open();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+    publisher.open();
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
+      emit(publisher, Collections.nCopies(CAPACITY + 1, text(1)).toArray(QueryEvent[]::new));
+    }
+    publisher.close();
+
+    var levels = logged.stream().map(LogRecord::getLevel).toList();
+    assertEquals(CAPACITY + 2, levels.size());
+    assertEquals("WARNING " + missed("AssistantText"), describe(logged.getFirst()));
+    assertEquals(Collections.nCopies(CAPACITY - 1, Level.FINE), levels.subList(1, CAPACITY));
+    assertEquals(List.of(Level.FINE, Level.WARNING), levels.subList(CAPACITY, CAPACITY + 2));
+  }
+
+  @Test
+  void aCriticalEventMissedAfterItsWaitIsCountedInTheNextMarkerAndStaysAWarning() {
+    var publisher = new SessionEventPublisher(SID, Duration.ofMillis(1));
+    var stream = publisher.open();
+    var events = stream.iterator();
+    emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+    var error = new QueryEvent.Error(SID, "run-2", 4, AT, SerializedError.of("Boom", "boom"));
+    var logged = new CopyOnWriteArrayList<LogRecord>();
+
+    try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
+      emit(publisher, error, TEXT, ENDED);
+    }
+    events.next();
+    emit(publisher, text(1));
+    publisher.close();
+
+    var rest = new ArrayList<QueryEvent>();
+    events.forEachRemaining(rest::add);
+    assertEquals(List.of(dropped(error, 3), text(1)), rest.subList(CAPACITY - 1, rest.size()));
+    assertEquals(
+        List.of(
+            "WARNING " + missed("Error"),
+            "FINE " + missed("AssistantText"),
+            "WARNING " + missed("RunEnded")),
+        logged.stream().map(SessionEventPublisherTest::describe).toList());
   }
 
   @Test
@@ -112,23 +160,22 @@ final class SessionEventPublisherTest {
     var publisher = new SessionEventPublisher(SID, Duration.ofMillis(1));
     var stream = publisher.open();
     emit(publisher, Collections.nCopies(CAPACITY, TEXT).toArray(QueryEvent[]::new));
+    var error = new QueryEvent.Error(SID, "run-1", 0, AT, SerializedError.of("Boom", "boom"));
     var logged = new CopyOnWriteArrayList<LogRecord>();
 
     try (var ignored = LogCapture.of(SessionEventPublisher.class, logged)) {
-      emit(
-          publisher,
-          new QueryEvent.Error(SID, "run-1", 0, AT, SerializedError.of("Boom", "boom")),
-          QUESTION,
-          ENDED);
+      emit(publisher, error, QUESTION, ENDED);
     }
     publisher.close();
 
-    assertEquals(Collections.nCopies(CAPACITY, TEXT), readToEnd(stream));
+    var read = readToEnd(stream);
+    assertEquals(Collections.nCopies(CAPACITY, TEXT), read.subList(0, CAPACITY));
+    assertEquals(List.of(dropped(error, 3)), read.subList(CAPACITY, read.size()));
     assertEquals(
         List.of(
-            "WARNING dropped Error for 1 full event stream(s) on session " + SID,
-            "WARNING dropped QuestionAsked for 1 full event stream(s) on session " + SID,
-            "WARNING dropped RunEnded for 1 full event stream(s) on session " + SID),
+            "WARNING " + missed("Error"),
+            "WARNING " + missed("QuestionAsked"),
+            "WARNING " + missed("RunEnded")),
         logged.stream().map(SessionEventPublisherTest::describe).toList());
   }
 
@@ -148,7 +195,9 @@ final class SessionEventPublisherTest {
     publisher.close();
 
     assertTrue(interrupted);
-    assertEquals(Collections.nCopies(CAPACITY, TEXT), readToEnd(stream));
+    var read = readToEnd(stream);
+    assertEquals(Collections.nCopies(CAPACITY, TEXT), read.subList(0, CAPACITY));
+    assertEquals(List.of(dropped(QUESTION, 1)), read.subList(CAPACITY, read.size()));
   }
 
   @Test
@@ -173,7 +222,7 @@ final class SessionEventPublisherTest {
     var stream = new BufferedEventStream(closed -> {});
     stream.close();
 
-    assertTrue(stream.offer(TEXT, 0));
+    assertEquals(0, stream.offer(TEXT, 0));
     assertFalse(stream.iterator().hasNext());
   }
 
@@ -393,6 +442,19 @@ final class SessionEventPublisherTest {
 
   private static QueryEvent text(int index) {
     return new QueryEvent.AssistantText(SID, "run-1", 0, AT, "t" + index);
+  }
+
+  private static QueryEvent dropped(QueryEvent first, long count) {
+    return new QueryEvent.EventsDropped(
+        first.sessionId(), first.runId(), first.turnIndex(), first.timestamp(), count);
+  }
+
+  private static String missed(String eventType) {
+    return "a full event stream missed "
+        + eventType
+        + " on session "
+        + SID
+        + "; its reader reads EventsDropped at the gap";
   }
 
   private static String describe(LogRecord logRecord) {

@@ -135,9 +135,11 @@ printer.join();
 
 Each stream buffers up to 256 events. A routine event never waits for a reader: a stream whose
 buffer is full misses it, so a slow reader never stalls the loop. `RunEnded`, `QuestionAsked` and
-`Error` wait up to 30 s for room.
+`Error` wait up to 30 s for room. The events a stream misses in a row are marked, where they would
+have been, by one `EventsDropped` that counts them: the text and tool activity around it are
+incomplete, and the run's answer is its `ResultMessage`.
 
-The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `RunStarted`, `RunEnded`, `Error`, each naming its run; see the [package
+The sealed `QueryEvent` interface — `AssistantText`, `AssistantThinking`, `AssistantCitations`, `UserMessageReceived`, `MessageBlocked`, `ContextWarning`, `ContextEdited`, `ToolUse`, `ToolResult`, `ToolBlocked`, `ToolMutated`, `HookFired`, `QuestionAsked`, `TurnEnded`, `TurnRetried`, `RunStarted`, `RunEnded`, `Error`, `EventsDropped`, each naming its run; see the [package
 Javadoc](src/main/java/com/standardapplied/helios/session/QueryEvent.java) — covers everything the loop emits.
 
 ## Cost tracking + budget cap
