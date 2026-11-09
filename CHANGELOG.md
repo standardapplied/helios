@@ -4,6 +4,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Fixed
+
+- `POST /sessions` gives a refused create's capacity back before it answers `500`, `503` or
+  `401`, so a client that retries as soon as it reads the answer is no longer refused `503` for
+  the capacity the failed create still held.
+
 ## [3.0.1] — 2026-11-08 — The session store records how each run ended
 
 ### Added
