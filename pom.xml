@@ -428,9 +428,9 @@
                 <!--
                   Documentation gate, documented in AGENTS.md: the doclint configuration in
                   pluginManagement applies here and to the release's javadoc jars, so a local
-                  verify fails on the warnings CI and the release fail on. The no-fork goal reuses the
-                  sources this lifecycle already generated. architecture and the examples set
-                  maven.javadoc.skip.
+                  verify fails on the warnings CI and the release fail on. The no-fork goal
+                  reuses the sources this lifecycle already generated. architecture and the
+                  examples set maven.javadoc.skip.
                 -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
