@@ -20,6 +20,8 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +71,16 @@ final class EndingSessions {
 
   static SessionLimits slowGrace() {
     return SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build();
+  }
+
+  /** A clock that throws {@code message} on a run's thread, so every run of its session crashes. */
+  static InstantSource crashingRuns(String message) {
+    return () -> {
+      if (Thread.currentThread().getName().startsWith("helios-agent-run-")) {
+        throw new IllegalStateException(message);
+      }
+      return Instant.EPOCH;
+    };
   }
 
   static ToolBinding binding(String name, ToolExecutor executor) {

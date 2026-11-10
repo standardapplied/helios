@@ -291,8 +291,14 @@ final class SubagentSessionTest {
                 .build());
   }
 
-  @Test
-  void anInterruptOfTheParentCancelsTheChildAndClosesIt() {
+  static Stream<Arguments> waysTheParentStopsItsCall() {
+    return Stream.of(
+        Arguments.of("an interrupt"), Arguments.of("a close"), Arguments.of("its wall clock"));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("waysTheParentStopsItsCall")
+  void whatStopsTheParentsRunCancelsTheChildAndClosesIt(String how) {
     var started = new CountDownLatch(1);
     var closed = new CountDownLatch(1);
     var provider = new RecordingProvider(new ArrayList<>());
@@ -302,7 +308,11 @@ final class SubagentSessionTest {
     try (var session = AgentSession.open(options)) {
       var result = session.send("find a match");
       Await.latch("the child's model call", started);
-      session.interrupt();
+      switch (how) {
+        case "an interrupt" -> session.interrupt();
+        case "a close" -> session.close();
+        default -> ((AgentSessionImpl) session).lifecycle.expireWallClock();
+      }
       assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the parent's result", result));
       Await.latch("the child's close", closed);
     }
@@ -665,6 +675,25 @@ final class SubagentSessionTest {
     try (var session = AgentSession.open(options)) {
       assertSame(error, Await.failure("the parent's result", session.send("find a match")));
     }
+  }
+
+  @Test
+  void aChildRunThatCrashesIsAFailureRedactedByTheChildsOwnSecrets() {
+    var secrets = new SecretRegistry();
+    secrets.register("CHILD_KEY", "child-secret-0123456789");
+    var parentModel = callingMatching(Usage.of(0, 0));
+    var child =
+        child(childModel().withTextTurn("never").build())
+            .withSecretRegistry(secrets)
+            .withClock(EndingSessions.crashingRuns("clock failure child-secret-0123456789"));
+
+    var result = run(parent(parentModel, child).build());
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals(
+        "Agent: subagent \"matching\" crashed: java.lang.IllegalStateException: clock failure"
+            + " <redacted:CHILD_KEY>",
+        agentResult(parentModel));
   }
 
   @Test
