@@ -43,18 +43,19 @@ import java.util.logging.Logger;
  * The OpenTelemetry spans of a session's runs, and the one owner of their names, attributes and
  * mapping onto the GenAI semantic conventions (status Development). A run is an {@code
  * invoke_agent} span from {@link #start} to {@link #end}, a child of the context its {@code send}
- * was called in. Under it, set as their parent: a {@code chat} span per model attempt, from {@link
- * #modelAttempt} to its {@link QueryEvent.ModelCallEnded} (a compactor's call, which starts none,
- * spans the event's duration); an {@code execute_tool} span per tool call, from its {@link
- * QueryEvent.ToolUse}, or its first {@link QueryEvent.ToolResult} when it had none, to that first
- * result; and a zero-length {@code hook} span per {@link QueryEvent.HookFired}. A span still open
- * when its run ends ends then, with the run's error. Content is added only under {@link
- * TraceDetail#VERBOSE}, each string redacted against the session's secrets, the tool and hook texts
- * already by their events. It reads every event the loop emits before the session's publisher does.
- * A {@link RuntimeException} the application's OpenTelemetry SDK throws from a span call, such as a
- * span processor's, is logged and changes no run: a run whose span did not start runs untraced in
- * its parent's context, and a span that did not start or end is not traced; an {@link Error}
- * propagates. Thread-safe: each run's spans are guarded by a lock of their own.
+ * was called in, carrying the session's {@link SessionOptions#traceAttributes() labels}. Under it,
+ * set as their parent: a {@code chat} span per model attempt, from {@link #modelAttempt} to its
+ * {@link QueryEvent.ModelCallEnded} (a compactor's call, which starts none, spans the event's
+ * duration); an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or
+ * its first {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length
+ * {@code hook} span per {@link QueryEvent.HookFired}. A span still open when its run ends ends
+ * then, with the run's error. Content is added only under {@link TraceDetail#VERBOSE}, each string
+ * redacted against the session's secrets, the tool and hook texts already by their events. It reads
+ * every event the loop emits before the session's publisher does. A {@link RuntimeException} the
+ * application's OpenTelemetry SDK throws from a span call, such as a span processor's, is logged
+ * and changes no run: a run whose span did not start runs untraced in its parent's context, and a
+ * span that did not start or end is not traced; an {@link Error} propagates. Thread-safe: each
+ * run's spans are guarded by a lock of their own.
  */
 final class RunSpans implements StepSpans {
 
@@ -104,6 +105,7 @@ final class RunSpans implements StepSpans {
   private final String provider;
   private final boolean verbose;
   private final SecretRegistry secrets;
+  private final SessionOptions options;
   private final Map<String, RunSpan> runs = new ConcurrentHashMap<>();
   private final ContextKey<Context> runParent = ContextKey.named("helios.run.parent");
 
@@ -120,6 +122,7 @@ final class RunSpans implements StepSpans {
             Objects.requireNonNull(options.model().provider(), "model provider must not be null"));
     this.verbose = options.traceDetail() == TraceDetail.VERBOSE;
     this.secrets = options.secretRegistry();
+    this.options = options;
   }
 
   /**
@@ -136,7 +139,7 @@ final class RunSpans implements StepSpans {
   }
 
   private Context started(SessionState run, Context parent) {
-    var span =
+    var builder =
         tracer
             .spanBuilder("invoke_agent " + agentName)
             .setParent(parent)
@@ -146,8 +149,9 @@ final class RunSpans implements StepSpans {
             .setAttribute(CONVERSATION_ID, sessionId)
             .setAttribute(RUN_ID, run.runId())
             .setAttribute(PROVIDER, provider)
-            .setAttribute(REQUEST_MODEL, modelId)
-            .startSpan();
+            .setAttribute(REQUEST_MODEL, modelId);
+    options.traceAttributes().forEach(builder::setAttribute);
+    var span = builder.startSpan();
     var context = parent.with(span).with(runParent, parent);
     runs.put(run.runId(), new RunSpan(run.runId(), span, context));
     return context;

@@ -572,6 +572,28 @@ var tracing = SdkTracerProvider.builder()
 options.withOpenTelemetry(OpenTelemetrySdk.builder().setTracerProvider(tracing).build());
 ```
 
+`withTraceAttributes(Map.of("app.eval.case_id", "c-17"))` labels every run span of the session; each key starts with `app.`,
+so a label never replaces a `helios.*` or `gen_ai.*` attribute. To record what your application made of a run's answer
+(what it rendered, a fallback, a verification), end a span of your own that names the run: `PgSpanExporter` stores any span
+carrying `helios.run.id` as one of that run's spans, of kind `host`, through the same redactor, and ignores every other span.
+
+```java
+var span = tracer.spanBuilder("answer").startSpan();
+try (var ignored = span.makeCurrent()) {
+  var result = session.send(message).join();
+  span.setAttribute("helios.run.id", result.runId());
+  span.setAttribute("app.reply.fallback", render(result));
+} finally {
+  span.end();
+}
+```
+
+`traceStore.findById(runId).spans()` returns that span with the run's own, in start order, its `kind()` `host` and its
+`scope()` your tracer's instrumentation scope.
+
+`PgTraceStore.list` selects runs by label through SCIM's JSON containment, `attributes eq "${\"app.eval.case_id\":\"c-17\"}"`:
+build the JSON object with a JSON library, then escape each `\` and `"` in it for the filter text.
+
 ## Sandboxed Code Execution (`helios-repl`)
 
 The `helios-repl` module runs Java snippets in a JVM subprocess sandbox. A session reaches it through the `Execute` tool with `runtime: JSHELL`: wire `JShellExecutionProvider` as the session's execution provider, which registers `Execute` over it. Each session gets its own sandbox, so variables, imports and classes persist across its `Execute` calls. The sandbox reaches the host only through the custom host functions you register on `ReplConfig`:
