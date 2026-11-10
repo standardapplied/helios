@@ -119,6 +119,7 @@ final class PgSpanExporterTest {
             Attributes.builder()
                 .put(AttributeKey.stringArrayKey("gen_ai.response.finish_reasons"), List.of("stop"))
                 .put("helios.attempt", 1L)
+                .put("helios.turn.index", 1L)
                 .putAll(usage(180, 22, 30, 50))
                 .build());
     var tool =
@@ -174,7 +175,13 @@ final class PgSpanExporterTest {
     assertEquals(Usage.of(100, 22, 30, 50), chatRow.usage());
     assertEquals(CostEstimate.ofMicroUsd(42), chatRow.cost());
     assertEquals(
-        Map.of("gen_ai.response.finish_reasons", "[stop]", "helios.attempt", "1"),
+        Map.of(
+            "gen_ai.response.finish_reasons",
+            "[stop]",
+            "helios.attempt",
+            "1",
+            "helios.turn.index",
+            "1"),
         chatRow.attributes());
     var toolRow = found.spans().get(1);
     assertNull(toolRow.usage());

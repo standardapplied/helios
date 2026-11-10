@@ -94,6 +94,7 @@ final class RunSpansTest {
     expected.put("helios.hook.name", "guard");
     expected.put("helios.hook.phase", "PRE_STOP");
     expected.put("helios.hook.outcome", outcome.getClass().getSimpleName());
+    expected.put("helios.turn.index", 1L);
     if (text != null) {
       expected.put("helios.hook.text", text);
     }
@@ -113,7 +114,9 @@ final class RunSpansTest {
             "helios.hook.phase",
             "PRE_STOP",
             "helios.hook.outcome",
-            outcome.getClass().getSimpleName()),
+            outcome.getClass().getSimpleName(),
+            "helios.turn.index",
+            1L),
         hookAttributes(outcome, TraceDetail.STANDARD));
   }
 

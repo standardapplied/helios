@@ -23,8 +23,18 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Filtering runs by label: `PgTraceStore.list` with the filter
   `attributes eq "${\"app.eval.case_id\":\"c-17\"}"`, scim-sql's JSON containment, returns the
   runs whose attributes hold every key and value given. No code change: documented and tested.
+- `helios.turn.index` (long) on every `chat`, `execute_tool` and `hook` span: the `turnIndex` of
+  the events the span is built from, `1` for a run's first model turn and `0` for a hook that fires
+  before it. A retried attempt keeps its turn's index. `PgSpanExporter` stores it in the span row's
+  `attributes`.
+- `helios.compaction` = `true` on the `chat` span of a compactor's summary call, which carries no
+  `helios.turn.index`.
 
 ### Changed
+
+- A turn whose `chat` span the application's OpenTelemetry SDK failed to start is untraced, as
+  `RunSpans` documents; it used to get a second `chat` span built from its `ModelCallEnded`, which
+  could not be told apart from a compactor's call.
 
 - `PgSpanExporter` selects the spans it stores by `helios.run.id` alone; it used to also require
   the scope `com.standardapplied.helios` and dropped every other span. A Helios-scope span still
