@@ -2,22 +2,37 @@
 
 package com.standardapplied.helios.core.provider;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
+import com.standardapplied.helios.core.test.Await;
+import com.sun.management.HotSpotDiagnosticMXBean;
 import java.io.ByteArrayInputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Parts shared by {@link SseReaderTest} and {@link SseRequestTest}. */
 final class SseFixtures {
 
   static final Duration NEVER_IDLE = Duration.ofMinutes(10);
+
+  private static final Pattern WATCHDOG =
+      Pattern.compile("\"tid\": \"(\\d+)\"[^{}\\[]*?\"name\": \"helios-sse-idle\"");
 
   private SseFixtures() {}
 
@@ -48,8 +63,12 @@ final class SseFixtures {
     }
   }
 
-  /** Records whether the reader closed the body it owns. */
+  /**
+   * Records whether the reader closed the body it owns, and every thread that read or closed it.
+   */
   static final class Closing extends FilterInputStream {
+    final Set<Thread> readers = ConcurrentHashMap.newKeySet();
+    final List<Thread> closers = new CopyOnWriteArrayList<>();
     boolean closed;
 
     Closing(InputStream body) {
@@ -57,10 +76,56 @@ final class SseFixtures {
     }
 
     @Override
+    public int read() throws IOException {
+      readers.add(Thread.currentThread());
+      return super.read();
+    }
+
+    @Override
+    public int read(byte[] target, int offset, int length) throws IOException {
+      readers.add(Thread.currentThread());
+      return super.read(target, offset, length);
+    }
+
+    /** The one thread that read the body. */
+    Thread reader() {
+      assertEquals(1, readers.size(), "the threads that read the body");
+      return readers.iterator().next();
+    }
+
+    @Override
     public void close() throws IOException {
+      closers.add(Thread.currentThread());
       closed = true;
       super.close();
     }
+  }
+
+  /**
+   * The thread ids of the live idle watchdogs, read from the JVM's JSON thread dump, the one view
+   * that lists virtual threads.
+   */
+  static Set<Long> watchdogs() {
+    try {
+      var dump = Files.createTempDirectory("threads").resolve("dump.json");
+      ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
+          .dumpThreads(dump.toString(), HotSpotDiagnosticMXBean.ThreadDumpFormat.JSON);
+      var text = Files.readString(dump);
+      Files.delete(dump);
+      Files.delete(dump.getParent());
+      return WATCHDOG
+          .matcher(text)
+          .results()
+          .map(match -> Long.parseLong(match.group(1)))
+          .collect(Collectors.toSet());
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /** Waits until every live idle watchdog is one of {@code before}. */
+  static void awaitNoWatchdogBut(Set<Long> before) {
+    Await.until("the idle watchdog to end", () -> before.containsAll(watchdogs()));
   }
 
   static InputStream stream(String text) {
