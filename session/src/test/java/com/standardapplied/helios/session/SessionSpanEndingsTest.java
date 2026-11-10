@@ -348,7 +348,9 @@ final class SessionSpanEndingsTest {
     var type = failure.getClass().getName();
     var description = readable ? type + ": host failure" : type;
     assertFailed(run, description, type);
-    assertFailed(capture.only("chat scripted-stream"), description, type);
+    var chat = capture.only("chat scripted-stream");
+    assertFailed(chat, description, type);
+    assertEquals(1L, chat.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertNull(run.getAttributes().get(SessionSpansTest.INPUT_TOKENS));
   }
 
