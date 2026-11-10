@@ -41,6 +41,7 @@ public final class SessionState {
   private final CancellationToken cancellation;
   private final InstantSource clock;
   private final ConversationHistory history;
+  private final Optional<SessionTotals> parentRun;
   private final SessionTotals totals;
   private final SessionEnding ending;
   private CompletableFuture<Void> cancelling;
@@ -61,18 +62,40 @@ public final class SessionState {
    * @throws IllegalArgumentException if {@code sessionId} is blank
    */
   public SessionState(String sessionId, CancellationToken cancellation, InstantSource clock) {
+    this(sessionId, cancellation, clock, Optional.empty());
+  }
+
+  /**
+   * Build the state of a new session, as {@link #SessionState(String, CancellationToken,
+   * InstantSource)} does, whose every run's totals roll up into {@code parentRun}'s, present for
+   * the child session of a subagent.
+   *
+   * @param sessionId stable session identifier; non-blank
+   * @param cancellation the session's cancellation token; non-null
+   * @param clock the time source that drives {@link SessionTotals#elapsed()}; non-null
+   * @param parentRun the totals of the run whose {@code Agent} call opened the session, or empty
+   * @throws NullPointerException if an argument is null
+   * @throws IllegalArgumentException if {@code sessionId} is blank
+   */
+  public SessionState(
+      String sessionId,
+      CancellationToken cancellation,
+      InstantSource clock,
+      Optional<SessionTotals> parentRun) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     if (Strings.isBlank(sessionId)) {
       throw new IllegalArgumentException("sessionId must not be blank");
     }
     Objects.requireNonNull(cancellation, "cancellation must not be null");
     Objects.requireNonNull(clock, "clock must not be null");
+    Objects.requireNonNull(parentRun, "parentRun must not be null");
     this(
         sessionId,
         cancellation,
         clock,
         new ConversationHistory(),
-        new SessionEnding(sessionId, cancellation));
+        new SessionEnding(sessionId, cancellation),
+        parentRun);
   }
 
   private SessionState(
@@ -80,20 +103,22 @@ public final class SessionState {
       CancellationToken cancellation,
       InstantSource clock,
       ConversationHistory history,
-      SessionEnding ending) {
+      SessionEnding ending,
+      Optional<SessionTotals> parentRun) {
     this.sessionId = sessionId;
     this.runId = "run-" + Ids.newId();
     this.cancellation = cancellation;
     this.clock = clock;
-    this.totals = new SessionTotals(clock);
+    this.parentRun = parentRun;
+    this.totals = new SessionTotals(clock, parentRun);
     this.history = history;
     this.ending = ending;
   }
 
   /**
    * Build the state of the next run of {@code session}'s session: the same session id, clock,
-   * history and ending; a fresh run id, its own token, turn {@code 0}, empty totals, no terminal,
-   * started now.
+   * history, ending and parent run; a fresh run id, its own token, turn {@code 0}, empty totals, no
+   * terminal, started now.
    *
    * @param session a state of the session; non-null
    * @param runToken the run's cancellation token; non-null
@@ -105,7 +130,8 @@ public final class SessionState {
         Objects.requireNonNull(runToken, "runToken must not be null"),
         session.clock,
         session.history,
-        session.ending);
+        session.ending,
+        session.parentRun);
   }
 
   /**

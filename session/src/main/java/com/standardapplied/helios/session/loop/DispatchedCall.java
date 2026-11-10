@@ -35,8 +35,9 @@ import java.util.logging.Logger;
  * call's own token is linked to the session's and is cancelled on a thread of its own, so a
  * callback that blocks or throws holds up neither the canceller nor the worker's interrupt. The
  * work is the worker and that cancellation; when both have ended, the worker removes the link and
- * the call is no longer live. A call its caller stops waiting for while its work runs is handed to
- * the dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's token
+ * the call is no longer live. While the tool runs, the call is bound to {@link ToolDispatch#CALL}
+ * on the worker. A call its caller stops waiting for while its work runs is handed to the
+ * dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's token
  * throws or one the tool throws, is recorded by the session's {@link SessionEnding}, the tool's
  * once the answer settled with it, so the caller reads it as itself.
  */
@@ -61,6 +62,7 @@ final class DispatchedCall {
   private final SessionEnding ending;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
+  private volatile ToolResult answerOnceTimedOut;
 
   DispatchedCall(
       ToolBinding binding,
@@ -78,6 +80,7 @@ final class DispatchedCall {
     this.parent = parent;
     this.timeout = timeout;
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
+    this.answerOnceTimedOut = ToolResult.timedOut(call.name(), timeout);
     this.liveCalls = liveCalls;
     this.abandoned = abandoned;
     this.ending = ending;
@@ -129,10 +132,13 @@ final class DispatchedCall {
   /**
    * Wait for the call's answer until the deadline. At the deadline, cancel the call and give its
    * work up to {@code stopGrace} to end: a call whose work ended is {@link ToolResult#timedOut
-   * timed out}; one whose tool still runs is {@link ToolResult#unknown unknown}, and abandoned.
-   * Both waits end as soon as the session's token is cancelled, and a call the session's
-   * cancellation or the caller's interrupt leaves running is abandoned.
+   * timed out}, or, if {@code answersLate}, answered with what its tool returned once cancelled;
+   * one whose tool still runs is {@link ToolResult#unknown unknown}, and abandoned. Both waits end
+   * as soon as the session's token is cancelled, and a call the session's cancellation or the
+   * caller's interrupt leaves running is abandoned.
    *
+   * @param stopGrace how long to wait for a timed-out tool to stop
+   * @param answersLate whether a tool that returns within {@code stopGrace} of the deadline answers
    * @return the tool's result, a {@link ToolResult#threw threw} result for a non-{@link Error}
    *     throwable that escaped {@link com.standardapplied.helios.core.tool.Tool#execute
    *     Tool.execute}, or the timed-out or unknown result
@@ -141,14 +147,14 @@ final class DispatchedCall {
    * @throws CancellationException if the session's token is cancelled, or the calling thread is
    *     interrupted (its interrupt status is kept), before this method returns
    */
-  ToolResult await(Duration stopGrace) {
+  ToolResult await(Duration stopGrace, boolean answersLate) {
     try {
       if (!settlesBy(answer, deadline)) {
         expire();
       }
       return answer.get();
     } catch (ExecutionException e) {
-      return expired(e.getCause(), stopGrace);
+      return expired(e.getCause(), stopGrace, answersLate);
     } catch (InterruptedException e) {
       throw interrupted();
     } catch (CancellationException e) {
@@ -188,7 +194,7 @@ final class DispatchedCall {
     answer.completeExceptionally(new TimeoutException());
   }
 
-  private ToolResult expired(Throwable cause, Duration stopGrace) {
+  private ToolResult expired(Throwable cause, Duration stopGrace, boolean answersLate) {
     if (cause instanceof Error error) {
       throw error;
     }
@@ -204,7 +210,7 @@ final class DispatchedCall {
       throw interrupted();
     }
     if (!isRunning()) {
-      return ToolResult.timedOut(call.name(), timeout);
+      return answersLate ? answerOnceTimedOut : ToolResult.timedOut(call.name(), timeout);
     }
     abandoned.accept(this);
     return ToolResult.unknown(call.name(), timeout);
@@ -236,7 +242,12 @@ final class DispatchedCall {
   private void work() {
     try {
       if (!answer.isDone() && !parent.isCancelled() && System.nanoTime() - deadline < 0) {
-        answer.complete(binding.tool().execute(call.arguments(), context));
+        var result =
+            ScopedValue.where(ToolDispatch.CALL, call)
+                .call(() -> binding.tool().execute(call.arguments(), context));
+        if (!answer.complete(result)) {
+          answerOnceTimedOut = result;
+        }
       }
     } catch (Error e) {
       answer.completeExceptionally(e);

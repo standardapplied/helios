@@ -64,7 +64,8 @@ import java.util.logging.Logger;
  * ending the run with {@link ResultMessage.ErrorDuringExecution} of kind {@code SessionConflict} or
  * {@code SessionStoreFailed} instead; the run's token is cancelled, and its callbacks and the tool
  * calls still running are awaited until one deadline, {@link SessionLimits#stopGrace()} away, each
- * one still running then logged; then {@link QueryEvent.RunEnded} is emitted.
+ * one still running then logged; then {@link QueryEvent.RunEnded} is emitted, its terminal counting
+ * the spend those calls added while they stopped.
  *
  * <p>Every emitted {@link QueryEvent} fires {@link HookRegistry#fireOnStreamEvent stream-event
  * hooks} for observe-only consumers.
@@ -275,13 +276,15 @@ public final class AgentLoop {
   /**
    * End the decided run: close an open tool round, append what the history gained and the run's end
    * to the store, cancel the run's token, wait up to {@code stopGrace} for its tool calls still
-   * running, then emit {@link QueryEvent.RunEnded}.
+   * running, then emit {@link QueryEvent.RunEnded}. The terminal of a run a limit or its
+   * cancellation ended counts the spend those calls added while they stopped, a subagent's ({@link
+   * StopClassifier#withSpend}).
    */
   private ResultMessage end(SessionState state, SessionLimits limits, ResultMessage decided) {
     // An interrupt host code left on this thread is no request to cut the run's waits short.
     Thread.interrupted();
     state.history().closeOpenRound(NOT_RUN);
-    var terminal =
+    var stored =
         storedHistory
             .end(
                 state, decided, collaborators.clock().instant(), collaborators.secrets().redactor())
@@ -297,6 +300,8 @@ public final class AgentLoop {
                   + limits.stopGrace());
     }
     collaborators.toolDispatch().endLiveCalls(deadline, limits.stopGrace(), run);
+    var terminal = StopClassifier.withSpend(stored, state.totals());
+    state.setFinalTerminal(terminal);
     emitter.emit(
         state,
         new QueryEvent.RunEnded(

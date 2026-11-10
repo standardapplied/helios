@@ -30,6 +30,16 @@ class RecordingStore implements SessionStore {
     this.failure = failure;
   }
 
+  /** A store whose every load throws {@code thrown}. */
+  static RecordingStore loadThrowing(RuntimeException thrown) {
+    return new RecordingStore() {
+      @Override
+      public StoredSession load(String sessionId) {
+        throw thrown;
+      }
+    };
+  }
+
   @Override
   public StoredSession load(String sessionId) {
     return inner.load(sessionId);

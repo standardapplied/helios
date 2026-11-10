@@ -12,12 +12,15 @@ import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.AgentSessionImpl;
+import com.standardapplied.helios.session.SessionLimits;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.logging.Logger;
 
@@ -29,6 +32,14 @@ import java.util.logging.Logger;
  *
  * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
+ *
+ * <p>A call that starts a run of its own, an {@code Agent} call its subagent's child run, runs
+ * under that run's limits, which the session's child-limits function gives: its deadline is the
+ * run's {@code maxWallClock} plus its {@code stopGrace}, and past it the dispatcher waits the run's
+ * {@code stopGrace} for it to stop; if its tool returns by then, what it returned is the call's
+ * answer, so an {@code Agent} call answers with its cancelled child's terminal. Every other call
+ * runs under the default deadline and stop grace the loop passes. While its tool runs, the call is
+ * {@link #callOfThisThread()} on the worker thread.
  *
  * <p>Each call stays linked to its run's cancellation token until its worker ends, so ending the
  * run or closing the session cancels and interrupts every call still running, including one already
@@ -43,17 +54,48 @@ public final class ToolDispatch {
 
   private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
 
+  /** The call whose tool runs on the current thread, bound by {@link DispatchedCall}. */
+  static final ScopedValue<ToolCall> CALL = ScopedValue.newInstance();
+
   private final SessionContext sessionContext;
   private final ToolRegistry registry;
   private final Set<DispatchedCall> liveCalls = ConcurrentHashMap.newKeySet();
   private final SessionEnding ending;
+  private final Function<ToolCall, Optional<SessionLimits>> childLimits;
   private volatile DispatchedCall abandoned;
 
-  /** {@code ending} records every {@link Error} the work of a call throws. */
+  /**
+   * A dispatcher whose calls all run under the default deadline; {@code ending} records every
+   * {@link Error} the work of a call throws.
+   */
   public ToolDispatch(SessionContext sessionContext, ToolRegistry registry, SessionEnding ending) {
+    this(sessionContext, registry, ending, call -> Optional.empty());
+  }
+
+  /**
+   * A dispatcher whose call runs under the limits of the run it starts, which {@code childLimits}
+   * gives, or under the defaults when it gives none; {@code ending} records every {@link Error} the
+   * work of a call throws.
+   */
+  public ToolDispatch(
+      SessionContext sessionContext,
+      ToolRegistry registry,
+      SessionEnding ending,
+      Function<ToolCall, Optional<SessionLimits>> childLimits) {
     this.sessionContext = sessionContext;
     this.registry = registry;
     this.ending = ending;
+    this.childLimits = childLimits;
+  }
+
+  /**
+   * The call whose tool runs on the calling thread, the worker of a dispatched call.
+   *
+   * @return the call, as dispatched
+   * @throws IllegalStateException if no dispatched tool runs on the calling thread
+   */
+  public static ToolCall callOfThisThread() {
+    return CALL.orElseThrow(() -> new IllegalStateException("no tool call runs on this thread"));
   }
 
   /**
@@ -116,20 +158,23 @@ public final class ToolDispatch {
   }
 
   /** Settle every live call's answer as its deadline does, for tests that fire deadlines. */
-  void expireLiveCalls() {
+  public void expireLiveCalls() {
     liveCalls.forEach(DispatchedCall::expire);
   }
 
   /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
-   * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
-   * tool's start and run; past it, this method waits at most {@code stopGrace}. A tool not started
-   * by the deadline, or before {@code cancellation} fires, never starts. At the deadline the call's
-   * token is cancelled and its worker interrupted, and the call is:
+   * linked to {@code cancellation}, under one deadline, from now, that covers the tool's start and
+   * run: {@code timeout}, or for a call that starts a run of its own, that run's {@code
+   * maxWallClock} plus its {@code stopGrace}; past it, this method waits at most {@code stopGrace},
+   * or that run's {@code stopGrace}. A tool not started by the deadline, or before {@code
+   * cancellation} fires, never starts. At the deadline the call's token is cancelled and its worker
+   * interrupted, and the call is:
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
-   *       stopGrace};
+   *       stopGrace}, unless the call starts a run of its own and the tool returned a result: that
+   *       result;
    *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
    *       it runs on until it ends.
    * </ul>
@@ -145,8 +190,9 @@ public final class ToolDispatch {
    *
    * @param call the call; non-null
    * @param cancellation the run's cancellation token; non-null
-   * @param timeout per-call budget, from now; non-null, positive
-   * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
+   * @param timeout per-call budget, from now, of a call that starts no run of its own; non-null,
+   *     positive
+   * @param stopGrace how long to wait for such a call's timed-out tool to stop; non-null, positive
    * @param withheld true for the canonical key of an entry the call must not return, handed to the
    *     tool through its {@link ToolContext}; non-null
    * @return the tool's result, or a framework result on unknown tool, refusal or timeout
@@ -179,18 +225,19 @@ public final class ToolDispatch {
           ToolDispatch.class.getSimpleName(),
           "tool '" + stuck.call().name() + "' did not stop; no tool runs until it ends");
     }
+    var own = childLimits.apply(call);
     var dispatched =
         new DispatchedCall(
             binding.orElseThrow(),
             call,
             sessionContext,
             cancellation,
-            timeout,
+            own.map(limits -> limits.maxWallClock().plus(limits.stopGrace())).orElse(timeout),
             withheld,
             liveCalls,
             left -> abandoned = left,
             ending);
     dispatched.start();
-    return dispatched.await(stopGrace);
+    return dispatched.await(own.map(SessionLimits::stopGrace).orElse(stopGrace), own.isPresent());
   }
 }

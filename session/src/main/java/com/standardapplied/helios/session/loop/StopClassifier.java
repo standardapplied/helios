@@ -134,6 +134,32 @@ public final class StopClassifier {
   }
 
   /**
+   * {@code terminal} with the usage and cost of {@code totals} as they are now, if a limit or the
+   * run's cancellation imposed it; any other terminal as it is. A run those ended may leave tool
+   * calls running, and what one adds to the totals while it stops, a subagent's spend, counts. The
+   * terminal's type, reason and duration stay as decided.
+   */
+  static ResultMessage withSpend(ResultMessage terminal, SessionTotals totals) {
+    var usage = totals.usage();
+    var cost = totals.cost();
+    if (terminal.usage().equals(usage) && terminal.cost().equals(cost)) {
+      return terminal;
+    }
+    return switch (terminal) {
+      case ResultMessage.Cancelled ended ->
+          new ResultMessage.Cancelled(
+              ended.sessionId(), ended.runId(), ended.reason(), usage, cost, ended.duration());
+      case ResultMessage.ErrorMaxWallClock ended ->
+          new ResultMessage.ErrorMaxWallClock(
+              ended.sessionId(), ended.runId(), usage, cost, ended.duration());
+      case ResultMessage.ErrorMaxBudgetUsd ended ->
+          new ResultMessage.ErrorMaxBudgetUsd(
+              ended.sessionId(), ended.runId(), cost.microUsd(), usage, cost, ended.duration());
+      default -> terminal;
+    };
+  }
+
+  /**
    * The terminal a turn's own ending implies, or empty when the turn would continue the loop: a
    * {@link FinishReason#TOOL_CALLS} turn, or a {@link FinishReason#STOP} turn with messages queued.
    */

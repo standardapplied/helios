@@ -132,6 +132,20 @@ final class SessionLifecycle {
     }
   }
 
+  /**
+   * The first host {@link Error} the closed session recorded, if any, once its teardown ended or
+   * {@code stopGrace} passed: another thread's close may still be tearing it down.
+   */
+  Optional<Error> failureOnceClosed() {
+    BoundedTask.settlesBy(tornDown, BoundedTask.deadlineAfter(limits.stopGrace()));
+    return session.ending().first();
+  }
+
+  /** Expire the tool calls still running as their deadline does, for tests. */
+  void expireToolCalls() {
+    loop.toolDispatch().expireLiveCalls();
+  }
+
   /** Expire the run in progress as its wall clock does, for tests. */
   void expireWallClock() {
     runs.activeRun().ifPresent(Run::expireWallClock);

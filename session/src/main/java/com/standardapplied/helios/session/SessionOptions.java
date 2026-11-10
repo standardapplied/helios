@@ -24,6 +24,7 @@ import io.opentelemetry.api.OpenTelemetry;
 import java.time.Clock;
 import java.time.InstantSource;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -112,6 +113,10 @@ import java.util.Optional;
  *     results and hook texts. Non-null, defaults to {@code STANDARD}
  * @param traceAttributes the host's labels every run span of the session carries, each key starting
  *     with {@code app.}; copied, non-null with no null key or value, defaults to none
+ * @param subagents the child agents the model may delegate to; with at least one, the session
+ *     registers the built-in {@code Agent} tool, which runs one of them per call (see {@link
+ *     Builder#withSubagent}). Copied, non-null with no null element, unique by name, defaults to
+ *     none
  */
 public record SessionOptions(
     Model model,
@@ -135,17 +140,19 @@ public record SessionOptions(
     Optional<OpenTelemetry> openTelemetry,
     String agentName,
     TraceDetail traceDetail,
-    Map<String, String> traceAttributes) {
+    Map<String, String> traceAttributes,
+    List<Subagent> subagents) {
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if any argument is null or {@code tools} or {@code hooks} holds a
-   *     null element
+   * @throws NullPointerException if any argument is null or {@code tools}, {@code hooks} or {@code
+   *     subagents} holds a null element
    * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule, {@code
    *     maxQueuedUserMessages} is not positive, {@code limits} sets a budget while {@code
-   *     costCalculator} is {@link CostCalculator#ZERO}, {@code agentName} is blank, or a key of
-   *     {@code traceAttributes} does not start with {@code app.}
+   *     costCalculator} is {@link CostCalculator#ZERO}, {@code agentName} is blank, a key of {@code
+   *     traceAttributes} does not start with {@code app.}, or {@code subagents} break a rule of
+   *     {@link Builder#withSubagent}
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -171,6 +178,49 @@ public record SessionOptions(
     Validate.notBlank("agentName", agentName);
     Objects.requireNonNull(traceDetail, "traceDetail must not be null");
     traceAttributes = appAttributes(traceAttributes);
+    subagents = List.copyOf(Objects.requireNonNull(subagents, "subagents must not be null"));
+    requireValidSubagents(subagents, tools, limits);
+  }
+
+  /**
+   * Refuse a subagent without a cost calculator, and one of its own subagents at any depth: each
+   * runs under what the budget has left, which could not count its spend.
+   */
+  private static void requireCostCalculators(List<Subagent> subagents) {
+    for (var subagent : subagents) {
+      if (subagent.options().costCalculator() == CostCalculator.ZERO) {
+        throw new IllegalArgumentException(
+            "subagent \""
+                + subagent.name()
+                + "\" has no cost calculator, so the session's maxBudgetMicroUsd could not count"
+                + " its spend; set its SessionOptions.Builder.withCostCalculator");
+      }
+      requireCostCalculators(subagent.options().subagents());
+    }
+  }
+
+  /**
+   * Refuse subagents with one name, a tool of the options' own that the {@code Agent} tool would
+   * collide with, and, under a budget, a subagent whose spend the budget could not count.
+   */
+  private static void requireValidSubagents(
+      List<Subagent> subagents, List<ToolBinding> tools, SessionLimits limits) {
+    if (subagents.isEmpty()) {
+      return;
+    }
+    var names = new HashSet<String>();
+    for (var subagent : subagents) {
+      if (!names.add(subagent.name())) {
+        throw new IllegalArgumentException("duplicate subagent name: " + subagent.name());
+      }
+    }
+    if (limits.maxBudgetMicroUsd().isPresent()) {
+      requireCostCalculators(subagents);
+    }
+    if (tools.stream().anyMatch(tool -> AgentTool.NAME.equals(tool.name()))) {
+      throw new IllegalArgumentException(
+          "a tool named " + AgentTool.NAME + " collides with the built-in tool subagents add");
+    }
   }
 
   /**
@@ -247,7 +297,8 @@ public record SessionOptions(
         .withSecretRegistry(secretRegistry)
         .withAgentName(agentName)
         .withTraceDetail(traceDetail)
-        .withTraceAttributes(traceAttributes);
+        .withTraceAttributes(traceAttributes)
+        .withSubagents(subagents);
   }
 
   /**
@@ -655,11 +706,78 @@ public record SessionOptions(
     }
 
     /**
+     * Set the full subagent list. Replaces any previously-added subagents. Defaults to none.
+     *
+     * @param subagents non-null list of subagents
+     * @return this builder
+     * @throws NullPointerException if {@code subagents} is null or contains null elements
+     */
+    public Builder withSubagents(List<Subagent> subagents) {
+      var copy = List.copyOf(Objects.requireNonNull(subagents, "subagents must not be null"));
+      wiring.subagents.clear();
+      wiring.subagents.addAll(copy);
+      return this;
+    }
+
+    /**
+     * Append a subagent the model may delegate to. With at least one, the session registers the
+     * built-in {@code Agent} tool, whose input is {@code {"agent": <name>, "prompt": <text>}}, both
+     * required, and whose description lists each {@code name: description}, its {@code agent}
+     * parameter the names; a call naming no subagent is a failure listing the names. It is an
+     * {@link com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION} tool keyed
+     * {@code Agent(<name>)}, so a permission rule allows, asks or denies one subagent, and hooks
+     * apply to it as to any tool.
+     *
+     * <p>Each call runs one fresh child session from the subagent's options (see {@link Subagent}),
+     * sends it the prompt, waits for its run to end and closes it. A child's {@code Success} is the
+     * call's result: its text, or its JSON under an output schema; any other terminal is a failure
+     * naming the subagent, the terminal and why it ended, and so is a child that cannot open. The
+     * child's secret registry redacts the answer before this session's does.
+     *
+     * <ul>
+     *   <li><b>Spend</b>: the child's usage and cost, whatever its terminal, are added to the
+     *       parent run's as the child spends, so the parent's {@link ResultMessage} and its budget
+     *       check after the turn count them. Under {@link SessionLimits#maxBudgetMicroUsd()}, the
+     *       child runs with the lower of its own budget and what the parent run has left, and a
+     *       call with nothing left fails without starting one. A child still stopping when this
+     *       session's run stops waiting for it, {@code stopGrace} after the run was cancelled, is
+     *       left running as any tool call is; what it accounts after that is in its own result
+     *       only.
+     *   <li><b>Time</b>: the call's deadline is the subagent's {@link SessionLimits#maxWallClock()}
+     *       plus its {@link SessionLimits#stopGrace()}, not this session's {@link
+     *       SessionLimits#toolTimeoutDefault()}; this session's own {@code maxWallClock} still
+     *       bounds its run. The call's cancellation, by an interrupt, a close, the call's deadline
+     *       or the run's wall clock, interrupts and closes the child, which ends {@link
+     *       ResultMessage.Cancelled}; at the deadline the call waits the subagent's {@code
+     *       stopGrace} for the child to close and answers with that failure.
+     *   <li><b>Linkage</b>: the child's run span is a child of the call's {@code execute_tool} span
+     *       and carries {@code helios.parent.session_id}, {@code helios.parent.run_id} and {@code
+     *       helios.parent.tool_call_id}, which {@code PgSpanExporter} stores in the child's run
+     *       row.
+     *   <li><b>Store</b>: a child whose options have a store is stored under its own id.
+     * </ul>
+     *
+     * <p>A child runs in the foreground of the call; background work, delivering its result into
+     * this session and caps on concurrent children are the host's, linked with its own {@link
+     * #withTraceAttributes labels}.
+     *
+     * @param subagent non-null subagent
+     * @return this builder
+     * @throws NullPointerException if {@code subagent} is null
+     */
+    public Builder withSubagent(Subagent subagent) {
+      wiring.subagents.add(Objects.requireNonNull(subagent, "subagent must not be null"));
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the options
      * @throws IllegalStateException if {@code model} was never set
-     * @throws IllegalArgumentException if the limits set a budget and no cost calculator is set
+     * @throws IllegalArgumentException if the limits set a budget and no cost calculator is set;
+     *     with subagents, if two share a name, a tool of the options is named {@code Agent}, or the
+     *     limits set a budget and a subagent's cost calculator is {@link CostCalculator#ZERO}
      */
     public SessionOptions build() {
       if (model == null) {
@@ -692,14 +810,15 @@ public record SessionOptions(
           Optional.ofNullable(wiring.openTelemetry),
           wiring.agentName,
           wiring.traceDetail,
-          wiring.traceAttributes);
+          wiring.traceAttributes,
+          wiring.subagents);
     }
 
     /**
      * What {@code SessionWiring} turns into the session's collaborators when it opens: the built-in
      * tools the session registers when switched on (the memory tools over a backend, {@code
-     * Execute} over a provider, and {@code AskUserQuestion}), and its spans: where they go, what
-     * its runs are named and labelled and how much content they carry.
+     * Execute} over a provider, {@code AskUserQuestion}, and {@code Agent} over subagents), and its
+     * spans: where they go, what its runs are named and labelled and how much content they carry.
      */
     private static final class Wiring {
 
@@ -710,6 +829,7 @@ public record SessionOptions(
       private String agentName = "helios";
       private TraceDetail traceDetail = TraceDetail.STANDARD;
       private Map<String, String> traceAttributes = Map.of();
+      private final List<Subagent> subagents = new ArrayList<>();
     }
   }
 }
