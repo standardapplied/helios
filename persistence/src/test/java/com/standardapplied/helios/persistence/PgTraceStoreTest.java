@@ -16,10 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.Paginate;
 import com.standardapplied.helios.core.model.Response.Usage;
+import com.standardapplied.helios.persistence.mapper.JsonbMapper;
 import com.standardapplied.scimsql.FilterSyntaxException;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -185,5 +187,74 @@ class PgTraceStoreTest {
             () -> store.list(Paginate.of(), "name eq \"my-agent\") or (name pr"));
 
     assertInstanceOf(FilterSyntaxException.class, e.getCause());
+  }
+
+  /** Store run {@code index}, starting {@code index} minutes in, labelled {@code labels}. */
+  private void label(int index, Map<String, String> labels) {
+    var attributes = Attributes.builder();
+    labels.forEach(attributes::put);
+    var span =
+        run("run-" + index, "%016x".formatted(index + 1), "agent", index * 60, attributes.build());
+    assertTrue(exporter.export(List.of(span)).isSuccess());
+  }
+
+  /**
+   * The filter that selects the runs labelled {@code labels}: their JSON object, written by a JSON
+   * library, with each backslash and quote escaped for the filter text.
+   */
+  private static String labelled(Map<String, String> labels) {
+    var json = JsonbMapper.toJsonb(labels).replace("\\", "\\\\").replace("\"", "\\\"");
+    return "attributes eq \"$" + json + "\"";
+  }
+
+  private List<String> listed(String filter) {
+    return store.list(Paginate.of(), filter).items().stream().map(Trace::id).toList();
+  }
+
+  private void seedLabelledRuns() {
+    label(0, Map.of("app.eval.case_id", "c-17", "app.eval.variant", "a"));
+    label(1, Map.of("app.eval.case_id", "c-17", "app.eval.variant", "b"));
+    label(2, Map.of("app.eval.case_id", "c-18", "app.eval.variant", "a"));
+    label(3, Map.of());
+    label(4, Map.of("app.note", "say \"hi\" \\ bye"));
+  }
+
+  @Test
+  void aLabelFilterReturnsExactlyTheRunsCarryingTheLabel() {
+    seedLabelledRuns();
+
+    assertEquals(
+        List.of("run-1", "run-0"),
+        listed("attributes eq \"${\\\"app.eval.case_id\\\":\\\"c-17\\\"}\""));
+    assertEquals(List.of("run-1", "run-0"), listed(labelled(Map.of("app.eval.case_id", "c-17"))));
+    assertEquals(List.of(), listed(labelled(Map.of("app.eval.case_id", "c-99"))));
+  }
+
+  @Test
+  void twoLabelsInOneObjectMustBothMatch() {
+    seedLabelledRuns();
+
+    assertEquals(
+        List.of("run-1"),
+        listed(labelled(Map.of("app.eval.case_id", "c-17", "app.eval.variant", "b"))));
+  }
+
+  @Test
+  void twoLabelClausesJoinWithAnd() {
+    seedLabelledRuns();
+
+    assertEquals(
+        List.of("run-0"),
+        listed(
+            labelled(Map.of("app.eval.case_id", "c-17"))
+                + " and "
+                + labelled(Map.of("app.eval.variant", "a"))));
+  }
+
+  @Test
+  void aLabelValueHoldingAQuoteAndABackslashIsMatched() {
+    seedLabelledRuns();
+
+    assertEquals(List.of("run-4"), listed(labelled(Map.of("app.note", "say \"hi\" \\ bye"))));
   }
 }

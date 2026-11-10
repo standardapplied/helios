@@ -505,6 +505,40 @@ final class SessionSpansTest {
   }
 
   @Test
+  void everyRunSpanOfALabelledSessionCarriesItsLabelsAndNoOtherSpanDoes() {
+    var model = ScriptedModel.newBuilder().withTextTurn("first").withTextTurn("second").build();
+    var options =
+        traced(model)
+            .withTraceAttributes(Map.of("app.eval.case_id", "c-17", "app.eval.variant", "b"))
+            .build();
+    try (var session = AgentSession.open(options)) {
+      Await.value("the first run", session.send("one"));
+      Await.value("the second run", session.send("two"));
+    }
+
+    var runs = capture.starting("invoke_agent ");
+    assertEquals(2, runs.size());
+    for (var run : runs) {
+      assertEquals("c-17", string(run, "app.eval.case_id"));
+      assertEquals("b", string(run, "app.eval.variant"));
+      assertEquals(SID, string(run, "gen_ai.conversation.id"));
+    }
+    for (var chat : capture.named("chat scripted")) {
+      assertNull(string(chat, "app.eval.case_id"));
+    }
+  }
+
+  @Test
+  void anUnlabelledSessionsRunSpanCarriesNoAppAttribute() {
+    run(traced(ScriptedModel.newBuilder().withTextTurn("done").build()).build(), "go");
+
+    capture
+        .run()
+        .getAttributes()
+        .forEach((key, value) -> assertFalse(key.getKey().startsWith("app."), key.getKey()));
+  }
+
+  @Test
   void aSessionClosedBeforeAnyRunEmitsNoSpan() {
     AgentSession.open(traced(ScriptedModel.newBuilder().build()).build()).close();
 

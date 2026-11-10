@@ -13,18 +13,20 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * One stored step of a run, a model attempt, tool call or hook decision, as {@link PgSpanExporter}
- * wrote it from the step's span and {@link PgTraceStore} reads it back.
+ * One stored span of a run, as {@link PgSpanExporter} wrote it and {@link PgTraceStore} reads it
+ * back: a step of Helios's own, a model attempt, tool call or hook decision, or a host's span that
+ * named the run, of kind {@code host}.
  *
  * @param id the OpenTelemetry span id, 16 lower-case hex digits
  * @param name the span's name, such as {@code chat gemini-3.8-flash}
- * @param kind the span's {@code gen_ai.operation.name} ({@code chat}, {@code execute_tool}), or
- *     {@code hook} for a hook decision
+ * @param kind the span's {@code gen_ai.operation.name} ({@code chat}, {@code execute_tool}), {@code
+ *     hook} for a hook decision, or {@code host} for a host's span
  * @param startTime when the step started
  * @param endTime when the step ended
  * @param duration from {@code startTime} to {@code endTime}, or null when either is missing
  * @param error the span's status description when the step failed, or null if it succeeded
- * @param attributes every other attribute of the span, as strings
+ * @param attributes every other attribute of the span, as strings; a host span's also holds its
+ *     instrumentation scope under {@code otel.scope.name}
  * @param usage the model attempt's token usage, or null if none was recorded
  * @param cost the model attempt's cost, or null if none was recorded
  */
@@ -39,6 +41,20 @@ public record Span(
     Map<String, String> attributes,
     Usage usage,
     CostEstimate cost) {
+
+  static final String HELIOS_SCOPE = "com.standardapplied.helios";
+  static final String HOST = "host";
+  static final String SCOPE_ATTRIBUTE = "otel.scope.name";
+
+  /**
+   * The instrumentation scope that emitted the span.
+   *
+   * @return {@code com.standardapplied.helios} for a step of Helios's own, the stored {@code
+   *     otel.scope.name} for a host span
+   */
+  public String scope() {
+    return HOST.equals(kind) ? attributes.get(SCOPE_ATTRIBUTE) : HELIOS_SCOPE;
+  }
 
   /**
    * Whether the span completed without an error attached.

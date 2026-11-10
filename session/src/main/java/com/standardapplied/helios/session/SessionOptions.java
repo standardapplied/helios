@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -109,6 +110,8 @@ import java.util.Optional;
  * @param traceDetail how much content the session's spans carry; {@link TraceDetail#STANDARD}
  *     carries none, {@link TraceDetail#VERBOSE} the redacted input, output, tool arguments and
  *     results and hook texts. Non-null, defaults to {@code STANDARD}
+ * @param traceAttributes the host's labels every run span of the session carries, each key starting
+ *     with {@code app.}; copied, non-null with no null key or value, defaults to none
  */
 public record SessionOptions(
     Model model,
@@ -131,7 +134,8 @@ public record SessionOptions(
     Optional<SessionStore> store,
     Optional<OpenTelemetry> openTelemetry,
     String agentName,
-    TraceDetail traceDetail) {
+    TraceDetail traceDetail,
+    Map<String, String> traceAttributes) {
 
   /**
    * Canonical constructor.
@@ -140,7 +144,8 @@ public record SessionOptions(
    *     null element
    * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule, {@code
    *     maxQueuedUserMessages} is not positive, {@code limits} sets a budget while {@code
-   *     costCalculator} is {@link CostCalculator#ZERO}, or {@code agentName} is blank
+   *     costCalculator} is {@link CostCalculator#ZERO}, {@code agentName} is blank, or a key of
+   *     {@code traceAttributes} does not start with {@code app.}
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -165,6 +170,22 @@ public record SessionOptions(
     Objects.requireNonNull(openTelemetry, "openTelemetry must not be null");
     Validate.notBlank("agentName", agentName);
     Objects.requireNonNull(traceDetail, "traceDetail must not be null");
+    traceAttributes = appAttributes(traceAttributes);
+  }
+
+  /**
+   * A copy of {@code attributes}, each key {@code app.} and a name, so a host's label never
+   * replaces one of Helios's {@code helios.*} or {@code gen_ai.*} attributes.
+   */
+  private static Map<String, String> appAttributes(Map<String, String> attributes) {
+    var copy = Map.copyOf(Objects.requireNonNull(attributes, "traceAttributes must not be null"));
+    for (var key : copy.keySet()) {
+      if (!key.startsWith("app.") || key.length() == "app.".length()) {
+        throw new IllegalArgumentException(
+            "trace attribute key \"" + key + "\" must start with \"app.\" and name an attribute");
+      }
+    }
+    return copy;
   }
 
   private static void requireCalculatorForBudget(
@@ -225,7 +246,8 @@ public record SessionOptions(
         .withContextCompactor(contextCompactor)
         .withSecretRegistry(secretRegistry)
         .withAgentName(agentName)
-        .withTraceDetail(traceDetail);
+        .withTraceDetail(traceDetail)
+        .withTraceAttributes(traceAttributes);
   }
 
   /**
@@ -616,6 +638,23 @@ public record SessionOptions(
     }
 
     /**
+     * Label the session's runs: every run span carries {@code traceAttributes}, which {@code
+     * PgSpanExporter} stores, through its redactor, in the run row's {@code attributes}. Each key
+     * starts with {@code app.}, so a label never replaces one of Helios's {@code helios.*} or
+     * {@code gen_ai.*} attributes. Replaces any set before; the map is copied. Defaults to none.
+     *
+     * @param traceAttributes non-null labels, with no null key or value
+     * @return this builder
+     * @throws NullPointerException if {@code traceAttributes}, a key or a value is null
+     * @throws IllegalArgumentException if a key does not start with {@code app.} or is {@code app.}
+     *     alone
+     */
+    public Builder withTraceAttributes(Map<String, String> traceAttributes) {
+      wiring.traceAttributes = appAttributes(traceAttributes);
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the options
@@ -652,14 +691,15 @@ public record SessionOptions(
           Optional.ofNullable(store),
           Optional.ofNullable(wiring.openTelemetry),
           wiring.agentName,
-          wiring.traceDetail);
+          wiring.traceDetail,
+          wiring.traceAttributes);
     }
 
     /**
      * What {@code SessionWiring} turns into the session's collaborators when it opens: the built-in
      * tools the session registers when switched on (the memory tools over a backend, {@code
      * Execute} over a provider, and {@code AskUserQuestion}), and its spans: where they go, what
-     * its runs are named and how much content they carry.
+     * its runs are named and labelled and how much content they carry.
      */
     private static final class Wiring {
 
@@ -669,6 +709,7 @@ public record SessionOptions(
       private OpenTelemetry openTelemetry;
       private String agentName = "helios";
       private TraceDetail traceDetail = TraceDetail.STANDARD;
+      private Map<String, String> traceAttributes = Map.of();
     }
   }
 }

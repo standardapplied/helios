@@ -4,9 +4,11 @@ package com.standardapplied.helios.persistence;
 
 import static com.standardapplied.helios.persistence.ExportedSpans.START;
 import static com.standardapplied.helios.persistence.ExportedSpans.TRACE_ID;
+import static com.standardapplied.helios.persistence.ExportedSpans.host;
 import static com.standardapplied.helios.persistence.ExportedSpans.run;
 import static com.standardapplied.helios.persistence.ExportedSpans.span;
 import static com.standardapplied.helios.persistence.ExportedSpans.step;
+import static io.opentelemetry.api.common.AttributeKey.stringKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -36,8 +38,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@link PgSpanExporter} writes each Helios run span as a {@code helios_traces} row and each other
- * Helios span as a {@code helios_spans} row, one batch per transaction, and ignores every other
- * span.
+ * span that names its run, Helios's or a host's, as a {@code helios_spans} row, one batch per
+ * transaction, and ignores every span that names no run.
  */
 final class PgSpanExporterTest {
 
@@ -356,13 +358,9 @@ final class PgSpanExporterTest {
   }
 
   @Test
-  void onlyHeliosSpansThatNameTheirRunAreWritten() {
+  void aSpanThatNamesNoRunIsNotStoredWhateverItsScope() {
     var application =
-        span(
-                "2000000000000001",
-                "database query",
-                1,
-                Attributes.of(AttributeKey.stringKey("helios.run.id"), RUN))
+        span("2000000000000001", "database query", 1, Attributes.empty())
             .setInstrumentationScopeInfo(InstrumentationScopeInfo.create("application"))
             .build();
     var anonymous = span("2000000000000002", "chat scripted", 1, Attributes.empty()).build();
@@ -376,7 +374,131 @@ final class PgSpanExporterTest {
   }
 
   @Test
-  void aBatchWithNoHeliosSpanSucceedsWithoutTouchingTheDatabase() {
+  void aHostSpanEndedAfterItsRunIsStoredAfterTheRunsOwnSpansWithItsScopeAttributesAndStatus() {
+    var chat = step(RUN, "1000000000000001", "chat scripted", "chat", 1, Attributes.empty());
+    assertTrue(exporter.export(List.of(chat, runSpan(RUN))).isSuccess());
+    var outcome =
+        host(
+                RUN,
+                "8000000000000001",
+                "render reply",
+                3,
+                Attributes.builder()
+                    .put("app.reply.fallback", true)
+                    .put("app.query.count", 3L)
+                    .put("otel.scope.name", "spoofed")
+                    .build())
+            .setStatus(StatusData.create(StatusCode.ERROR, "parse failed"))
+            .build();
+
+    assertTrue(exporter.export(List.of(outcome)).isSuccess());
+
+    var spans = store.findById(RUN).spans();
+    assertEquals(List.of("chat scripted", "render reply"), spans.stream().map(Span::name).toList());
+    var row = spans.getLast();
+    assertEquals("8000000000000001", row.id());
+    assertEquals("host", row.kind());
+    assertEquals("light-grid", row.scope());
+    assertEquals("com.standardapplied.helios", spans.getFirst().scope());
+    assertEquals(START.plusSeconds(3), row.startTime());
+    assertEquals("parse failed", row.error());
+    assertNull(row.usage());
+    assertEquals(
+        Map.of(
+            "app.reply.fallback", "true",
+            "app.query.count", "3",
+            "otel.scope.name", "light-grid"),
+        row.attributes());
+  }
+
+  @Test
+  void aHostSpanExportedBeforeItsRunRowIsReadBackWithTheRun() {
+    var outcome =
+        host(RUN, "8000000000000002", "answer", 0, Attributes.of(stringKey("app.mode"), "chat"))
+            .setStatus(StatusData.ok())
+            .build();
+
+    assertTrue(exporter.export(List.of(outcome)).isSuccess());
+    assertNull(store.findById(RUN));
+    assertTrue(exporter.export(List.of(runSpan(RUN))).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals("matchmaking", found.name());
+    var row = found.spans().getFirst();
+    assertEquals("answer", row.name());
+    assertTrue(row.success());
+    assertEquals(Map.of("app.mode", "chat", "otel.scope.name", "light-grid"), row.attributes());
+  }
+
+  @Test
+  void aHostSpanNamedAsARunIsAHostSpanRowNeverTheRunsRow() {
+    var impostor =
+        host(
+                RUN,
+                "8000000000000003",
+                "invoke_agent host",
+                2,
+                Attributes.builder()
+                    .put("gen_ai.operation.name", "invoke_agent")
+                    .put("gen_ai.agent.name", "host")
+                    .build())
+            .build();
+
+    assertTrue(exporter.export(List.of(runSpan(RUN), impostor)).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals("matchmaking", found.name());
+    assertEquals("00f067aa0ba902b7", found.otelSpanId());
+    var row = found.spans().getFirst();
+    assertEquals("host", row.kind());
+    assertEquals(
+        Map.of(
+            "gen_ai.operation.name", "invoke_agent",
+            "gen_ai.agent.name", "host",
+            "otel.scope.name", "light-grid"),
+        row.attributes());
+  }
+
+  @Test
+  void aHostSpansNameAttributesAndStatusAreRedactedAndItsNulsReplaced() {
+    var secrets = new SecretRegistry();
+    secrets.register("key", SECRET);
+    var redacting =
+        new PgSpanExporter(
+            PgConfig.newBuilder()
+                .withDbClient(PgTestSupport.dbClient())
+                .withRedactor(secrets.redactor())
+                .build());
+    var outcome =
+        host(
+                RUN,
+                "8000000000000004",
+                "verify " + SECRET,
+                1,
+                Attributes.builder()
+                    .put("app.reply", "token " + SECRET)
+                    .put("app.raw", "a\u0000b")
+                    .put("app.key\u0000", "c")
+                    .build())
+            .setStatus(StatusData.create(StatusCode.ERROR, "rejected " + SECRET))
+            .build();
+
+    assertTrue(redacting.export(List.of(outcome, runSpan(RUN))).isSuccess());
+
+    var row = store.findById(RUN).spans().getFirst();
+    assertEquals("verify <redacted:key>", row.name());
+    assertEquals("rejected <redacted:key>", row.error());
+    assertEquals(
+        Map.of(
+            "app.reply", "token <redacted:key>",
+            "app.raw", "a\uFFFDb",
+            "app.key\uFFFD", "c",
+            "otel.scope.name", "light-grid"),
+        row.attributes());
+  }
+
+  @Test
+  void aBatchWithNoSpanNamingARunSucceedsWithoutTouchingTheDatabase() {
     var unavailable =
         new PgSpanExporter(new PgConfig(PgTestSupport.unavailable("database down"), null, null));
     var application =

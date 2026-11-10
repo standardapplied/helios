@@ -39,6 +39,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -119,7 +120,8 @@ final class SessionOptionsTest {
         "store",
         "openTelemetry",
         "agentName",
-        "traceDetail"
+        "traceDetail",
+        "traceAttributes"
       })
   void canonicalConstructorRejectsANullComponent(String component) {
     var ex = assertThrows(NullPointerException.class, () -> canonical(component, null));
@@ -661,6 +663,7 @@ final class SessionOptionsTest {
     assertTrue(opts.openTelemetry().isEmpty());
     assertEquals("helios", opts.agentName());
     assertEquals(TraceDetail.STANDARD, opts.traceDetail());
+    assertEquals(Map.of(), opts.traceAttributes());
   }
 
   @Test
@@ -672,8 +675,10 @@ final class SessionOptionsTest {
             .withOpenTelemetry(openTelemetry)
             .withAgentName("matchmaking")
             .withTraceDetail(TraceDetail.VERBOSE)
+            .withTraceAttributes(Map.of("app.eval.case_id", "c-17"))
             .build();
     var copy = opts.toBuilder().build();
+    assertEquals(Map.of("app.eval.case_id", "c-17"), copy.traceAttributes());
     assertSame(openTelemetry, copy.openTelemetry().orElseThrow());
     assertEquals("matchmaking", copy.agentName());
     assertEquals(TraceDetail.VERBOSE, copy.traceDetail());
@@ -706,5 +711,51 @@ final class SessionOptionsTest {
         "agentName must not be blank",
         assertThrows(IllegalArgumentException.class, () -> canonical("agentName", " "))
             .getMessage());
+  }
+
+  @Test
+  void theTraceAttributesAreACopy() {
+    var labels = new HashMap<String, String>();
+    labels.put("app.eval.case_id", "c-17");
+    var opts = SessionOptions.newBuilder().withModel(stubModel()).withTraceAttributes(labels);
+    labels.put("app.eval.variant", "b");
+
+    assertEquals(Map.of("app.eval.case_id", "c-17"), opts.build().traceAttributes());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"helios.x", "gen_ai.x", "x", "app.", "app", "App.x"})
+  void aTraceAttributeKeyOutsideTheAppNamespaceIsRejectedByName(String key) {
+    var message =
+        "trace attribute key \"" + key + "\" must start with \"app.\" and name an attribute";
+    assertEquals(
+        message,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SessionOptions.newBuilder().withTraceAttributes(Map.of(key, "v")))
+            .getMessage());
+    assertEquals(
+        message,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> canonical("traceAttributes", Map.of(key, "v")))
+            .getMessage());
+  }
+
+  @Test
+  void aNullTraceAttributeKeyOrValueIsRejected() {
+    var builder = SessionOptions.newBuilder();
+    var nullKey = new HashMap<String, String>();
+    nullKey.put(null, "v");
+    var nullValue = new HashMap<String, String>();
+    nullValue.put("app.x", null);
+
+    assertEquals(
+        "traceAttributes must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(null))
+            .getMessage());
+    assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullKey));
+    assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullValue));
+    assertThrows(NullPointerException.class, () -> canonical("traceAttributes", nullValue));
   }
 }

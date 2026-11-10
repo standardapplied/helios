@@ -61,4 +61,22 @@ class SpanTest {
     assertNull(Span.newBuilder().withEndTime(START).build().duration());
     assertTrue(span.success());
   }
+
+  @Test
+  void aHostSpansScopeIsItsStoredScopeAttributeAndAnyOtherSpansIsHelios() {
+    var host =
+        Span.newBuilder()
+            .withKind("host")
+            .withAttributes(Map.of("otel.scope.name", "light-grid"))
+            .build();
+
+    assertEquals("light-grid", host.scope());
+    assertEquals(
+        "com.standardapplied.helios",
+        Span.newBuilder()
+            .withKind("chat")
+            .withAttributes(Map.of("otel.scope.name", "light-grid"))
+            .build()
+            .scope());
+  }
 }
