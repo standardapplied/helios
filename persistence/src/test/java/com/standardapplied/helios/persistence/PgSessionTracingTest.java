@@ -17,13 +17,19 @@ import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.Subagent;
 import com.standardapplied.helios.session.TraceDetail;
+import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.permissions.PermissionMode;
+import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -201,5 +207,82 @@ final class PgSessionTracingTest {
     var found = store.findById(result.runId());
     assertEquals("find a match", found.inputText());
     assertEquals("matched", found.outputText());
+  }
+
+  /** Run session {@code sessionId}, whose model calls subagent {@code matching} once per prompt. */
+  private void delegate(String sessionId, PgSessionStore sessions, String... prompts) {
+    var calls =
+        Arrays.stream(prompts)
+            .map(
+                prompt ->
+                    new ToolCall(
+                        "c-" + prompt, "Agent", Map.of("agent", "matching", "prompt", prompt)))
+            .toArray(ToolCall[]::new);
+    var child = ScriptedModel.newBuilder();
+    Arrays.stream(prompts).forEach(prompt -> child.withTextTurn("found " + prompt));
+    var matching =
+        SessionOptions.newBuilder()
+            .withModel(child.build())
+            .withStore(sessions)
+            .withOpenTelemetry(capture.openTelemetry())
+            .build();
+    var options =
+        SessionOptions.newBuilder()
+            .withModel(
+                ScriptedModel.newBuilder().withToolCallsTurn(calls).withTextTurn("done").build())
+            .withSessionId(sessionId)
+            .withPermission(
+                new Permission(
+                    PermissionMode.DEFAULT,
+                    List.of(PermissionRule.any("Agent")),
+                    List.of(),
+                    List.of()))
+            .withSubagent(new Subagent("matching", "finds a match", matching))
+            .withOpenTelemetry(capture.openTelemetry())
+            .build();
+    try (var session = AgentSession.open(options)) {
+      Await.value("the result", session.send("delegate"));
+    }
+  }
+
+  @Test
+  void aSubagentsRunIsStoredUnderItsOwnSessionAndFoundByItsParentsSessionId() {
+    PgTestSupport.truncateSessions();
+    var sessions = new PgSessionStore(PgTestSupport.pgConfig());
+    delegate(SID, sessions, "bob", "eve");
+    delegate("sess-other", sessions, "ann");
+
+    var children = capture.named("invoke_agent matching");
+    var mine =
+        children.stream()
+            .filter(
+                span ->
+                    SID.equals(
+                        span.getAttributes()
+                            .get(AttributeKey.stringKey("helios.parent.session_id"))))
+            .map(span -> span.getAttributes().get(AttributeKey.stringKey("helios.run.id")))
+            .sorted()
+            .toList();
+    assertEquals(3, children.size());
+    assertEquals(2, mine.size());
+    assertEquals(
+        mine,
+        store
+            .list(
+                Paginate.of(),
+                "attributes eq \"${\\\"helios.parent.session_id\\\":\\\"" + SID + "\\\"}\"")
+            .items()
+            .stream()
+            .map(Trace::id)
+            .sorted()
+            .toList());
+    for (var span : children) {
+      var childId = span.getAttributes().get(AttributeKey.stringKey("gen_ai.conversation.id"));
+      var found = store.findById(span.getAttributes().get(AttributeKey.stringKey("helios.run.id")));
+      assertEquals(childId, found.sessionId());
+      assertEquals(
+          "Success", sessions.load(childId).lastRunEnded().orElseThrow().terminal(), childId);
+      assertEquals(2, sessions.load(childId).history().size(), "its prompt and its answer");
+    }
   }
 }

@@ -27,13 +27,16 @@ import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -74,6 +77,85 @@ final class ToolDispatchTest {
     var d = new ToolDispatch(CTX, registry, fixture.ending);
     assertSame(CTX, d.sessionContext());
     assertSame(registry, d.registry());
+  }
+
+  @Test
+  void aCallRunsUnderTheWallClockAndGraceOfTheRunItStartsAndIsTheCallOfItsWorker() {
+    var seen = new CopyOnWriteArrayList<String>();
+    ToolExecutor recording =
+        (arguments, context) -> {
+          seen.add(ToolDispatch.callOfThisThread().name() + " " + context.deadline());
+          return ToolResult.success("ok");
+        };
+    var registry =
+        new ToolRegistry(
+            List.of(
+                binding("own", ToolCategory.READ, recording),
+                binding("other", ToolCategory.READ, recording)));
+    var own = limits(Duration.ofMinutes(40), Duration.ofMinutes(2));
+    var d =
+        new ToolDispatch(
+            CTX,
+            registry,
+            fixture.ending,
+            call -> "own".equals(call.name()) ? Optional.of(own) : Optional.empty());
+
+    var token = new CancellationToken();
+    d.dispatch(call("own"), token, NEVER, NEVER, key -> false);
+    d.dispatch(call("other"), token, NEVER, NEVER, key -> false);
+
+    assertEquals(List.of("own " + Duration.ofMinutes(42), "other " + NEVER), seen);
+  }
+
+  private static SessionLimits limits(Duration maxWallClock, Duration stopGrace) {
+    return SessionLimits.newBuilder()
+        .withMaxWallClock(maxWallClock)
+        .withStopGrace(stopGrace)
+        .build();
+  }
+
+  /** A dispatcher over {@code bindings} whose every call starts a run under {@code own}. */
+  private ToolDispatch ownLimits(SessionLimits own, ToolBinding... bindings) {
+    return new ToolDispatch(
+        CTX, new ToolRegistry(List.of(bindings)), fixture.ending, call -> Optional.of(own));
+  }
+
+  @Test
+  void aCallStartingARunAnswersWithWhatItsToolReturnedOnceCancelled() {
+    var interrupted = new CountDownLatch(1);
+    var d =
+        ownLimits(
+            limits(NEVER, NEVER),
+            binding("own", ToolCategory.READ, fixture.interruptible(interrupted)));
+
+    var running = start(d, "own");
+    Await.latch("the tool to start", fixture.entered);
+    d.expireLiveCalls();
+
+    assertEquals(ToolResult.failure("interrupted"), running.ending("the dispatch").result());
+  }
+
+  @Test
+  void aCallStartingARunWaitsThatRunsStopGraceNotTheDefault() {
+    var cancelled = new CountDownLatch(1);
+    var d =
+        ownLimits(
+            limits(NEVER, NEVER),
+            binding("own", ToolCategory.READ, fixture.stuckSignalling(cancelled)));
+
+    var running = start(d, "own", new CancellationToken(), Duration.ofNanos(1));
+    Await.latch("the tool to start", fixture.entered);
+    d.expireLiveCalls();
+    Await.latch("the call's cancellation", cancelled);
+    fixture.release.countDown();
+
+    assertEquals(ToolResult.success("late"), running.ending("the dispatch").result());
+  }
+
+  @Test
+  void aThreadNoToolRunsOnHasNoCall() {
+    var none = assertThrows(IllegalStateException.class, ToolDispatch::callOfThisThread);
+    assertEquals("no tool call runs on this thread", none.getMessage());
   }
 
   // ── dispatch validation ───────────────────────────────────────────────────

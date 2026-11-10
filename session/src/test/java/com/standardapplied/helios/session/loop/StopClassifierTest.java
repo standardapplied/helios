@@ -7,6 +7,7 @@ package com.standardapplied.helios.session.loop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -155,6 +156,72 @@ final class StopClassifierTest {
     var s = stateAtElapsed(Duration.ofHours(2), token);
     var result = classifyNoError(s, defaults(), FinishReason.STOP, "ignored", false);
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
+  }
+
+  // ── late spend ────────────────────────────────────────────────────────────
+
+  private static final Duration DECIDED = Duration.ofSeconds(3);
+
+  private static SessionTotals lateSpend() {
+    var totals = state().totals();
+    totals.accumulateUsage(Usage.of(7, 3));
+    totals.accumulateCost(CostEstimate.ofMicroUsd(10));
+    return totals;
+  }
+
+  @Test
+  void aCancelledTerminalTakesTheSpendAddedSinceAndKeepsItsReasonAndDuration() {
+    var decided =
+        new ResultMessage.Cancelled(
+            SID, "run-1", "user-stop", Usage.of(0, 0), CostEstimate.zero(), DECIDED);
+
+    assertEquals(
+        new ResultMessage.Cancelled(
+            SID, "run-1", "user-stop", Usage.of(7, 3), CostEstimate.ofMicroUsd(10), DECIDED),
+        StopClassifier.withSpend(decided, lateSpend()));
+  }
+
+  @Test
+  void aWallClockTerminalTakesTheSpendAddedSinceAndKeepsItsDuration() {
+    var decided =
+        new ResultMessage.ErrorMaxWallClock(
+            SID, "run-1", Usage.of(0, 0), CostEstimate.zero(), DECIDED);
+
+    assertEquals(
+        new ResultMessage.ErrorMaxWallClock(
+            SID, "run-1", Usage.of(7, 3), CostEstimate.ofMicroUsd(10), DECIDED),
+        StopClassifier.withSpend(decided, lateSpend()));
+  }
+
+  @Test
+  void aBudgetTerminalTakesTheSpendAddedSinceAsWhatItSpent() {
+    var decided =
+        new ResultMessage.ErrorMaxBudgetUsd(
+            SID, "run-1", 0, Usage.of(0, 0), CostEstimate.zero(), DECIDED);
+
+    assertEquals(
+        new ResultMessage.ErrorMaxBudgetUsd(
+            SID, "run-1", 10, Usage.of(7, 3), CostEstimate.ofMicroUsd(10), DECIDED),
+        StopClassifier.withSpend(decided, lateSpend()));
+  }
+
+  @Test
+  void aTerminalWithNoSpendAddedSinceIsItself() {
+    var totals = lateSpend();
+    var decided =
+        new ResultMessage.Cancelled(
+            SID, "run-1", "user-stop", totals.usage(), totals.cost(), DECIDED);
+
+    assertSame(decided, StopClassifier.withSpend(decided, totals));
+  }
+
+  @Test
+  void aTerminalNoLimitOrCancellationImposedIsItselfWhateverWasSpentSince() {
+    var decided =
+        new ResultMessage.Success(
+            SID, "run-1", "done", Usage.of(0, 0), CostEstimate.zero(), DECIDED, List.of());
+
+    assertSame(decided, StopClassifier.withSpend(decided, lateSpend()));
   }
 
   // ── budget ────────────────────────────────────────────────────────────────

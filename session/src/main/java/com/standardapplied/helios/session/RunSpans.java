@@ -43,21 +43,23 @@ import java.util.logging.Logger;
  * The OpenTelemetry spans of a session's runs, and the one owner of their names, attributes and
  * mapping onto the GenAI semantic conventions (status Development). A run is an {@code
  * invoke_agent} span from {@link #start} to {@link #end}, a child of the context its {@code send}
- * was called in, carrying the session's {@link SessionOptions#traceAttributes() labels}. Under it,
- * set as their parent: a {@code chat} span per model attempt, from {@link #modelAttempt} to its
- * {@link QueryEvent.ModelCallEnded} (a compactor's call, which starts none, spans the event's
- * duration); an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or
- * its first {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length
- * {@code hook} span per {@link QueryEvent.HookFired}. Each carries the {@link
- * QueryEvent#turnIndex() turnIndex} of its events as {@code helios.turn.index}, except the
- * compactor's call, which carries {@code helios.compaction} instead. A span still open when its run
- * ends ends then, with the run's error. Content is added only under {@link TraceDetail#VERBOSE},
- * each string redacted against the session's secrets, the tool and hook texts already by their
- * events. It reads every event the loop emits before the session's publisher does. A {@link
- * RuntimeException} the application's OpenTelemetry SDK throws from a span call, such as a span
- * processor's, is logged and changes no run: a run whose span did not start runs untraced in its
- * parent's context, and a span that did not start or end is not traced; an {@link Error}
- * propagates. Thread-safe: each run's spans are guarded by a lock of their own.
+ * was called in, carrying the session's {@link SessionOptions#traceAttributes() labels} and, in the
+ * child session of an {@code Agent} call, {@code helios.parent.session_id}, {@code
+ * helios.parent.run_id} and {@code helios.parent.tool_call_id}. Under it, set as their parent: a
+ * {@code chat} span per model attempt, from {@link #modelAttempt} to its {@link
+ * QueryEvent.ModelCallEnded} (a compactor's call, which starts none, spans the event's duration);
+ * an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or its first
+ * {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length {@code
+ * hook} span per {@link QueryEvent.HookFired}. Each carries the {@link QueryEvent#turnIndex()
+ * turnIndex} of its events as {@code helios.turn.index}, except the compactor's call, which carries
+ * {@code helios.compaction} instead. A span still open when its run ends ends then, with the run's
+ * error. Content is added only under {@link TraceDetail#VERBOSE}, each string redacted against the
+ * session's secrets, the tool and hook texts already by their events. It reads every event the loop
+ * emits before the session's publisher does. A {@link RuntimeException} the application's
+ * OpenTelemetry SDK throws from a span call, such as a span processor's, is logged and changes no
+ * run: a run whose span did not start runs untraced in its parent's context, and a span that did
+ * not start or end is not traced; an {@link Error} propagates. Thread-safe: each run's spans are
+ * guarded by a lock of their own.
  */
 final class RunSpans implements StepSpans {
 
@@ -93,6 +95,9 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<Long> ATTEMPT = longKey("helios.attempt");
   private static final AttributeKey<Long> TURN_INDEX = longKey("helios.turn.index");
   private static final String COMPACTION = "helios.compaction";
+  private static final String PARENT_SESSION_ID = "helios.parent.session_id";
+  private static final String PARENT_RUN_ID = "helios.parent.run_id";
+  private static final String PARENT_TOOL_CALL_ID = "helios.parent.tool_call_id";
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
   private static final AttributeKey<String> TOOL_OUTCOME = stringKey("helios.tool.outcome");
   private static final AttributeKey<Long> ARGUMENTS_CHARS = longKey("helios.tool.argumentsChars");
@@ -110,13 +115,14 @@ final class RunSpans implements StepSpans {
   private final boolean verbose;
   private final SecretRegistry secrets;
   private final SessionOptions options;
+  private final Map<String, String> linkage;
   private final Map<String, RunSpan> runs = new ConcurrentHashMap<>();
   private final ContextKey<Context> runParent = ContextKey.named("helios.run.parent");
 
   /**
    * @throws NullPointerException if the options' model reports no id or provider
    */
-  RunSpans(SessionOptions options) {
+  RunSpans(SessionOptions options, Map<String, String> linkage) {
     this.tracer = options.openTelemetry().orElseGet(GlobalOpenTelemetry::get).getTracer(SCOPE);
     this.sessionId = options.sessionId();
     this.agentName = options.agentName();
@@ -127,6 +133,16 @@ final class RunSpans implements StepSpans {
     this.verbose = options.traceDetail() == TraceDetail.VERBOSE;
     this.secrets = options.secretRegistry();
     this.options = options;
+    this.linkage = linkage;
+  }
+
+  /**
+   * The attributes of the run spans of a child session opened by an {@code Agent} call, which name
+   * the parent's session, run and call.
+   */
+  static Map<String, String> parentLinkage(String sessionId, String runId, String toolCallId) {
+    return Map.of(
+        PARENT_SESSION_ID, sessionId, PARENT_RUN_ID, runId, PARENT_TOOL_CALL_ID, toolCallId);
   }
 
   /**
@@ -155,6 +171,7 @@ final class RunSpans implements StepSpans {
             .setAttribute(PROVIDER, provider)
             .setAttribute(REQUEST_MODEL, modelId);
     options.traceAttributes().forEach(builder::setAttribute);
+    linkage.forEach(builder::setAttribute);
     var span = builder.startSpan();
     var context = parent.with(span).with(runParent, parent);
     runs.put(run.runId(), new RunSpan(run.runId(), span, context));
@@ -198,7 +215,7 @@ final class RunSpans implements StepSpans {
     if (spans == null) {
       return;
     }
-    var failure = Failure.of(run.ending().first(), crash, terminal, secrets);
+    var failure = SpanFailure.of(run.ending().first(), crash, terminal, secrets);
     var output = terminal instanceof ResultMessage.Success success ? success.result() : null;
     traced(run.runId(), () -> spans.end(run.totals(), terminal, failure, output));
   }
@@ -274,7 +291,7 @@ final class RunSpans implements StepSpans {
     }
   }
 
-  private static void fail(Span span, String description, String type) {
+  static void fail(Span span, String description, String type) {
     span.setStatus(StatusCode.ERROR, description).setAttribute(ERROR_TYPE, type);
   }
 
@@ -334,7 +351,7 @@ final class RunSpans implements StepSpans {
     }
 
     synchronized void end(
-        SessionTotals totals, ResultMessage terminal, Failure failure, String output) {
+        SessionTotals totals, ResultMessage terminal, SpanFailure failure, String output) {
       try {
         if (model != null) {
           failure.end(model);
@@ -484,57 +501,6 @@ final class RunSpans implements StepSpans {
         case HookOutcome.Continue _, HookOutcome.MutateArgs _, HookOutcome.MutateHistory _ ->
             Optional.empty();
       };
-    }
-  }
-
-  /**
-   * A run's error, null for a {@code Success}, and its {@code error.type}: the first host {@link
-   * Error} the session recorded, else the crash, each as its redacted {@code kind: message}, else
-   * the terminal's simple name, with the {@code kind: message} of the error it carries.
-   */
-  private record Failure(String error, String type) {
-
-    static Failure of(
-        Optional<Error> host,
-        RuntimeException crash,
-        ResultMessage terminal,
-        SecretRegistry secrets) {
-      Throwable thrown = host.isPresent() ? host.get() : crash;
-      if (thrown != null) {
-        return new Failure(described(thrown, secrets), thrown.getClass().getName());
-      }
-      var name = terminal.getClass().getSimpleName();
-      return switch (terminal) {
-        case ResultMessage.Success _ -> new Failure(null, null);
-        case ResultMessage.ErrorDuringExecution failed ->
-            new Failure(name + ": " + described(failed.error()), name);
-        case ResultMessage.ErrorTransientStream failed ->
-            new Failure(name + ": " + described(failed.error()), name);
-        default -> new Failure(name, name);
-      };
-    }
-
-    /** End {@code span}, failed with this error unless there is none. */
-    void end(Span span) {
-      if (error != null) {
-        fail(span, error, type);
-      }
-      span.end();
-    }
-
-    /**
-     * {@code thrown}'s redacted {@code kind: message}, or its class name when that cannot be read.
-     */
-    private static String described(Throwable thrown, SecretRegistry secrets) {
-      try {
-        return described(SerializedError.of(thrown).redactedBy(secrets.redactor()));
-      } catch (RuntimeException unreadable) {
-        return thrown.getClass().getName();
-      }
-    }
-
-    private static String described(SerializedError error) {
-      return error.kind() + ": " + error.message();
     }
   }
 }

@@ -22,18 +22,22 @@ import com.standardapplied.helios.session.memory.MemoryReadTool;
 import com.standardapplied.helios.session.memory.MemoryWriteTool;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Builds one session's agent loop from its options: the tool registry, the options' tools followed
  * by the built-in tools the options switch on (the memory tools for a memory backend, {@code
- * Execute} for an execution provider, {@code AskUserQuestion} when asked for), refusing a hand
- * {@code Execute} binding without a provider, whose start and end would never run; the tool
- * dispatch, the hooks, the permission stage, the loop collaborators and the turn runner. The
- * permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
+ * Execute} for an execution provider, {@code AskUserQuestion} when asked for, {@code Agent} for
+ * subagents), refusing a hand {@code Execute} binding without a provider, whose start and end would
+ * never run; the tool dispatch, whose {@code Agent} calls run under their subagent's limits, the
+ * hooks, the permission stage, the loop collaborators and the turn runner. The permission stage is
+ * the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
- * questions, with the rules that decide a key withholding what walking tools return. The loop's
- * events reach the session's {@link RunSpans} before its publisher. It acquires nothing, so a
- * failure here leaves only what the caller acquired to release.
+ * questions, or, in the child session of an {@code Agent} call, denying what its policy asks about,
+ * with the rules that decide a key withholding what walking tools return. The loop's events reach
+ * the session's {@link RunSpans} before its publisher. It acquires nothing, so a failure here
+ * leaves only what the caller acquired to release.
  */
 final class SessionWiring {
 
@@ -47,20 +51,22 @@ final class SessionWiring {
       SteeringQueue steeringQueue,
       SessionEventPublisher events,
       SessionEnding ending,
-      StoredHistory storedHistory) {
-    this.spans = new RunSpans(options);
-    var tools = registry(options, pendingQuestions);
+      StoredHistory storedHistory,
+      Optional<AgentTool.Parent> parent) {
+    this.spans = new RunSpans(options, parent.map(AgentTool.Parent::linkage).orElse(Map.of()));
+    var agents = new AgentTool(options.subagents(), options.limits());
+    var tools = registry(options, pendingQuestions, agents);
     var model = options.model();
     var evaluator =
         new DefaultPermissionEvaluator(
             options.permission(),
             tools,
-            ToolApprover.askingUser(pendingQuestions),
+            parent.isPresent() ? AgentTool.DENY_ASKS : ToolApprover.askingUser(pendingQuestions),
             sessionContext.secrets());
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(options.hooks(), sessionContext.secrets()),
-            new ToolDispatch(sessionContext, tools, ending),
+            new ToolDispatch(sessionContext, tools, ending, agents::childLimits),
             evaluator::authorize,
             options.permission(),
             steeringQueue,
@@ -93,7 +99,8 @@ final class SessionWiring {
     return spans;
   }
 
-  private static ToolRegistry registry(SessionOptions options, QuestionGateway gateway) {
+  private static ToolRegistry registry(
+      SessionOptions options, QuestionGateway gateway, AgentTool agents) {
     if (options.executionProvider().isEmpty()
         && options.tools().stream().anyMatch(tool -> ExecuteTool.NAME.equals(tool.name()))) {
       throw new IllegalArgumentException(
@@ -110,6 +117,9 @@ final class SessionWiring {
     options.executionProvider().ifPresent(provider -> tools.add(ExecuteTool.binding(provider)));
     if (options.askUserQuestion()) {
       tools.add(AskUserQuestionTool.binding(gateway));
+    }
+    if (!options.subagents().isEmpty()) {
+      tools.add(agents.binding());
     }
     return new ToolRegistry(tools);
   }

@@ -3,7 +3,9 @@
 package com.standardapplied.helios.session.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.FileReference;
 import com.standardapplied.helios.core.model.InlineFile;
@@ -11,11 +13,20 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.tool.Tool;
+import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.ResultMessage;
+import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.session.store.SessionConflictException;
 import com.standardapplied.helios.session.store.SessionEntry;
 import com.standardapplied.helios.session.store.SessionStore;
+import com.standardapplied.helios.session.store.SessionStoreException;
 import com.standardapplied.helios.session.store.StoredSession;
+import com.standardapplied.helios.session.tools.ToolBinding;
+import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.testing.ScriptedModel;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +36,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The cases every {@link SessionStore} passes, whatever holds the log: a store's test extends this
@@ -258,5 +272,86 @@ public abstract class SessionStoreContract {
     assertThrows(
         IllegalArgumentException.class,
         () -> store.append("../escape", 0, List.of(added(Message.user("a")))));
+  }
+
+  /**
+   * A run stopped at any of its store writes, as a crash leaves the log, never leaves a tool call
+   * without its result: the run writes after a whole turn, its tool results included, and at its
+   * end after answering every open call, so the session reopened over the store takes a new
+   * message, and the request that answers it pairs every tool call with its result. The run writes
+   * three batches: the first turn, the second, and the last with the run's end.
+   *
+   * @param writes how many of the run's writes the store took before it stopped
+   */
+  @ParameterizedTest(name = "stopped after {0} writes")
+  @ValueSource(ints = {0, 1, 2, 3})
+  void aSessionReopenedAfterItsRunStoppedAtAnyWriteTakesANewMessage(int writes) {
+    var store = store();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(
+                new ToolCall("c-1", "echo", Map.of()), new ToolCall("c-2", "echo", Map.of()))
+            .withToolCallsTurn(new ToolCall("c-3", "echo", Map.of()))
+            .withTextTurn("done")
+            .build();
+    try (var session = AgentSession.open(stored(model, new StopsAfter(store, writes)))) {
+      Await.value("the stopped run", session.send("start"));
+    }
+    assertEquals(writes == 3, store.load(SID).lastRunEnded().isPresent());
+
+    var next = ScriptedModel.newBuilder().withTextTurn("resumed").build();
+    try (var session = AgentSession.open(stored(next, store))) {
+      assertInstanceOf(
+          ResultMessage.Success.class, Await.value("the next run", session.send("continue")));
+    }
+    var request = next.calls().getFirst();
+    assertEquals(
+        List.of(0L, 2L, 3L, 3L).get(writes),
+        request.stream().filter(message -> message.toolCallId() != null).count(),
+        "the tool results the stopped run stored");
+    for (var i = 0; i < request.size(); i++) {
+      for (var call : Optional.ofNullable(request.get(i).toolCalls()).orElse(List.of())) {
+        var answered =
+            request.subList(i + 1, request.size()).stream()
+                .anyMatch(message -> call.id().equals(message.toolCallId()));
+        assertTrue(answered, "call " + call.id() + " has no result in " + request);
+      }
+    }
+  }
+
+  private static SessionOptions stored(ScriptedModel model, SessionStore store) {
+    var echo =
+        Tool.newBuilder()
+            .withName("echo")
+            .withDescription("echo")
+            .withExecutor((arguments, context) -> ToolResult.success("echoed"))
+            .build();
+    return SessionOptions.newBuilder()
+        .withModel(model)
+        .withSessionId(SID)
+        .withStore(store)
+        .withTool(ToolBinding.newBuilder(echo).withCategory(ToolCategory.READ).build())
+        .build();
+  }
+
+  /** A store that takes {@code writes} appends and refuses every later one, as a crash would. */
+  private record StopsAfter(SessionStore store, AtomicInteger left) implements SessionStore {
+
+    StopsAfter(SessionStore store, int writes) {
+      this(store, new AtomicInteger(writes));
+    }
+
+    @Override
+    public StoredSession load(String sessionId) {
+      return store.load(sessionId);
+    }
+
+    @Override
+    public void append(String sessionId, long expectedLastSeq, List<SessionEntry> entries) {
+      if (left.getAndDecrement() <= 0) {
+        throw new SessionStoreException("stopped", null);
+      }
+      store.append(sessionId, expectedLastSeq, entries);
+    }
   }
 }

@@ -103,7 +103,9 @@ The `workspace` preset wires:
 `Permission.planMode()` for purely read-only inspection. Tools append with `withTool(binding)`;
 `SessionPresets.workspace(model, root).withExecutionProvider(provider)` adds `Execute` through the
 given `ExecutionProvider`, asked before each run, and starts and ends the provider with the
-session; `withAskUserQuestion()` adds the model's `AskUserQuestion` tool.
+session; `withAskUserQuestion()` adds the model's `AskUserQuestion` tool; `withSubagent(subagent)`
+adds the `Agent` tool, through which the model runs a child session (see the root README's
+"Subagents").
 
 ## Streaming events
 

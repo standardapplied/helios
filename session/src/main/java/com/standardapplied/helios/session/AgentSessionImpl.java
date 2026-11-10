@@ -18,6 +18,7 @@ import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.loop.StoredHistory;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -69,13 +70,31 @@ public final class AgentSessionImpl implements AgentSession {
    *     the session; nothing was acquired
    */
   AgentSessionImpl(SessionOptions options) {
+    this(options, Optional.empty());
+  }
+
+  /**
+   * Open a session, the child session of an {@code Agent} call when {@code parent} is present: its
+   * run spans name the parent's run and call, its runs' totals roll up into the parent run's, and a
+   * call its policy asks about is denied.
+   *
+   * @param options the configuration bundle; non-null
+   * @param parent the run and call that opened it, or empty for a session of the host's
+   * @throws NullPointerException if an argument is null
+   * @throws SessionUnavailableException if the execution provider did not accept the session
+   * @throws com.standardapplied.helios.session.store.SessionStoreException if the store cannot load
+   *     the session; nothing was acquired
+   */
+  AgentSessionImpl(SessionOptions options, Optional<AgentTool.Parent> parent) {
     Objects.requireNonNull(options, "options must not be null");
+    Objects.requireNonNull(parent, "parent must not be null");
     this.sessionId = options.sessionId();
     this.rawOutputCapturePolicy = options.model().rawOutputCapturePolicy();
     this.outputSchema = options.outputSchema().orElse(null);
     var clock = options.clock();
     var cancellation = new CancellationToken();
-    var state = new SessionState(sessionId, cancellation, clock);
+    var state =
+        new SessionState(sessionId, cancellation, clock, parent.map(AgentTool.Parent::totals));
     options.systemPrompt().ifPresent(prompt -> state.history().append(Message.system(prompt)));
     var storedHistory =
         options
@@ -106,7 +125,8 @@ public final class AgentSessionImpl implements AgentSession {
               steeringQueue,
               events,
               state.ending(),
-              storedHistory);
+              storedHistory,
+              parent);
     } catch (RuntimeException | Error e) {
       lifecycle.abandon();
       throw e;
