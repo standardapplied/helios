@@ -6,8 +6,10 @@ import static com.standardapplied.helios.session.SessionSpansTest.call;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
@@ -30,6 +32,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
@@ -148,9 +152,76 @@ final class SessionSpanFailuresTest {
 
   @Test
   void aModelAttemptWhoseSpanDoesNotStartLeavesTheRunsResultUnchanged() {
-    var spans = assertRunsUnchanged(failing("chat ", true), LOGGED, 4);
+    var spans = assertRunsUnchanged(failing("chat ", true), LOGGED, 2);
 
     assertEquals(2, spans.starting("invoke_agent ").size());
+  }
+
+  @Test
+  void aTurnWhoseAttemptSpanDoesNotStartIsUntracedNeverTakenForACompactorsCall() {
+    var failed = new AtomicBoolean();
+    var spans =
+        new SpanCapture(
+            new Failing(
+                "chat ",
+                true,
+                () -> {
+                  if (!failed.getAndSet(true)) {
+                    throw new IllegalStateException("span processor failed");
+                  }
+                }));
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(call("lookup", Map.of()))
+            .withTextTurn("done")
+            .build();
+
+    run(EndingSessions.options(model).withOpenTelemetry(spans.openTelemetry()));
+
+    var chats = spans.starting("chat ");
+    assertEquals(1, chats.size(), () -> "chat spans among " + spans.names());
+    assertEquals(2L, chats.getFirst().getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
+    assertNull(chats.getFirst().getAttributes().get(SessionSpanTurnsTest.COMPACTION));
+  }
+
+  @Test
+  void aCompactorsCallAfterATurnWhoseSpanDidNotEndIsSpannedOnItsOwn() {
+    var compactions = new AtomicInteger();
+    ContextCompactor compactor =
+        (history, context) ->
+            compactions.getAndIncrement() == 1
+                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
+                : CompactionResult.noOp(history);
+    var spans = new SpanCapture(failing("chat scripted", false));
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(call("lookup", Map.of()))
+            .withTextTurn("done")
+            .build();
+
+    run(
+        EndingSessions.options(model)
+            .withContextCompactor(compactor)
+            .withLimits(SessionLimits.newBuilder().withMaxContextTokens(1).build())
+            .withOpenTelemetry(spans.openTelemetry()));
+
+    var summary = spans.only("chat summary").getAttributes();
+    assertEquals(true, summary.get(SessionSpanTurnsTest.COMPACTION));
+    assertNull(summary.get(SessionSpanTurnsTest.TURN_INDEX));
+    assertEquals(
+        List.of(1L, 2L),
+        spans.named("chat scripted").stream()
+            .map(chat -> chat.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX))
+            .toList());
+  }
+
+  /** Run {@code options} with a {@code lookup} tool once, asserting it succeeds. */
+  private void run(SessionOptions.Builder options) {
+    try (var ignored = LogCapture.of(AgentSessionImpl.class, logged);
+        var session =
+            AgentSession.open(options.withTool(SessionSpansTest.tool("lookup", "found")).build())) {
+      assertInstanceOf(ResultMessage.Success.class, Await.value("the run", session.send("go")));
+    }
   }
 
   @Test

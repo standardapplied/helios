@@ -345,6 +345,7 @@ final class SessionSpansTest {
     assertEquals(hook.getStartEpochNanos(), hook.getEndEpochNanos());
     var noop = capture.only("execute_tool noop");
     assertEquals("Rejected", string(noop, "helios.tool.outcome"));
+    assertEquals(1L, noop.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(StatusCode.ERROR, noop.getStatus().getStatusCode());
     assertEquals("Rejected", noop.getStatus().getDescription());
     assertEquals("Rejected", noop.getAttributes().get(ERROR_TYPE));
@@ -410,6 +411,8 @@ final class SessionSpansTest {
       assertNull(retried.getAttributes().get(usage));
     }
     assertEquals(2L, number(chats.get(1), "helios.attempt"));
+    assertEquals(1L, chats.get(0).getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
+    assertEquals(1L, chats.get(1).getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(StatusCode.UNSET, chats.get(1).getStatus().getStatusCode());
     assertTotalsEqual(result, capture.run());
   }
@@ -443,6 +446,11 @@ final class SessionSpansTest {
             .orElseThrow();
     var summary = capture.only("chat summary");
     assertEquals("summary", string(summary, "gen_ai.request.model"));
+    assertEquals(true, summary.getAttributes().get(SessionSpanTurnsTest.COMPACTION));
+    assertNull(summary.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
+    var turn = capture.only("chat scripted");
+    assertNull(turn.getAttributes().get(SessionSpanTurnsTest.COMPACTION));
+    assertEquals(1L, turn.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(900L, summary.getAttributes().get(INPUT_TOKENS));
     assertEquals(900L, summary.getAttributes().get(CACHE_READ));
     assertEquals(
@@ -451,7 +459,6 @@ final class SessionSpansTest {
     assertEquals(
         ended.duration().toNanos(), summary.getEndEpochNanos() - summary.getStartEpochNanos());
     assertEquals(capture.run().getSpanId(), summary.getParentSpanId());
-    assertEquals(1, capture.named("chat scripted").size());
     assertTotalsEqual(result, capture.run());
   }
 
