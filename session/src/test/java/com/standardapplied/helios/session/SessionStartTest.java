@@ -513,7 +513,8 @@ final class SessionStartTest {
         new SteeringQueue(4),
         lifecycle.events(),
         state.ending(),
-        StoredHistory.none());
+        StoredHistory.none(),
+        Optional.empty());
   }
 
   /** Whether {@code events} holds an event, read on a thread of its own. */

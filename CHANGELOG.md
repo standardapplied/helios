@@ -29,6 +29,28 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `attributes`.
 - `helios.compaction` = `true` on the `chat` span of a compactor's summary call, which carries no
   `helios.turn.index`.
+- Subagents: `Subagent(name, description, options)` and
+  `SessionOptions.Builder.withSubagents(List<Subagent>)` / `withSubagent(Subagent)`. With at least
+  one, the session registers the built-in `Agent` tool, input `{"agent": <name>, "prompt":
+  <text>}`, category `EXECUTION`, permission key `Agent(<name>)`, its description and its `agent`
+  parameter's listing each `name: description`. Each call runs one fresh child session from the
+  subagent's options (a fresh `sess-` id, `agentName` the subagent's name, nothing inherited), sends
+  it the prompt, waits for its run and closes it. A child's `Success` is the call's result, its
+  JSON under an output schema; any other terminal, a child that cannot open, an unknown name and a
+  call with no budget left are failures naming why. The call's deadline is the subagent's
+  `maxWallClock` plus its `stopGrace`; its cancellation (interrupt, close, deadline, the parent's
+  wall clock) interrupts the child, which ends `Cancelled`. A child's permission `ASK` is denied
+  with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
+  refuses two subagents with one name, a tool of the options named `Agent`, and, under
+  `maxBudgetMicroUsd`, a subagent whose cost calculator is `CostCalculator.ZERO`; `Subagent`
+  refuses a name outside `[a-z][a-z0-9_-]{0,63}`, a blank description and options with
+  `AskUserQuestion`. Background children, delivery into the parent, idempotency and caps on
+  concurrent children stay with the host.
+- Parent linkage: a child's `invoke_agent` span is a child of the call's `execute_tool` span and
+  carries `helios.parent.session_id`, `helios.parent.run_id` and `helios.parent.tool_call_id`,
+  which `PgSpanExporter` stores in the child's run row; `PgTraceStore.list` with
+  `attributes eq "${\"helios.parent.session_id\":\"<id>\"}"` returns a session's children. No
+  exporter or DDL change.
 
 ### Changed
 
@@ -46,6 +68,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `Error` stays a WARNING. Each missing stream logs its own line, where one line used to count the
   streams.
 
+- A run's usage and cost include its subagents' spend: the `Agent` call adds its child's usage
+  and cost, whatever the child's terminal, to the run's totals when it ends, so the run's
+  `ResultMessage` and its budget check after the turn count them. Under `maxBudgetMicroUsd` a
+  child runs with the lower of its own budget and what the run has left. The run's
+  `Usage.promptTokens()` stays its own last request's.
+
 ### Compatibility
 
 - A `switch` over `QueryEvent` that lists every type without a `default` must add a case for
@@ -54,6 +82,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - `SessionOptions` gains the record component `traceAttributes`, after `traceDetail`: a call of
   its canonical constructor, which its Javadoc reserves for framework internals, or a record
   pattern over it adds the component. The builder and `toBuilder` are unchanged for callers.
+- `SessionOptions` gains the record component `subagents`, after `traceAttributes`, with the same
+  consequence for its canonical constructor and record patterns; `toBuilder` carries it.
 
 ### Fixed
 
@@ -675,12 +705,13 @@ when it improvised a batched rewrite, and one run ended with an empty `Success` 
 `CodeExecutionTool`, an older second way to run JShell, goes with them. The sandbox itself stays
 (`repl.sandbox`, its policy verifier and module limits, `ReplSession`, `JShellExecutionProvider`)
 and is reached through `Execute` with `Runtime.JSHELL`, plus the custom host functions registered
-through `ReplConfig`. Sub-agents, planned for 3.1, replace in-sandbox sub-model fan-out.
+through `ReplConfig`. Sub-agents replace in-sandbox sub-model fan-out from 3.1.0: a subagent
+(`SessionOptions.Builder.withSubagent`) runs as a child session through the `Agent` tool.
 
 | 2.x | 3.0 |
 |---|---|
 | `repl.codeact.CodeActPreset.typed(...)` | `JShellExecutionProvider` as the session's `ExecutionProvider` (`withExecutionProvider`, which registers `Execute`), and the task's own system prompt; the final answer is the model's last message, through `runBlocking(message, OutputSchema)` for a typed one |
-| `repl.codeact.CodeActPreset.withSubLm(...)` (RLM: `predict(...)` / `submit(...)` in the sandbox) | no replacement in 3.0; sub-agents in 3.1 replace sub-model fan-out. A host-side call the snippet needs is a custom `HostFunction` registered through `ReplConfig.Builder.withHostFunction` |
+| `repl.codeact.CodeActPreset.withSubLm(...)` (RLM: `predict(...)` / `submit(...)` in the sandbox) | no replacement in 3.0; from 3.1.0 a subagent (`SessionOptions.Builder.withSubagent`, the `Agent` tool) runs a child session in place of a sub-model call. A host-side call the snippet needs is a custom `HostFunction` registered through `ReplConfig.Builder.withHostFunction` |
 | the rest of `repl.codeact` (`CodeActStrategy`, `RlmStrategy`, `PromptRendering`, `PredictFunction`, `PredictTool`, `SubmitFunction`, `SubmitTool`, `SubmitValidation`, `SubmittedValueHolder`, `OnSubmitStopHook`, `RequireExecuteCodeHook`, `InputFunction`, `OwnedExecutionProvider`) and the package's JPMS export | removed with the presets |
 | `repl.CodeExecutionTool` | `Execute` with `runtime: JSHELL` through `JShellExecutionProvider` |
 | `repl.InputBindings` | removed; seed per-session state with `JShellExecutionProvider.Builder.withStartupSnippet` |

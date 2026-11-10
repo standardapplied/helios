@@ -14,6 +14,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SessionPresets;
+import com.standardapplied.helios.session.Subagent;
 import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.hooks.HookOutcome;
@@ -22,6 +23,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.store.FileSessionStore;
+import com.standardapplied.helios.session.store.SessionStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -67,6 +69,38 @@ final class QuickStarts {
         AgentSession.open(
             options.toBuilder().withSessionId("member-42").withStore(store).build())) {
       session.send("Where did we leave off?").join();
+    }
+  }
+
+  static void restart(SessionOptions options, SessionStore store) {
+    var ended = store.load("member-42").lastRunEnded();
+    try (var session =
+        AgentSession.open(
+            options.toBuilder().withSessionId("member-42").withStore(store).build())) {
+      if (ended.isEmpty()) {
+        session.send("Your last answer was cut off; pick up where you left off.").join();
+      }
+    }
+  }
+
+  static void subagents(Model model, Path repo) {
+    var researcher =
+        new Subagent(
+            "researcher",
+            "reads the repository and answers one question about it",
+            SessionPresets.readOnly(model, repo).build());
+    var options =
+        SessionPresets.minimal(model)
+            .withSubagent(researcher)
+            .withPermission(
+                new Permission(
+                    PermissionMode.DEFAULT,
+                    List.of(PermissionRule.of("Agent", "researcher")),
+                    List.of(),
+                    List.of()))
+            .build();
+    try (var session = AgentSession.open(options)) {
+      System.out.println(session.send("Which classes form the session's public API?").join());
     }
   }
 

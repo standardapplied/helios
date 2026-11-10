@@ -57,7 +57,7 @@ final class RunSpansTest {
             .withTraceDetail(detail)
             .withSecretRegistry(secrets)
             .build();
-    return new RunSpans(options);
+    return new RunSpans(options, Map.of());
   }
 
   static Stream<Arguments> outcomes() {

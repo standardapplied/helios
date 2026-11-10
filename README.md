@@ -321,6 +321,20 @@ try (var session =
 }
 ```
 
+**Restarting after a crash.** A run the process lost leaves a stored history that ends after a whole turn, never with a tool call that has no result, so the session reopens and takes a new message. Load the session, see that `lastRunEnded()` is empty, reopen it under the same id, then `send` a continuation of your choosing, or record the run as abandoned and send nothing.
+
+<!-- snippet: QuickStarts#restart -->
+```java
+var ended = store.load("member-42").lastRunEnded();
+try (var session =
+    AgentSession.open(
+        options.toBuilder().withSessionId("member-42").withStore(store).build())) {
+  if (ended.isEmpty()) {
+    session.send("Your last answer was cut off; pick up where you left off.").join();
+  }
+}
+```
+
 `SessionPresets` ships three curated factories, each returning a `SessionOptions.Builder` that already holds the model:
 
 - `minimal(model)` — model only, defaults for everything else.
@@ -330,6 +344,40 @@ try (var session =
 Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), and `withAskUserQuestion()` adds `AskUserQuestion`. Two tools with one name fail `AgentSession.open`.
 
 Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
+
+### Subagents
+
+A subagent is a child agent the model delegates a task to. `withSubagent(new Subagent(name, description, options))` registers the built-in `Agent` tool, whose call names the subagent and gives it a prompt; each call runs one fresh child session from the subagent's own options, waits for its run and closes it. Nothing is inherited from the parent: the child's model, prompt, tools, permission, limits, output schema and store are all in its options.
+
+<!-- snippet: QuickStarts#subagents -->
+```java
+var researcher =
+    new Subagent(
+        "researcher",
+        "reads the repository and answers one question about it",
+        SessionPresets.readOnly(model, repo).build());
+var options =
+    SessionPresets.minimal(model)
+        .withSubagent(researcher)
+        .withPermission(
+            new Permission(
+                PermissionMode.DEFAULT,
+                List.of(PermissionRule.of("Agent", "researcher")),
+                List.of(),
+                List.of()))
+        .build();
+try (var session = AgentSession.open(options)) {
+  System.out.println(session.send("Which classes form the session's public API?").join());
+}
+```
+
+- **Result.** A child's `Success` is the call's result (its JSON under an output schema); any other terminal, a child that cannot open and an unknown name are failures the model reads.
+- **Spend.** The child's usage and cost are added to the parent run's, so the parent's `ResultMessage` and budget count them; under `maxBudgetMicroUsd` the child gets at most what the run has left, and with nothing left the call fails without starting one. Under a budget every subagent needs a cost calculator.
+- **Time and cancellation.** The call's deadline is the subagent's `maxWallClock` plus its `stopGrace`, not `toolTimeoutDefault`. An interrupt, a close, the deadline or the parent's wall clock interrupts the child, which ends `Cancelled`.
+- **Permissions.** `Agent` is an `EXECUTION` tool keyed `Agent(<name>)`, so a rule allows, asks or denies one subagent, and hooks apply as to any tool. A child has no one to answer: its `ASK` is denied, so allow in its own permission what it needs.
+- **Linkage.** The child's run span nests under the call's `execute_tool` span and carries `helios.parent.session_id`, `helios.parent.run_id` and `helios.parent.tool_call_id`; `PgTraceStore.list` with the filter `attributes eq "${\"helios.parent.session_id\":\"<id>\"}"` finds a session's children.
+
+Helios runs subagents in the foreground of the parent's call. Background work, delivery into the parent (`send`), caps on concurrent children and idempotency are the host's job, and a child session the host starts itself is linked with its own `withTraceAttributes` labels.
 
 Stream events for a live UI:
 

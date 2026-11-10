@@ -132,6 +132,11 @@ final class SessionLifecycle {
     }
   }
 
+  /** Expire the tool calls still running as their deadline does, for tests. */
+  void expireToolCalls() {
+    loop.toolDispatch().expireLiveCalls();
+  }
+
   /** Expire the run in progress as its wall clock does, for tests. */
   void expireWallClock() {
     runs.activeRun().ifPresent(Run::expireWallClock);
