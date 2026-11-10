@@ -33,8 +33,10 @@ import java.util.logging.Logger;
  * loop feeds that result back to the model so it can self-correct rather than crash.
  *
  * <p>A call runs under the deadline the session's deadline function gives it, the {@code Agent}
- * call its subagent's, else under the default the loop passes. While its tool runs, the call is
- * {@link #callOfThisThread()} on the worker thread.
+ * call its subagent's, else under the default the loop passes. A call given its own deadline stops
+ * itself: if its tool returns within {@code stopGrace} of that deadline, what it returned is the
+ * call's answer, so an {@code Agent} call answers with its cancelled child's terminal. While its
+ * tool runs, the call is {@link #callOfThisThread()} on the worker thread.
  *
  * <p>Each call stays linked to its run's cancellation token until its worker ends, so ending the
  * run or closing the session cancels and interrupts every call still running, including one already
@@ -166,7 +168,8 @@ public final class ToolDispatch {
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
-   *       stopGrace};
+   *       stopGrace}, unless the call has its own deadline and the tool returned a result: that
+   *       result;
    *   <li>{@link ToolOutcome.Unknown} if it still runs. Java cannot safely stop arbitrary code, so
    *       it runs on until it ends.
    * </ul>
@@ -217,18 +220,19 @@ public final class ToolDispatch {
           ToolDispatch.class.getSimpleName(),
           "tool '" + stuck.call().name() + "' did not stop; no tool runs until it ends");
     }
+    var own = deadlines.apply(call);
     var dispatched =
         new DispatchedCall(
             binding.orElseThrow(),
             call,
             sessionContext,
             cancellation,
-            deadlines.apply(call).orElse(timeout),
+            own.orElse(timeout),
             withheld,
             liveCalls,
             left -> abandoned = left,
             ending);
     dispatched.start();
-    return dispatched.await(stopGrace);
+    return dispatched.await(stopGrace, own.isPresent());
   }
 }

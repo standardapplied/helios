@@ -138,7 +138,7 @@ final class DispatchedCallTest {
   void aCallerInterruptedBeforeTheWorkerStartedKeepsTheToolFromStarting() {
     var dispatched = dispatched(NEVER);
     Thread.currentThread().interrupt();
-    assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    assertThrows(CancellationException.class, () -> dispatched.await(NEVER, false));
     assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
 
     dispatched.start();
@@ -192,7 +192,7 @@ final class DispatchedCallTest {
     assertEquals(1, runs.get(), "the tool ran and answered");
     cancelBehindTheBlockedCallback(session);
 
-    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER, false));
     assertEquals("session closed", thrown.getMessage());
   }
 
@@ -204,7 +204,7 @@ final class DispatchedCallTest {
     assertEquals(1, runs.get(), "the tool ran and answered");
 
     Thread.currentThread().interrupt();
-    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER, false));
 
     assertTrue(Thread.interrupted(), "the caller's interrupt status is kept");
     assertEquals("interrupted waiting for tool t", thrown.getMessage());
@@ -225,7 +225,7 @@ final class DispatchedCallTest {
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
-    assertSame(sentinel, assertThrows(AssertionError.class, () -> dispatched.await(NEVER)));
+    assertSame(sentinel, assertThrows(AssertionError.class, () -> dispatched.await(NEVER, false)));
     assertSame(sentinel, ending.seal().orElseThrow());
   }
 
@@ -242,7 +242,7 @@ final class DispatchedCallTest {
     Await.until("the worker to end", live::isEmpty);
     session.cancel("session closed");
 
-    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER, false));
     assertEquals("session closed", thrown.getMessage());
   }
 
@@ -255,7 +255,7 @@ final class DispatchedCallTest {
     assertEquals(0, runs.get(), "the tool never ran");
     cancelBehindTheBlockedCallback(session);
 
-    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER));
+    var thrown = assertThrows(CancellationException.class, () -> dispatched.await(NEVER, false));
     assertEquals("session closed", thrown.getMessage());
   }
 }

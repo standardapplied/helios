@@ -29,6 +29,7 @@ import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -103,6 +104,36 @@ final class ToolDispatchTest {
     d.dispatch(call("other"), token, NEVER, NEVER, key -> false);
 
     assertEquals(List.of("own " + own, "other " + NEVER), seen);
+  }
+
+  /** A dispatcher over {@code bindings} that gives every call {@code own} as its own deadline. */
+  private ToolDispatch ownDeadline(Duration own, ToolBinding... bindings) {
+    return new ToolDispatch(
+        CTX, new ToolRegistry(List.of(bindings)), fixture.ending, call -> Optional.of(own));
+  }
+
+  @Test
+  void aCallWithItsOwnDeadlineAnswersWithWhatItsToolReturnedOnceCancelled() {
+    var interrupted = new CountDownLatch(1);
+    var d =
+        ownDeadline(NEVER, binding("own", ToolCategory.READ, fixture.interruptible(interrupted)));
+
+    var running = start(d, "own");
+    Await.latch("the tool to start", fixture.entered);
+    d.expireLiveCalls();
+
+    assertEquals(ToolResult.failure("interrupted"), running.ending("the dispatch").result());
+  }
+
+  @Test
+  void aCallWithItsOwnDeadlineWhoseToolNeverRanIsTimedOut() {
+    var starts = new AtomicInteger();
+    var instant = Duration.ofNanos(1);
+    var d = ownDeadline(instant, binding("own", ToolCategory.READ, fixture.stuck(starts)));
+
+    assertEquals(
+        ToolResult.timedOut("own", instant), start(d, "own").ending("the dispatch").result());
+    assertEquals(0, starts.get());
   }
 
   @Test

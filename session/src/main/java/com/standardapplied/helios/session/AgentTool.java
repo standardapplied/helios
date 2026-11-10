@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 /**
@@ -30,8 +31,10 @@ import java.util.stream.Collectors;
  * Subagent} as one fresh child session, as {@link SessionOptions.Builder#withSubagent} describes,
  * on the call's worker thread, which belongs to the parent's run ({@link Run#stateOfThisThread}).
  * Its deadline is the subagent's {@code maxWallClock} plus its {@code stopGrace} ({@link
- * #deadline}). The call's token interrupts the child; once the child's run ended, its spend is
- * added to the parent run's totals and the child is closed.
+ * #deadline}). The call's token closes the child, which cancels its run; once the child's run
+ * ended, its spend is added to the parent run's totals and the child is closed. A child's host
+ * {@link Error} is thrown as itself, so it fails the parent too, and a child that cannot start is a
+ * failure whose text the child's secret registry redacted.
  */
 final class AgentTool {
 
@@ -146,16 +149,20 @@ final class AgentTool {
     try {
       child = new AgentSessionImpl(options.get(), Optional.of(parent));
     } catch (RuntimeException e) {
-      return failure(name, "could not start: " + e.getMessage());
+      var why = String.valueOf(hostError(e).getMessage());
+      return failure(
+          name, "could not start: " + options.get().secretRegistry().redactor().redact(why).text());
     }
     try {
       var result = child.send(UserMessage.text(prompt));
-      var interrupting = context.cancellation().onCancel(child::interrupt);
+      var closing = context.cancellation().onCancel(child::close);
       ResultMessage terminal;
       try {
         terminal = result.join();
+      } catch (CompletionException e) {
+        throw hostError(e);
       } finally {
-        interrupting.remove();
+        closing.remove();
       }
       run.totals().accumulate(terminal.usage(), terminal.cost());
       return answer(name, terminal);
@@ -185,6 +192,16 @@ final class AgentTool {
     var budget = Math.min(own.limits().maxBudgetMicroUsd().orElse(Long.MAX_VALUE), left);
     return Optional.of(
         builder.withLimits(own.limits().toBuilder().withMaxBudgetMicroUsd(budget).build()).build());
+  }
+
+  /**
+   * {@code e}, unless it carries a host {@link Error} as a joined future's cause: that is thrown.
+   */
+  private static RuntimeException hostError(RuntimeException e) {
+    if (e instanceof CompletionException && e.getCause() instanceof Error error) {
+      throw error;
+    }
+    return e;
   }
 
   private static ToolResult failure(String name, String what) {
