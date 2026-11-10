@@ -94,7 +94,7 @@ final class AgentTool {
                     ToolParameter.newBuilder()
                         .withName("agent")
                         .withType(ParameterType.STRING)
-                        .withDescription("The subagent's name, one of:\n" + names)
+                        .withDescription("The subagent's name, one of " + subagents.keySet())
                         .withRequired(true)
                         .build(),
                     ToolParameter.newBuilder()
@@ -164,7 +164,7 @@ final class AgentTool {
       Thread.interrupted();
       child.close();
     }
-    var closing = child.lifecycle.failure();
+    var closing = child.lifecycle.failureOnceClosed();
     if (closing.isPresent()) {
       throw closing.get();
     }

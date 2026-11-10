@@ -183,6 +183,23 @@ public record SessionOptions(
   }
 
   /**
+   * Refuse a subagent without a cost calculator, and one of its own subagents at any depth: each
+   * runs under what the budget has left, which could not count its spend.
+   */
+  private static void requireCostCalculators(List<Subagent> subagents) {
+    for (var subagent : subagents) {
+      if (subagent.options().costCalculator() == CostCalculator.ZERO) {
+        throw new IllegalArgumentException(
+            "subagent \""
+                + subagent.name()
+                + "\" has no cost calculator, so the session's maxBudgetMicroUsd could not count"
+                + " its spend; set its SessionOptions.Builder.withCostCalculator");
+      }
+      requireCostCalculators(subagent.options().subagents());
+    }
+  }
+
+  /**
    * Refuse subagents with one name, a tool of the options' own that the {@code Agent} tool would
    * collide with, and, under a budget, a subagent whose spend the budget could not count.
    */
@@ -196,14 +213,9 @@ public record SessionOptions(
       if (!names.add(subagent.name())) {
         throw new IllegalArgumentException("duplicate subagent name: " + subagent.name());
       }
-      if (limits.maxBudgetMicroUsd().isPresent()
-          && subagent.options().costCalculator() == CostCalculator.ZERO) {
-        throw new IllegalArgumentException(
-            "subagent \""
-                + subagent.name()
-                + "\" has no cost calculator, so the session's maxBudgetMicroUsd could not count"
-                + " its spend; set its SessionOptions.Builder.withCostCalculator");
-      }
+    }
+    if (limits.maxBudgetMicroUsd().isPresent()) {
+      requireCostCalculators(subagents);
     }
     if (tools.stream().anyMatch(tool -> AgentTool.NAME.equals(tool.name()))) {
       throw new IllegalArgumentException(
@@ -710,11 +722,11 @@ public record SessionOptions(
     /**
      * Append a subagent the model may delegate to. With at least one, the session registers the
      * built-in {@code Agent} tool, whose input is {@code {"agent": <name>, "prompt": <text>}}, both
-     * required, and whose description and {@code agent} parameter list each {@code name:
-     * description}; a call naming no subagent is a failure listing the names. It is an {@link
-     * com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION} tool keyed {@code
-     * Agent(<name>)}, so a permission rule allows, asks or denies one subagent, and hooks apply to
-     * it as to any tool.
+     * required, and whose description lists each {@code name: description}, its {@code agent}
+     * parameter the names; a call naming no subagent is a failure listing the names. It is an
+     * {@link com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION} tool keyed
+     * {@code Agent(<name>)}, so a permission rule allows, asks or denies one subagent, and hooks
+     * apply to it as to any tool.
      *
      * <p>Each call runs one fresh child session from the subagent's options (see {@link Subagent}),
      * sends it the prompt, waits for its run to end and closes it. A child's {@code Success} is the
