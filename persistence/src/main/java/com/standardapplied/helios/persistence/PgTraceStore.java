@@ -80,6 +80,11 @@ public class PgTraceStore {
   /**
    * Lists runs with optional SCIM filter and pagination, without their spans.
    *
+   * <p>A run's labels, its {@code SessionOptions.Builder.withTraceAttributes}, are selected by JSON
+   * containment on {@code attributes}: {@code attributes eq "${\"app.eval.case_id\":\"c-17\"}"}
+   * returns the runs whose attributes hold every key and value of the object. Build the object with
+   * a JSON library, then escape each {@code \} and {@code "} in it for the filter text.
+   *
    * @param paginate pagination parameters (defaults to page 1, size 50 if null)
    * @param scimFilter optional SCIM filter string (e.g., {@code name eq "my-agent"})
    * @return paginated list of traces

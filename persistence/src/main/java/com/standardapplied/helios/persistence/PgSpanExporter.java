@@ -35,27 +35,46 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * An OpenTelemetry {@link SpanExporter} that stores a session's spans in the Helios trace tables,
- * for {@link PgTraceStore} to read: each {@code invoke_agent} span becomes one {@code
- * helios_traces} row, any other Helios span one {@code helios_spans} row. It reads the attributes
- * the session sets after the OpenTelemetry GenAI semantic conventions ({@code gen_ai-spans} and
- * {@code gen_ai-agent-spans}, status Development, read on 2026-11-03), plus Helios's own {@code
- * helios.*} attributes. It exports only Helios spans, those of the instrumentation scope {@code
- * com.standardapplied.helios} that carry {@code helios.run.id}, and ignores every other span.
+ * An OpenTelemetry {@link SpanExporter} that stores the spans of a session's runs in the Helios
+ * trace tables, for {@link PgTraceStore} to read. It stores only spans that carry {@code
+ * helios.run.id}, the run they belong to, and ignores every other span. A span of the session's
+ * instrumentation scope {@code com.standardapplied.helios} is Helios's own: its {@code
+ * invoke_agent} span becomes the run's {@code helios_traces} row, any other its {@code
+ * helios_spans} row. It reads the attributes the session sets after the OpenTelemetry GenAI
+ * semantic conventions ({@code gen_ai-spans} and {@code gen_ai-agent-spans}, status Development,
+ * read on 2026-11-03), plus Helios's own {@code helios.*} attributes.
  *
- * <p>A run's step spans end before its run span, so its span rows arrive first and its run row
- * last; a span row needs no other row to exist. One {@link #export} call writes its batch in one
+ * <p>A span of any other scope is a host's: one {@code helios_spans} row of the run it names, of
+ * kind {@code host}, its scope stored as its {@code otel.scope.name} attribute ({@link
+ * Span#scope()}). It is how a host records what it made of a run's answer on that run's trace: a
+ * span opened around {@code send}, or started after it, that names the run from {@code
+ * ResultMessage.runId()} and carries the host's outcome as {@code app.*} attributes and its status,
+ * which {@link Trace#spans()} returns with Helios's own:
+ *
+ * {@snippet :
+ * var span = tracer.spanBuilder("answer").startSpan();
+ * try (var ignored = span.makeCurrent()) {
+ *   var result = session.send(message).join();
+ *   span.setAttribute("helios.run.id", result.runId());
+ *   span.setAttribute("app.reply.fallback", render(result));
+ * } finally {
+ *   span.end();
+ * }
+ * }
+ *
+ * <p>A run's spans may arrive in any order: Helios's step spans end before its run span, so its
+ * span rows arrive first and its run row last, and a host span may end before or after the run's. A
+ * span row needs no other row to exist. One {@link #export} call writes its batch in one
  * transaction; a failure rolls it back, is logged as a warning naming the batch's run ids, and is
- * returned as {@link CompletableResultCode#ofFailure()}. Text and attribute values pass through the
- * {@link PgConfig}'s redactor, and each U+0000, which Postgres cannot store as text, becomes
- * U+FFFD. Every statement is parameterized and qualified by its schema. The exporter neither owns
- * nor closes the {@code DbClient}; after {@link #shutdown()} it writes nothing. Thread-safe.
+ * returned as {@link CompletableResultCode#ofFailure()}. Span names, status descriptions, text and
+ * attribute values pass through the {@link PgConfig}'s redactor, and each U+0000, which Postgres
+ * cannot store as text, becomes U+FFFD. Every statement is parameterized and qualified by its
+ * schema. The exporter neither owns nor closes the {@code DbClient}; after {@link #shutdown()} it
+ * writes nothing. Thread-safe.
  */
 public final class PgSpanExporter implements SpanExporter {
 
   private static final Logger LOGGER = Logger.getLogger(PgSpanExporter.class.getName());
-
-  private static final String SCOPE = "com.standardapplied.helios";
 
   private static final AttributeKey<String> RUN_ID = stringKey("helios.run.id");
   private static final AttributeKey<String> OPERATION = stringKey("gen_ai.operation.name");
@@ -96,20 +115,20 @@ public final class PgSpanExporter implements SpanExporter {
     if (shutdown.get()) {
       return CompletableResultCode.ofFailure();
     }
-    var helios = spans.stream().filter(PgSpanExporter::isHelios).toList();
-    if (helios.isEmpty()) {
+    var stored = spans.stream().filter(span -> span.getAttributes().get(RUN_ID) != null).toList();
+    if (stored.isEmpty()) {
       return CompletableResultCode.ofSuccess();
     }
     DbTransaction tx = null;
     try {
       tx = config.dbClient().transaction();
-      for (var span : helios) {
+      for (var span : stored) {
         write(tx, span);
       }
       tx.commit();
       return CompletableResultCode.ofSuccess();
     } catch (RuntimeException e) {
-      var runs = helios.stream().map(span -> span.getAttributes().get(RUN_ID)).distinct().toList();
+      var runs = stored.stream().map(span -> span.getAttributes().get(RUN_ID)).distinct().toList();
       warn("the spans of runs " + config.redact(runs.toString()) + " were not stored", e);
       if (tx != null) {
         rollback(tx);
@@ -145,13 +164,8 @@ public final class PgSpanExporter implements SpanExporter {
     return CompletableResultCode.ofSuccess();
   }
 
-  private static boolean isHelios(SpanData span) {
-    return SCOPE.equals(span.getInstrumentationScopeInfo().getName())
-        && span.getAttributes().get(RUN_ID) != null;
-  }
-
   private void write(DbTransaction tx, SpanData span) {
-    var run = "invoke_agent".equals(span.getAttributes().get(OPERATION));
+    var run = isHelios(span) && "invoke_agent".equals(span.getAttributes().get(OPERATION));
     var params = run ? runRow(span) : stepRow(span);
     params.replaceAll(value -> value instanceof String text ? storable(text) : value);
     tx.dml(config.qualify(run ? TraceSql.INSERT : SpanSql.INSERT), params.toArray());
@@ -173,7 +187,7 @@ public final class PgSpanExporter implements SpanExporter {
     params.add(utc(span.getStartEpochNanos()));
     params.add(utc(span.getEndEpochNanos()));
     params.add(error(span));
-    params.add(others(attributes, RUN_COLUMNS));
+    params.add(json(others(attributes, RUN_COLUMNS)));
     params.add(messageText(attributes.get(INPUT_MESSAGES)));
     params.add(messageText(attributes.get(OUTPUT_MESSAGES)));
     params.add(attributes.get(CONVERSATION_ID));
@@ -183,18 +197,23 @@ public final class PgSpanExporter implements SpanExporter {
     return params;
   }
 
+  /** A Helios step's row, or a host span's: kind {@code host}, its scope as an attribute. */
   private List<Object> stepRow(SpanData span) {
     var attributes = span.getAttributes();
-    var operation = attributes.get(OPERATION);
+    var helios = isHelios(span);
+    var others = others(attributes, helios ? Set.of(OPERATION) : Set.of());
+    if (!helios) {
+      others.put(Span.SCOPE_ATTRIBUTE, span.getInstrumentationScopeInfo().getName());
+    }
     var params = new ArrayList<Object>();
     params.add(span.getSpanId());
     params.add(attributes.get(RUN_ID));
-    params.add(span.getName());
-    params.add(operation != null ? operation : "hook");
+    params.add(config.redact(span.getName()));
+    params.add(helios ? Objects.requireNonNullElse(attributes.get(OPERATION), "hook") : Span.HOST);
     params.add(utc(span.getStartEpochNanos()));
     params.add(utc(span.getEndEpochNanos()));
     params.add(error(span));
-    params.add(others(attributes, Set.of(OPERATION)));
+    params.add(json(others));
     var usage = usage(attributes);
     params.add(usage != null ? usage.totalTokens() : null);
     UsageMapper.addParams(params, usage, cost(attributes));
@@ -208,16 +227,27 @@ public final class PgSpanExporter implements SpanExporter {
         : null;
   }
 
-  /** The span's attributes not stored in a column of their own, as redacted JSON strings. */
-  private String others(Attributes attributes, Set<AttributeKey<?>> columns) {
+  private static boolean isHelios(SpanData span) {
+    return Span.HELIOS_SCOPE.equals(span.getInstrumentationScopeInfo().getName());
+  }
+
+  /** The span's attributes not stored in a column of their own, as strings. */
+  private static Map<String, String> others(Attributes attributes, Set<AttributeKey<?>> columns) {
     var others = new LinkedHashMap<String, String>();
     attributes.forEach(
         (key, value) -> {
           if (!SHARED_COLUMNS.contains(key) && !columns.contains(key)) {
-            others.put(key.getKey(), storable(String.valueOf(value)));
+            others.put(key.getKey(), String.valueOf(value));
           }
         });
-    return JsonbMapper.toJsonb(config.redactValues(others));
+    return others;
+  }
+
+  /** {@code attributes} as JSONB text, each key and value storable and each value redacted. */
+  private String json(Map<String, String> attributes) {
+    var storable = new LinkedHashMap<String, String>();
+    attributes.forEach((key, value) -> storable.put(storable(key), storable(value)));
+    return JsonbMapper.toJsonb(config.redactValues(storable));
   }
 
   private String messageText(String messages) {
