@@ -781,7 +781,7 @@ final class SubagentSessionTest {
                     "type",
                     "string",
                     "description",
-                    "The subagent's name, one of:\nmatching: finds a match\nscoring: scores a match"),
+                    "The subagent's name, one of [matching, scoring]"),
                 "prompt",
                 Map.of(
                     "type",

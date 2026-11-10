@@ -32,8 +32,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Subagents: `Subagent(name, description, options)` and
   `SessionOptions.Builder.withSubagents(List<Subagent>)` / `withSubagent(Subagent)`. With at least
   one, the session registers the built-in `Agent` tool, input `{"agent": <name>, "prompt":
-  <text>}`, category `EXECUTION`, permission key `Agent(<name>)`, its description and its `agent`
-  parameter's listing each `name: description`. Each call runs one fresh child session from the
+  <text>}`, category `EXECUTION`, permission key `Agent(<name>)`, its description listing each
+  `name: description` and its `agent` parameter the names. Each call runs one fresh child session from the
   subagent's options (a fresh `sess-` id, `agentName` the subagent's name, nothing inherited), sends
   it the prompt, waits for its run and closes it. A child's `Success` is the call's result, its
   JSON under an output schema; any other terminal, a child that cannot open, an unknown name and a
@@ -41,13 +41,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `maxWallClock` plus its `stopGrace`; its cancellation (interrupt, close, deadline, the parent's
   wall clock) interrupts and closes the child, whose run ends `Cancelled`, and at the deadline the
   call waits the subagent's `stopGrace` for the child to close and answers with that failure. A
-  child's host `Error`, one its close records included, fails the parent as itself. Every answer, the child's result included, and
-  why a child could not open are redacted against the child's own secret registry, then against the
-  parent's as any tool result is. A child's permission `ASK` is denied
-  with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
+  child's host `Error`, one its close records included, fails the parent as itself. Every answer,
+  the child's result included, and why a child could not open are redacted against the child's own
+  secret registry, then against the parent's as any tool result is. A child's permission `ASK` is
+  denied with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
   refuses two subagents with one name, a tool of the options named `Agent`, and, under
-  `maxBudgetMicroUsd`, a subagent whose cost calculator is `CostCalculator.ZERO`; `Subagent`
-  refuses a name outside `[a-z][a-z0-9_-]{0,63}`, a blank description and options with
+  `maxBudgetMicroUsd`, a subagent, or one of its own at any depth, whose cost calculator is
+  `CostCalculator.ZERO`; `Subagent` refuses a name outside `[a-z][a-z0-9_-]{0,63}`, a blank
+  description and options with
   `AskUserQuestion`. Background children, delivery into the parent, idempotency and caps on
   concurrent children stay with the host.
 - Parent linkage: a child's `invoke_agent` span is a child of the call's `execute_tool` span and
@@ -77,10 +78,11 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   teardown takes, so the run's `ResultMessage` and its budget check after the turn count them; a
   subagent's own subagents roll up the same way. Under `maxBudgetMicroUsd` a child runs with the
   lower of its own budget and what the run has left. The run's `Usage.promptTokens()` stays its
-  own last request's. A run its cancellation or wall clock ended waits, within its `stopGrace`, for
-  its tool calls still running before it takes its terminal and writes its end to the store, so a
-  child that spends while it stops is counted. A child still stopping when that `stopGrace` runs out
-  is left running as any tool call is, and what it accounts after that is in its own result only.
+  own last request's. A `Cancelled`, `ErrorMaxWallClock` or `ErrorMaxBudgetUsd` result takes its
+  usage and cost after the run waited, within its `stopGrace`, for its tool calls still running, so
+  a child that spends while it stops is counted; its type and duration are as decided. A child
+  still stopping when that `stopGrace` runs out is left running as any tool call is, and what it
+  accounts after that is in its own result only.
 
 ### Compatibility
 

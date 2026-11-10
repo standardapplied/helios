@@ -123,4 +123,18 @@ final class SubagentTest {
     options().withLimits(budget()).withCostCalculator(COSTS).withSubagent(priced).build();
     options().withSubagent(subagent("free")).build();
   }
+
+  @Test
+  void underABudgetASubagentsOwnSubagentWithoutACostCalculatorIsRefusedByName() {
+    var outer =
+        new Subagent(
+            "outer",
+            "d",
+            options().withCostCalculator(COSTS).withSubagent(subagent("inner")).build());
+    var builder = options().withLimits(budget()).withCostCalculator(COSTS).withSubagent(outer);
+
+    var refused = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertTrue(refused.getMessage().startsWith("subagent \"inner\" has no cost calculator"));
+  }
 }
