@@ -15,9 +15,11 @@ import com.standardapplied.helios.session.AgentSessionImpl;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.logging.Logger;
 
@@ -29,6 +31,10 @@ import java.util.logging.Logger;
  *
  * <p>Unknown tool names return a {@link ToolResult#notFound(String) not-found} result; the agent
  * loop feeds that result back to the model so it can self-correct rather than crash.
+ *
+ * <p>A call runs under the deadline the session's deadline function gives it, the {@code Agent}
+ * call its subagent's, else under the default the loop passes. While its tool runs, the call is
+ * {@link #callOfThisThread()} on the worker thread.
  *
  * <p>Each call stays linked to its run's cancellation token until its worker ends, so ending the
  * run or closing the session cancels and interrupts every call still running, including one already
@@ -43,17 +49,47 @@ public final class ToolDispatch {
 
   private static final Logger LOGGER = Logger.getLogger(AgentSessionImpl.class.getName());
 
+  /** The call whose tool runs on the current thread, bound by {@link DispatchedCall}. */
+  static final ScopedValue<ToolCall> CALL = ScopedValue.newInstance();
+
   private final SessionContext sessionContext;
   private final ToolRegistry registry;
   private final Set<DispatchedCall> liveCalls = ConcurrentHashMap.newKeySet();
   private final SessionEnding ending;
+  private final Function<ToolCall, Optional<Duration>> deadlines;
   private volatile DispatchedCall abandoned;
 
-  /** {@code ending} records every {@link Error} the work of a call throws. */
+  /**
+   * A dispatcher whose calls all run under the default deadline; {@code ending} records every
+   * {@link Error} the work of a call throws.
+   */
   public ToolDispatch(SessionContext sessionContext, ToolRegistry registry, SessionEnding ending) {
+    this(sessionContext, registry, ending, call -> Optional.empty());
+  }
+
+  /**
+   * A dispatcher whose call runs under the deadline {@code deadlines} gives it, or the default when
+   * it gives none; {@code ending} records every {@link Error} the work of a call throws.
+   */
+  public ToolDispatch(
+      SessionContext sessionContext,
+      ToolRegistry registry,
+      SessionEnding ending,
+      Function<ToolCall, Optional<Duration>> deadlines) {
     this.sessionContext = sessionContext;
     this.registry = registry;
     this.ending = ending;
+    this.deadlines = deadlines;
+  }
+
+  /**
+   * The call whose tool runs on the calling thread, the worker of a dispatched call.
+   *
+   * @return the call, as dispatched
+   * @throws IllegalStateException if no dispatched tool runs on the calling thread
+   */
+  public static ToolCall callOfThisThread() {
+    return CALL.orElseThrow(() -> new IllegalStateException("no tool call runs on this thread"));
   }
 
   /**
@@ -116,16 +152,17 @@ public final class ToolDispatch {
   }
 
   /** Settle every live call's answer as its deadline does, for tests that fire deadlines. */
-  void expireLiveCalls() {
+  public void expireLiveCalls() {
     liveCalls.forEach(DispatchedCall::expire);
   }
 
   /**
    * Dispatch one tool call and wait for its answer. The call runs on its own cancellation token,
-   * linked to {@code cancellation}, under one deadline, {@code timeout} from now, that covers the
-   * tool's start and run; past it, this method waits at most {@code stopGrace}. A tool not started
-   * by the deadline, or before {@code cancellation} fires, never starts. At the deadline the call's
-   * token is cancelled and its worker interrupted, and the call is:
+   * linked to {@code cancellation}, under one deadline, the call's own from the dispatcher's
+   * deadline function or else {@code timeout}, from now, that covers the tool's start and run; past
+   * it, this method waits at most {@code stopGrace}. A tool not started by the deadline, or before
+   * {@code cancellation} fires, never starts. At the deadline the call's token is cancelled and its
+   * worker interrupted, and the call is:
    *
    * <ul>
    *   <li>{@link ToolOutcome.TimedOut} if the tool never started or stopped within {@code
@@ -145,7 +182,8 @@ public final class ToolDispatch {
    *
    * @param call the call; non-null
    * @param cancellation the run's cancellation token; non-null
-   * @param timeout per-call budget, from now; non-null, positive
+   * @param timeout per-call budget, from now, of a call the deadline function gives none; non-null,
+   *     positive
    * @param stopGrace how long to wait for a timed-out tool to stop; non-null, positive
    * @param withheld true for the canonical key of an entry the call must not return, handed to the
    *     tool through its {@link ToolContext}; non-null
@@ -185,7 +223,7 @@ public final class ToolDispatch {
             call,
             sessionContext,
             cancellation,
-            timeout,
+            deadlines.apply(call).orElse(timeout),
             withheld,
             liveCalls,
             left -> abandoned = left,

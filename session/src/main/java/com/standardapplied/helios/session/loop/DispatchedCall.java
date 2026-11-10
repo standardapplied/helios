@@ -35,8 +35,9 @@ import java.util.logging.Logger;
  * call's own token is linked to the session's and is cancelled on a thread of its own, so a
  * callback that blocks or throws holds up neither the canceller nor the worker's interrupt. The
  * work is the worker and that cancellation; when both have ended, the worker removes the link and
- * the call is no longer live. A call its caller stops waiting for while its work runs is handed to
- * the dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's token
+ * the call is no longer live. While the tool runs, the call is bound to {@link ToolDispatch#CALL}
+ * on the worker. A call its caller stops waiting for while its work runs is handed to the
+ * dispatcher as abandoned. Every {@link Error} of the work, one a callback on the call's token
  * throws or one the tool throws, is recorded by the session's {@link SessionEnding}, the tool's
  * once the answer settled with it, so the caller reads it as itself.
  */
@@ -236,7 +237,9 @@ final class DispatchedCall {
   private void work() {
     try {
       if (!answer.isDone() && !parent.isCancelled() && System.nanoTime() - deadline < 0) {
-        answer.complete(binding.tool().execute(call.arguments(), context));
+        answer.complete(
+            ScopedValue.where(ToolDispatch.CALL, call)
+                .call(() -> binding.tool().execute(call.arguments(), context)));
       }
     } catch (Error e) {
       answer.completeExceptionally(e);

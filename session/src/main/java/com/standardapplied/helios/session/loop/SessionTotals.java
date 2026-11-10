@@ -15,12 +15,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The running totals of one run — usage, cost and grounding citations across every model call, and
- * the time since the run started — read by anyone and accumulated only by the loop.
+ * the time since the run started — read by anyone and accumulated by the loop, and, for the spend
+ * of a subagent's child session, by the {@code Agent} call that ran it.
  *
  * <h2>Thread-safety</h2>
  *
- * Each total is an {@link AtomicReference}: the loop thread writes, any thread may read. Readers
- * see a consistent value per total, not necessarily across totals.
+ * Each total is an {@link AtomicReference} updated atomically: the loop thread writes, and so does
+ * the worker thread of an {@code Agent} call, through {@link #accumulate}; any thread may read.
+ * Readers see a consistent value per total, not necessarily across totals.
  */
 public final class SessionTotals {
 
@@ -71,6 +73,28 @@ public final class SessionTotals {
    */
   public List<Citation> citations() {
     return citations.get();
+  }
+
+  /**
+   * Add the spend of a subagent's child session, whatever its terminal, to the run's usage and
+   * cost, from the {@code Agent} call that ran it, so the run's result and its budget check count
+   * it. Its token counts are added; the run's {@link Usage#promptTokens()} stays the size of its
+   * own last request, since the child's requests are not this run's prompt.
+   *
+   * @param usage the child's usage; non-null
+   * @param cost the child's cost; non-null
+   * @throws NullPointerException if an argument is null
+   */
+  public void accumulate(Usage usage, CostEstimate cost) {
+    accumulateUsage(
+        new Usage(
+            usage.inputTokens(),
+            usage.outputTokens(),
+            usage.cacheCreationInputTokens(),
+            usage.cacheReadInputTokens(),
+            usage.totalTokens(),
+            0));
+    accumulateCost(cost);
   }
 
   /**

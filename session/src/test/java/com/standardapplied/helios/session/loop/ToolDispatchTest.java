@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -74,6 +75,40 @@ final class ToolDispatchTest {
     var d = new ToolDispatch(CTX, registry, fixture.ending);
     assertSame(CTX, d.sessionContext());
     assertSame(registry, d.registry());
+  }
+
+  @Test
+  void aCallRunsUnderTheDeadlineItsFunctionGivesAndIsTheCallOfItsWorker() {
+    var seen = new CopyOnWriteArrayList<String>();
+    ToolExecutor recording =
+        (arguments, context) -> {
+          seen.add(ToolDispatch.callOfThisThread().name() + " " + context.deadline());
+          return ToolResult.success("ok");
+        };
+    var registry =
+        new ToolRegistry(
+            List.of(
+                binding("own", ToolCategory.READ, recording),
+                binding("other", ToolCategory.READ, recording)));
+    var own = Duration.ofMinutes(42);
+    var d =
+        new ToolDispatch(
+            CTX,
+            registry,
+            fixture.ending,
+            call -> "own".equals(call.name()) ? Optional.of(own) : Optional.empty());
+
+    var token = new CancellationToken();
+    d.dispatch(call("own"), token, NEVER, NEVER, key -> false);
+    d.dispatch(call("other"), token, NEVER, NEVER, key -> false);
+
+    assertEquals(List.of("own " + own, "other " + NEVER), seen);
+  }
+
+  @Test
+  void aThreadNoToolRunsOnHasNoCall() {
+    var none = assertThrows(IllegalStateException.class, ToolDispatch::callOfThisThread);
+    assertEquals("no tool call runs on this thread", none.getMessage());
   }
 
   // ── dispatch validation ───────────────────────────────────────────────────
