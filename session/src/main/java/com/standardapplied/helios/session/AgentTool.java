@@ -5,6 +5,7 @@ package com.standardapplied.helios.session;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.Ids;
 import com.standardapplied.helios.core.common.Strings;
+import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
@@ -32,10 +33,10 @@ import java.util.stream.Collectors;
  * on the call's worker thread, which belongs to the parent's run ({@link Run#stateOfThisThread}).
  * The dispatcher runs the call under the subagent's limits ({@link #childLimits}). The child's
  * totals roll up into the parent run's as it spends. The call's token interrupts the child and
- * closes it; once the child's run ended, the child is closed. A child's host {@link Error} is
- * thrown as itself, so it fails the parent too. Every answer, a child's result or why it failed or
- * could not start, is redacted by the child's secret registry, and then by the parent's as any tool
- * result is.
+ * closes it; once the child's run ended, the child is closed. A child's host {@link Error}, one its
+ * close recorded included, is thrown as itself, so it fails the parent too. Every answer, a child's
+ * result or why it failed or could not start, is redacted by the child's secret registry, and then
+ * by the parent's as any tool result is.
  */
 final class AgentTool {
 
@@ -148,39 +149,56 @@ final class AgentTool {
     var parent =
         new Parent(
             run.sessionId(), run.runId(), ToolDispatch.callOfThisThread().id(), run.totals());
-    var redactor = options.get().secretRegistry().redactor();
     AgentSessionImpl child;
     try {
       child = new AgentSessionImpl(options.get(), Optional.of(parent));
     } catch (RuntimeException e) {
-      var why = String.valueOf(hostError(e).getMessage());
-      return failure(name, "could not start: " + redactor.redact(why).text());
+      return redacted(
+          failure(name, "could not start: " + hostError(e).getMessage()), options.get());
     }
+    ToolResult answer;
     try {
-      var result = child.send(UserMessage.text(prompt));
-      var stopping =
-          context
-              .cancellation()
-              .onCancel(
-                  () -> {
-                    child.interrupt();
-                    child.close();
-                  });
-      ResultMessage terminal;
-      try {
-        terminal = result.join();
-      } catch (CompletionException e) {
-        throw hostError(e);
-      } finally {
-        stopping.remove();
-      }
-      var answer = answer(name, terminal);
-      return answer.withOutput(redactor.redact(answer.output()).text());
+      answer = answer(name, terminal(child, prompt, context.cancellation()));
     } finally {
       // An interrupt of this call is no request to cut the child's teardown short.
       Thread.interrupted();
       child.close();
     }
+    var closing = child.lifecycle.failure();
+    if (closing.isPresent()) {
+      throw closing.get();
+    }
+    return redacted(answer, options.get());
+  }
+
+  /**
+   * The terminal of the child's run on {@code prompt}; the call's {@code cancellation} interrupts
+   * the child and closes it.
+   */
+  private static ResultMessage terminal(
+      AgentSessionImpl child, String prompt, CancellationToken cancellation) {
+    var result = child.send(UserMessage.text(prompt));
+    var stopping =
+        cancellation.onCancel(
+            () -> {
+              child.interrupt();
+              child.close();
+            });
+    try {
+      return result.join();
+    } catch (CompletionException e) {
+      throw hostError(e);
+    } finally {
+      stopping.remove();
+    }
+  }
+
+  /**
+   * {@code answer}, redacted by the child's secret registry as it is now, so a secret the child
+   * registered while it ran is redacted too.
+   */
+  private static ToolResult redacted(ToolResult answer, SessionOptions child) {
+    return answer.withOutput(child.secretRegistry().redactor().redact(answer.output()).text());
   }
 
   /**

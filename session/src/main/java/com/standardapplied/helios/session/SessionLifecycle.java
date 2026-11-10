@@ -132,6 +132,11 @@ final class SessionLifecycle {
     }
   }
 
+  /** The first host {@link Error} the session recorded, if any. */
+  Optional<Error> failure() {
+    return session.ending().first();
+  }
+
   /** Expire the tool calls still running as their deadline does, for tests. */
   void expireToolCalls() {
     loop.toolDispatch().expireLiveCalls();

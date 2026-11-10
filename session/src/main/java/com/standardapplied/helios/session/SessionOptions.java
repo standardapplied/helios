@@ -727,7 +727,10 @@ public record SessionOptions(
      *       parent run's as the child spends, so the parent's {@link ResultMessage} and its budget
      *       check after the turn count them. Under {@link SessionLimits#maxBudgetMicroUsd()}, the
      *       child runs with the lower of its own budget and what the parent run has left, and a
-     *       call with nothing left fails without starting one.
+     *       call with nothing left fails without starting one. A child still stopping when this
+     *       session's run stops waiting for it, {@code stopGrace} after the run was cancelled, is
+     *       left running as any tool call is; what it accounts after that is in its own result
+     *       only.
      *   <li><b>Time</b>: the call's deadline is the subagent's {@link SessionLimits#maxWallClock()}
      *       plus its {@link SessionLimits#stopGrace()}, not this session's {@link
      *       SessionLimits#toolTimeoutDefault()}; this session's own {@code maxWallClock} still
