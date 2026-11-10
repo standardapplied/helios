@@ -3,7 +3,9 @@
 package com.standardapplied.helios.core.provider;
 
 import static com.standardapplied.helios.core.provider.SseFixtures.NEVER_IDLE;
+import static com.standardapplied.helios.core.provider.SseFixtures.awaitNoWatchdogBut;
 import static com.standardapplied.helios.core.provider.SseFixtures.stream;
+import static com.standardapplied.helios.core.provider.SseFixtures.watchdogs;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -27,13 +29,17 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -771,6 +777,209 @@ class SseReaderTest {
       assertTrue(Thread.interrupted());
       assertTrue(body.closed);
       assertFalse(reader.hasNext());
+    }
+  }
+
+  @Test
+  void theConsumingThreadReadsEveryLineAndOneWatchdogWatchesTheStreamUntilItEnds() {
+    var before = watchdogs();
+    var body = new Closing(byteByByte("data: x\n\n".repeat(149) + "data: stop\n\n"));
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    assertTrue(reader.hasNext());
+    var started = new HashSet<>(watchdogs());
+    started.removeAll(before);
+    assertEquals(150, drain(reader).size());
+
+    assertEquals(1, started.size());
+    assertEquals(Set.of(Thread.currentThread()), body.readers);
+    awaitNoWatchdogBut(before);
+  }
+
+  @Test
+  void aReaderClosedBeforeItsFirstLineStartsNoWatchdogAndNeverReadsTheBody() {
+    var before = watchdogs();
+    var body = new Closing(stream("data: stop\n\n"));
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var afterBuilding = watchdogs();
+
+    reader.close();
+
+    assertTrue(before.containsAll(afterBuilding));
+    assertFalse(reader.hasNext());
+    assertTrue(body.closed);
+    assertEquals(Set.of(), body.readers);
+    assertTrue(before.containsAll(watchdogs()));
+  }
+
+  @ParameterizedTest
+  @MethodSource("streamEndings")
+  void theWatchdogEndsAndTheBodyIsClosedOnceTheStreamEnds(InputStream content) {
+    var before = watchdogs();
+    var body = new Closing(content);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    drain(reader);
+
+    assertTrue(body.closed);
+    awaitNoWatchdogBut(before);
+  }
+
+  static List<Named<InputStream>> streamEndings() {
+    var unread = "data: never\n\n";
+    return List.of(
+        Named.of("done", stream("data: stop\n\n" + unread)),
+        Named.of("parser error", stream("data: fail\n\n" + unread)),
+        Named.of("body ended early", stream("data: one\n\n")),
+        Named.of("oversized line", endless("data: ".getBytes(StandardCharsets.UTF_8), (byte) 'x')));
+  }
+
+  @Test
+  void aBodyThatFailsAfterTwoEventsYieldsBothAndThenTheOneError() {
+    var before = watchdogs();
+    var feed = new FeedableInputStream();
+    feed.feed("data: one\n\ndata: two\n\n");
+    var failure = new IOException("connection reset");
+    feed.fail(failure);
+    var body = new Closing(feed);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    var events = drain(reader);
+
+    assertEquals(
+        List.of(new StreamEvent.TextDelta("one"), new StreamEvent.TextDelta("two")),
+        events.subList(0, 2));
+    assertSame(failure, assertInstanceOf(StreamEvent.Error.class, events.get(2)).cause());
+    assertEquals(3, events.size());
+    assertTrue(body.closed);
+    awaitNoWatchdogBut(before);
+  }
+
+  @Test
+  void aStalledBodyIsClosedByTheWatchdogAndEndsInTheIdleTimeoutWithThePartial() {
+    var before = watchdogs();
+    var body = new Closing(new FeedableInputStream());
+    var parser =
+        new EchoParser() {
+          @Override
+          public Response<Void> partial() {
+            return Response.newBuilder()
+                .withContent("so far")
+                .withFinishReason(FinishReason.ERROR)
+                .build();
+          }
+        };
+    var reader = new SseReader(body, Duration.ofMillis(1), parser, ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, consume(reader::next));
+
+    assertEquals("Stream idle timeout: no data received for 1 ms", error.message());
+    assertInstanceOf(ProviderException.class, error.cause());
+    assertEquals("so far", error.partial().content());
+    assertEquals("helios-sse-idle", body.closers.getFirst().getName());
+    assertFalse(reader.hasNext());
+    awaitNoWatchdogBut(before);
+  }
+
+  @Test
+  void timeTheConsumerSpendsBetweenLinesAlreadyReadIsNeverIdle() {
+    var timeout = Duration.ofMillis(400);
+    var body = new Closing(stream("data: one\n\ndata: two\n\n"));
+    try (var reader = new SseReader(body, timeout, new EchoParser(), ProviderException::new)) {
+      assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+
+      atLeast(timeout);
+
+      assertEquals(new StreamEvent.TextDelta("two"), reader.next());
+      assertFalse(body.closed);
+    }
+  }
+
+  @Test
+  void linesThatEachArriveWithinTheTimeoutNeverTimeOutHoweverLongTheStreamLasts() {
+    var timeout = Duration.ofMillis(400);
+    var feed = new FeedableInputStream();
+    var reader = new SseReader(feed, timeout, new EchoParser(), ProviderException::new);
+    var consumer = Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      var events = consumer.submit(() -> drain(reader));
+
+      for (var i = 0; i < 8; i++) {
+        atLeast(timeout.dividedBy(2));
+        feed.feed("data: " + i + "\n\n");
+      }
+      feed.feed("data: stop\n\n");
+
+      var all = Await.value("the stream's events", events);
+      assertEquals(9, all.size());
+      assertInstanceOf(StreamEvent.Done.class, all.getLast());
+    } finally {
+      consumer.shutdownNow();
+    }
+  }
+
+  @Test
+  void aWaitTheWatchdogClaimsFirstFailsAsIdleEvenWhenItsLineArrives() {
+    var feed = new FeedableInputStream();
+    var body = new Closing(feed);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var consumer = Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      var next = consumer.submit(reader::next);
+      feed.awaitBlockedRead();
+
+      assertTrue(reader.wait.compareAndSet(reader.wait.get(), SseReader.CLAIMED));
+      feed.feed("data: one\n\n");
+
+      var error = assertInstanceOf(StreamEvent.Error.class, Await.value("the next event", next));
+      assertEquals(
+          "Stream idle timeout: no data received for " + NEVER_IDLE.toMillis() + " ms",
+          error.message());
+      assertTrue(body.closed);
+    } finally {
+      consumer.shutdownNow();
+    }
+  }
+
+  @Test
+  void aWaitWhoseLineArrivesFirstCannotBeClaimedAndKeepsTheBodyOpen() {
+    var feed = new FeedableInputStream();
+    var body = new Closing(feed);
+    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
+      var consumer = Executors.newVirtualThreadPerTaskExecutor();
+      try {
+        var next = consumer.submit(reader::next);
+        feed.awaitBlockedRead();
+        var mark = reader.wait.get();
+
+        feed.feed("data: one\n\n");
+
+        assertEquals(new StreamEvent.TextDelta("one"), Await.value("the next event", next));
+        assertFalse(reader.wait.compareAndSet(mark, SseReader.CLAIMED));
+        assertEquals(SseReader.NOT_WAITING, reader.wait.get());
+        assertFalse(body.closed);
+      } finally {
+        consumer.shutdownNow();
+      }
+    }
+  }
+
+  /** Returns once at least {@code timeout} has passed: a stalled stream with it has timed out. */
+  private static void atLeast(Duration timeout) {
+    try (var stalled =
+        new SseReader(
+            new FeedableInputStream(), timeout, new EchoParser(), ProviderException::new)) {
+      assertInstanceOf(StreamEvent.Error.class, stalled.next());
+    }
+  }
+
+  /** What {@code consumer} returns on a thread of its own, interrupted if it is still waiting. */
+  private static <T> T consume(Callable<T> consumer) {
+    var thread = Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      return Await.value("the consumer", thread.submit(consumer));
+    } finally {
+      thread.shutdownNow();
     }
   }
 }

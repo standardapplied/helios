@@ -18,9 +18,10 @@
         <!--
           Surefire opens a test package of the module only when a selected test class lives in
           it, so a filtered run of a contract subclass could not reach the contract in core.test.
-          ChildJvm's own test runs it inside the module, which reads java.management only here.
+          ChildJvm's own test runs it inside the module, which reads java.management only here, and
+          SseReaderTest reads jdk.management for the thread dump that lists virtual threads.
         -->
-        <helios.test.opens>--add-opens com.standardapplied.helios.core/com.standardapplied.helios.core.test=ALL-UNNAMED --add-modules java.management --add-reads com.standardapplied.helios.core=java.management</helios.test.opens>
+        <helios.test.opens>--add-opens com.standardapplied.helios.core/com.standardapplied.helios.core.test=ALL-UNNAMED --add-modules java.management,jdk.management --add-reads com.standardapplied.helios.core=java.management,jdk.management</helios.test.opens>
     </properties>
 
     <dependencies>
@@ -46,9 +47,9 @@
                         <configuration>
                             <compilerArgs>
                                 <arg>--add-modules</arg>
-                                <arg>java.management</arg>
+                                <arg>java.management,jdk.management</arg>
                                 <arg>--add-reads</arg>
-                                <arg>com.standardapplied.helios.core=java.management</arg>
+                                <arg>com.standardapplied.helios.core=java.management,jdk.management</arg>
                             </compilerArgs>
                         </configuration>
                     </execution>

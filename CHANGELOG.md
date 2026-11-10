@@ -4,6 +4,16 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Changed
+
+- `SseReader` reads a stream's lines on the consuming thread, with one idle watchdog per stream, a
+  virtual thread named `helios-sse-idle` started by the first line asked for; it used to read every
+  line on a virtual thread of its own. The idle timeout, the read failures, `close()` from another
+  thread and an interrupt of the consuming thread end the stream as before.
+- A blocked read is now released only by closing the body or by the body's response to an
+  interrupt, so a body whose `read` ignores both keeps its consumer blocked until data arrives; the
+  JDK HTTP client's response body, which every provider reads, is released by both.
+
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 
 ### Added
