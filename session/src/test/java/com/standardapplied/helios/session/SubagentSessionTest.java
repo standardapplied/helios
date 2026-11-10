@@ -600,6 +600,26 @@ final class SubagentSessionTest {
     assertEquals(expected, agentResult(parentModel));
   }
 
+  @Test
+  void aSecretTheChildRegistersWhileItRunsIsRedactedFromItsAnswer() {
+    var secrets = new SecretRegistry();
+    var provider = new RecordingProvider(new ArrayList<>());
+    provider.start =
+        () -> {
+          secrets.register("CHILD_KEY", "child-secret-0123456789");
+          return SessionStartOutcome.accept();
+        };
+    var parentModel = callingMatching(Usage.of(0, 0));
+    var child =
+        child(childModel().withTextTurn("answer child-secret-0123456789").build())
+            .withSecretRegistry(secrets)
+            .withExecutionProvider(provider);
+
+    run(parent(parentModel, child).build());
+
+    assertEquals("answer <redacted:CHILD_KEY>", agentResult(parentModel));
+  }
+
   static Stream<Arguments> childAnswersNamingASecret() {
     return Stream.of(
         Arguments.of(
@@ -640,6 +660,25 @@ final class SubagentSessionTest {
                 callingMatching(Usage.of(0, 0)),
                 child(childModel().build())
                     .withStore(RecordingStore.loadThrowing(new CompletionException(error))))
+            .build();
+
+    try (var session = AgentSession.open(options)) {
+      assertSame(error, Await.failure("the parent's result", session.send("find a match")));
+    }
+  }
+
+  @Test
+  void anErrorOfTheChildsCloseFailsTheParentAsItself() {
+    var error = new AssertionError("child close error");
+    var provider = new RecordingProvider(new ArrayList<>());
+    provider.end =
+        () -> {
+          throw error;
+        };
+    var options =
+        parent(
+                callingMatching(Usage.of(0, 0)),
+                child(childModel().withTextTurn("found").build()).withExecutionProvider(provider))
             .build();
 
     try (var session = AgentSession.open(options)) {

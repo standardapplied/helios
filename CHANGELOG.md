@@ -41,7 +41,7 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `maxWallClock` plus its `stopGrace`; its cancellation (interrupt, close, deadline, the parent's
   wall clock) interrupts and closes the child, whose run ends `Cancelled`, and at the deadline the
   call waits the subagent's `stopGrace` for the child to close and answers with that failure. A
-  child's host `Error` fails the parent as itself. Every answer, the child's result included, and
+  child's host `Error`, one its close records included, fails the parent as itself. Every answer, the child's result included, and
   why a child could not open are redacted against the child's own secret registry, then against the
   parent's as any tool result is. A child's permission `ASK` is denied
   with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
@@ -79,7 +79,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   lower of its own budget and what the run has left. The run's `Usage.promptTokens()` stays its
   own last request's. A run its cancellation or wall clock ended waits, within its `stopGrace`, for
   its tool calls still running before it takes its terminal and writes its end to the store, so a
-  child that spends while it stops is counted.
+  child that spends while it stops is counted. A child still stopping when that `stopGrace` runs out
+  is left running as any tool call is, and what it accounts after that is in its own result only.
 
 ### Compatibility
 
