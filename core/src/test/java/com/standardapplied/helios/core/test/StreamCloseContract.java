@@ -177,7 +177,7 @@ public abstract class StreamCloseContract {
     var blocked = new BlockedRead(stream);
     Await.until(
         "the read to wait for the next line",
-        () -> blocked.thread.getState() == Thread.State.TIMED_WAITING);
+        () -> blocked.thread.getState() == Thread.State.WAITING);
     return blocked;
   }
 
