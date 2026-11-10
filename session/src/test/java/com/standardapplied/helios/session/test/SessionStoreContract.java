@@ -305,6 +305,10 @@ public abstract class SessionStoreContract {
           ResultMessage.Success.class, Await.value("the next run", session.send("continue")));
     }
     var request = next.calls().getFirst();
+    assertEquals(
+        List.of(0L, 2L, 3L, 3L).get(writes),
+        request.stream().filter(message -> message.toolCallId() != null).count(),
+        "the tool results the stopped run stored");
     for (var i = 0; i < request.size(); i++) {
       for (var call : Optional.ofNullable(request.get(i).toolCalls()).orElse(List.of())) {
         var answered =

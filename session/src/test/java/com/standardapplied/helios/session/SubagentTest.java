@@ -8,8 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostCalculator.Pricing;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.testing.ScriptedModel;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -136,5 +138,20 @@ final class SubagentTest {
     var refused = assertThrows(IllegalArgumentException.class, builder::build);
 
     assertTrue(refused.getMessage().startsWith("subagent \"inner\" has no cost calculator"));
+  }
+
+  @Test
+  void onlyAnAgentCallNamingASubagentRunsUnderThatSubagentsLimits() {
+    var limits = SessionLimits.newBuilder().withMaxWallClock(Duration.ofMinutes(7)).build();
+    var matching = new Subagent("matching", "finds a match", options().withLimits(limits).build());
+    var tool = new AgentTool(List.of(matching), SessionLimits.defaults());
+
+    assertEquals(limits, tool.childLimits(call("Agent", "matching")).orElseThrow());
+    assertTrue(tool.childLimits(call("Agent", "nobody")).isEmpty());
+    assertTrue(tool.childLimits(call("lookup", "matching")).isEmpty());
+  }
+
+  private static ToolCall call(String tool, String agent) {
+    return new ToolCall("c-1", tool, Map.of("agent", agent, "prompt", "p"));
   }
 }

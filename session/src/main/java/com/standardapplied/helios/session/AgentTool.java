@@ -35,8 +35,8 @@ import java.util.stream.Collectors;
  * totals roll up into the parent run's as it spends. The call's token interrupts the child and
  * closes it; once the child's run ended, the child is closed. A child's host {@link Error}, one its
  * close recorded included, is thrown as itself, so it fails the parent too. Every answer, a child's
- * result or why it failed or could not start, is redacted by the child's secret registry, and then
- * by the parent's as any tool result is.
+ * result or why it failed, crashed or could not start, is redacted by the child's secret registry,
+ * and then by the parent's as any tool result is.
  */
 final class AgentTool {
 
@@ -159,6 +159,8 @@ final class AgentTool {
     ToolResult answer;
     try {
       answer = answer(name, terminal(child, prompt, context.cancellation()));
+    } catch (CompletionException e) {
+      answer = failure(name, "crashed: " + hostError(e).getMessage());
     } finally {
       // An interrupt of this call is no request to cut the child's teardown short.
       Thread.interrupted();
@@ -174,6 +176,8 @@ final class AgentTool {
   /**
    * The terminal of the child's run on {@code prompt}; the call's {@code cancellation} interrupts
    * the child and closes it.
+   *
+   * @throws CompletionException if the run failed, with what it failed with as the cause
    */
   private static ResultMessage terminal(
       AgentSessionImpl child, String prompt, CancellationToken cancellation) {
@@ -186,8 +190,6 @@ final class AgentTool {
             });
     try {
       return result.join();
-    } catch (CompletionException e) {
-      throw hostError(e);
     } finally {
       stopping.remove();
     }
