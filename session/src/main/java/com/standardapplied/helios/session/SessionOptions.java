@@ -710,8 +710,8 @@ public record SessionOptions(
     /**
      * Append a subagent the model may delegate to. With at least one, the session registers the
      * built-in {@code Agent} tool, whose input is {@code {"agent": <name>, "prompt": <text>}}, both
-     * required, {@code agent} an {@code enum} of the names, and whose description lists each {@code
-     * name: description}. It is an {@link
+     * required, and whose description and {@code agent} parameter list each {@code name:
+     * description}; a call naming no subagent is a failure listing the names. It is an {@link
      * com.standardapplied.helios.session.tools.ToolCategory#EXECUTION EXECUTION} tool keyed {@code
      * Agent(<name>)}, so a permission rule allows, asks or denies one subagent, and hooks apply to
      * it as to any tool.
@@ -719,11 +719,12 @@ public record SessionOptions(
      * <p>Each call runs one fresh child session from the subagent's options (see {@link Subagent}),
      * sends it the prompt, waits for its run to end and closes it. A child's {@code Success} is the
      * call's result: its text, or its JSON under an output schema; any other terminal is a failure
-     * naming the subagent, the terminal and why it ended, and so is a child that cannot open.
+     * naming the subagent, the terminal and why it ended, and so is a child that cannot open. The
+     * child's secret registry redacts the answer before this session's does.
      *
      * <ul>
-     *   <li><b>Spend</b>: when the call ends, the child's usage and cost, whatever its terminal,
-     *       are added to the parent run's, so the parent's {@link ResultMessage} and its budget
+     *   <li><b>Spend</b>: the child's usage and cost, whatever its terminal, are added to the
+     *       parent run's as the child spends, so the parent's {@link ResultMessage} and its budget
      *       check after the turn count them. Under {@link SessionLimits#maxBudgetMicroUsd()}, the
      *       child runs with the lower of its own budget and what the parent run has left, and a
      *       call with nothing left fails without starting one.
@@ -731,8 +732,9 @@ public record SessionOptions(
      *       plus its {@link SessionLimits#stopGrace()}, not this session's {@link
      *       SessionLimits#toolTimeoutDefault()}; this session's own {@code maxWallClock} still
      *       bounds its run. The call's cancellation, by an interrupt, a close, the call's deadline
-     *       or the run's wall clock, interrupts the child, which ends {@link
-     *       ResultMessage.Cancelled}.
+     *       or the run's wall clock, interrupts and closes the child, which ends {@link
+     *       ResultMessage.Cancelled}; at the deadline the call waits the subagent's {@code
+     *       stopGrace} for the child to close and answers with that failure.
      *   <li><b>Linkage</b>: the child's run span is a child of the call's {@code execute_tool} span
      *       and carries {@code helios.parent.session_id}, {@code helios.parent.run_id} and {@code
      *       helios.parent.tool_call_id}, which {@code PgSpanExporter} stores in the child's run

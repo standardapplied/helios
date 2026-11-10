@@ -157,6 +157,38 @@ final class SessionStateTest {
     assertEquals(350_000L, state.totals().cost().microUsd());
   }
 
+  /** The state of a session whose runs' totals roll up into {@code parentRun}'s. */
+  private static SessionState childOf(SessionTotals parentRun) {
+    return new SessionState(
+        SID, new CancellationToken(), Clock.systemUTC(), Optional.of(parentRun));
+  }
+
+  @Test
+  void aChildRunsSpendRollsUpIntoEachRunAboveItWhileEachKeepsItsOwnPromptSize() {
+    var parent = build();
+    parent.totals().accumulateUsage(Usage.of(100, 10));
+    var child = new SessionState(childOf(parent.totals()), new CancellationToken());
+    child.totals().accumulateUsage(Usage.of(40, 4));
+    var grandchild = childOf(child.totals());
+
+    grandchild.totals().accumulateUsage(Usage.of(10, 1));
+    grandchild.totals().accumulateCost(CostEstimate.ofMicroUsd(7));
+
+    assertEquals(new Usage(150, 15, 0, 0, 165, 100), parent.totals().usage());
+    assertEquals(new Usage(50, 5, 0, 0, 55, 40), child.totals().usage());
+    assertEquals(CostEstimate.ofMicroUsd(7), parent.totals().cost());
+    assertEquals(CostEstimate.ofMicroUsd(7), child.totals().cost());
+  }
+
+  @Test
+  void nullParentRunRejected() {
+    var ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> new SessionState(SID, new CancellationToken(), Clock.systemUTC(), null));
+    assertEquals("parentRun must not be null", ex.getMessage());
+  }
+
   @Test
   void accumulateCostRejectsNull() {
     var state = build();

@@ -371,9 +371,9 @@ try (var session = AgentSession.open(options)) {
 }
 ```
 
-- **Result.** A child's `Success` is the call's result (its JSON under an output schema); any other terminal, a child that cannot open and an unknown name are failures the model reads.
-- **Spend.** The child's usage and cost are added to the parent run's, so the parent's `ResultMessage` and budget count them; under `maxBudgetMicroUsd` the child gets at most what the run has left, and with nothing left the call fails without starting one. Under a budget every subagent needs a cost calculator.
-- **Time and cancellation.** The call's deadline is the subagent's `maxWallClock` plus its `stopGrace`, not `toolTimeoutDefault`. An interrupt, a close, the deadline or the parent's wall clock interrupts the child, which ends `Cancelled`.
+- **Result.** A child's `Success` is the call's result (its JSON under an output schema); any other terminal, a child that cannot open and an unknown name are failures the model reads. The child's secret registry redacts what it answers before the parent's does.
+- **Spend.** The child's usage and cost are added to the parent run's as it spends, so the parent's `ResultMessage` and budget count them; under `maxBudgetMicroUsd` the child gets at most what the run has left, and with nothing left the call fails without starting one. Under a budget every subagent needs a cost calculator.
+- **Time and cancellation.** The call's deadline is the subagent's `maxWallClock` plus its `stopGrace`, not `toolTimeoutDefault`. An interrupt, a close, the deadline or the parent's wall clock interrupts the child, which ends `Cancelled`; at the deadline the call waits the subagent's `stopGrace` for it to close.
 - **Permissions.** `Agent` is an `EXECUTION` tool keyed `Agent(<name>)`, so a rule allows, asks or denies one subagent, and hooks apply as to any tool. A child has no one to answer: its `ASK` is denied, so allow in its own permission what it needs.
 - **Linkage.** The child's run span nests under the call's `execute_tool` span and carries `helios.parent.session_id`, `helios.parent.run_id` and `helios.parent.tool_call_id`; `PgTraceStore.list` with the filter `attributes eq "${\"helios.parent.session_id\":\"<id>\"}"` finds a session's children.
 
