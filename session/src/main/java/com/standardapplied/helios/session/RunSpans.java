@@ -48,14 +48,16 @@ import java.util.logging.Logger;
  * {@link QueryEvent.ModelCallEnded} (a compactor's call, which starts none, spans the event's
  * duration); an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or
  * its first {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length
- * {@code hook} span per {@link QueryEvent.HookFired}. A span still open when its run ends ends
- * then, with the run's error. Content is added only under {@link TraceDetail#VERBOSE}, each string
- * redacted against the session's secrets, the tool and hook texts already by their events. It reads
- * every event the loop emits before the session's publisher does. A {@link RuntimeException} the
- * application's OpenTelemetry SDK throws from a span call, such as a span processor's, is logged
- * and changes no run: a run whose span did not start runs untraced in its parent's context, and a
- * span that did not start or end is not traced; an {@link Error} propagates. Thread-safe: each
- * run's spans are guarded by a lock of their own.
+ * {@code hook} span per {@link QueryEvent.HookFired}. Each carries the {@link
+ * QueryEvent#turnIndex() turnIndex} of its events as {@code helios.turn.index}, except the
+ * compactor's call, which carries {@code helios.compaction} instead. A span still open when its run
+ * ends ends then, with the run's error. Content is added only under {@link TraceDetail#VERBOSE},
+ * each string redacted against the session's secrets, the tool and hook texts already by their
+ * events. It reads every event the loop emits before the session's publisher does. A {@link
+ * RuntimeException} the application's OpenTelemetry SDK throws from a span call, such as a span
+ * processor's, is logged and changes no run: a run whose span did not start runs untraced in its
+ * parent's context, and a span that did not start or end is not traced; an {@link Error}
+ * propagates. Thread-safe: each run's spans are guarded by a lock of their own.
  */
 final class RunSpans implements StepSpans {
 
@@ -89,6 +91,8 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<String> RUN_ID = stringKey("helios.run.id");
   private static final AttributeKey<String> TERMINAL = stringKey("helios.terminal");
   private static final AttributeKey<Long> ATTEMPT = longKey("helios.attempt");
+  private static final AttributeKey<Long> TURN_INDEX = longKey("helios.turn.index");
+  private static final String COMPACTION = "helios.compaction";
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
   private static final AttributeKey<String> TOOL_OUTCOME = stringKey("helios.tool.outcome");
   private static final AttributeKey<Long> ARGUMENTS_CHARS = longKey("helios.tool.argumentsChars");
@@ -169,7 +173,9 @@ final class RunSpans implements StepSpans {
   @Override
   public Context modelAttempt(SessionState state) {
     var run = runs.get(state.runId());
-    return run == null ? Context.current() : traced(state.runId(), run::modelAttempt, run.context);
+    return run == null
+        ? Context.current()
+        : traced(state.runId(), () -> run.modelAttempt(state.currentTurnIndex()), run.context);
   }
 
   /** The context the call runs in: the current one, untraced, when the run has no span. */
@@ -303,7 +309,7 @@ final class RunSpans implements StepSpans {
     synchronized void accept(QueryEvent event) {
       switch (event) {
         case QueryEvent.ModelCallEnded call -> modelCallEnded(call);
-        case QueryEvent.ToolUse use -> tool(use.call());
+        case QueryEvent.ToolUse use -> tool(use.turnIndex(), use.call());
         case QueryEvent.ToolResult result -> toolResult(result);
         case QueryEvent.HookFired hook -> hook(hook);
         case QueryEvent.UserMessageReceived received when input == null ->
@@ -312,8 +318,13 @@ final class RunSpans implements StepSpans {
       }
     }
 
-    synchronized Context modelAttempt() {
-      model = chat(modelId).startSpan();
+    /**
+     * Open the turn's attempt before its span starts, so an attempt whose span does not start is
+     * untraced rather than taken for a compactor's call.
+     */
+    synchronized Context modelAttempt(long turnIndex) {
+      model = Span.getInvalid();
+      model = chat(modelId).setAttribute(TURN_INDEX, turnIndex).startSpan();
       return context.with(model);
     }
 
@@ -364,16 +375,32 @@ final class RunSpans implements StepSpans {
           .setAttribute(REQUEST_MODEL, model);
     }
 
-    /** End the open attempt, or span a call no attempt was started for over its duration. */
+    /**
+     * End the open attempt, closed first so no later call ends its span again, or span the
+     * compactor's call when none is open.
+     */
     private void modelCallEnded(QueryEvent.ModelCallEnded call) {
-      if (model != null) {
-        describe(model, call).end();
-      } else {
-        var started = call.timestamp().minus(call.duration());
-        describe(chat(call.modelId()).setStartTimestamp(started).startSpan(), call)
-            .end(call.timestamp());
-      }
+      var attempt = model;
       model = null;
+      if (attempt != null) {
+        describe(attempt, call).end();
+      } else {
+        compaction(call);
+      }
+    }
+
+    /**
+     * Span a compactor's summary call over its duration. Every turn's attempt opens one in {@link
+     * #modelAttempt}, so only {@code UsageAccounting.accountCompaction}'s call arrives with none.
+     */
+    private void compaction(QueryEvent.ModelCallEnded call) {
+      var started = call.timestamp().minus(call.duration());
+      var span =
+          chat(call.modelId())
+              .setAttribute(COMPACTION, true)
+              .setStartTimestamp(started)
+              .startSpan();
+      describe(span, call).end(call.timestamp());
     }
 
     private Span describe(Span attempt, QueryEvent.ModelCallEnded call) {
@@ -389,7 +416,7 @@ final class RunSpans implements StepSpans {
       return attempt;
     }
 
-    private Span tool(ToolCall call) {
+    private Span tool(long turnIndex, ToolCall call) {
       return tools.computeIfAbsent(
           call.id(),
           callId -> {
@@ -400,6 +427,7 @@ final class RunSpans implements StepSpans {
                     .setAttribute(TOOL_NAME, call.name())
                     .setAttribute(TOOL_CALL_ID, callId)
                     .setAttribute(TOOL_TYPE, "function")
+                    .setAttribute(TURN_INDEX, turnIndex)
                     .setAttribute(ARGUMENTS_CHARS, (long) arguments.length());
             if (verbose) {
               tool.setAttribute(TOOL_ARGUMENTS, arguments);
@@ -413,7 +441,7 @@ final class RunSpans implements StepSpans {
      * {@code PostToolUse} rewrite, reaches no ended span.
      */
     private void toolResult(QueryEvent.ToolResult event) {
-      var tool = tool(event.call());
+      var tool = tool(event.turnIndex(), event.call());
       if (!endedTools.add(event.call().id())) {
         return;
       }
@@ -437,7 +465,8 @@ final class RunSpans implements StepSpans {
               .setStartTimestamp(hook.timestamp())
               .setAttribute(HOOK_NAME, hook.hookName())
               .setAttribute(HOOK_PHASE, hook.phase().name())
-              .setAttribute(HOOK_OUTCOME, hook.outcome().getClass().getSimpleName());
+              .setAttribute(HOOK_OUTCOME, hook.outcome().getClass().getSimpleName())
+              .setAttribute(TURN_INDEX, hook.turnIndex());
       if (verbose) {
         text(hook.outcome()).ifPresent(text -> builder.setAttribute(HOOK_TEXT, text));
       }

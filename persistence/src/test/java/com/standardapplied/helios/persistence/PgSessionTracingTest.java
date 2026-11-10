@@ -113,6 +113,9 @@ final class PgSessionTracingTest {
         List.of("chat scripted", "execute_tool noop", "chat scripted"),
         found.spans().stream().map(Span::name).toList());
     assertEquals(
+        List.of("1", "1", "2"),
+        found.spans().stream().map(span -> span.attributes().get("helios.turn.index")).toList());
+    assertEquals(
         result.usage().outputTokens(),
         found.spans().stream()
             .filter(span -> span.usage() != null)
