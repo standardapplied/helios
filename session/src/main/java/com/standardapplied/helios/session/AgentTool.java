@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.loop.SessionTotals;
 import com.standardapplied.helios.session.loop.ToolApprover;
 import com.standardapplied.helios.session.loop.ToolDispatch;
 import com.standardapplied.helios.session.permissions.PermissionDecision;
@@ -18,7 +19,6 @@ import com.standardapplied.helios.session.tools.ToolArgs;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,11 +30,12 @@ import java.util.stream.Collectors;
  * The built-in {@code Agent} tool of a session with subagents: each call runs the named {@link
  * Subagent} as one fresh child session, as {@link SessionOptions.Builder#withSubagent} describes,
  * on the call's worker thread, which belongs to the parent's run ({@link Run#stateOfThisThread}).
- * Its deadline is the subagent's {@code maxWallClock} plus its {@code stopGrace} ({@link
- * #deadline}). The call's token closes the child, which cancels its run; once the child's run
- * ended, its spend is added to the parent run's totals and the child is closed. A child's host
- * {@link Error} is thrown as itself, so it fails the parent too, and a child that cannot start is a
- * failure whose text the child's secret registry redacted.
+ * The dispatcher runs the call under the subagent's limits ({@link #childLimits}). The child's
+ * totals roll up into the parent run's as it spends. The call's token interrupts the child and
+ * closes it; once the child's run ended, the child is closed. A child's host {@link Error} is
+ * thrown as itself, so it fails the parent too. Every answer, a child's result or why it failed or
+ * could not start, is redacted by the child's secret registry, and then by the parent's as any tool
+ * result is.
  */
 final class AgentTool {
 
@@ -49,13 +50,15 @@ final class AgentTool {
   static final ToolApprover DENY_ASKS = request -> PermissionDecision.deny(NO_ONE_TO_ASK);
 
   /**
-   * The run and tool call a child session was opened for, which its run spans name.
+   * The run and tool call a child session was opened for, which its run spans name and its totals
+   * roll up into.
    *
    * @param sessionId the parent session's id
    * @param runId the parent run's id
    * @param toolCallId the id of the {@code Agent} call
+   * @param totals the parent run's totals
    */
-  record Parent(String sessionId, String runId, String toolCallId) {
+  record Parent(String sessionId, String runId, String toolCallId, SessionTotals totals) {
 
     /** The attributes of the child's run spans that name this run and call. */
     Map<String, String> linkage() {
@@ -109,17 +112,15 @@ final class AgentTool {
   }
 
   /**
-   * The deadline of {@code call}: the named subagent's {@code maxWallClock} plus its {@code
-   * stopGrace}, or empty when it names none.
+   * The limits of the child run {@code call} starts, the named subagent's, under which the
+   * dispatcher runs the call, or empty when it names none.
    */
-  Optional<Duration> deadline(ToolCall call) {
+  Optional<SessionLimits> childLimits(ToolCall call) {
     if (!NAME.equals(call.name())) {
       return Optional.empty();
     }
     return Optional.ofNullable(subagents.get(ToolArgs.stringArg(call.arguments(), "agent")))
-        .map(Subagent::options)
-        .map(SessionOptions::limits)
-        .map(child -> child.maxWallClock().plus(child.stopGrace()));
+        .map(subagent -> subagent.options().limits());
   }
 
   private ToolResult execute(Map<String, Object> args, ToolContext context) {
@@ -144,28 +145,37 @@ final class AgentTool {
               + limits.maxBudgetMicroUsd().orElseThrow()
               + " micro-USD budget");
     }
-    var parent = new Parent(run.sessionId(), run.runId(), ToolDispatch.callOfThisThread().id());
+    var parent =
+        new Parent(
+            run.sessionId(), run.runId(), ToolDispatch.callOfThisThread().id(), run.totals());
+    var redactor = options.get().secretRegistry().redactor();
     AgentSessionImpl child;
     try {
       child = new AgentSessionImpl(options.get(), Optional.of(parent));
     } catch (RuntimeException e) {
       var why = String.valueOf(hostError(e).getMessage());
-      return failure(
-          name, "could not start: " + options.get().secretRegistry().redactor().redact(why).text());
+      return failure(name, "could not start: " + redactor.redact(why).text());
     }
     try {
       var result = child.send(UserMessage.text(prompt));
-      var closing = context.cancellation().onCancel(child::close);
+      var stopping =
+          context
+              .cancellation()
+              .onCancel(
+                  () -> {
+                    child.interrupt();
+                    child.close();
+                  });
       ResultMessage terminal;
       try {
         terminal = result.join();
       } catch (CompletionException e) {
         throw hostError(e);
       } finally {
-        closing.remove();
+        stopping.remove();
       }
-      run.totals().accumulate(terminal.usage(), terminal.cost());
-      return answer(name, terminal);
+      var answer = answer(name, terminal);
+      return answer.withOutput(redactor.redact(answer.output()).text());
     } finally {
       // An interrupt of this call is no request to cut the child's teardown short.
       Thread.interrupted();

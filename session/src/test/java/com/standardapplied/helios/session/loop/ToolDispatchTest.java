@@ -27,6 +27,7 @@ import com.standardapplied.helios.core.tool.ToolContext;
 import com.standardapplied.helios.core.tool.ToolExecutor;
 import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.session.test.RedactedLogs;
 import com.standardapplied.helios.session.tools.ToolBinding;
@@ -79,7 +80,7 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aCallRunsUnderTheDeadlineItsFunctionGivesAndIsTheCallOfItsWorker() {
+  void aCallRunsUnderTheWallClockAndGraceOfTheRunItStartsAndIsTheCallOfItsWorker() {
     var seen = new CopyOnWriteArrayList<String>();
     ToolExecutor recording =
         (arguments, context) -> {
@@ -91,7 +92,7 @@ final class ToolDispatchTest {
             List.of(
                 binding("own", ToolCategory.READ, recording),
                 binding("other", ToolCategory.READ, recording)));
-    var own = Duration.ofMinutes(42);
+    var own = limits(Duration.ofMinutes(40), Duration.ofMinutes(2));
     var d =
         new ToolDispatch(
             CTX,
@@ -103,20 +104,29 @@ final class ToolDispatchTest {
     d.dispatch(call("own"), token, NEVER, NEVER, key -> false);
     d.dispatch(call("other"), token, NEVER, NEVER, key -> false);
 
-    assertEquals(List.of("own " + own, "other " + NEVER), seen);
+    assertEquals(List.of("own " + Duration.ofMinutes(42), "other " + NEVER), seen);
   }
 
-  /** A dispatcher over {@code bindings} that gives every call {@code own} as its own deadline. */
-  private ToolDispatch ownDeadline(Duration own, ToolBinding... bindings) {
+  private static SessionLimits limits(Duration maxWallClock, Duration stopGrace) {
+    return SessionLimits.newBuilder()
+        .withMaxWallClock(maxWallClock)
+        .withStopGrace(stopGrace)
+        .build();
+  }
+
+  /** A dispatcher over {@code bindings} whose every call starts a run under {@code own}. */
+  private ToolDispatch ownLimits(SessionLimits own, ToolBinding... bindings) {
     return new ToolDispatch(
         CTX, new ToolRegistry(List.of(bindings)), fixture.ending, call -> Optional.of(own));
   }
 
   @Test
-  void aCallWithItsOwnDeadlineAnswersWithWhatItsToolReturnedOnceCancelled() {
+  void aCallStartingARunAnswersWithWhatItsToolReturnedOnceCancelled() {
     var interrupted = new CountDownLatch(1);
     var d =
-        ownDeadline(NEVER, binding("own", ToolCategory.READ, fixture.interruptible(interrupted)));
+        ownLimits(
+            limits(NEVER, NEVER),
+            binding("own", ToolCategory.READ, fixture.interruptible(interrupted)));
 
     var running = start(d, "own");
     Await.latch("the tool to start", fixture.entered);
@@ -126,14 +136,20 @@ final class ToolDispatchTest {
   }
 
   @Test
-  void aCallWithItsOwnDeadlineWhoseToolNeverRanIsTimedOut() {
-    var starts = new AtomicInteger();
-    var instant = Duration.ofNanos(1);
-    var d = ownDeadline(instant, binding("own", ToolCategory.READ, fixture.stuck(starts)));
+  void aCallStartingARunWaitsThatRunsStopGraceNotTheDefault() {
+    var cancelled = new CountDownLatch(1);
+    var d =
+        ownLimits(
+            limits(NEVER, NEVER),
+            binding("own", ToolCategory.READ, fixture.stuckSignalling(cancelled)));
 
-    assertEquals(
-        ToolResult.timedOut("own", instant), start(d, "own").ending("the dispatch").result());
-    assertEquals(0, starts.get());
+    var running = start(d, "own", new CancellationToken(), Duration.ofNanos(1));
+    Await.latch("the tool to start", fixture.entered);
+    d.expireLiveCalls();
+    Await.latch("the call's cancellation", cancelled);
+    fixture.release.countDown();
+
+    assertEquals(ToolResult.success("late"), running.ending("the dispatch").result());
   }
 
   @Test

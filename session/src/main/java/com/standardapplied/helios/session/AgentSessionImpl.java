@@ -75,7 +75,8 @@ public final class AgentSessionImpl implements AgentSession {
 
   /**
    * Open a session, the child session of an {@code Agent} call when {@code parent} is present: its
-   * run spans name the parent's run and call, and a call its policy asks about is denied.
+   * run spans name the parent's run and call, its runs' totals roll up into the parent run's, and a
+   * call its policy asks about is denied.
    *
    * @param options the configuration bundle; non-null
    * @param parent the run and call that opened it, or empty for a session of the host's
@@ -92,7 +93,8 @@ public final class AgentSessionImpl implements AgentSession {
     this.outputSchema = options.outputSchema().orElse(null);
     var clock = options.clock();
     var cancellation = new CancellationToken();
-    var state = new SessionState(sessionId, cancellation, clock);
+    var state =
+        new SessionState(sessionId, cancellation, clock, parent.map(AgentTool.Parent::totals));
     options.systemPrompt().ifPresent(prompt -> state.history().append(Message.system(prompt)));
     var storedHistory =
         options

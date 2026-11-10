@@ -62,7 +62,7 @@ final class DispatchedCall {
   private final SessionEnding ending;
   private final Thread worker;
   private volatile CancellationToken.Registration parentLink = CancellationToken.Registration.NOOP;
-  private volatile ToolResult late;
+  private volatile ToolResult answerOnceTimedOut;
 
   DispatchedCall(
       ToolBinding binding,
@@ -80,6 +80,7 @@ final class DispatchedCall {
     this.parent = parent;
     this.timeout = timeout;
     this.deadline = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout);
+    this.answerOnceTimedOut = ToolResult.timedOut(call.name(), timeout);
     this.liveCalls = liveCalls;
     this.abandoned = abandoned;
     this.ending = ending;
@@ -209,8 +210,7 @@ final class DispatchedCall {
       throw interrupted();
     }
     if (!isRunning()) {
-      var returned = late;
-      return answersLate && returned != null ? returned : ToolResult.timedOut(call.name(), timeout);
+      return answersLate ? answerOnceTimedOut : ToolResult.timedOut(call.name(), timeout);
     }
     abandoned.accept(this);
     return ToolResult.unknown(call.name(), timeout);
@@ -246,7 +246,7 @@ final class DispatchedCall {
             ScopedValue.where(ToolDispatch.CALL, call)
                 .call(() -> binding.tool().execute(call.arguments(), context));
         if (!answer.complete(result)) {
-          late = result;
+          answerOnceTimedOut = result;
         }
       }
     } catch (Error e) {

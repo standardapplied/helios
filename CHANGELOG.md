@@ -39,9 +39,11 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   JSON under an output schema; any other terminal, a child that cannot open, an unknown name and a
   call with no budget left are failures naming why. The call's deadline is the subagent's
   `maxWallClock` plus its `stopGrace`; its cancellation (interrupt, close, deadline, the parent's
-  wall clock) closes the child, whose run ends `Cancelled`, and at the deadline the call answers
-  with that failure. A child's host `Error` fails the parent as itself, and a child that cannot
-  open is reported redacted against the child's own secret registry. A child's permission `ASK` is denied
+  wall clock) interrupts and closes the child, whose run ends `Cancelled`, and at the deadline the
+  call waits the subagent's `stopGrace` for the child to close and answers with that failure. A
+  child's host `Error` fails the parent as itself. Every answer, the child's result included, and
+  why a child could not open are redacted against the child's own secret registry, then against the
+  parent's as any tool result is. A child's permission `ASK` is denied
   with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
   refuses two subagents with one name, a tool of the options named `Agent`, and, under
   `maxBudgetMicroUsd`, a subagent whose cost calculator is `CostCalculator.ZERO`; `Subagent`
@@ -70,13 +72,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `Error` stays a WARNING. Each missing stream logs its own line, where one line used to count the
   streams.
 
-- A run's usage and cost include its subagents' spend: the `Agent` call adds its child's usage
-  and cost, whatever the child's terminal, to the run's totals when it ends, so the run's
-  `ResultMessage` and its budget check after the turn count them. Under `maxBudgetMicroUsd` a
-  child runs with the lower of its own budget and what the run has left. The run's
-  `Usage.promptTokens()` stays its own last request's. A run its cancellation or wall clock ended
-  waits, within its `stopGrace`, for its tool calls still running before it takes its terminal and
-  writes its end to the store, so a child that stops then is counted.
+- A run's usage and cost include its subagents' spend: a child run's usage and cost are added to
+  the run's totals as the child spends them, whatever the child's terminal and however long its
+  teardown takes, so the run's `ResultMessage` and its budget check after the turn count them; a
+  subagent's own subagents roll up the same way. Under `maxBudgetMicroUsd` a child runs with the
+  lower of its own budget and what the run has left. The run's `Usage.promptTokens()` stays its
+  own last request's. A run its cancellation or wall clock ended waits, within its `stopGrace`, for
+  its tool calls still running before it takes its terminal and writes its end to the store, so a
+  child that spends while it stops is counted.
 
 ### Compatibility
 

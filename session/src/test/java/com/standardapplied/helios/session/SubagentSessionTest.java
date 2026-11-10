@@ -313,40 +313,67 @@ final class SubagentSessionTest {
         capture.only("execute_tool Agent").getAttributes().get(stringKey("helios.tool.outcome")));
   }
 
+  /** A parent run whose state its {@code PreToolUseHook} records in {@code parentRun}. */
+  private SessionOptions.Builder recordingParent(
+      AtomicReference<SessionState> parentRun, SessionOptions.Builder child, Duration grace) {
+    return parent(callingMatching(Usage.of(100, 10)), child)
+        .withLimits(SessionLimits.newBuilder().withStopGrace(grace).build())
+        .withHook(
+            (PreToolUseHook)
+                (call, ctx) -> {
+                  parentRun.set(Run.stateOfThisThread());
+                  return HookOutcome.cont();
+                });
+  }
+
+  /** Interrupt the parent once {@code started} opens, and return its result. */
+  private static ResultMessage interrupted(SessionOptions options, CountDownLatch started) {
+    try (var session = AgentSession.open(options)) {
+      var running = session.send("find a match");
+      Await.latch("the child's model call", started);
+      session.interrupt();
+      return Await.value("the parent's result", running);
+    }
+  }
+
   @Test
   void anInterruptedParentsResultCountsTheSpendItsChildAddsWhileStopping() {
     var parentRun = new AtomicReference<SessionState>();
     var started = new CountDownLatch(1);
-    var provider = new RecordingProvider(new ArrayList<>());
-    provider.end =
-        () -> Await.until("the parent's end decided", () -> parentRun.get().isTerminal());
-    var childModel =
-        childModel()
-            .withToolCallsTurn(Usage.of(50, 5), new ToolCall("c-lookup", "lookup", Map.of()))
-            .withStreamTurn(ModelStreams.stalled(started::countDown))
-            .build();
-    var options =
-        parent(
-                callingMatching(Usage.of(100, 10)),
-                stalledChild(started, provider)
-                    .withModel(childModel)
-                    .withTool(answering("lookup", "ada")))
-            .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build())
-            .withHook(
-                (PreToolUseHook)
-                    (call, ctx) -> {
-                      parentRun.set(Run.stateOfThisThread());
-                      return HookOutcome.cont();
-                    })
-            .build();
+    var stream =
+        EndingSessions.lingering(
+            Usage.of(50, 5),
+            started,
+            () -> Await.until("the parent's end decided", () -> parentRun.get().isTerminal()));
+    var child =
+        stalledChild(started, new RecordingProvider(new ArrayList<>()))
+            .withModel(childModel().withStreamTurn(stream).build());
 
-    ResultMessage result;
-    try (var session = AgentSession.open(options)) {
-      var running = session.send("find a match");
-      Await.latch("the child's second model call", started);
-      session.interrupt();
-      result = Await.value("the parent's result", running);
-    }
+    var result = interrupted(recordingParent(parentRun, child, NOT_REACHED).build(), started);
+
+    assertInstanceOf(ResultMessage.Cancelled.class, result);
+    assertEquals(CostEstimate.ofMicroUsd(110 + 55), result.cost());
+    assertEquals(110 + 55, result.usage().totalTokens());
+  }
+
+  @Test
+  void aChildsSpendCountsInTheParentsResultThoughItsTeardownOutlastsTheParentsGrace() {
+    var parentRun = new AtomicReference<SessionState>();
+    var started = new CountDownLatch(1);
+    var provider = new RecordingProvider(new ArrayList<>());
+    provider.end = () -> Await.until("the parent's run ended", () -> parentRun.get().isTerminal());
+    var child =
+        stalledChild(started, provider)
+            .withModel(
+                childModel()
+                    .withToolCallsTurn(
+                        Usage.of(50, 5), new ToolCall("c-lookup", "lookup", Map.of()))
+                    .withStreamTurn(ModelStreams.stalled(started::countDown))
+                    .build())
+            .withTool(answering("lookup", "ada"));
+
+    var result =
+        interrupted(recordingParent(parentRun, child, Duration.ofNanos(1)).build(), started);
 
     assertInstanceOf(ResultMessage.Cancelled.class, result);
     assertEquals(CostEstimate.ofMicroUsd(110 + 55), result.cost());
@@ -389,24 +416,33 @@ final class SubagentSessionTest {
   }
 
   @Test
-  void theCallsDeadlineCancelsTheChildClosesItAndNamesTheSubagentsWallClockAndGrace() {
+  void theCallsDeadlineInterruptsTheChildAndWaitsItsGraceForItsCloseNotTheParents() {
     var started = new CountDownLatch(1);
+    var tearingDown = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
     var provider = new RecordingProvider(new ArrayList<>());
+    provider.end =
+        () -> {
+          tearingDown.countDown();
+          Uninterruptible.await(release);
+        };
     var parentModel = callingMatching(Usage.of(0, 0));
     var options =
         parent(parentModel, stalledChild(started, provider))
-            .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build())
+            .withLimits(SessionLimits.newBuilder().withStopGrace(Duration.ofNanos(1)).build())
             .build();
 
     try (var session = AgentSession.open(options)) {
       var result = session.send("find a match");
       Await.latch("the child's model call", started);
       ((AgentSessionImpl) session).lifecycle.expireToolCalls();
+      Await.latch("the child's teardown", tearingDown);
+      release.countDown();
       assertInstanceOf(ResultMessage.Success.class, Await.value("the parent's result", result));
     }
 
     assertEquals(
-        "Agent: subagent \"matching\" ended Cancelled: session closed", agentResult(parentModel));
+        "Agent: subagent \"matching\" ended Cancelled: interrupted", agentResult(parentModel));
     assertEquals("Cancelled", childSpan("helios.terminal"));
     assertEquals(1, provider.ends.get());
   }
@@ -548,6 +584,30 @@ final class SubagentSessionTest {
             + SessionStoreException.class.getName()
             + ": store refused <redacted:CHILD_KEY>",
         agentResult(parentModel));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("childAnswersNamingASecret")
+  void aChildsAnswerIsRedactedByTheChildsOwnSecrets(String expected, ChildScript script) {
+    var secrets = new SecretRegistry();
+    secrets.register("CHILD_KEY", "child-secret-0123456789");
+    var parentModel = callingMatching(Usage.of(0, 0));
+
+    run(
+        parent(parentModel, child(script.script(childModel()).build()).withSecretRegistry(secrets))
+            .build());
+
+    assertEquals(expected, agentResult(parentModel));
+  }
+
+  static Stream<Arguments> childAnswersNamingASecret() {
+    return Stream.of(
+        Arguments.of(
+            "answer <redacted:CHILD_KEY>",
+            (ChildScript) model -> model.withTextTurn("answer child-secret-0123456789")),
+        Arguments.of(
+            "Agent: subagent \"matching\" ended Refusal: not <redacted:CHILD_KEY>",
+            (ChildScript) model -> model.withRefusalTurn("not child-secret-0123456789")));
   }
 
   @Test

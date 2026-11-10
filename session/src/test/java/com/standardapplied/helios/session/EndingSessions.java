@@ -8,6 +8,7 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Uninterruptible;
@@ -19,6 +20,7 @@ import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -130,6 +132,35 @@ final class EndingSessions {
         close.run();
       }
     };
+  }
+
+  /**
+   * A stream that yields one {@code MessageStop} reporting {@code usage}, opens {@code started},
+   * then runs {@code hold} before it ends, as a provider's connection that lingers after its last
+   * chunk.
+   */
+  static CloseableIterator<ModelChunk> lingering(
+      Usage usage, CountDownLatch started, Runnable hold) {
+    var chunks =
+        List.<ModelChunk>of(new ModelChunk.MessageStop("end_turn", usage, Map.of(), List.of()))
+            .iterator();
+    return CloseableIterator.of(
+        new Iterator<>() {
+          @Override
+          public boolean hasNext() {
+            if (chunks.hasNext()) {
+              return true;
+            }
+            started.countDown();
+            hold.run();
+            return false;
+          }
+
+          @Override
+          public ModelChunk next() {
+            return chunks.next();
+          }
+        });
   }
 
   static void assertReported(List<LogRecord> logged, String warning) {

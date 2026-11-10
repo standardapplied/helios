@@ -11,18 +11,23 @@ import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The running totals of one run — usage, cost and grounding citations across every model call, and
- * the time since the run started — read by anyone and accumulated by the loop, and, for the spend
- * of a subagent's child session, by the {@code Agent} call that ran it.
+ * the time since the run started — read by anyone and accumulated by the loop. The totals of a
+ * subagent's child run roll up into those of the parent run whose {@code Agent} call opened it:
+ * each usage and cost the child adds is added to the parent's as it is added, whatever the child's
+ * terminal and however long its teardown takes, so the parent's result and budget check count it.
+ * The parent's {@link Usage#promptTokens()} stays the size of its own last request, since the
+ * child's requests are not its prompt.
  *
  * <h2>Thread-safety</h2>
  *
- * Each total is an {@link AtomicReference} updated atomically: the loop thread writes, and so does
- * the worker thread of an {@code Agent} call, through {@link #accumulate}; any thread may read.
- * Readers see a consistent value per total, not necessarily across totals.
+ * Each total is an {@link AtomicReference} updated atomically: the run's loop thread writes, and so
+ * do the loop threads of its child runs; any thread may read. Readers see a consistent value per
+ * total, not necessarily across totals.
  */
 public final class SessionTotals {
 
@@ -32,10 +37,13 @@ public final class SessionTotals {
 
   private final InstantSource clock;
   private final Instant startedAt;
+  private final Optional<SessionTotals> parentRun;
 
-  SessionTotals(InstantSource clock) {
+  /** The totals of a run started now, rolling up into {@code parentRun}'s if present. */
+  SessionTotals(InstantSource clock, Optional<SessionTotals> parentRun) {
     this.clock = clock;
     this.startedAt = clock.instant();
+    this.parentRun = parentRun;
   }
 
   /**
@@ -76,45 +84,36 @@ public final class SessionTotals {
   }
 
   /**
-   * Add the spend of a subagent's child session, whatever its terminal, to the run's usage and
-   * cost, from the {@code Agent} call that ran it, so the run's result and its budget check count
-   * it. Its token counts are added; the run's {@link Usage#promptTokens()} stays the size of its
-   * own last request, since the child's requests are not this run's prompt.
-   *
-   * @param usage the child's usage; non-null
-   * @param cost the child's cost; non-null
-   * @throws NullPointerException if an argument is null
-   */
-  public void accumulate(Usage usage, CostEstimate cost) {
-    accumulateUsage(
-        new Usage(
-            usage.inputTokens(),
-            usage.outputTokens(),
-            usage.cacheCreationInputTokens(),
-            usage.cacheReadInputTokens(),
-            usage.totalTokens(),
-            0));
-    accumulateCost(cost);
-  }
-
-  /**
-   * Add the given usage delta to the running totals.
+   * Add the given usage delta to the running totals, and its token counts to the parent run's.
    *
    * @throws NullPointerException if {@code delta} is null
    */
   void accumulateUsage(Usage delta) {
     Objects.requireNonNull(delta, "delta must not be null");
     usage.updateAndGet(prev -> prev.plus(delta));
+    parentRun.ifPresent(parent -> parent.accumulateUsage(withoutPrompt(delta)));
   }
 
   /**
-   * Add the given cost delta to the running total.
+   * Add the given cost delta to the running total, and to the parent run's.
    *
    * @throws NullPointerException if {@code delta} is null
    */
   void accumulateCost(CostEstimate delta) {
     Objects.requireNonNull(delta, "delta must not be null");
     cost.updateAndGet(prev -> prev.plus(delta));
+    parentRun.ifPresent(parent -> parent.accumulateCost(delta));
+  }
+
+  /** {@code delta}'s token counts with no prompt size, which {@link Usage#plus} then keeps. */
+  private static Usage withoutPrompt(Usage delta) {
+    return new Usage(
+        delta.inputTokens(),
+        delta.outputTokens(),
+        delta.cacheCreationInputTokens(),
+        delta.cacheReadInputTokens(),
+        delta.totalTokens(),
+        0);
   }
 
   /**

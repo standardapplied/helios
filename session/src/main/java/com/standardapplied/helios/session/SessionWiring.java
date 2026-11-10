@@ -30,7 +30,7 @@ import java.util.Optional;
  * by the built-in tools the options switch on (the memory tools for a memory backend, {@code
  * Execute} for an execution provider, {@code AskUserQuestion} when asked for, {@code Agent} for
  * subagents), refusing a hand {@code Execute} binding without a provider, whose start and end would
- * never run; the tool dispatch, whose {@code Agent} calls run under their subagent's deadline, the
+ * never run; the tool dispatch, whose {@code Agent} calls run under their subagent's limits, the
  * hooks, the permission stage, the loop collaborators and the turn runner. The permission stage is
  * the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
@@ -66,7 +66,7 @@ final class SessionWiring {
     var collaborators =
         new LoopCollaborators(
             new HookRegistry(options.hooks(), sessionContext.secrets()),
-            new ToolDispatch(sessionContext, tools, ending, agents::deadline),
+            new ToolDispatch(sessionContext, tools, ending, agents::childLimits),
             evaluator::authorize,
             options.permission(),
             steeringQueue,
