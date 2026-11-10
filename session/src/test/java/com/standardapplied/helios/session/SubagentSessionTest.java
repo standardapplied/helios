@@ -32,10 +32,7 @@ import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.store.InMemorySessionStore;
-import com.standardapplied.helios.session.store.SessionEntry;
-import com.standardapplied.helios.session.store.SessionStore;
 import com.standardapplied.helios.session.store.SessionStoreException;
-import com.standardapplied.helios.session.store.StoredSession;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -530,28 +527,13 @@ final class SubagentSessionTest {
         agentResult(parentModel));
   }
 
-  /** A store whose every load throws {@code thrown}. */
-  private static SessionStore loadThrowing(RuntimeException thrown) {
-    return new SessionStore() {
-      @Override
-      public StoredSession load(String sessionId) {
-        throw thrown;
-      }
-
-      @Override
-      public void append(String sessionId, long expectedLastSeq, List<SessionEntry> entries) {
-        throw new AssertionError("a child that did not open appends nothing");
-      }
-    };
-  }
-
   @Test
   void aChildThatCannotStartIsAFailureRedactedByTheChildsOwnSecrets() {
     var secrets = new SecretRegistry();
     secrets.register("CHILD_KEY", "child-secret-0123456789");
     var parentModel = callingMatching(Usage.of(0, 0));
     var failing =
-        loadThrowing(
+        RecordingStore.loadThrowing(
             new CompletionException(
                 new SessionStoreException("store refused child-secret-0123456789", null)));
 
@@ -596,7 +578,8 @@ final class SubagentSessionTest {
     var options =
         parent(
                 callingMatching(Usage.of(0, 0)),
-                child(childModel().build()).withStore(loadThrowing(new CompletionException(error))))
+                child(childModel().build())
+                    .withStore(RecordingStore.loadThrowing(new CompletionException(error))))
             .build();
 
     try (var session = AgentSession.open(options)) {
