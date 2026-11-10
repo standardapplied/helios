@@ -39,7 +39,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   JSON under an output schema; any other terminal, a child that cannot open, an unknown name and a
   call with no budget left are failures naming why. The call's deadline is the subagent's
   `maxWallClock` plus its `stopGrace`; its cancellation (interrupt, close, deadline, the parent's
-  wall clock) interrupts the child, which ends `Cancelled`. A child's permission `ASK` is denied
+  wall clock) closes the child, whose run ends `Cancelled`, and at the deadline the call answers
+  with that failure. A child's host `Error` fails the parent as itself, and a child that cannot
+  open is reported redacted against the child's own secret registry. A child's permission `ASK` is denied
   with "a subagent has no one to ask; allow the tool in the subagent's permission". `build()`
   refuses two subagents with one name, a tool of the options named `Agent`, and, under
   `maxBudgetMicroUsd`, a subagent whose cost calculator is `CostCalculator.ZERO`; `Subagent`
@@ -72,7 +74,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   and cost, whatever the child's terminal, to the run's totals when it ends, so the run's
   `ResultMessage` and its budget check after the turn count them. Under `maxBudgetMicroUsd` a
   child runs with the lower of its own budget and what the run has left. The run's
-  `Usage.promptTokens()` stays its own last request's.
+  `Usage.promptTokens()` stays its own last request's. A run its cancellation or wall clock ended
+  waits, within its `stopGrace`, for its tool calls still running before it takes its terminal and
+  writes its end to the store, so a child that stops then is counted.
 
 ### Compatibility
 

@@ -58,13 +58,14 @@ import java.util.logging.Logger;
  * send} takes: a {@code Success} that holds only while no message is queued gives way to a message
  * sent meanwhile, and the run goes on with it. Once decided, the run ends: an assistant message
  * whose tool calls are not all answered gets a "not run" tool message per unanswered call, in call
- * order, so the next run's history is one a provider accepts; what the history gained is appended
- * to the session's store with the run's {@link
+ * order, so the next run's history is one a provider accepts; the run's token is cancelled, and its
+ * callbacks and the tool calls still running are awaited until one deadline, {@link
+ * SessionLimits#stopGrace()} away, each one still running then logged; a run its cancellation ended
+ * takes the terminal the cancellation imposes then, so a call's late spend counts; what the history
+ * gained is appended to the session's store with the run's {@link
  * com.standardapplied.helios.session.store.SessionEntry.RunEnded}, in one batch, a refused write
  * ending the run with {@link ResultMessage.ErrorDuringExecution} of kind {@code SessionConflict} or
- * {@code SessionStoreFailed} instead; the run's token is cancelled, and its callbacks and the tool
- * calls still running are awaited until one deadline, {@link SessionLimits#stopGrace()} away, each
- * one still running then logged; then {@link QueryEvent.RunEnded} is emitted.
+ * {@code SessionStoreFailed} instead; then {@link QueryEvent.RunEnded} is emitted.
  *
  * <p>Every emitted {@link QueryEvent} fires {@link HookRegistry#fireOnStreamEvent stream-event
  * hooks} for observe-only consumers.
@@ -273,19 +274,17 @@ public final class AgentLoop {
   }
 
   /**
-   * End the decided run: close an open tool round, append what the history gained and the run's end
-   * to the store, cancel the run's token, wait up to {@code stopGrace} for its tool calls still
-   * running, then emit {@link QueryEvent.RunEnded}.
+   * End the decided run: close an open tool round, cancel the run's token, wait up to {@code
+   * stopGrace} for its tool calls still running, append what the history gained and the run's end
+   * to the store, then emit {@link QueryEvent.RunEnded}. A run its cancellation ended ends with the
+   * terminal the cancellation imposes once those calls ended, so the spend a call added while it
+   * stopped, a subagent's, counts.
    */
   private ResultMessage end(SessionState state, SessionLimits limits, ResultMessage decided) {
     // An interrupt host code left on this thread is no request to cut the run's waits short.
     Thread.interrupted();
     state.history().closeOpenRound(NOT_RUN);
-    var terminal =
-        storedHistory
-            .end(
-                state, decided, collaborators.clock().instant(), collaborators.secrets().redactor())
-            .orElse(decided);
+    var imposed = state.cancellation().isCancelled() && isImposed(decided);
     var deadline = System.nanoTime() + limits.stopGrace().toNanos();
     var run = "run " + state.runId() + " of session " + state.sessionId();
     if (!settlesBy(state.cancel("run ended"), deadline)) {
@@ -297,6 +296,13 @@ public final class AgentLoop {
                   + limits.stopGrace());
     }
     collaborators.toolDispatch().endLiveCalls(deadline, limits.stopGrace(), run);
+    var settled = imposed ? classifier.imposed(state, limits).orElseThrow() : decided;
+    state.setFinalTerminal(settled);
+    var terminal =
+        storedHistory
+            .end(
+                state, settled, collaborators.clock().instant(), collaborators.secrets().redactor())
+            .orElse(settled);
     emitter.emit(
         state,
         new QueryEvent.RunEnded(
@@ -306,6 +312,13 @@ public final class AgentLoop {
             collaborators.clock().instant(),
             terminal));
     return terminal;
+  }
+
+  /** Whether {@code terminal} is one {@link StopClassifier#imposed} gives a cancelled run. */
+  private static boolean isImposed(ResultMessage terminal) {
+    return terminal instanceof ResultMessage.Cancelled
+        || terminal instanceof ResultMessage.ErrorMaxWallClock
+        || terminal instanceof ResultMessage.ErrorMaxBudgetUsd;
   }
 
   /**

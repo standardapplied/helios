@@ -7,26 +7,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.CostEstimate;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
+import com.standardapplied.helios.core.test.Uninterruptible;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.execution.SessionStartOutcome;
 import com.standardapplied.helios.session.hooks.HookContext;
 import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.OnStreamEventHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
+import com.standardapplied.helios.session.loop.SessionState;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.store.InMemorySessionStore;
+import com.standardapplied.helios.session.store.SessionEntry;
+import com.standardapplied.helios.session.store.SessionStore;
+import com.standardapplied.helios.session.store.SessionStoreException;
+import com.standardapplied.helios.session.store.StoredSession;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
@@ -37,7 +46,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -306,6 +317,81 @@ final class SubagentSessionTest {
   }
 
   @Test
+  void anInterruptedParentsResultCountsTheSpendItsChildAddsWhileStopping() {
+    var parentRun = new AtomicReference<SessionState>();
+    var started = new CountDownLatch(1);
+    var provider = new RecordingProvider(new ArrayList<>());
+    provider.end =
+        () -> Await.until("the parent's end decided", () -> parentRun.get().isTerminal());
+    var childModel =
+        childModel()
+            .withToolCallsTurn(Usage.of(50, 5), new ToolCall("c-lookup", "lookup", Map.of()))
+            .withStreamTurn(ModelStreams.stalled(started::countDown))
+            .build();
+    var options =
+        parent(
+                callingMatching(Usage.of(100, 10)),
+                stalledChild(started, provider)
+                    .withModel(childModel)
+                    .withTool(answering("lookup", "ada")))
+            .withLimits(SessionLimits.newBuilder().withStopGrace(NOT_REACHED).build())
+            .withHook(
+                (PreToolUseHook)
+                    (call, ctx) -> {
+                      parentRun.set(Run.stateOfThisThread());
+                      return HookOutcome.cont();
+                    })
+            .build();
+
+    ResultMessage result;
+    try (var session = AgentSession.open(options)) {
+      var running = session.send("find a match");
+      Await.latch("the child's second model call", started);
+      session.interrupt();
+      result = Await.value("the parent's result", running);
+    }
+
+    assertInstanceOf(ResultMessage.Cancelled.class, result);
+    assertEquals(CostEstimate.ofMicroUsd(110 + 55), result.cost());
+    assertEquals(110 + 55, result.usage().totalTokens());
+  }
+
+  @Test
+  void aCancelledCallClosesAChildHeldInAHookWithoutWaitingForItsRun() {
+    var held = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var tornDown = new CountDownLatch(1);
+    var provider = new RecordingProvider(new ArrayList<>());
+    provider.end = tornDown::countDown;
+    var holding =
+        child(childModel().withTextTurn("found").build())
+            .withExecutionProvider(provider)
+            .withHook(
+                (OnStreamEventHook)
+                    (event, ctx) -> {
+                      if (event instanceof QueryEvent.RunStarted) {
+                        held.countDown();
+                        Uninterruptible.await(release);
+                      }
+                    })
+            .withLimits(SessionLimits.newBuilder().withStopGrace(Duration.ofMillis(1)).build());
+    var options =
+        parent(callingMatching(Usage.of(0, 0)), holding)
+            .withLimits(SessionLimits.newBuilder().withStopGrace(Duration.ofMillis(1)).build())
+            .build();
+
+    try (var session = AgentSession.open(options)) {
+      var result = session.send("find a match");
+      Await.latch("the child's hook", held);
+      session.interrupt();
+      Await.latch("the child's teardown while its run is held", tornDown);
+      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the parent's result", result));
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
   void theCallsDeadlineCancelsTheChildClosesItAndNamesTheSubagentsWallClockAndGrace() {
     var started = new CountDownLatch(1);
     var provider = new RecordingProvider(new ArrayList<>());
@@ -322,7 +408,8 @@ final class SubagentSessionTest {
       assertInstanceOf(ResultMessage.Success.class, Await.value("the parent's result", result));
     }
 
-    assertEquals("tool 'Agent' timed out after PT40M", agentResult(parentModel));
+    assertEquals(
+        "Agent: subagent \"matching\" ended Cancelled: session closed", agentResult(parentModel));
     assertEquals("Cancelled", childSpan("helios.terminal"));
     assertEquals(1, provider.ends.get());
   }
@@ -441,6 +528,80 @@ final class SubagentSessionTest {
         agentResult(parentModel).startsWith("Agent: subagent \"matching\" could not start: ")
             && agentResult(parentModel).contains("no sandbox free"),
         agentResult(parentModel));
+  }
+
+  /** A store whose every load throws {@code thrown}. */
+  private static SessionStore loadThrowing(RuntimeException thrown) {
+    return new SessionStore() {
+      @Override
+      public StoredSession load(String sessionId) {
+        throw thrown;
+      }
+
+      @Override
+      public void append(String sessionId, long expectedLastSeq, List<SessionEntry> entries) {
+        throw new AssertionError("a child that did not open appends nothing");
+      }
+    };
+  }
+
+  @Test
+  void aChildThatCannotStartIsAFailureRedactedByTheChildsOwnSecrets() {
+    var secrets = new SecretRegistry();
+    secrets.register("CHILD_KEY", "child-secret-0123456789");
+    var parentModel = callingMatching(Usage.of(0, 0));
+    var failing =
+        loadThrowing(
+            new CompletionException(
+                new SessionStoreException("store refused child-secret-0123456789", null)));
+
+    run(
+        parent(
+                parentModel,
+                child(childModel().build()).withSecretRegistry(secrets).withStore(failing))
+            .build());
+
+    assertEquals(
+        "Agent: subagent \"matching\" could not start: "
+            + SessionStoreException.class.getName()
+            + ": store refused <redacted:CHILD_KEY>",
+        agentResult(parentModel));
+  }
+
+  @Test
+  void aChildsHostErrorFailsTheParentAsItself() {
+    var error = new AssertionError("child host error");
+    var childModel =
+        childModel().withToolCallsTurn(new ToolCall("c-lookup", "lookup", Map.of())).build();
+    var options =
+        parent(
+                callingMatching(Usage.of(0, 0)),
+                child(childModel)
+                    .withTool(
+                        EndingSessions.binding(
+                            "lookup",
+                            (arguments, context) -> {
+                              throw error;
+                            })))
+            .build();
+
+    try (var session = AgentSession.open(options)) {
+      assertSame(error, Await.failure("the parent's result", session.send("find a match")));
+    }
+  }
+
+  @Test
+  void aHostErrorOpeningTheChildFailsTheParentAsItself() {
+    var error = new AssertionError("store host error");
+    var options =
+        parent(
+                callingMatching(Usage.of(0, 0)),
+                child(childModel().build()).withStore(loadThrowing(new CompletionException(error))))
+            .build();
+
+    try (var session = AgentSession.open(options)) {
+      assertSame(error, Await.failure("the parent's result", session.send("find a match")));
+    }
   }
 
   static Stream<Arguments> unsuccessfulChildren() {
