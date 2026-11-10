@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
+
 ### Added
 
 - `QueryEvent.EventsDropped(sessionId, runId, turnIndex, timestamp, count)`: a reader's stream
