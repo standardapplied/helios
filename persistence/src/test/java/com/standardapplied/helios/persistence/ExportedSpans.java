@@ -25,6 +25,7 @@ final class ExportedSpans {
   static final OffsetDateTime START = OffsetDateTime.of(2026, 11, 3, 10, 0, 0, 0, ZoneOffset.UTC);
   static final InstrumentationScopeInfo HELIOS =
       InstrumentationScopeInfo.create("com.standardapplied.helios");
+  static final InstrumentationScopeInfo HOST = InstrumentationScopeInfo.create("light-grid");
 
   private ExportedSpans() {}
 
@@ -48,6 +49,13 @@ final class ExportedSpans {
       attributes.put("gen_ai.operation.name", operation);
     }
     return span(spanId, name, second, attributes.build()).build();
+  }
+
+  /** A host's span of {@code runId}, of the scope {@link #HOST}, plus {@code attributes}. */
+  static TestSpanData.Builder host(
+      String runId, String spanId, String name, int second, Attributes more) {
+    var attributes = Attributes.builder().put("helios.run.id", runId).putAll(more).build();
+    return span(spanId, name, second, attributes).setInstrumentationScopeInfo(HOST);
   }
 
   /** An ended Helios-scope span, unset status, with {@code attributes}. */

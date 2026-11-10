@@ -12,8 +12,24 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   common fields are those of the first missed event. Only the stream that missed the events
   carries it: hooks, traces and other streams never see it. The SSE route sends it as `event:
   EventsDropped`. A reader that keeps up never reads one.
+- `PgSpanExporter` stores a host's span: one of any instrumentation scope that carries
+  `helios.run.id` is a `helios_spans` row of that run, of kind `host`, its scope in its
+  `otel.scope.name` attribute, written through the same redactor, U+0000 handling and per-batch
+  transaction as Helios's own. It may be exported before or after its run's row.
+  `Span.scope()` returns it, `com.standardapplied.helios` for Helios's own spans. No DDL change.
+- `SessionOptions.Builder.withTraceAttributes(Map<String, String>)`: labels every run span of the
+  session carries, stored in the run row's `attributes`. Each key starts with `app.` and names an
+  attribute; any other key throws `IllegalArgumentException` naming it. Default none.
+- Filtering runs by label: `PgTraceStore.list` with the filter
+  `attributes eq "${\"app.eval.case_id\":\"c-17\"}"`, scim-sql's JSON containment, returns the
+  runs whose attributes hold every key and value given. No code change: documented and tested.
 
 ### Changed
+
+- `PgSpanExporter` selects the spans it stores by `helios.run.id` alone; it used to also require
+  the scope `com.standardapplied.helios` and dropped every other span. A Helios-scope span still
+  makes the run row only when it is `invoke_agent`; a host span never does. A stored span's name
+  now passes through the `PgConfig` redactor like its other text.
 
 - A full event stream's first miss is logged as a WARNING naming the session and the event type,
   once per stream; later routine misses stay at FINE and a missed `RunEnded`, `QuestionAsked` or
@@ -25,6 +41,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - A `switch` over `QueryEvent` that lists every type without a `default` must add a case for
   `EventsDropped`. This is the only source change; `EventStream` and `AgentSession` keep their
   signatures.
+- `SessionOptions` gains the record component `traceAttributes`, after `traceDetail`: a call of
+  its canonical constructor, which its Javadoc reserves for framework internals, or a record
+  pattern over it adds the component. The builder and `toBuilder` are unchanged for callers.
 
 ### Fixed
 

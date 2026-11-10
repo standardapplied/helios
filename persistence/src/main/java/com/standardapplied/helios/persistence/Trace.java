@@ -26,8 +26,10 @@ import java.util.Map;
  * @param endTime when the run ended
  * @param duration from {@code startTime} to {@code endTime}, or null when either is missing
  * @param error the span's status description when the run failed, or null if it succeeded
- * @param spans the run's model, tool and hook spans, in start order
- * @param attributes every other attribute of the run's span, as strings
+ * @param spans the run's model, tool and hook spans and the host spans that named it, in start
+ *     order
+ * @param attributes every other attribute of the run's span, its {@code app.*} labels included, as
+ *     strings
  * @param inputText the run's first user message, stored only under {@code TraceDetail.VERBOSE}
  * @param outputText a successful run's result, stored only under {@code TraceDetail.VERBOSE}
  * @param sessionId the session the run belongs to
