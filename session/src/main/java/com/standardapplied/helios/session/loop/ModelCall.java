@@ -76,7 +76,10 @@ final class ModelCall {
    * CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly without burning
    * the full delay. A cancelled session or an interrupted thread starts no further attempt, even
    * one cancelled while a retried attempt's event was delivered, which a zero back-off does not
-   * notice. The caller maps a still-failing transient error to {@link
+   * notice. Nor does a run whose spend exceeds {@link SessionLimits#maxBudgetMicroUsd()}, checked
+   * once an attempt is accounted and again after its back-off; that run ends in {@link
+   * com.standardapplied.helios.session.ResultMessage.ErrorMaxBudgetUsd}. The caller maps a
+   * still-failing transient error to {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
@@ -104,7 +107,7 @@ final class ModelCall {
       accounting.accountTurn(state, turn, attempt, started, clock.instant());
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
-          || stopped(state)) {
+          || stopped(state, limits)) {
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
@@ -119,14 +122,16 @@ final class ModelCall {
               backoff,
               transientErr.providerName(),
               SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
-      if (!sleepHonouringCancellation(backoff, state.cancellation()) || stopped(state)) {
+      if (!sleepHonouringCancellation(backoff, state.cancellation()) || stopped(state, limits)) {
         return turn.withStreamAttempts(attempt);
       }
     }
   }
 
-  private static boolean stopped(SessionState state) {
-    return state.cancellation().isCancelled() || Thread.currentThread().isInterrupted();
+  private static boolean stopped(SessionState state, SessionLimits limits) {
+    return state.cancellation().isCancelled()
+        || Thread.currentThread().isInterrupted()
+        || StopClassifier.overBudget(state, limits);
   }
 
   private static Duration delay(
