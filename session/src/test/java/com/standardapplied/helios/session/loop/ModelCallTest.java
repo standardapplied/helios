@@ -56,9 +56,6 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The model call at its edges: a parse failure with nothing to echo, the partial text of a call cut
@@ -149,48 +146,43 @@ final class ModelCallTest {
 
   @Test
   void anErrorOutcomeKeepsOnlyItsTextTaggedAsAPartialTurn() {
-    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
-    var before = state.history().snapshot().size();
+    var before = keep(cut("Half a sentence"));
 
-    call.keepPartial(state, cut(FinishReason.ERROR, "Half a sentence"));
-
+    var history = state.history().snapshot();
     assertEquals(
         List.of(
             Message.assistant(
                 "Half a sentence", List.of(), Map.of("helios.origin", "partial-turn"))),
-        added(before));
+        history.subList(before, history.size()));
   }
 
-  @ParameterizedTest
-  @ValueSource(strings = {"", " ", " \n\t "})
-  void anErrorOutcomeWithBlankTextKeepsNothing(String text) {
-    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
-    var before = state.history().snapshot().size();
+  @Test
+  void anErrorOutcomeWithBlankTextKeepsNothing() {
+    for (var blank : List.of("", " ", " \n\t ")) {
+      var before = keep(cut(blank));
 
-    call.keepPartial(state, cut(FinishReason.ERROR, text));
-
-    assertEquals(List.of(), added(before));
+      assertEquals(before, state.history().snapshot().size(), () -> "text '" + blank + "'");
+    }
   }
 
-  @ParameterizedTest
-  @EnumSource(value = FinishReason.class, mode = EnumSource.Mode.EXCLUDE, names = "ERROR")
-  void anOutcomeOtherThanAnErrorKeepsNothing(FinishReason finishReason) {
-    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
-    var before = state.history().snapshot().size();
+  @Test
+  void anOutcomeOtherThanAnErrorKeepsNothing() {
+    for (var finishReason : FinishReason.values()) {
+      if (finishReason != FinishReason.ERROR) {
+        var before = keep(cut("Half a sentence").withFinishReason(finishReason));
 
-    call.keepPartial(state, cut(finishReason, "Half a sentence"));
-
-    assertEquals(List.of(), added(before));
+        assertEquals(before, state.history().snapshot().size(), finishReason::name);
+      }
+    }
   }
 
   /**
-   * An outcome ending in {@code finishReason} with {@code text}, a tool call, and the raw content
-   * of a stream that completed just before it was cut: an unanswered {@code tool_use} block and
-   * signed thinking.
+   * An {@code ERROR} outcome with {@code text}, a tool call, and the raw content of a stream that
+   * completed just before it was cut: an unanswered {@code tool_use} block and signed thinking.
    */
-  private static TurnOutcome cut(FinishReason finishReason, String text) {
+  private static TurnOutcome cut(String text) {
     return new TurnOutcome(
-        finishReason,
+        FinishReason.ERROR,
         text,
         List.of(new ToolCall("c-1", "record", Map.of())),
         List.of(),
@@ -199,13 +191,19 @@ final class ModelCallTest {
             "anthropic.rawContent",
             "[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"},"
                 + "{\"type\":\"tool_use\",\"id\":\"c-1\",\"name\":\"record\",\"input\":{}}]"),
-        finishReason == FinishReason.ERROR ? new IllegalStateException("cut") : null,
+        new IllegalStateException("cut"),
         1);
   }
 
-  private List<Message> added(int before) {
-    var history = state.history().snapshot();
-    return history.subList(before, history.size());
+  /**
+   * Runs {@link ModelCall#keepPartial} on {@code turn} and returns the history's size before it, so
+   * the test reads what it added.
+   */
+  private int keep(TurnOutcome turn) {
+    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
+    var before = state.history().snapshot().size();
+    call.keepPartial(state, turn);
+    return before;
   }
 
   @Test
