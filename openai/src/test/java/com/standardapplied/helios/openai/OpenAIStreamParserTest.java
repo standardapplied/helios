@@ -3,12 +3,14 @@
 package com.standardapplied.helios.openai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.SseReader;
 import com.standardapplied.helios.core.test.ExchangeTurns;
@@ -16,6 +18,8 @@ import com.standardapplied.helios.core.test.SseEvents;
 import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.io.EOFException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class OpenAIStreamParserTest {
 
@@ -47,6 +51,34 @@ class OpenAIStreamParserTest {
     assertEquals("Hi", response.content());
     assertEquals(FinishReason.STOP, response.finishReason());
     assertNotNull(response.usage());
+  }
+
+  @Test
+  void theModelTheTerminalResponseNamesIsTheModelThatServedIt() {
+    var completed =
+        "data: {\"type\":\"response.completed\",\"response\":{"
+            + "\"status\":\"completed\",\"model\":\"gpt-5.6-2026-08-01\"}}\n\n";
+    var failed =
+        "{\"type\":\"response.failed\",\"response\":{"
+            + "\"status\":\"failed\",\"model\":\"gpt-5.6-2026-08-01\"}}";
+
+    var response = drain(completed);
+    var error = assertInstanceOf(StreamEvent.Error.class, new OpenAIStreamParser().parse(failed));
+
+    assertEquals("gpt-5.6-2026-08-01", response.metadata().get(Response.RESPONSE_MODEL_KEY));
+    assertEquals("gpt-5.6-2026-08-01", error.partial().metadata().get(Response.RESPONSE_MODEL_KEY));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", ",\"model\":null", ",\"model\":\" \""})
+  void aResponseNamingNoModelOrABlankOneReportsNone(String model) {
+    var sse =
+        "data: {\"type\":\"response.completed\",\"response\":{"
+            + "\"status\":\"completed\""
+            + model
+            + "}}\n\n";
+
+    assertFalse(drain(sse).metadata().containsKey(Response.RESPONSE_MODEL_KEY));
   }
 
   @Test

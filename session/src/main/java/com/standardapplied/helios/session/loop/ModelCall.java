@@ -9,6 +9,7 @@ import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
@@ -137,13 +138,16 @@ final class ModelCall {
   }
 
   /**
-   * One attempt, its span current while its stream is opened and read. What opening the stream
-   * throws ends the turn; an {@link Error} also ends the session ({@link TurnReader}), and one the
-   * turn ended with is thrown as itself, so it leaves the loop as a tool's or a hook's does.
+   * One attempt, its span current while its stream is opened and read, and given the model the
+   * provider reported serving it before the attempt is accounted. What opening the stream throws
+   * ends the turn; an {@link Error} also ends the session ({@link TurnReader}), and one the turn
+   * ended with is thrown as itself, so it leaves the loop as a tool's or a hook's does.
    */
   private TurnOutcome streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
     try (var scope = collaborators.spans().modelAttempt(state).makeCurrent()) {
-      return thrownIfError(attempt(state, limits, tools));
+      var turn = thrownIfError(attempt(state, limits, tools));
+      collaborators.spans().servedModel(state, turn.metadata().get(Response.RESPONSE_MODEL_KEY));
+      return turn;
     }
   }
 

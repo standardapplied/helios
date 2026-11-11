@@ -22,6 +22,12 @@ public interface StepSpans {
   Context modelAttempt(SessionState state);
 
   /**
+   * Record the model the provider reported for {@code state}'s model attempt in progress, or {@code
+   * null} when it reported none.
+   */
+  void servedModel(SessionState state, String model);
+
+  /**
    * The context {@code call}'s tool runs in: the span its {@link
    * com.standardapplied.helios.session.QueryEvent.ToolUse} started.
    */

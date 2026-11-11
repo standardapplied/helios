@@ -10,9 +10,9 @@ import java.util.Map;
 
 /**
  * Assembles the response of a streamed interaction, at its end or as far as it got: its output,
- * finish reason and usage, and the metadata a later turn needs — the API version, the thought
- * signatures to replay before its tool calls, the interaction id to continue from, the stamp of the
- * prompt it was produced under, and the refusal of one Gemini blocked.
+ * finish reason and usage, the model that served it, and the metadata a later turn needs — the API
+ * version, the thought signatures to replay before its tool calls, the interaction id to continue
+ * from, the stamp of the prompt it was produced under, and the refusal of one Gemini blocked.
  */
 final class GeminiResponseAssembler {
 
@@ -26,6 +26,7 @@ final class GeminiResponseAssembler {
    * The response of an interaction, finishing with {@code finishReason}.
    *
    * @param interactionId the id to record for continuation, or {@code null} to record none
+   * @param model the model the API reported serving the interaction, or {@code null} for none
    * @param promptStamp the stamp of the request's prompt
    * @param refusal the {@link Response#REFUSAL_EXPLANATION_KEY} and {@link
    *     Response#REFUSAL_CATEGORY_KEY} of a blocked response, empty for any other
@@ -34,6 +35,7 @@ final class GeminiResponseAssembler {
       StepOutput.Result output,
       Response.Usage usage,
       String interactionId,
+      String model,
       String apiVersion,
       String promptStamp,
       FinishReason finishReason,
@@ -47,6 +49,9 @@ final class GeminiResponseAssembler {
       metadata.put(ContinuationPoint.INTERACTION_ID_KEY, interactionId);
     }
     metadata.put(ContinuationPoint.PROMPT_STAMP_KEY, promptStamp);
+    if (model != null) {
+      metadata.put(Response.RESPONSE_MODEL_KEY, model);
+    }
     return Response.newBuilder()
         .withContent(output.content())
         .withToolCalls(output.calls())

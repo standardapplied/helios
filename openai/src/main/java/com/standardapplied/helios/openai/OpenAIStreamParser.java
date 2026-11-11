@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.openai;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
@@ -36,6 +37,7 @@ final class OpenAIStreamParser implements SseReader.Parser {
   private final FunctionCalls functionCalls = new FunctionCalls();
   private Response.Usage usage;
   private String incompleteReason;
+  private String model;
 
   @Override
   public StreamEvent parse(String payload) {
@@ -126,8 +128,14 @@ final class OpenAIStreamParser implements SseReader.Parser {
   }
 
   private void record(ResponsesResponse response) {
-    if (response != null && response.usage() != null) {
+    if (response == null) {
+      return;
+    }
+    if (response.usage() != null) {
       usage = OpenAIResponseAssembler.usage(response.usage());
+    }
+    if (!Strings.isBlank(response.model())) {
+      model = response.model();
     }
   }
 
@@ -143,7 +151,8 @@ final class OpenAIStreamParser implements SseReader.Parser {
             reasoning.text(),
             message.refusal(),
             incompleteReason,
-            usage),
+            usage,
+            model),
         finishReason);
   }
 }
