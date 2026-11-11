@@ -228,8 +228,8 @@ Model uncached = provider.create(
 ```
 
 For cost tracking, `AnthropicPricing.calculator(cachePolicy)` prices every catalogued Claude
-model at Anthropic's list price, including each model's cache-read rate and the cache-write rate
-that matches the policy's TTL:
+model at Anthropic's list price, including each model's cache-read rate, the cache-write rate
+that matches the policy's TTL, and Haiku 5.5's two prompt-length tiers:
 
 ```java
 var options = SessionOptions.newBuilder()
