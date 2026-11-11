@@ -10,6 +10,7 @@ import com.standardapplied.helios.core.common.CostCalculator;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
@@ -27,7 +28,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -35,10 +38,10 @@ import org.junit.jupiter.api.Test;
  * Every attempt of a model call is accounted once, as its stream ends, with the usage its stream
  * reported, after the model its provider reported serving it and the time from its start to its
  * first chunk and first text are recorded, on every way {@link ModelCall#stream} returns: retries
- * that run out, a transient failure on a run already stopped, a run cancelled while an attempt is
- * accounted or before its back-off, a run interrupted while a retry is announced under a zero
- * back-off, and a run whose spend, its child runs' included, exceeds its budget once an attempt is
- * accounted or after its back-off.
+ * that run out, a run cancelled before its stream is read, a transient failure on a run already
+ * stopped, a run cancelled while an attempt is accounted or before its back-off, a run interrupted
+ * while a retry is announced under a zero back-off, and a run whose spend, its child runs'
+ * included, exceeds its budget once an attempt is accounted or after its back-off.
  */
 final class AttemptAccountingTest {
 
@@ -119,6 +122,40 @@ final class AttemptAccountingTest {
     assertEquals(
         List.of("served null", "first chunk OptionalLong.empty, first text OptionalLong.empty"),
         steps);
+  }
+
+  /** Asking the stream for its first chunk is what makes a provider send the request. */
+  @Test
+  void aRunCancelledBeforeItsModelCallNeverAsksItsStreamForAChunkAndIsAccountedWithNoUsage() {
+    var asked = new AtomicInteger();
+    var chunks = ModelStreams.of(new ModelChunk.UsageDelta(REPORTED));
+    var counted =
+        new CloseableIterator<ModelChunk>() {
+          @Override
+          public boolean hasNext() {
+            asked.incrementAndGet();
+            return chunks.hasNext();
+          }
+
+          @Override
+          public ModelChunk next() {
+            return chunks.next();
+          }
+
+          @Override
+          public void close() {
+            chunks.close();
+          }
+        };
+    state.cancellation().cancel("cancelled before the model call");
+
+    var turn = stream(ScriptedModel.newBuilder().withStreamTurn(counted), event -> {});
+
+    assertEquals(0, asked.get());
+    assertEquals(FinishReason.ERROR, turn.finishReason());
+    assertInstanceOf(CancellationException.class, turn.streamError());
+    assertEquals(List.of(Usage.of(0, 0)), accounted());
+    assertEquals(Usage.of(0, 0), state.totals().usage());
   }
 
   @Test

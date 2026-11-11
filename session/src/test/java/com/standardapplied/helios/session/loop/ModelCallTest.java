@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -454,18 +455,24 @@ final class ModelCallTest {
         logged.getFirst().getMessage());
   }
 
+  /**
+   * The reader, which asks the ended turn's stream for nothing and closes it as it ends, and the
+   * close the cancellation started race to close it first; neither is the loop thread.
+   */
   @Test
   void aSessionCancelledWhileItsStreamIsBuiltClosesTheStreamOffTheLoopThread() {
     var closing = new CountDownLatch(1);
-    var closer = new AtomicReference<String>();
+    var loop = new AtomicReference<Thread>();
+    var closer = new AtomicReference<Thread>();
     var model =
         new StreamModel(
             cancellation -> {
+              loop.set(Thread.currentThread());
               cancellation.cancel("closed");
               return blocking(
                   new CountDownLatch(1),
                   () -> {
-                    closer.compareAndSet(null, Thread.currentThread().getName());
+                    closer.compareAndSet(null, Thread.currentThread());
                     closing.countDown();
                     Uninterruptible.await(released);
                   });
@@ -481,7 +488,7 @@ final class ModelCallTest {
     var cancelled = assertInstanceOf(CancellationException.class, turn.streamError());
     assertEquals("session cancelled while waiting for model stream", cancelled.getMessage());
     Await.latch("the close", closing);
-    assertEquals("helios-model-stream-close-sess-call", closer.get());
+    assertNotSame(loop.get(), closer.get());
     assertEquals(1, logged.size());
     assertEquals(Level.WARNING, logged.getFirst().getLevel());
   }
