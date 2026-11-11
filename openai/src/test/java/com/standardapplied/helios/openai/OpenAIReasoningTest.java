@@ -76,6 +76,7 @@ class OpenAIReasoningTest {
       Map.ofEntries(
           Map.entry(OpenAIModelId.GPT_6_ASTRA, ALWAYS_REASONS),
           Map.entry(OpenAIModelId.GPT_6_1_SOL, ALWAYS_REASONS),
+          Map.entry(OpenAIModelId.GPT_6_1_TERRA, NONE_TO_MAX),
           Map.entry(OpenAIModelId.GPT_6_SOL, NONE_TO_MAX),
           Map.entry(OpenAIModelId.GPT_6_LUNA, NONE_TO_MAX),
           Map.entry(OpenAIModelId.GPT_5_6, NONE_TO_MAX),

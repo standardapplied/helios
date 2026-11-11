@@ -20,9 +20,9 @@ public enum GeminiModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
   // reasoning lists each model's documented thinking_level set (Gemini thinking guide, Gemini 3
-  // guide and Gemini 4 Argon page, 2026-10-20): 3.7 Flash, 3.8 Flash and 4 Argon accept
-  // low/medium/high; 3.6 Flash also accepts minimal. None can turn thinking off; thought summaries
-  // are on or off through thinking_summaries.
+  // guide and Gemini 4 Argon page, 2026-10-20; Gemini 4 Carbon page, 2026-11-11): 3.7 Flash, 3.8
+  // Flash, 4 Argon and 4 Carbon accept low/medium/high; 3.6 Flash also accepts minimal. None can
+  // turn thinking off; thought summaries are on or off through thinking_summaries.
   /**
    * Gemini 3.6 Flash: thinking level {@code minimal} to {@code high}; thinking cannot be turned
    * off.
@@ -37,7 +37,9 @@ public enum GeminiModelId {
    */
   GEMINI_3_8_FLASH("gemini-3.8-flash", 1_048_576, 65_536, Level.LOW),
   /** Gemini 4 Argon: thinking level {@code low} to {@code high}; thinking cannot be turned off. */
-  GEMINI_4_ARGON("gemini-4-argon", 1_048_576, 65_536, Level.LOW);
+  GEMINI_4_ARGON("gemini-4-argon", 1_048_576, 65_536, Level.LOW),
+  /** Gemini 4 Carbon: thinking level {@code low} to {@code high}; thinking cannot be turned off. */
+  GEMINI_4_CARBON("gemini-4-carbon", 1_048_576, 65_536, Level.LOW);
 
   private final String id;
   private final int contextWindow;

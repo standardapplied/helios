@@ -160,12 +160,14 @@ class OpenAIModelIdTest {
   void gpt6FamilyIsCatalogued() {
     assertEquals("gpt-6-astra", OpenAIModelId.GPT_6_ASTRA.id());
     assertEquals("gpt-6.1-sol", OpenAIModelId.GPT_6_1_SOL.id());
+    assertEquals("gpt-6.1-terra", OpenAIModelId.GPT_6_1_TERRA.id());
     assertEquals("gpt-6-sol", OpenAIModelId.GPT_6_SOL.id());
     assertEquals("gpt-6-luna", OpenAIModelId.GPT_6_LUNA.id());
     for (var model :
         List.of(
             OpenAIModelId.GPT_6_ASTRA,
             OpenAIModelId.GPT_6_1_SOL,
+            OpenAIModelId.GPT_6_1_TERRA,
             OpenAIModelId.GPT_6_SOL,
             OpenAIModelId.GPT_6_LUNA)) {
       assertEquals(1_050_000, model.contextWindow(), model.id());
