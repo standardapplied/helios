@@ -10,7 +10,6 @@ import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.ModelChunk;
-import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
@@ -31,11 +30,16 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * A model call cut short counts the usage its provider reported before the cut, whatever cut it,
- * once and as a completed call's does: in the run's totals, its terminal and its {@link
- * QueryEvent.RunEnded}, priced, and checked against the budget. A retried attempt counts too, and a
- * call cut before its provider reported any usage counts zero. The cuts are those of {@code
- * PartialTurnSessionTest}.
+ * A model call cut short counts the usage its stream reported before the cut, once and as a
+ * completed call's does: in the run's totals, its terminal and its {@link QueryEvent.RunEnded},
+ * priced, and checked against the budget. A retried attempt counts too, and a call cut before its
+ * stream reported any usage counts zero. The cuts are those of {@code PartialTurnSessionTest}.
+ *
+ * <p>A failed stream reports usage ahead of its failure as a shipped provider's does. The cuts by
+ * {@code interrupt()}, {@code close()} and the wall clock need a stream that yields a {@link
+ * ModelChunk.UsageDelta} before the cut, which {@code ScriptedModel} does and no shipped provider
+ * does yet: those providers pass usage to the session only when the stream ends, so such a call of
+ * theirs still counts zero. These cases pin that the session keeps a usage it read before the cut.
  */
 final class CutCallUsageSessionTest {
 
@@ -63,14 +67,12 @@ final class CutCallUsageSessionTest {
             "stream failure",
             (test, chunks) -> test.failed(new IllegalStateException("connection reset"), chunks)),
         cut(
-            "idle timeout",
-            (test, chunks) ->
-                test.failed(
-                    new ProviderException("Stream idle timeout: no data received for 120000 ms"),
-                    chunks)),
-        cut("interrupt", (test, chunks) -> test.stalledThen(AgentSession::interrupt, chunks)),
-        cut("close", (test, chunks) -> test.stalledThen(AgentSession::close, chunks)),
-        cut("wall clock", CutCallUsageSessionTest::pastItsWallClock));
+            "interrupt after a scripted usage chunk",
+            (test, chunks) -> test.stalledThen(AgentSession::interrupt, chunks)),
+        cut(
+            "close after a scripted usage chunk",
+            (test, chunks) -> test.stalledThen(AgentSession::close, chunks)),
+        cut("wall clock after a scripted usage chunk", CutCallUsageSessionTest::pastItsWallClock));
   }
 
   private static Arguments cut(String how, Cut cut) {
@@ -79,7 +81,7 @@ final class CutCallUsageSessionTest {
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("cuts")
-  void aCutCallCountsTheUsageItsProviderReportedOnce(String how, Cut cut) {
+  void aCutCallCountsTheUsageItsStreamReportedBeforeTheCutOnce(String how, Cut cut) {
     var result = cut.after(this, USAGE, TEXT);
 
     assertEquals(REPORTED, result.usage());
@@ -90,7 +92,7 @@ final class CutCallUsageSessionTest {
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("cuts")
-  void aCallCutBeforeItsProviderReportedUsageCountsZero(String how, Cut cut) {
+  void aCallCutBeforeItsStreamReportedUsageCountsZero(String how, Cut cut) {
     var result = cut.after(this, TEXT);
 
     assertEquals(Usage.of(0, 0), result.usage());
@@ -118,6 +120,11 @@ final class CutCallUsageSessionTest {
     assertEquals(REPORTED.plus(REPORTED).plus(answered), result.usage());
     assertEquals(CostEstimate.ofMicroUsd(1_200 + 1_200 + 330), result.cost());
     assertEquals(List.of(REPORTED, REPORTED, answered), modelCallUsages());
+    assertEquals(
+        List.of(1, 2, 3),
+        events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
+            .map(QueryEvent.ModelCallEnded::attempt)
+            .toList());
   }
 
   @Test
