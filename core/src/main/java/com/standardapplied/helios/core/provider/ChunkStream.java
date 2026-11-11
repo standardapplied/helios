@@ -14,11 +14,14 @@ import java.util.function.Consumer;
 /**
  * A turn's event stream as the {@link ModelChunk}s a model yields, one chunk per event; the {@link
  * StreamEvent.Done} becomes the {@link ModelChunk.MessageStop} once its response passes the turn's
- * check. A {@link StreamEvent.Error}, and events that end without a {@code Done}, are thrown from
- * {@code hasNext()} after closing the events. Once the stream is closed or its reading thread
- * interrupted (the interrupt kept), whatever is read, a chunk read ahead included, is thrown as a
- * {@link CancellationException}, unless it is an {@link Error} or a {@link CompletionException}
- * carrying one, so nothing retries a failure read then.
+ * check. A {@link StreamEvent.Error}, a {@code Done} that fails the check, and events that end
+ * without a {@code Done}, are thrown from {@code hasNext()} after closing the events; an error
+ * whose partial reports tokens, and a {@code Done} that fails the check whose response does, first
+ * yield that usage as a {@link ModelChunk.UsageDelta}, so a reader counts what the provider billed.
+ * Once the stream is closed or its reading thread interrupted (the interrupt kept), whatever is
+ * read, a chunk read ahead included, is thrown as a {@link CancellationException}, unless it is an
+ * {@link Error} or a {@link CompletionException} carrying one, so nothing retries a failure read
+ * then.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -26,6 +29,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
   private final StreamFailure failures;
   private final Consumer<Response<Void>> check;
   private ModelChunk next;
+  private RuntimeException pendingFailure;
   private boolean ended;
   private volatile boolean closed;
 
@@ -53,7 +57,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       next = null;
       ended = true;
       close();
-      throw cancelled(null);
+      throw cancelled(pendingFailure);
     }
     if (next == null) {
       next = read();
@@ -63,12 +67,15 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
 
   private ModelChunk read() {
     try {
+      if (pendingFailure != null) {
+        throw pendingFailure;
+      }
       if (!events.hasNext()) {
         throw failures.unterminated();
       }
       var chunk = chunkOf(events.next());
       if (stopped()) {
-        throw cancelled(null);
+        throw cancelled(pendingFailure);
       }
       return chunk;
     } catch (RuntimeException failure) {
@@ -118,7 +125,6 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
     return cancelled;
   }
 
-  @SuppressWarnings("unchecked")
   private ModelChunk chunkOf(StreamEvent event) {
     return switch (event) {
       case StreamEvent.TextDelta(var text) -> new ModelChunk.TextDelta(text);
@@ -129,13 +135,36 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       case StreamEvent.ToolCallDelta(var callId, var arguments) ->
           new ModelChunk.ToolUseDelta(callId, arguments);
       case StreamEvent.ToolCallComplete(var call) -> new ModelChunk.ToolUseStop(call);
-      case StreamEvent.Done(var response) -> {
-        check.accept((Response<Void>) response);
-        ended = true;
-        events.close();
-        yield ModelChunk.MessageStop.of(response);
-      }
-      case StreamEvent.Error error -> throw failures.of(error);
+      case StreamEvent.Done(var response) -> completed(response);
+      case StreamEvent.Error error -> usageBefore(failures.of(error), error.partial().usage());
     };
+  }
+
+  /**
+   * The message stop of a {@code response} that passes the turn's check, which ends the stream;
+   * what the check throws fails the turn as an error event does.
+   */
+  @SuppressWarnings("unchecked")
+  private ModelChunk completed(Response<?> response) {
+    try {
+      check.accept((Response<Void>) response);
+    } catch (RuntimeException rejected) {
+      return usageBefore(rejected, response.usage());
+    }
+    ended = true;
+    events.close();
+    return ModelChunk.MessageStop.of(response);
+  }
+
+  /**
+   * Yields the usage a failed turn reported and leaves {@code failure} to throw on the next read,
+   * or throws it now when the turn reported none.
+   */
+  private ModelChunk usageBefore(RuntimeException failure, Response.Usage usage) {
+    if (usage == null || !usage.reportsTokens()) {
+      throw failure;
+    }
+    pendingFailure = failure;
+    return new ModelChunk.UsageDelta(usage);
   }
 }

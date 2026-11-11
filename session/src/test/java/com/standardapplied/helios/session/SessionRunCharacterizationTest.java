@@ -70,7 +70,7 @@ class SessionRunCharacterizationTest {
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals("{\"answer\":\"final\"}", success.result());
       assertEquals(new Usage(63, 22, 0, 0, 85, 30), success.usage());
-      assertEquals(CostEstimate.ofMicroUsd(401), success.cost());
+      assertEquals(CostEstimate.ofMicroUsd(501), success.cost());
       assertEquals(
           EXPECTED_EVENTS, events.stream().map(SessionRunCharacterizationTest::describe).toList());
       assertEquals(
@@ -157,8 +157,8 @@ class SessionRunCharacterizationTest {
           "HookFired turn=1 SessionRunCharacterizationTest$Run PRE_MODEL_TURN Inject",
           "TurnEnded turn=1 TOOL_CALLS",
           "UserMessageReceived turn=1 pre-model inject files=0",
-          "TurnRetried turn=2 attempt=1 delay=PT0S test",
           "ModelCallEnded turn=2 attempt=1 ERROR tokens=0 error=true",
+          "TurnRetried turn=2 attempt=1 delay=PT0S test",
           "ModelCallEnded turn=2 attempt=2 TOOL_CALLS tokens=15 error=false",
           "HookFired turn=2 SessionRunCharacterizationTest$Run PRE_TOOL_USE MutateArgs",
           "ToolMutated turn=2 c1 SessionRunCharacterizationTest$Run {v=one}->{v=mutated}",

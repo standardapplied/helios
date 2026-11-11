@@ -3,6 +3,7 @@ KeepAlive[]
 KeepAlive[]
 TextDelta[text=Hello]
 KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=86, outputTokens=2, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2008, promptTokens=2006]]
 onError TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=gemini caused by EOFException(the response body ended before the provider's terminal event)

@@ -206,7 +206,8 @@ public record Response<T>(
     /**
      * Add a later request's usage to this one, count by count; the total is recomputed from the
      * summed counts. {@link #promptTokens} is the later request's size, or this one's when the
-     * later reports none, so adding a zero usage, such as a failed attempt's, changes nothing.
+     * later reports none, so adding a zero usage, such as that of a call cut before its provider
+     * reported any, changes nothing.
      *
      * @param other the usage of a later request; non-null
      * @return a usage record with every count summed and the last reported prompt size

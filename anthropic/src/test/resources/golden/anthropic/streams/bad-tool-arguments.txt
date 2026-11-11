@@ -2,6 +2,7 @@
 KeepAlive[]
 ToolUseStart[callId=toolu_1, toolName=weather]
 ToolUseDelta[callId=toolu_1, argumentsDelta={"city":]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
 onError AnthropicException(Arguments of tool call 'weather' are not a JSON object: Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN]) status=0 caused by UnexpectedEndOfInputException(Unexpected end-of-input within/between Object entries
  at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])

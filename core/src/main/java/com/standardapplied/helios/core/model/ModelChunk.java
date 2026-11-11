@@ -240,12 +240,13 @@ public sealed interface ModelChunk
   }
 
   /**
-   * An incremental usage update emitted mid-stream by providers that surface token-by-token usage
-   * (e.g. cached-prompt readouts arriving before {@link MessageStop}). The final cumulative usage
-   * still arrives on {@link MessageStop}; consumers that only need the final tally can ignore
-   * {@code UsageDelta} entirely.
+   * The usage the provider has reported so far: a cumulative snapshot, which replaces any earlier
+   * one, never adds to it. A completed stream's final usage arrives on {@link MessageStop}; a
+   * stream that fails after its provider reported usage yields one {@code UsageDelta} carrying it
+   * just before the failure, since the provider bills the call either way; a stream closed or
+   * interrupted first yields none.
    *
-   * @param usage the usage snapshot at this delta; non-null
+   * @param usage the usage reported so far; non-null
    */
   record UsageDelta(Usage usage) implements ModelChunk {
 

@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
@@ -193,6 +194,25 @@ final class SubagentSessionTest {
     assertEquals("Success", stored.lastRunEnded().orElseThrow().terminal());
     assertEquals(
         "find a match for bob", stored.history().getFirst().content(), "the child's own history");
+  }
+
+  @Test
+  void theUsageAChildsCutCallReportedIsTheParentRunsSpend() {
+    var child =
+        child(
+            childModel()
+                .withStreamTurn(
+                    ModelStreams.failing(
+                        new IllegalStateException("connection reset"),
+                        new ModelChunk.UsageDelta(Usage.of(50, 5)),
+                        new ModelChunk.TextDelta("half")))
+                .build());
+
+    var result = run(parent(callingMatching(Usage.of(100, 10)), child).build());
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals(new Usage(150, 15, 0, 0, 165, 100), result.usage());
+    assertEquals(CostEstimate.ofMicroUsd(110 + 55), result.cost());
   }
 
   @Test

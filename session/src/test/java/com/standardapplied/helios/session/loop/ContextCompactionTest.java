@@ -417,6 +417,21 @@ final class ContextCompactionTest {
   }
 
   @Test
+  void aFailedTurnThatReportedUsageAnchorsTheCountOnItsInput() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new IllegalStateException("connection reset"),
+                    new ModelChunk.UsageDelta(Usage.of(6_000, 7))))
+            .build();
+
+    run(loop(model, ContextCompactor.disabled()), 1_000_000L);
+
+    assertEquals(6_000L, state.history().tokens(recording));
+  }
+
+  @Test
   void aReportOfOneInputTokenAnchors() {
     state.history().append(Message.user("a"));
 
