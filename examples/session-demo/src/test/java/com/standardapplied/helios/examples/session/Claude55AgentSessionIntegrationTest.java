@@ -289,8 +289,7 @@ final class Claude55AgentSessionIntegrationTest {
   }
 
   /**
-   * Sonnet 5.5, a model that binds reasoning, interrupted mid-answer: the next run sends the
-   * partial turn, and the API accepts it.
+   * Sonnet 5.5 interrupted mid-answer: the next run sends the partial turn, and the API accepts it.
    */
   @Test
   void sonnet55AcceptsTheRunAfterAnInterruptedAnswer() {

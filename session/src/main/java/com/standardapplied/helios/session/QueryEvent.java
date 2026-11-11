@@ -411,7 +411,8 @@ public sealed interface QueryEvent
    * attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI affordances
    * and to correlate per-attempt token usage in their own ledgers. The {@link AssistantText} and
    * {@link AssistantThinking} deltas the failed attempt streamed are superseded: the next attempt
-   * streams its answer from the start.
+   * streams its answer from the start; a run cut before that attempt keeps the failed attempt's
+   * text as its {@link com.standardapplied.helios.session.store.MessageOrigin#PARTIAL_TURN}.
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link

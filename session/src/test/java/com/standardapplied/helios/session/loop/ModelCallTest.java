@@ -146,13 +146,13 @@ final class ModelCallTest {
 
   @Test
   void anErrorOutcomeKeepsOnlyItsTextTaggedAsAPartialTurn() {
-    var before = keep(cut("Half a sentence"));
+    var before = keep(cut("Half a sentence "));
 
     var history = state.history().snapshot();
     assertEquals(
         List.of(
             Message.assistant(
-                "Half a sentence", List.of(), Map.of("helios.origin", "partial-turn"))),
+                "Half a sentence ", List.of(), Map.of("helios.origin", "partial-turn"))),
         history.subList(before, history.size()));
   }
 
