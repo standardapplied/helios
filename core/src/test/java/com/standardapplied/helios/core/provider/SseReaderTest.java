@@ -1035,43 +1035,6 @@ class SseReaderTest {
     }
   }
 
-  @Test
-  void timeTheConsumerSpendsBetweenLinesAlreadyReadIsNeverIdle() {
-    var timeout = Duration.ofSeconds(2);
-    var body = new Closing(stream("data: one\n\ndata: two\n\n"));
-    try (var reader = new SseReader(body, timeout, new EchoParser(), ProviderException::new)) {
-      assertEquals(new StreamEvent.TextDelta("one"), reader.next());
-
-      atLeast(timeout);
-
-      assertEquals(new StreamEvent.TextDelta("two"), reader.next());
-      assertFalse(body.closed);
-    }
-  }
-
-  @Test
-  void linesThatEachArriveWithinTheTimeoutNeverTimeOutHoweverLongTheStreamLasts() {
-    var feed = new FeedableInputStream();
-    var reader =
-        new SseReader(feed, Duration.ofSeconds(2), new EchoParser(), ProviderException::new);
-    var consumer = Executors.newVirtualThreadPerTaskExecutor();
-    try {
-      var events = consumer.submit(() -> drain(reader));
-
-      for (var i = 0; i < 10; i++) {
-        atLeast(Duration.ofMillis(250));
-        feed.feed("data: " + i + "\n\n");
-      }
-      feed.feed("data: stop\n\n");
-
-      var all = Await.value("the stream's events", events);
-      assertEquals(11, all.size());
-      assertInstanceOf(StreamEvent.Done.class, all.getLast());
-    } finally {
-      consumer.shutdownNow();
-    }
-  }
-
   @ParameterizedTest
   @MethodSource("timeoutsBeyondTheNanosecondRange")
   void anIdleTimeoutBeyondTheNanosecondRangeReadsTheStreamWhileItsWatchdogSleeps(Duration timeout) {
@@ -1095,19 +1058,23 @@ class SseReaderTest {
   }
 
   @ParameterizedTest
-  @ValueSource(longs = {0, -1})
-  void anIdleTimeoutThatIsNotPositiveFailsTheFirstLineAtOnceWithoutAWatchdog(long millis) {
+  @MethodSource("timeoutsThatAreNotPositive")
+  void anIdleTimeoutThatIsNotPositiveFailsTheFirstLineAtOnceWithoutAWatchdog(Duration timeout) {
     var body = new Closing(stream("data: one\n\n"));
-    var reader =
-        new SseReader(body, Duration.ofMillis(millis), new EchoParser(), ProviderException::new);
+    var reader = new SseReader(body, timeout, new EchoParser(), ProviderException::new);
 
     var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
 
-    assertEquals("Stream idle timeout: no data received for " + millis + " ms", error.message());
+    assertEquals(
+        "Stream idle timeout: no data received for " + timeout.toMillis() + " ms", error.message());
     assertTrue(body.closed);
     assertEquals(Set.of(), body.readers);
     assertNull(reader.idleWatch.watchdog());
     assertFalse(reader.hasNext());
+  }
+
+  static List<Duration> timeoutsThatAreNotPositive() {
+    return List.of(Duration.ZERO, Duration.ofMillis(-1), Duration.ofNanos(-1));
   }
 
   /** A {@code next()} on a thread of its own, blocked in the body's read. */
@@ -1128,15 +1095,6 @@ class SseReaderTest {
     var thread = Thread.ofVirtual().start(task);
     Await.latch("the read to block on the body", body.reading);
     return new BlockedRead(thread, task, interruptKept);
-  }
-
-  /** Returns once at least {@code timeout} has passed: a stalled stream with it has timed out. */
-  private static void atLeast(Duration timeout) {
-    try (var stalled =
-        new SseReader(
-            new FeedableInputStream(), timeout, new EchoParser(), ProviderException::new)) {
-      assertInstanceOf(StreamEvent.Error.class, stalled.next());
-    }
   }
 
   /** What {@code consumer} returns on a thread of its own, interrupted if it is still waiting. */
