@@ -100,7 +100,11 @@ class TurnUsageAccountingTest {
   @CsvSource({"0, 900, 450", "900, 0, 900"})
   void aCompactionReportingOnlyCacheTokensIsAccountedAtTheCompactorsRate(
       int cacheWrites, int cacheReads, long expectedCost) {
-    var usage = Usage.of(0, 0, cacheWrites, cacheReads);
+    var usage =
+        Usage.newBuilder()
+            .withCacheCreationInputTokens(cacheWrites)
+            .withCacheReadInputTokens(cacheReads)
+            .build();
     var model =
         ScriptedModel.newBuilder()
             .withId(MAIN)

@@ -148,7 +148,13 @@ final class SubagentSessionTest {
                 Usage.of(50, 5),
                 new ToolCall("c-lookup", "lookup", Map.of()),
                 new ToolCall("c-score", "score", Map.of()))
-            .withTextTurn("{\"name\":\"ada\",\"score\":9}", Usage.of(60, 6, 0, 0, 4))
+            .withTextTurn(
+                "{\"name\":\"ada\",\"score\":9}",
+                Usage.newBuilder()
+                    .withInputTokens(60)
+                    .withOutputTokens(6)
+                    .withReasoningTokens(4)
+                    .build())
             .build();
     var parentModel =
         parentModel()

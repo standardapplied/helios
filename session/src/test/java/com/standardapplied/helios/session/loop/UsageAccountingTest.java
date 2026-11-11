@@ -103,7 +103,13 @@ final class UsageAccountingTest {
 
   @Test
   void aCompactionIsAccountedAtItsOwnModelAsAStoppedFirstAttempt() {
-    accounting().accountCompaction(state, "summary-model", Usage.of(0, 0, 0, 900), STARTED, ENDED);
+    accounting()
+        .accountCompaction(
+            state,
+            "summary-model",
+            Usage.newBuilder().withCacheReadInputTokens(900).build(),
+            STARTED,
+            ENDED);
 
     var event = onlyEvent();
     assertEquals(List.of("summary-model"), pricedIds);

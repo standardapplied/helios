@@ -104,7 +104,13 @@ class StreamEventTest {
 
   @Test
   void usageDeltaCarriesTheUsageReportedSoFarAndRefusesNone() {
-    var usage = Response.Usage.of(25, 1, 5, 7);
+    var usage =
+        Response.Usage.newBuilder()
+            .withInputTokens(25)
+            .withOutputTokens(1)
+            .withCacheCreationInputTokens(5)
+            .withCacheReadInputTokens(7)
+            .build();
 
     assertEquals(usage, new StreamEvent.UsageDelta(usage).usage());
     assertEquals(

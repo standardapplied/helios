@@ -86,14 +86,14 @@ class OpenAIRestructuredPartsTest {
   void usageCountsAnyReportedTokenClassAndNothingWhenAllAreZero() {
     assertNull(OpenAIResponseAssembler.usage(new ApiUsage(0, 0, 0, null, null)));
     assertEquals(
-        Response.Usage.of(0, 4, 0, 0),
+        Response.Usage.of(0, 4),
         OpenAIResponseAssembler.usage(new ApiUsage(null, 4, 4, null, null)));
     assertEquals(
-        Response.Usage.of(0, 0, 0, 3),
+        Response.Usage.newBuilder().withCacheReadInputTokens(3).build(),
         OpenAIResponseAssembler.usage(
             new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(3, null), null)));
     assertEquals(
-        Response.Usage.of(0, 0, 2, 0),
+        Response.Usage.newBuilder().withCacheCreationInputTokens(2).build(),
         OpenAIResponseAssembler.usage(
             new ApiUsage(0, 0, 0, new ApiUsage.InputTokensDetails(null, 2), null)));
   }

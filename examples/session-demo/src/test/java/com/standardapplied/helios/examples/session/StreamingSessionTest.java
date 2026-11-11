@@ -92,15 +92,38 @@ final class StreamingSessionTest {
 
   private static final Map<String, Usage> REPORTED_BEFORE_THE_HOLD =
       Map.of(
-          "anthropic", Usage.of(25, 1, 5, 7),
+          "anthropic",
+              Usage.newBuilder()
+                  .withInputTokens(25)
+                  .withOutputTokens(1)
+                  .withCacheCreationInputTokens(5)
+                  .withCacheReadInputTokens(7)
+                  .build(),
           "gemini", Usage.of(0, 0),
           "openai", Usage.of(0, 0));
 
   private static final Map<String, Usage> COMPLETED_USAGE =
       Map.of(
-          "anthropic", Usage.of(25, 15, 5, 7),
-          "gemini", Usage.of(86, 150, 0, 1920),
-          "openai", Usage.of(46, 150, 40, 1920));
+          "anthropic",
+              Usage.newBuilder()
+                  .withInputTokens(25)
+                  .withOutputTokens(15)
+                  .withCacheCreationInputTokens(5)
+                  .withCacheReadInputTokens(7)
+                  .build(),
+          "gemini",
+              Usage.newBuilder()
+                  .withInputTokens(86)
+                  .withOutputTokens(150)
+                  .withCacheReadInputTokens(1920)
+                  .build(),
+          "openai",
+              Usage.newBuilder()
+                  .withInputTokens(46)
+                  .withOutputTokens(150)
+                  .withCacheCreationInputTokens(40)
+                  .withCacheReadInputTokens(1920)
+                  .build());
 
   private static final CostCalculator ONE_MICRO_USD_A_TOKEN =
       CostCalculator.staticTable(

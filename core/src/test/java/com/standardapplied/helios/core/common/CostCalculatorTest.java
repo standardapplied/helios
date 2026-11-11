@@ -197,7 +197,13 @@ final class CostCalculatorTest {
   void pricingCostIncludesEveryTokenClassWeighted() {
     // Mirror the matchmaking baseline shape: $15/M input, $75/M output, plus cache ratios.
     var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
-    var usage = Usage.of(1_000_000, 1_000_000, 1_000_000, 1_000_000);
+    var usage =
+        Usage.newBuilder()
+            .withInputTokens(1_000_000)
+            .withOutputTokens(1_000_000)
+            .withCacheCreationInputTokens(1_000_000)
+            .withCacheReadInputTokens(1_000_000)
+            .build();
     // input  $15.00 + output $75.00 + cache write $18.75 + cache read $1.50 = $110.25
     assertEquals(110_250_000L, p.cost(usage).microUsd());
   }
@@ -220,11 +226,11 @@ final class CostCalculatorTest {
     // tools prefix). cache_read = 9_823_217, cache_create = 0, input = 2_455_805.
     // Total tokens identical; only the class mix changes.
     var withCache =
-        Usage.of(
-            2_455_805, // uncached input
-            684_700, // output
-            0, // cache creation (steady state)
-            9_823_217); // cache read
+        Usage.newBuilder()
+            .withInputTokens(2_455_805)
+            .withOutputTokens(684_700)
+            .withCacheReadInputTokens(9_823_217)
+            .build();
     var withCacheCost = p.cost(withCache).microUsd();
 
     // Cache-aware cost: 2_455_805 × 15 = 36_837_075; 684_700 × 75 = 51_352_500;
@@ -265,13 +271,25 @@ final class CostCalculatorTest {
     var p = Pricing.ofUsdPerMillion(3.0, 15.0);
     assertEquals(p.inputMicroUsdPerMillion(), p.cacheWriteMicroUsdPerMillion());
     assertEquals(p.inputMicroUsdPerMillion(), p.cacheReadMicroUsdPerMillion());
-    var usage = Usage.of(100, 100, 100, 100);
+    var usage =
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(100)
+            .withCacheCreationInputTokens(100)
+            .withCacheReadInputTokens(100)
+            .build();
     // Per-class integer division: each multiply-then-divide truncates separately. 100 tokens
     // each at the four respective rates (3M, 15M, 3M, 3M microUSD/M) yields 300, 1500, 300, 300
     // microUSD per class — sum 2400 microUSD = $0.0024.
     assertEquals(300L + 1_500L + 300L + 300L, p.cost(usage).microUsd());
     // 1_000_000 tokens of each — clean integer math, no truncation.
-    var bigUsage = Usage.of(1_000_000, 1_000_000, 1_000_000, 1_000_000);
+    var bigUsage =
+        Usage.newBuilder()
+            .withInputTokens(1_000_000)
+            .withOutputTokens(1_000_000)
+            .withCacheCreationInputTokens(1_000_000)
+            .withCacheReadInputTokens(1_000_000)
+            .build();
     assertEquals(3_000_000L + 15_000_000L + 3_000_000L + 3_000_000L, p.cost(bigUsage).microUsd());
   }
 }

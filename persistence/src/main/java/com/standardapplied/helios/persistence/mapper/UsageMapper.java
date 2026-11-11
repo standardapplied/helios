@@ -36,12 +36,13 @@ public final class UsageMapper {
       return null;
     }
     var reasoning = intOrNull(row, "reasoning_tokens");
-    return Usage.of(
-        input != null ? input : 0,
-        output != null ? output : 0,
-        cacheCreation != null ? cacheCreation : 0,
-        cacheRead != null ? cacheRead : 0,
-        reasoning != null ? reasoning : 0);
+    return Usage.newBuilder()
+        .withInputTokens(input != null ? input : 0)
+        .withOutputTokens(output != null ? output : 0)
+        .withCacheCreationInputTokens(cacheCreation != null ? cacheCreation : 0)
+        .withCacheReadInputTokens(cacheRead != null ? cacheRead : 0)
+        .withReasoningTokens(reasoning != null ? reasoning : 0)
+        .build();
   }
 
   /**

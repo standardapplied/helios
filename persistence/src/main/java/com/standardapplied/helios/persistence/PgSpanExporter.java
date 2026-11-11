@@ -270,12 +270,13 @@ public final class PgSpanExporter implements SpanExporter {
     var cacheWrite = count(attributes, CACHE_WRITE);
     var cacheRead = count(attributes, CACHE_READ);
     var output = count(attributes, OUTPUT_TOKENS);
-    return Usage.of(
-        Math.toIntExact(input - cacheWrite - cacheRead),
-        output,
-        cacheWrite,
-        cacheRead,
-        Math.min(count(attributes, REASONING_TOKENS), output));
+    return Usage.newBuilder()
+        .withInputTokens(Math.toIntExact(input - cacheWrite - cacheRead))
+        .withOutputTokens(output)
+        .withCacheCreationInputTokens(cacheWrite)
+        .withCacheReadInputTokens(cacheRead)
+        .withReasoningTokens(Math.min(count(attributes, REASONING_TOKENS), output))
+        .build();
   }
 
   private static int count(Attributes attributes, AttributeKey<Long> key) {
