@@ -18,6 +18,7 @@ import com.standardapplied.helios.session.SteeringQueue;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 
@@ -74,19 +75,30 @@ final class UsageAccountingTest {
   }
 
   @Test
-  void aRetriedAttemptIsReportedWithZeroUsageAndItsRedactedErrorAndIsNotAccounted() {
-    accounting()
-        .reportRetried(state, 1, new IllegalStateException("reset " + SECRET), STARTED, ENDED);
+  void aFailedAttemptIsAccountedWithTheUsageItsProviderReportedAndItsRedactedError() {
+    var failed =
+        new TurnOutcome(
+            FinishReason.ERROR,
+            "Half",
+            List.of(),
+            List.of(),
+            Usage.of(40, 2),
+            Map.of(),
+            new IllegalStateException("reset " + SECRET),
+            1);
+
+    accounting().accountTurn(state, failed, 1, STARTED, ENDED);
 
     var event = onlyEvent();
-    assertEquals(Usage.of(0, 0), event.usage());
-    assertEquals(CostEstimate.zero(), event.cost());
+    assertEquals(Usage.of(40, 2), state.totals().usage());
+    assertEquals(CostEstimate.ofMicroUsd(42), state.totals().cost());
+    assertEquals(state.totals().usage(), event.usage());
+    assertEquals(state.totals().cost(), event.cost());
+    assertEquals(List.of("mock"), pricedIds);
     assertEquals(FinishReason.ERROR, event.finishReason());
     assertEquals(IllegalStateException.class.getName(), event.error().kind());
     assertFalse(event.error().message().contains(SECRET));
     assertTrue(event.error().message().contains("<redacted:key>"));
-    assertEquals(Usage.of(0, 0), state.totals().usage());
-    assertTrue(pricedIds.isEmpty());
   }
 
   @Test

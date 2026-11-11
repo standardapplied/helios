@@ -407,12 +407,13 @@ public sealed interface QueryEvent
    * retry the turn: a transport failure, a 408, 429 or 5xx answer to the stream request (the
    * error's {@code cause()} is the provider's exception, whose message starts {@code API error
    * (status <n>)}), or an error event the provider marks retryable mid-stream. Fires after each
-   * failed attempt, before the configured back-off delay; the next attempt is the {@code
-   * attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI affordances
-   * and to correlate per-attempt token usage in their own ledgers. The {@link AssistantText} and
-   * {@link AssistantThinking} deltas the failed attempt streamed are superseded: the next attempt
-   * streams its answer from the start; a run cut before that attempt keeps the failed attempt's
-   * text as its {@link com.standardapplied.helios.session.store.MessageOrigin#PARTIAL_TURN}.
+   * failed attempt's {@link ModelCallEnded}, before the configured back-off delay; the next attempt
+   * is the {@code attemptNumber + 1}-th overall. Subscribers can use this to surface "retrying…" UI
+   * affordances and to correlate per-attempt token usage in their own ledgers. The {@link
+   * AssistantText} and {@link AssistantThinking} deltas the failed attempt streamed are superseded:
+   * the next attempt streams its answer from the start; a run cut before that attempt keeps the
+   * failed attempt's text as its {@link
+   * com.standardapplied.helios.session.store.MessageOrigin#PARTIAL_TURN}.
    *
    * <p>Does <em>not</em> fire on the final exhausted attempt — that one terminates the session via
    * {@link ResultMessage.ErrorTransientStream} which is surfaced through the subsequent {@link
@@ -469,13 +470,13 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A model attempt ended: one event per attempt, a compactor's summary call included. An attempt
-   * the session accounts (a turn's final attempt, which a schema self-correction also is, and a
-   * compactor's call that reports tokens) carries exactly the usage it added to the run's totals
-   * and the cost computed for that usage, so the events' usage sums to the run's; an attempt that
-   * failed transiently and is retried carries zero usage and cost, and follows its {@link
-   * TurnRetried} once the back-off elapsed. An attempt a host {@link java.lang.Error} ended has
-   * none. A cost calculator that fails leaves the call's usage accounted at zero cost.
+   * A model attempt ended: one event per attempt, a compactor's summary call included, emitted as
+   * its stream ends. Each carries exactly the usage the session added to the run's totals for it,
+   * the usage its stream reported before the attempt ended, a failed attempt's included, zero when
+   * it reported none, and the cost computed for that usage, so the events' usage sums to the run's;
+   * an attempt that failed transiently and is retried precedes its {@link TurnRetried}. An attempt
+   * a host {@link java.lang.Error} ended has none. A cost calculator that fails leaves the call's
+   * usage accounted at zero cost.
    *
    * @param sessionId the session id
    * @param runId the run id

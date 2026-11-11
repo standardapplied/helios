@@ -4,6 +4,7 @@ KeepAlive[]
 TextDelta[text=Hello]
 KeepAlive[]
 KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37]]
 onError TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)
 == chat
 threw TransientStreamException(Stream ended before its terminal event) provider=anthropic caused by EOFException(the response body ended before the provider's terminal event)

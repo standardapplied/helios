@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Wires the collaborators of a {@link TurnRunner} or {@link AgentLoop} under test: a tool dispatch
@@ -62,13 +63,19 @@ final class LoopFixture {
 
   /** Collaborators that admit every call and emit into {@link #events}, on this fixture's clock. */
   LoopCollaborators collaborators(HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue) {
+    return collaborators(hooks, dispatch, queue, events::add);
+  }
+
+  /** Collaborators that admit every call and emit into {@code sink}, on this fixture's clock. */
+  LoopCollaborators collaborators(
+      HookRegistry hooks, ToolDispatch dispatch, SteeringQueue queue, Consumer<QueryEvent> sink) {
     return new LoopCollaborators(
         hooks,
         dispatch,
         Authorizations.ADMIT_ALL,
         Authorizations.NO_RULE,
         queue,
-        events::add,
+        sink,
         this::hookContext,
         clock,
         NoSpans.INSTANCE);

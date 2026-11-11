@@ -136,6 +136,42 @@ final class TurnReaderTest {
   }
 
   @Test
+  void aFailedTurnHasTheLatestUsageItsProviderReported() {
+    reader.read(
+        ModelStreams.failing(
+            new IllegalStateException("reset"),
+            new ModelChunk.UsageDelta(Response.Usage.of(7, 0)),
+            new ModelChunk.TextDelta("Hel"),
+            new ModelChunk.UsageDelta(USAGE)));
+
+    assertEquals(FinishReason.ERROR, reader.outcome().finishReason());
+    assertEquals(USAGE, reader.outcome().usage());
+  }
+
+  @Test
+  void aTurnEndedFromAnotherThreadHasTheUsageReportedBeforeTheEnding() {
+    var stalled = new CountDownLatch(1);
+    var stream = ModelStreams.stalled(stalled::countDown, new ModelChunk.UsageDelta(USAGE));
+    var reading = CompletableFuture.runAsync(() -> reader.read(stream));
+    Await.latch("the stream to stall after its usage", stalled);
+
+    reader.end(new CancellationException("cancelled"));
+    reader.close(stream);
+    Await.value("the read", reading);
+
+    assertInstanceOf(CancellationException.class, reader.outcome().streamError());
+    assertEquals(USAGE, reader.outcome().usage());
+  }
+
+  @Test
+  void aTurnEndedBeforeItsProviderReportedUsageHasNone() {
+    reader.read(
+        ModelStreams.failing(new IllegalStateException("reset"), new ModelChunk.TextDelta("Hel")));
+
+    assertEquals(Response.Usage.of(0, 0), reader.outcome().usage());
+  }
+
+  @Test
   void anErrorTheStreamThrowsEndsTheTurnAndTheSession() {
     var failure = new AssertionError("host");
 

@@ -27,9 +27,11 @@ import java.util.logging.Logger;
  * #end} from {@link ModelCall} when the session is cancelled or its thread interrupted. It
  * snapshots what the stream produced under the lock that guards every accumulation, so a turn that
  * failed, was cancelled or ended without its {@link ModelChunk.MessageStop} finishes as {@link
- * FinishReason#ERROR}. A chunk read after the ending is dropped and emits nothing. A chunk accepted
- * before it emits its event outside the lock, and the waiting runner is released once that event is
- * out, so every event of the turn precedes the runner's next one.
+ * FinishReason#ERROR}, with the usage of the latest {@link ModelChunk.UsageDelta} read before the
+ * ending, zero when none, since its provider bills what it reported. A chunk read after the ending
+ * is dropped and emits nothing. A chunk accepted before it emits its event outside the lock, and
+ * the waiting runner is released once that event is out, so every event of the turn precedes the
+ * runner's next one.
  *
  * <h2>Host errors</h2>
  *
@@ -50,6 +52,7 @@ final class TurnReader {
   private final Object lock = new Object();
   private final StringBuilder content = new StringBuilder();
   private final List<ToolCall> toolCalls = new ArrayList<>();
+  private Usage reported = Usage.of(0, 0);
   private ModelChunk.MessageStop stop;
   private boolean emitting;
   private TurnOutcome outcome;
@@ -152,6 +155,7 @@ final class TurnReader {
     switch (chunk) {
       case ModelChunk.TextDelta(String text) -> content.append(text);
       case ModelChunk.ToolUseStop(ToolCall call) -> toolCalls.add(call);
+      case ModelChunk.UsageDelta(Usage usage) -> reported = usage;
       case ModelChunk.MessageStop messageStop -> stop = messageStop;
       default -> {}
     }
@@ -223,7 +227,7 @@ final class TurnReader {
         content.toString(),
         toolCalls,
         stopped ? stop.citations() : List.of(),
-        stopped ? stop.usage() : Usage.of(0, 0),
+        stopped ? stop.usage() : reported,
         stopped ? stop.metadata() : Map.of(),
         failure,
         1);
