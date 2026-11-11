@@ -66,7 +66,8 @@ class OpenAIProviderTest {
 
   @Test
   void supportsGpt6Family() {
-    for (var id : List.of("gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna")) {
+    for (var id :
+        List.of("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna")) {
       assertTrue(provider.supports(id), id);
     }
   }

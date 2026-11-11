@@ -53,7 +53,8 @@ class GeminiReasoningTest {
           GeminiModelId.GEMINI_3_6_FLASH, MINIMAL_TO_HIGH,
           GeminiModelId.GEMINI_3_7_FLASH, LOW_TO_HIGH,
           GeminiModelId.GEMINI_3_8_FLASH, LOW_TO_HIGH,
-          GeminiModelId.GEMINI_4_ARGON, LOW_TO_HIGH);
+          GeminiModelId.GEMINI_4_ARGON, LOW_TO_HIGH,
+          GeminiModelId.GEMINI_4_CARBON, LOW_TO_HIGH);
 
   static Stream<Arguments> acceptedCells() {
     return ReasoningMatrix.cells(DOCUMENTED, GeminiReasoningTest::accepts, true);
