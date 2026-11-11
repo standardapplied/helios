@@ -17,9 +17,11 @@ import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
@@ -70,6 +72,8 @@ final class SessionSpansTest {
   private static final String SID = "sess-spans";
   private static final String SECRET = "sk-trace-secret-0123456789";
   private static final String SENTINEL = "S3NT1NEL";
+  private static final String RESPONSE_MODEL = "gen_ai.response.model";
+  private static final String SERVED = "claude-opus-5-5-20261101";
   private static final List<AttributeKey<String>> CONTENT =
       List.of(
           stringKey("gen_ai.input.messages"),
@@ -209,6 +213,29 @@ final class SessionSpansTest {
     assertEquals("MutateResult", string(hook, "helios.hook.outcome"));
     assertEquals(hook.getStartEpochNanos(), hook.getEndEpochNanos());
     assertNull(hook.getAttributes().get(OPERATION));
+  }
+
+  @Test
+  void aChatSpanCarriesTheModelThatServedItOnlyWhenTheProviderReportedOne() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withResponseTurn(
+                Response.newBuilder()
+                    .withContent("")
+                    .withToolCalls(List.of(call("noop", Map.of())))
+                    .withFinishReason(FinishReason.TOOL_CALLS)
+                    .withMetadata(Map.of(Response.RESPONSE_MODEL_KEY, SERVED))
+                    .build())
+            .withTextTurn("done")
+            .build();
+
+    run(traced(model).withTool(tool("noop", "ok")).build(), "go");
+
+    var chats = capture.named("chat scripted");
+    assertEquals("scripted", string(chats.get(0), "gen_ai.request.model"));
+    assertEquals(SERVED, string(chats.get(0), RESPONSE_MODEL));
+    assertEquals("scripted", string(chats.get(1), "gen_ai.request.model"));
+    assertNull(string(chats.get(1), RESPONSE_MODEL));
   }
 
   @Test
@@ -384,7 +411,13 @@ final class SessionSpansTest {
         ScriptedModel.newBuilder()
             .withStreamTurn(
                 ModelStreams.failing(new TransientStreamException("reset " + SECRET, null, "test")))
-            .withTextTurn("ok", Usage.of(50, 5))
+            .withResponseTurn(
+                Response.newBuilder()
+                    .withContent("ok")
+                    .withUsage(Usage.of(50, 5))
+                    .withFinishReason(FinishReason.STOP)
+                    .withMetadata(Map.of(Response.RESPONSE_MODEL_KEY, SERVED))
+                    .build())
             .build();
     var limits =
         SessionLimits.newBuilder()
@@ -411,7 +444,9 @@ final class SessionSpansTest {
         List.of(INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, TOTAL_TOKENS, COST)) {
       assertNull(retried.getAttributes().get(usage));
     }
+    assertNull(string(retried, RESPONSE_MODEL));
     assertEquals(2L, number(chats.get(1), "helios.attempt"));
+    assertEquals(SERVED, string(chats.get(1), RESPONSE_MODEL));
     assertEquals(1L, chats.get(0).getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(1L, chats.get(1).getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(StatusCode.UNSET, chats.get(1).getStatus().getStatusCode());

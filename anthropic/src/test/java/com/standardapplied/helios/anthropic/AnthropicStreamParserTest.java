@@ -4,6 +4,7 @@ package com.standardapplied.helios.anthropic;
 
 import static com.standardapplied.helios.anthropic.AnthropicFixture.drainSseFixture;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -56,6 +57,35 @@ class AnthropicStreamParserTest {
 
     assertEquals(Response.Usage.of(0, 4, 0, 0), outputOnly.partial().usage());
     assertEquals(Response.Usage.of(0, 0, 2, 0), cacheWritesOnly.partial().usage());
+  }
+
+  @Test
+  void theModelTheMessageNamesIsTheModelThatServedTheResponse() {
+    parser.parse(
+        "{\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5-20261101\"}}");
+    parser.parse("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+
+    var done =
+        assertInstanceOf(StreamEvent.Done.class, parser.parse("{\"type\":\"message_stop\"}"));
+
+    assertEquals(
+        "claude-opus-5-5-20261101", done.response().metadata().get(Response.RESPONSE_MODEL_KEY));
+    assertEquals(
+        "claude-opus-5-5-20261101", parser.partial().metadata().get(Response.RESPONSE_MODEL_KEY));
+  }
+
+  @Test
+  void aMessageNamingNoModelOrABlankOneReportsNone() {
+    for (var message : List.of("{}", "{\"model\":null}", "{\"model\":\" \"}")) {
+      var unnamed = new AnthropicStreamParser("stamp");
+      unnamed.parse("{\"type\":\"message_start\",\"message\":" + message + "}");
+      unnamed.parse("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+
+      var done =
+          assertInstanceOf(StreamEvent.Done.class, unnamed.parse("{\"type\":\"message_stop\"}"));
+
+      assertFalse(done.response().metadata().containsKey(Response.RESPONSE_MODEL_KEY), message);
+    }
   }
 
   @Test

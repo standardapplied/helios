@@ -47,7 +47,8 @@ import java.util.logging.Logger;
  * child session of an {@code Agent} call, {@code helios.parent.session_id}, {@code
  * helios.parent.run_id} and {@code helios.parent.tool_call_id}. Under it, set as their parent: a
  * {@code chat} span per model attempt, from {@link #modelAttempt} to its {@link
- * QueryEvent.ModelCallEnded} (a compactor's call, which starts none, spans the event's duration);
+ * QueryEvent.ModelCallEnded}, carrying as {@code gen_ai.response.model} the model the provider
+ * reported serving it, if any (a compactor's call, which starts none, spans the event's duration);
  * an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or its first
  * {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length {@code
  * hook} span per {@link QueryEvent.HookFired}. Each carries the {@link QueryEvent#turnIndex()
@@ -73,6 +74,7 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<String> CONVERSATION_ID = stringKey("gen_ai.conversation.id");
   private static final AttributeKey<String> PROVIDER = stringKey("gen_ai.provider.name");
   private static final AttributeKey<String> REQUEST_MODEL = stringKey("gen_ai.request.model");
+  private static final AttributeKey<String> RESPONSE_MODEL = stringKey("gen_ai.response.model");
   private static final AttributeKey<List<String>> FINISH_REASONS =
       stringArrayKey("gen_ai.response.finish_reasons");
   private static final AttributeKey<Long> INPUT_TOKENS = longKey("gen_ai.usage.input_tokens");
@@ -193,6 +195,15 @@ final class RunSpans implements StepSpans {
     return run == null
         ? Context.current()
         : traced(state.runId(), () -> run.modelAttempt(state.currentTurnIndex()), run.context);
+  }
+
+  /** Set on the run's open attempt span; nothing when there is no model, span or open attempt. */
+  @Override
+  public void servedModel(SessionState state, String model) {
+    var run = runs.get(state.runId());
+    if (run != null && model != null) {
+      traced(state.runId(), () -> run.servedModel(model));
+    }
   }
 
   /** The context the call runs in: the current one, untraced, when the run has no span. */
@@ -343,6 +354,12 @@ final class RunSpans implements StepSpans {
       model = Span.getInvalid();
       model = chat(modelId).setAttribute(TURN_INDEX, turnIndex).startSpan();
       return context.with(model);
+    }
+
+    synchronized void servedModel(String served) {
+      if (model != null) {
+        model.setAttribute(RESPONSE_MODEL, served);
+      }
     }
 
     synchronized Context toolCall(ToolCall call) {

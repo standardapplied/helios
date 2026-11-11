@@ -229,6 +229,36 @@ class PauseContinuationTest {
   }
 
   @Test
+  void aPausedTurnReportsTheModelThatServedItsLastSegment() {
+    var segments =
+        new ArrayDeque<>(
+            List.of(
+                segment(
+                    Map.of(
+                        AnthropicResponseAssembler.STOP_REASON_KEY,
+                        "pause_turn",
+                        RawContentEcho.RAW_CONTENT_KEY,
+                        PAUSED_CONTENT,
+                        Response.RESPONSE_MODEL_KEY,
+                        "claude-opus-5-5-20261101"),
+                    10),
+                segment(
+                    Map.of(
+                        AnthropicResponseAssembler.STOP_REASON_KEY,
+                        "end_turn",
+                        Response.RESPONSE_MODEL_KEY,
+                        "claude-opus-5-5-20261201"),
+                    20)));
+
+    var done =
+        assertInstanceOf(
+            StreamEvent.Done.class, events(r -> stream(segments.removeFirst())).getLast());
+
+    assertEquals(
+        "claude-opus-5-5-20261201", done.response().metadata().get(Response.RESPONSE_MODEL_KEY));
+  }
+
+  @Test
   void theContinuationResendsTheRequestWithThePausedContentAppended() {
     var sent = new ArrayList<StampedRequest>();
 

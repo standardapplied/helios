@@ -15,9 +15,9 @@ import java.util.Map;
 
 /**
  * Merges two segments of one assistant turn split by {@code pause_turn}. The later segment's
- * scalars — finish reason, raw stop reason and the code execution container, unless only the
- * earlier one ran code — win; text, tool calls, citations, thinking, usage, thinking blocks and
- * verbatim content combine in order.
+ * scalars — finish reason, raw stop reason, served model and the code execution container, unless
+ * only the earlier one ran code — win; text, tool calls, citations, thinking, usage, thinking
+ * blocks and verbatim content combine in order.
  */
 final class SegmentMerge {
 

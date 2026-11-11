@@ -6,9 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.CancellationToken;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookPhase;
@@ -18,6 +21,7 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,14 +35,16 @@ import org.junit.jupiter.params.provider.MethodSource;
 /**
  * {@link RunSpans} on its own: a hook span names the hook, its phase and its outcome, and only a
  * verbose run adds the reason or text the outcome carries; a step's span is a child of its run's
- * span whatever context is current; an event of no run in progress starts no span; and a run's
- * error is the first host {@link Error} its session recorded.
+ * span whatever context is current; an event of no run in progress starts no span; the served model
+ * is set only on the open attempt's span; and a run's error is the first host {@link Error} its
+ * session recorded.
  */
 final class RunSpansTest {
 
   private static final Instant AT = Instant.parse("2026-11-03T10:00:00Z");
   private static final RuntimeException CRASH = new IllegalStateException("crashed");
   private static final String SECRET = "sk-span-secret-0123456789";
+  private static final String RESPONSE_MODEL = "gen_ai.response.model";
 
   private final SpanCapture capture = new SpanCapture();
   private final SessionState run =
@@ -158,6 +164,49 @@ final class RunSpansTest {
     var runSpan = capture.run();
     assertEquals(caller.getSpanContext().getSpanId(), runSpan.getParentSpanId());
     assertEquals(runSpan.getSpanId(), capture.only("hook guard").getParentSpanId());
+  }
+
+  @Test
+  void theServedModelIsSetOnTheOpenAttemptsSpanOnly() {
+    var spans = spans(TraceDetail.STANDARD);
+    spans.start(run, Context.root());
+
+    spans.modelAttempt(run);
+    spans.servedModel(run, null);
+    spans.accept(attemptEnded(1));
+    spans.modelAttempt(run);
+    spans.servedModel(run, "claude-opus-5-5-20261101");
+    spans.accept(attemptEnded(2));
+    spans.servedModel(run, "after-the-attempt");
+    spans.end(run, null, CRASH);
+
+    assertNull(SessionSpansTest.string(capture.starting("chat ").get(0), RESPONSE_MODEL));
+    assertEquals(
+        "claude-opus-5-5-20261101",
+        SessionSpansTest.string(capture.starting("chat ").get(1), RESPONSE_MODEL));
+    assertNull(SessionSpansTest.string(capture.run(), RESPONSE_MODEL));
+  }
+
+  @Test
+  void theServedModelOfARunWithNoSpanSetsNothing() {
+    spans(TraceDetail.STANDARD).servedModel(run, "claude-opus-5-5-20261101");
+
+    assertEquals(List.of(), capture.spans());
+  }
+
+  private QueryEvent.ModelCallEnded attemptEnded(int attempt) {
+    return new QueryEvent.ModelCallEnded(
+        "sess-spans",
+        run.runId(),
+        run.currentTurnIndex(),
+        AT,
+        "scripted",
+        attempt,
+        FinishReason.STOP,
+        Usage.of(1, 1),
+        CostEstimate.zero(),
+        Duration.ZERO,
+        null);
   }
 
   @Test

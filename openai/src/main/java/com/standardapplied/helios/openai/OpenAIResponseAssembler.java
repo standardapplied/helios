@@ -12,8 +12,9 @@ import java.util.List;
 /**
  * Assembles the response of a streamed turn, at its end or as far as it got: its text, tool calls,
  * finish reason, usage and reasoning summary, which also rides as {@link #REASONING_KEY} metadata,
- * with a refusal's text as {@link Response#REFUSAL_EXPLANATION_KEY} and the reason an incomplete
- * response stopped as {@link #INCOMPLETE_REASON_KEY}.
+ * with a refusal's text as {@link Response#REFUSAL_EXPLANATION_KEY}, the reason an incomplete
+ * response stopped as {@link #INCOMPLETE_REASON_KEY} and the model that served it as {@link
+ * Response#RESPONSE_MODEL_KEY}.
  */
 final class OpenAIResponseAssembler {
 
@@ -31,6 +32,7 @@ final class OpenAIResponseAssembler {
    * @param refusal the refusal text, empty without one
    * @param incompleteReason why an incomplete response stopped, or {@code null}
    * @param usage the reported usage in Helios's shape, or {@code null}
+   * @param model the model the API reported serving the response, or {@code null}
    */
   record Turn(
       String content,
@@ -38,7 +40,8 @@ final class OpenAIResponseAssembler {
       String thinking,
       String refusal,
       String incompleteReason,
-      Response.Usage usage) {}
+      Response.Usage usage,
+      String model) {}
 
   private OpenAIResponseAssembler() {}
 
@@ -53,6 +56,9 @@ final class OpenAIResponseAssembler {
     }
     if (turn.incompleteReason() != null) {
       metadata.put(INCOMPLETE_REASON_KEY, turn.incompleteReason());
+    }
+    if (turn.model() != null) {
+      metadata.put(Response.RESPONSE_MODEL_KEY, turn.model());
     }
     return Response.newBuilder()
         .withContent(turn.content())

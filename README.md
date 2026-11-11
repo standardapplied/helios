@@ -614,6 +614,8 @@ following the GenAI semantic conventions: an `invoke_agent` span per run, a chil
 per model attempt, `execute_tool` per tool call and `hook` per hook decision, each current while its step runs.
 Each step span carries `helios.turn.index`, the `turnIndex` of the events it is built from (`1` for a run's first model turn,
 `0` for a hook that fires before it), so a reader joins events to spans and tells which model call asked for which tool.
+A `chat` span carries `gen_ai.response.model` when the provider reported the model that served the call, which
+`Response.metadata()` holds under `Response.RESPONSE_MODEL_KEY`.
 A compactor's summary call is a `chat` span with `helios.compaction` = `true` and no turn index.
 `TraceDetail.STANDARD` (the default) records no content; `VERBOSE` adds prompts, answers, tool arguments and results, redacted.
 `PgSpanExporter` stores the spans for `PgTraceStore`; your application adds `io.opentelemetry:opentelemetry-sdk`:

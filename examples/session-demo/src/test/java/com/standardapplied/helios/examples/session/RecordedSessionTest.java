@@ -110,7 +110,7 @@ final class RecordedSessionTest {
   }
 
   @Test
-  void claudeProgressLoopTracesTheCacheReadOfEachModelCall() {
+  void claudeProgressLoopTracesTheCacheReadAndTheServedModelOfEachModelCall() {
     var capture = new SpanCapture();
 
     var replay = progressLoop(capture.openTelemetry());
@@ -119,6 +119,11 @@ final class RecordedSessionTest {
     var cacheRead = AttributeKey.longKey("gen_ai.usage.cache_read.input_tokens");
     assertNull(calls.get(0).getAttributes().get(cacheRead));
     assertEquals(904L, calls.get(1).getAttributes().get(cacheRead));
+    assertEquals(
+        List.of("claude-opus-5-5", "claude-opus-5-5", "claude-opus-5-5", "claude-opus-5-5"),
+        calls.stream()
+            .map(call -> call.getAttributes().get(AttributeKey.stringKey("gen_ai.response.model")))
+            .toList());
     var usage = replay.terminal().usage();
     var run = capture.run().getAttributes();
     assertEquals(

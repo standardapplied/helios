@@ -85,6 +85,41 @@ class GeminiStreamParserTest {
   }
 
   @Test
+  void theModelAnEnvelopeNamesIsTheModelThatServedTheResponse() {
+    var created =
+        "data: {\"event_type\":\"interaction.created\","
+            + "\"interaction\":{\"id\":\"int_xyz\",\"model\":\"gemini-3.8-flash\"}}\n\n";
+    var completed =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"status\":\"completed\",\"model\":\"gemini-3.8-flash-001\"}}\n\n";
+
+    var unnamedAtTheEnd = (StreamEvent.Done) drain(created + TEXT_FLOW).getLast();
+    var renamedAtTheEnd = (StreamEvent.Done) drain(created + completed).getLast();
+    var cut = (StreamEvent.Error) drain(created).getLast();
+
+    assertEquals(
+        "gemini-3.8-flash", unnamedAtTheEnd.response().metadata().get(Response.RESPONSE_MODEL_KEY));
+    assertEquals(
+        "gemini-3.8-flash-001",
+        renamedAtTheEnd.response().metadata().get(Response.RESPONSE_MODEL_KEY));
+    assertEquals("gemini-3.8-flash", cut.partial().metadata().get(Response.RESPONSE_MODEL_KEY));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", ",\"model\":null", ",\"model\":\" \""})
+  void anInteractionNamingNoModelOrABlankOneReportsNone(String model) {
+    var sse =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"status\":\"completed\""
+            + model
+            + "}}\n\n";
+
+    var done = (StreamEvent.Done) drain(sse).getFirst();
+
+    assertFalse(done.response().metadata().containsKey(Response.RESPONSE_MODEL_KEY));
+  }
+
+  @Test
   void unknownEventTypeIsTolerated() {
     var unknown = "data: {\"event_type\":\"interaction.unknown\"}\n\n";
     var sse = unknown + TEXT_FLOW;
