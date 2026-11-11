@@ -154,7 +154,7 @@ class PauseContinuationTest {
     assertEquals(PauseContinuation.MAX_PAUSE_CONTINUATIONS + 1, opened.get());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
     assertEquals("Searching. ".repeat(9), error.partial().content());
-    assertEquals(new Response.Usage(90, 18, 0, 0, 108, 10), error.partial().usage());
+    assertEquals(new Response.Usage(90, 18, 0, 0, 108, 10, 0), error.partial().usage());
   }
 
   @Test
@@ -182,7 +182,7 @@ class PauseContinuationTest {
     var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
     assertSame(eof, error.cause());
     assertEquals("Searching. Fou", error.partial().content());
-    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5), error.partial().usage());
+    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5, 0), error.partial().usage());
     assertEquals(FinishReason.ERROR, error.partial().finishReason());
   }
 
@@ -206,7 +206,7 @@ class PauseContinuationTest {
     var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
     assertEquals(1, events.size());
     assertEquals("Searching. Found.", done.response().content());
-    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5), done.response().usage());
+    assertEquals(new Response.Usage(15, 3, 0, 0, 18, 5, 0), done.response().usage());
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertTrue(pausedClosedAtSecondOpen.get());
     assertTrue(finished.isClosed());
@@ -229,30 +229,31 @@ class PauseContinuationTest {
   }
 
   @Test
-  void aPausedTurnsUsageEventsAddEachContinuationsUsageToTheTurnsSoFar() {
+  void aPausedTurnsUsageEventsAddEachContinuationsUsageAndReasoningToTheTurnsSoFar() {
     var segments =
         new ArrayDeque<>(
             List.of(
-                reporting(PAUSED_METADATA, Response.Usage.of(100, 1), Response.Usage.of(100, 4)),
+                reporting(
+                    PAUSED_METADATA, Response.Usage.of(100, 1), Response.Usage.of(100, 4, 0, 0, 3)),
                 reporting(
                     Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"),
                     Response.Usage.of(40, 1),
-                    Response.Usage.of(40, 9))));
+                    Response.Usage.of(40, 9, 0, 0, 6))));
 
     var events = events(r -> segments.removeFirst());
 
     assertEquals(
         List.of(
             Response.Usage.of(100, 1),
-            Response.Usage.of(100, 4),
-            new Response.Usage(140, 5, 0, 0, 145, 40),
-            new Response.Usage(140, 13, 0, 0, 153, 40)),
+            Response.Usage.of(100, 4, 0, 0, 3),
+            new Response.Usage(140, 5, 0, 0, 145, 40, 3),
+            new Response.Usage(140, 13, 0, 0, 153, 40, 9)),
         events.stream()
             .filter(StreamEvent.UsageDelta.class::isInstance)
             .map(event -> ((StreamEvent.UsageDelta) event).usage())
             .toList());
     var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
-    assertEquals(new Response.Usage(140, 13, 0, 0, 153, 40), done.response().usage());
+    assertEquals(new Response.Usage(140, 13, 0, 0, 153, 40, 9), done.response().usage());
   }
 
   @Test

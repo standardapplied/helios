@@ -1,6 +1,6 @@
 == chatStream
 TextDelta[text=Partial]
-UsageDelta[usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006]]
+UsageDelta[usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0]]
 onError TransientStreamException(API response failed: server_error: The model failed to generate a response.) provider=openai
 == chat
 threw TransientStreamException(API response failed: server_error: The model failed to generate a response.) provider=openai

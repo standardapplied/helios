@@ -618,6 +618,8 @@ A `chat` span carries `gen_ai.response.model` when the provider reported the mod
 `Response.metadata()` holds under `Response.RESPONSE_MODEL_KEY`, and `helios.model.first_chunk_ms` and `helios.model.first_text_ms`,
 whole milliseconds from the attempt's start to its first chunk of any kind and to its first text, each absent when the attempt had none;
 tokens per second is yours to derive.
+A `chat` span carries `gen_ai.usage.reasoning_tokens` when the provider reported reasoning tokens, a part of its output tokens
+(`Response.Usage.reasoningTokens()`); the run span carries the run's total.
 A compactor's summary call is a `chat` span with `helios.compaction` = `true` and no turn index.
 `TraceDetail.STANDARD` (the default) records no content; `VERBOSE` adds prompts, answers, tool arguments and results, redacted.
 `PgSpanExporter` stores the spans for `PgTraceStore`; your application adds `io.opentelemetry:opentelemetry-sdk`:

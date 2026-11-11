@@ -113,7 +113,8 @@ public final class SessionTotals {
         delta.cacheCreationInputTokens(),
         delta.cacheReadInputTokens(),
         delta.totalTokens(),
-        0);
+        0,
+        delta.reasoningTokens());
   }
 
   /**

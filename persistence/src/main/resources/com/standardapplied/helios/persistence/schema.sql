@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS helios_traces (
     output_tokens     INT,
     cache_creation_tokens INT,
     cache_read_tokens INT,
+    reasoning_tokens  INT,
     cost_micro_usd    BIGINT,
     thumbs_up_count   INT             NOT NULL DEFAULT 0,
     thumbs_down_count INT             NOT NULL DEFAULT 0
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS helios_spans (
     output_tokens INT,
     cache_creation_tokens INT,
     cache_read_tokens INT,
+    reasoning_tokens INT,
     cost_micro_usd BIGINT
 );
 

@@ -29,6 +29,16 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   had none.
 - `StreamEvent.UsageDelta(Response.Usage)`: the usage a provider reported so far, before its stream
   ended.
+- `Response.Usage.reasoningTokens()`: the part of `outputTokens` a model spent reasoning, from
+  Gemini's `total_thought_tokens`, OpenAI's `output_tokens_details.reasoning_tokens` and Anthropic's
+  `output_tokens_details.thinking_tokens`, zero when none is reported. A count reported above the
+  output count is cut to it. `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` builds
+  one request's usage with it; `plus` sums it. It is part of the output count, so totals, prompt
+  size and cost do not change.
+- `gen_ai.usage.reasoning_tokens` on a `chat` span whose call reported reasoning tokens, and on the
+  run span, the run's total; a subagent's reasoning rolls up into its parent run's.
+- A `reasoning_tokens` column on `helios_traces` and `helios_spans`, written by `PgSpanExporter` and
+  read into `Span.usage()` and `Trace.usage()`.
 
 ### Changed
 
@@ -123,6 +133,24 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Each provider's assistant messages, and the stored session entries holding them, carry one more
   metadata key, `response.model`; no provider sends it back.
 - A `switch` over `StreamEvent` without `default` gains a case.
+- `new Response.Usage(...)` takes seven arguments, the last `reasoningTokens`. Replace a
+  six-argument call with `Usage.of(input, output, cacheCreation, cacheRead)` for one request with no
+  reasoning count, `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` for one with it,
+  `plus` to add requests, and the seven-argument constructor only where an explicit prompt size is
+  needed. A record pattern over `Usage` gains a component. The constructor throws
+  `IllegalArgumentException` when `reasoningTokens` is negative or greater than `outputTokens`.
+- `Usage`'s JSON, in `helios-runtime`'s event stream and result bodies, gains `reasoningTokens`; its
+  `toString` gains `reasoningTokens=`.
+- **DDL delta** (additive; run it before deploying this release, since an exporter writing to a
+  table without the column fails every insert; `schema.sql` creates the column only in a new
+  table):
+
+  ```sql
+  ALTER TABLE helios_traces ADD COLUMN reasoning_tokens INT;
+  ALTER TABLE helios_spans ADD COLUMN reasoning_tokens INT;
+  ```
+
+  A row written by 3.1 reads with zero reasoning tokens.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 

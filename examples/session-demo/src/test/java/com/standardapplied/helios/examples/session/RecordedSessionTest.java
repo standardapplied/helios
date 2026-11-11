@@ -110,7 +110,7 @@ final class RecordedSessionTest {
   }
 
   @Test
-  void claudeProgressLoopTracesTheCacheReadAndTheServedModelOfEachModelCall() {
+  void claudeProgressLoopTracesTheCacheReadTheThinkingAndTheServedModelOfEachModelCall() {
     var capture = new SpanCapture();
 
     var replay = progressLoop(capture.openTelemetry());
@@ -124,8 +124,14 @@ final class RecordedSessionTest {
         calls.stream()
             .map(call -> call.getAttributes().get(AttributeKey.stringKey("gen_ai.response.model")))
             .toList());
+    var reasoning = AttributeKey.longKey("gen_ai.usage.reasoning_tokens");
+    assertEquals(
+        List.of(21L, 95L, 167L, 28L),
+        calls.stream().map(call -> call.getAttributes().get(reasoning)).toList());
     var usage = replay.terminal().usage();
     var run = capture.run().getAttributes();
+    assertEquals(21 + 95 + 167 + 28, usage.reasoningTokens());
+    assertEquals((long) usage.reasoningTokens(), run.get(reasoning));
     assertEquals(
         (long) usage.inputTokens()
             + usage.cacheCreationInputTokens()

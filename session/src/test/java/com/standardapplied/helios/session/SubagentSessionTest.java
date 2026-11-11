@@ -148,7 +148,7 @@ final class SubagentSessionTest {
                 Usage.of(50, 5),
                 new ToolCall("c-lookup", "lookup", Map.of()),
                 new ToolCall("c-score", "score", Map.of()))
-            .withTextTurn("{\"name\":\"ada\",\"score\":9}", Usage.of(60, 6))
+            .withTextTurn("{\"name\":\"ada\",\"score\":9}", Usage.of(60, 6, 0, 0, 4))
             .build();
     var parentModel =
         parentModel()
@@ -173,7 +173,7 @@ final class SubagentSessionTest {
             .filter(message -> message.toolCallId() != null)
             .map(Message::content)
             .toList());
-    assertEquals(new Usage(410, 41, 0, 0, 451, 200), result.usage());
+    assertEquals(new Usage(410, 41, 0, 0, 451, 200, 4), result.usage());
     assertEquals(CostEstimate.ofMicroUsd(410 + 41), result.cost());
 
     var parentRun = capture.only("invoke_agent helios");
@@ -211,7 +211,7 @@ final class SubagentSessionTest {
     var result = run(parent(callingMatching(Usage.of(100, 10)), child).build());
 
     assertInstanceOf(ResultMessage.Success.class, result);
-    assertEquals(new Usage(150, 15, 0, 0, 165, 100), result.usage());
+    assertEquals(new Usage(150, 15, 0, 0, 165, 100, 0), result.usage());
     assertEquals(CostEstimate.ofMicroUsd(110 + 55), result.cost());
   }
 
@@ -253,7 +253,7 @@ final class SubagentSessionTest {
     var overBudget = assertInstanceOf(ResultMessage.ErrorMaxBudgetUsd.class, result);
     assertEquals(1_020, overBudget.microUsdSpent());
     assertEquals(
-        new Usage(1_000, 20, 0, 0, 1_020, 100),
+        new Usage(1_000, 20, 0, 0, 1_020, 100, 0),
         result.usage(),
         "the parent's own last request is its prompt");
     assertEquals("ErrorMaxBudgetUsd", childSpan("helios.terminal"));

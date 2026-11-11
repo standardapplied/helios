@@ -105,22 +105,33 @@ final class AnthropicStreamParser implements SseReader.Parser {
    * StreamEvent.UsageDelta}, or {@code null} when {@code usage} is null or no count is non-zero.
    * {@code message_start} reports the input, cache and initial output counts; each {@code
    * message_delta} reports cumulative counts, which grow past the start's input count when server
-   * tools run, so every count it carries replaces the last. Counts whose sum overflows fail here,
-   * before they replace any count, so the partial stays readable.
+   * tools run, so every count it carries replaces the last. The thinking count, which {@code
+   * message_delta} reports with the output count, is cut to the output count, as a subset over its
+   * total is a server accounting bug. Counts whose sum overflows fail here, before they replace any
+   * count, so the partial stays readable.
    */
   private StreamEvent absorb(ApiUsage usage) {
     if (usage == null) {
       return null;
     }
+    var output = Objects.requireNonNullElse(usage.outputTokens(), counts.outputTokens());
     counts =
         Response.Usage.of(
             Objects.requireNonNullElse(usage.inputTokens(), counts.inputTokens()),
-            Objects.requireNonNullElse(usage.outputTokens(), counts.outputTokens()),
+            output,
             Objects.requireNonNullElse(
                 usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()),
-            Objects.requireNonNullElse(
-                usage.cacheReadInputTokens(), counts.cacheReadInputTokens()));
+            Objects.requireNonNullElse(usage.cacheReadInputTokens(), counts.cacheReadInputTokens()),
+            Math.min(thinking(usage), output));
     return counts.reportsTokens() ? new StreamEvent.UsageDelta(counts) : null;
+  }
+
+  /** The thinking count {@code usage} reports, or the last one when it reports none. */
+  private int thinking(ApiUsage usage) {
+    var details = usage.outputTokensDetails();
+    return details != null && details.thinkingTokens() != null
+        ? details.thinkingTokens()
+        : counts.reasoningTokens();
   }
 
   private StreamEvent messageStop() {
