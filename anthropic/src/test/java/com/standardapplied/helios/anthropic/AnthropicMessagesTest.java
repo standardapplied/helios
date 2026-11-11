@@ -261,6 +261,36 @@ class AnthropicMessagesTest {
     assertEquals(List.of(false, true), thinkingKept(requests, null, current));
   }
 
+  /**
+   * A partial turn, the text a cut call streamed, carries no stamp, so a binding model sends no
+   * reasoning before it, and the partial goes as its text alone.
+   */
+  @Test
+  void aPartialTurnGoesAsItsTextAloneAndABindingModelSendsNoReasoningBeforeIt() {
+    var requests = requests(AnthropicModelId.CLAUDE_OPUS_5_5, ModelConfig.of("k"));
+    var partial =
+        Message.assistant("Once upon", List.of(), Map.of("helios.origin", "partial-turn"));
+    var messages =
+        List.of(
+            Message.user("Next?"),
+            turn("Answer.", currentStamp(requests)),
+            Message.user("Tell me a story."),
+            partial,
+            Message.user("Go on."));
+
+    var assistants =
+        requests.build(messages, List.of(), null).body().messages().stream()
+            .filter(entry -> "assistant".equals(entry.role()))
+            .toList();
+
+    assertEquals(2, assistants.size());
+    assertEquals(List.of("text"), types(assistants.get(0).content()));
+    @SuppressWarnings("unchecked")
+    var partialBlocks = (List<ContentBlock>) assistants.get(1).content();
+    assertEquals(List.of("text"), types(partialBlocks));
+    assertEquals("Once upon", partialBlocks.getFirst().text());
+  }
+
   @Test
   void mythos51SendsNoReasoningFromBeforeItsToolsChanged() {
     var requests = requests(AnthropicModelId.CLAUDE_MYTHOS_5_1, ModelConfig.of("k"));

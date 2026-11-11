@@ -15,7 +15,9 @@ import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.Role;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
@@ -37,6 +39,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -53,10 +56,14 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * The model call at its edges: a parse failure with nothing to echo, a transient failure once the
- * session is cancelled, and the retry back-off ended by cancellation or interruption, or elapsing.
+ * The model call at its edges: a parse failure with nothing to echo, the partial text of a call cut
+ * short, a transient failure once the session is cancelled, and the retry back-off ended by
+ * cancellation or interruption, or elapsing.
  */
 final class ModelCallTest {
 
@@ -138,6 +145,67 @@ final class ModelCallTest {
                 .build()),
         added);
     assertEquals(0, queue.size());
+  }
+
+  @Test
+  void anErrorOutcomeKeepsOnlyItsTextTaggedAsAPartialTurn() {
+    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
+    var before = state.history().snapshot().size();
+
+    call.keepPartial(state, cut(FinishReason.ERROR, "Half a sentence"));
+
+    assertEquals(
+        List.of(
+            Message.assistant(
+                "Half a sentence", List.of(), Map.of("helios.origin", "partial-turn"))),
+        added(before));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", " ", " \n\t "})
+  void anErrorOutcomeWithBlankTextKeepsNothing(String text) {
+    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
+    var before = state.history().snapshot().size();
+
+    call.keepPartial(state, cut(FinishReason.ERROR, text));
+
+    assertEquals(List.of(), added(before));
+  }
+
+  @ParameterizedTest
+  @EnumSource(value = FinishReason.class, mode = EnumSource.Mode.EXCLUDE, names = "ERROR")
+  void anOutcomeOtherThanAnErrorKeepsNothing(FinishReason finishReason) {
+    var call = modelCall(failing(cancellation -> new IllegalStateException("unused")));
+    var before = state.history().snapshot().size();
+
+    call.keepPartial(state, cut(finishReason, "Half a sentence"));
+
+    assertEquals(List.of(), added(before));
+  }
+
+  /**
+   * An outcome ending in {@code finishReason} with {@code text}, a tool call, and the raw content
+   * of a stream that completed just before it was cut: an unanswered {@code tool_use} block and
+   * signed thinking.
+   */
+  private static TurnOutcome cut(FinishReason finishReason, String text) {
+    return new TurnOutcome(
+        finishReason,
+        text,
+        List.of(new ToolCall("c-1", "record", Map.of())),
+        List.of(),
+        Usage.of(3, 2),
+        Map.of(
+            "anthropic.rawContent",
+            "[{\"type\":\"thinking\",\"thinking\":\"t\",\"signature\":\"s\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"c-1\",\"name\":\"record\",\"input\":{}}]"),
+        finishReason == FinishReason.ERROR ? new IllegalStateException("cut") : null,
+        1);
+  }
+
+  private List<Message> added(int before) {
+    var history = state.history().snapshot();
+    return history.subList(before, history.size());
   }
 
   @Test

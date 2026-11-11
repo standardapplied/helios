@@ -13,9 +13,9 @@ import java.util.concurrent.CountDownLatch;
 
 /**
  * Fixed model streams for tests: one-pass {@link CloseableIterator}s of {@link ModelChunk} that
- * yield a chunk sequence and end, yield one and fail, or never end. A test that scripts the same
- * stream twice builds it twice. Script one into a {@link ScriptedModel} with {@link
- * ScriptedModel.Builder#withStreamTurn}.
+ * yield a chunk sequence and end, yield one and fail, or yield one and never end. A test that
+ * scripts the same stream twice builds it twice. Script one into a {@link ScriptedModel} with
+ * {@link ScriptedModel.Builder#withStreamTurn}.
  */
 public final class ModelStreams {
 
@@ -51,16 +51,20 @@ public final class ModelStreams {
   }
 
   /**
-   * A stream that never yields a chunk or ends, as a stalled provider connection does. Its first
-   * {@code hasNext()} runs {@code onFirstPull}, so a test learns the reader is now waiting, then
-   * blocks until the stream is closed or the reading thread interrupted, and throws a {@link
-   * CancellationException}; an interrupt stays set.
+   * A stream that yields {@code chunks} in order, then never yields another or ends, as a stalled
+   * provider connection does. The {@code hasNext()} after the last chunk runs {@code onStall}, so a
+   * test learns the reader has read every chunk and is now waiting, then blocks until the stream is
+   * closed or the reading thread interrupted, and throws a {@link CancellationException}; an
+   * interrupt stays set. {@code onStall} runs once, however often the stream is read after.
    *
-   * @param onFirstPull what to run on the first {@code hasNext()}
+   * @param onStall what to run when the stream stalls
+   * @param chunks the chunks to yield before it stalls; none to stall at the first {@code
+   *     hasNext()}
    * @return the stream
    */
-  public static CloseableIterator<ModelChunk> stalled(Runnable onFirstPull) {
-    return new Stalled(Objects.requireNonNull(onFirstPull, "onFirstPull must not be null"));
+  public static CloseableIterator<ModelChunk> stalled(Runnable onStall, ModelChunk... chunks) {
+    Objects.requireNonNull(onStall, "onStall must not be null");
+    return new Stalled(onStall, sequence(chunks).iterator());
   }
 
   private static List<ModelChunk> sequence(ModelChunk[] chunks) {
@@ -95,28 +99,34 @@ public final class ModelStreams {
 
   private static final class Stalled implements CloseableIterator<ModelChunk> {
 
-    private final Runnable onFirstPull;
+    private final Runnable onStall;
+    private final Iterator<ModelChunk> chunks;
     private final CountDownLatch closed = new CountDownLatch(1);
-    private boolean pulled;
+    private boolean stalled;
 
-    Stalled(Runnable onFirstPull) {
-      this.onFirstPull = onFirstPull;
+    Stalled(Runnable onStall, Iterator<ModelChunk> chunks) {
+      this.onStall = onStall;
+      this.chunks = chunks;
     }
 
     @Override
     public boolean hasNext() {
+      if (chunks.hasNext()) {
+        return true;
+      }
       throw stall();
     }
 
     @Override
     public ModelChunk next() {
-      throw stall();
+      hasNext();
+      return chunks.next();
     }
 
     private CancellationException stall() {
-      if (!pulled) {
-        pulled = true;
-        onFirstPull.run();
+      if (!stalled) {
+        stalled = true;
+        onStall.run();
       }
       try {
         closed.await();

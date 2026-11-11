@@ -190,6 +190,12 @@ final class SessionDemoIntegrationTest {
         memoryBackend.list("/memories/").isEmpty(), "no memory entries should have been written");
   }
 
+  /** The shared model, interrupted mid-answer, accepts the partial turn the next run sends. */
+  @Test
+  void aRunAfterAnInterruptedAnswerIsAccepted() {
+    InterruptedSession.interruptThenGoOn(model);
+  }
+
   private static void seedFakeRepo(Path tmp) throws IOException {
     Files.writeString(
         tmp.resolve("README.md"),
