@@ -1,9 +1,9 @@
 == chatStream
-KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
 KeepAlive[]
 TextDelta[text=Hello, wor]
 KeepAlive[]
-KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41, promptTokens=37]]
 MessageStop[stopReason=LENGTH, usage=Usage[inputTokens=25, outputTokens=4, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=41, promptTokens=37], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=max_tokens, response.model=claude-opus-5-5}, citations=[]]
 onComplete
 == chat

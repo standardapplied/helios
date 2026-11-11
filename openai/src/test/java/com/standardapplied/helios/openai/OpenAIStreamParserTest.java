@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.standardapplied.helios.core.model.FinishReason;
@@ -51,6 +52,18 @@ class OpenAIStreamParserTest {
     assertEquals("Hi", response.content());
     assertEquals(FinishReason.STOP, response.finishReason());
     assertNotNull(response.usage());
+  }
+
+  @Test
+  void theEventsBeforeTheTerminalOneYieldNoUsage() {
+    var parser = new OpenAIStreamParser();
+    var withUsage =
+        "{\"id\":\"resp_1\",\"status\":\"in_progress\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}";
+
+    assertNull(parser.parse("{\"type\":\"response.created\",\"response\":" + withUsage + "}"));
+    assertNull(parser.parse("{\"type\":\"response.in_progress\",\"response\":" + withUsage + "}"));
+    assertNull(parser.partial().usage());
   }
 
   @Test

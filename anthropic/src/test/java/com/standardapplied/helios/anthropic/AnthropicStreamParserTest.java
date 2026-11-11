@@ -230,6 +230,35 @@ class AnthropicStreamParserTest {
   }
 
   @Test
+  void eachEventReportingUsageYieldsTheCumulativeCountsSoFar() {
+    var started =
+        parser.parse(
+            "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,"
+                + "\"cache_creation_input_tokens\":5,\"cache_read_input_tokens\":7,"
+                + "\"output_tokens\":1}}}");
+    var streamedText =
+        parser.parse(
+            "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+                + "\"usage\":{\"output_tokens\":15}}");
+    var withoutUsage =
+        parser.parse("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 1, 5, 7)), started);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 15, 5, 7)), streamedText);
+    assertNull(withoutUsage);
+  }
+
+  @Test
+  void aMessageStartReportingNoTokensYieldsNoUsage() {
+    assertNull(
+        parser.parse(
+            "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,"
+                + "\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,"
+                + "\"output_tokens\":0}}}"));
+    assertNull(parser.parse("{\"type\":\"message_start\",\"message\":{\"id\":\"m\"}}"));
+  }
+
+  @Test
   void tokenCountsWhoseSumOverflowsEndTheStreamKeepingTheEarlierCounts() {
     parser.parse("{\"type\":\"message_start\",\"message\":{\"usage\":{\"output_tokens\":1}}}");
 

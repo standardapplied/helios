@@ -19,7 +19,8 @@ import java.util.Objects;
 
 /**
  * Parses one Messages API stream, one event at a time, into {@link StreamEvent}s: text, thinking
- * and tool calls as their blocks stream and close, and the assembled response at {@code
+ * and tool calls as their blocks stream and close, the usage reported so far at {@code
+ * message_start} and each {@code message_delta}, and the assembled response at {@code
  * message_stop}. The stream succeeds only there, with a stop reason the assembler knows and no tool
  * use still open; an {@code error} event, an unreadable event, tool input that is not a JSON object
  * and any other {@code message_stop} end it in an error. A retryable API error ({@code
@@ -79,13 +80,14 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent messageStart(MessagesResponse message) {
-    if (message != null) {
-      absorb(message.usage());
-      if (!Strings.isBlank(message.model())) {
-        model = message.model();
-      }
+    if (message == null) {
+      return null;
     }
-    return null;
+    var reported = absorb(message.usage());
+    if (!Strings.isBlank(message.model())) {
+      model = message.model();
+    }
+    return reported;
   }
 
   private StreamEvent messageDelta(ContentDelta delta, ApiUsage usage) {
@@ -96,20 +98,20 @@ final class AnthropicStreamParser implements SseReader.Parser {
     if (delta != null && delta.container() != null) {
       container = delta.container();
     }
-    absorb(usage);
-    return null;
+    return absorb(usage);
   }
 
   /**
-   * The token counts {@code usage} reports. {@code message_start} reports the input, cache and
-   * initial output counts; each {@code message_delta} reports cumulative counts, which grow past
-   * the start's input count when server tools run, so every count it carries replaces the last.
-   * Counts whose sum overflows fail here, before they replace any count, so the partial stays
-   * readable.
+   * The token counts {@code usage} reports, as the usage the stream reported so far, or {@code
+   * null} when it reports none or nothing has reported a token yet. {@code message_start} reports
+   * the input, cache and initial output counts; each {@code message_delta} reports cumulative
+   * counts, which grow past the start's input count when server tools run, so every count it
+   * carries replaces the last. Counts whose sum overflows fail here, before they replace any count,
+   * so the partial stays readable.
    */
-  private void absorb(ApiUsage usage) {
+  private StreamEvent absorb(ApiUsage usage) {
     if (usage == null) {
-      return;
+      return null;
     }
     counts =
         Response.Usage.of(
@@ -119,6 +121,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
                 usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()),
             Objects.requireNonNullElse(
                 usage.cacheReadInputTokens(), counts.cacheReadInputTokens()));
+    return counts.reportsTokens() ? new StreamEvent.UsageDelta(counts) : null;
   }
 
   private StreamEvent messageStop() {

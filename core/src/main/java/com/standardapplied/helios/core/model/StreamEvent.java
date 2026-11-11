@@ -56,6 +56,25 @@ public sealed interface StreamEvent {
   record KeepAlive() implements StreamEvent {}
 
   /**
+   * The usage the provider has reported so far: a cumulative snapshot, which replaces any earlier
+   * one. A parser yields one each time its wire reports usage before the stream's terminal event,
+   * so a reader that stops early keeps what was reported. It does not end the stream.
+   *
+   * @param usage the usage reported so far
+   */
+  record UsageDelta(Response.Usage usage) implements StreamEvent {
+
+    /**
+     * Creates a usage report.
+     *
+     * @throws NullPointerException if {@code usage} is null
+     */
+    public UsageDelta {
+      Objects.requireNonNull(usage, "usage must not be null");
+    }
+  }
+
+  /**
    * The stream is complete.
    *
    * @param response the final aggregated response (accumulated text, tool calls, usage, finish
