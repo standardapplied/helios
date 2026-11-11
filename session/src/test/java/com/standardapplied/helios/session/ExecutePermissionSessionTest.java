@@ -230,12 +230,7 @@ final class ExecutePermissionSessionTest {
   void aUsersAllowRuleAddedToTheWorkspacePresetRunsWithoutAQuestion() {
     var preset = Permission.defaultInWorkspace();
     var permission =
-        Permission.newBuilder(preset.mode())
-            .withAllow(preset.allow().toArray(PermissionRule[]::new))
-            .withAllow(PermissionRule.of(ExecuteTool.NAME, "BASH/ls"))
-            .withAsk(preset.ask().toArray(PermissionRule[]::new))
-            .withDeny(preset.deny().toArray(PermissionRule[]::new))
-            .build();
+        preset.toBuilder().withAllow(PermissionRule.of(ExecuteTool.NAME, "BASH/ls")).build();
 
     var run =
         run(

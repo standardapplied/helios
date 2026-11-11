@@ -162,6 +162,39 @@ final class PermissionTypesTest {
     assertThrows(UnsupportedOperationException.class, () -> p.allow().add(READ_DOCS));
   }
 
+  @Test
+  void toBuilderBuildsAnEqualPermission() {
+    var original =
+        Permission.newBuilder(PermissionMode.PLAN)
+            .withAllow(READ_SRC, READ_DOCS)
+            .withAsk(WRITE_TMP, WRITE_ANY)
+            .withDeny(EXECUTE_RM, READ_SECRETS)
+            .build();
+
+    assertEquals(original, original.toBuilder().build());
+  }
+
+  @Test
+  void rulesAddedAfterToBuilderFollowTheCopiedOnesInTheirOwnList() {
+    var original =
+        Permission.newBuilder(PermissionMode.ACCEPT_EDITS)
+            .withAllow(READ_SRC)
+            .withAsk(WRITE_TMP)
+            .withDeny(EXECUTE_RM)
+            .build();
+
+    var layered =
+        original.toBuilder().withAllow(READ_DOCS).withAsk(WRITE_ANY).withDeny(READ_SECRETS).build();
+
+    assertEquals(PermissionMode.ACCEPT_EDITS, layered.mode());
+    assertEquals(List.of(READ_SRC, READ_DOCS), layered.allow());
+    assertEquals(List.of(WRITE_TMP, WRITE_ANY), layered.ask());
+    assertEquals(List.of(EXECUTE_RM, READ_SECRETS), layered.deny());
+    assertEquals(List.of(READ_SRC), original.allow());
+    assertEquals(List.of(WRITE_TMP), original.ask());
+    assertEquals(List.of(EXECUTE_RM), original.deny());
+  }
+
   @ParameterizedTest
   @EnumSource(PermissionMode.class)
   void anEmptyBuilderBuildsTheEmptyPolicy(PermissionMode mode) {
