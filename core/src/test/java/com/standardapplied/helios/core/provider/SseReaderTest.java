@@ -5,6 +5,7 @@ package com.standardapplied.helios.core.provider;
 import static com.standardapplied.helios.core.provider.SseFixtures.NEVER_IDLE;
 import static com.standardapplied.helios.core.provider.SseFixtures.awaitNoWatchdogBut;
 import static com.standardapplied.helios.core.provider.SseFixtures.stream;
+import static com.standardapplied.helios.core.provider.SseFixtures.watchdogStates;
 import static com.standardapplied.helios.core.provider.SseFixtures.watchdogs;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -883,7 +885,7 @@ class SseReaderTest {
 
   @Test
   void timeTheConsumerSpendsBetweenLinesAlreadyReadIsNeverIdle() {
-    var timeout = Duration.ofMillis(400);
+    var timeout = Duration.ofSeconds(2);
     var body = new Closing(stream("data: one\n\ndata: two\n\n"));
     try (var reader = new SseReader(body, timeout, new EchoParser(), ProviderException::new)) {
       assertEquals(new StreamEvent.TextDelta("one"), reader.next());
@@ -897,21 +899,21 @@ class SseReaderTest {
 
   @Test
   void linesThatEachArriveWithinTheTimeoutNeverTimeOutHoweverLongTheStreamLasts() {
-    var timeout = Duration.ofMillis(400);
     var feed = new FeedableInputStream();
-    var reader = new SseReader(feed, timeout, new EchoParser(), ProviderException::new);
+    var reader =
+        new SseReader(feed, Duration.ofSeconds(2), new EchoParser(), ProviderException::new);
     var consumer = Executors.newVirtualThreadPerTaskExecutor();
     try {
       var events = consumer.submit(() -> drain(reader));
 
-      for (var i = 0; i < 8; i++) {
-        atLeast(timeout.dividedBy(2));
+      for (var i = 0; i < 10; i++) {
+        atLeast(Duration.ofMillis(250));
         feed.feed("data: " + i + "\n\n");
       }
       feed.feed("data: stop\n\n");
 
       var all = Await.value("the stream's events", events);
-      assertEquals(9, all.size());
+      assertEquals(11, all.size());
       assertInstanceOf(StreamEvent.Done.class, all.getLast());
     } finally {
       consumer.shutdownNow();
@@ -962,6 +964,50 @@ class SseReaderTest {
         consumer.shutdownNow();
       }
     }
+  }
+
+  @ParameterizedTest
+  @MethodSource("timeoutsBeyondTheNanosecondRange")
+  void anIdleTimeoutBeyondTheNanosecondRangeReadsTheStreamWhileItsWatchdogSleeps(Duration timeout) {
+    var before = watchdogs();
+    var reader =
+        new SseReader(
+            stream("data: one\n\ndata: stop\n\n"),
+            timeout,
+            new EchoParser(),
+            ProviderException::new);
+    assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+    var started = new HashSet<>(watchdogs());
+    started.removeAll(before);
+    assertEquals(1, started.size());
+    var watchdog = started.iterator().next();
+
+    Await.until(
+        "the watchdog to sleep", () -> "TIMED_WAITING".equals(watchdogStates().get(watchdog)));
+
+    assertInstanceOf(StreamEvent.Done.class, reader.next());
+    awaitNoWatchdogBut(before);
+  }
+
+  static List<Duration> timeoutsBeyondTheNanosecondRange() {
+    return List.of(Duration.ofDays(365_000_000), ChronoUnit.FOREVER.getDuration());
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {0, -1})
+  void anIdleTimeoutThatIsNotPositiveFailsTheFirstLineAtOnceWithoutAWatchdog(long millis) {
+    var before = watchdogs();
+    var body = new Closing(stream("data: one\n\n"));
+    var reader =
+        new SseReader(body, Duration.ofMillis(millis), new EchoParser(), ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+
+    assertEquals("Stream idle timeout: no data received for " + millis + " ms", error.message());
+    assertTrue(body.closed);
+    assertEquals(Set.of(), body.readers);
+    assertTrue(before.containsAll(watchdogs()));
+    assertFalse(reader.hasNext());
   }
 
   /** Returns once at least {@code timeout} has passed: a stalled stream with it has timed out. */

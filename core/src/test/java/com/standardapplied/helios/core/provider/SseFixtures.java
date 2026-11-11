@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -32,7 +33,8 @@ final class SseFixtures {
   static final Duration NEVER_IDLE = Duration.ofMinutes(10);
 
   private static final Pattern WATCHDOG =
-      Pattern.compile("\"tid\": \"(\\d+)\"[^{}\\[]*?\"name\": \"helios-sse-idle\"");
+      Pattern.compile(
+          "\"tid\": \"(\\d+)\"[^{}\\[]*?\"name\": \"helios-sse-idle\",\\s*\"state\": \"(\\w+)\"");
 
   private SseFixtures() {}
 
@@ -101,11 +103,16 @@ final class SseFixtures {
     }
   }
 
-  /**
-   * The thread ids of the live idle watchdogs, read from the JVM's JSON thread dump, the one view
-   * that lists virtual threads.
-   */
+  /** The thread ids of the live idle watchdogs. */
   static Set<Long> watchdogs() {
+    return watchdogStates().keySet();
+  }
+
+  /**
+   * The state of each live idle watchdog by thread id, read from the JVM's JSON thread dump, the
+   * one view that lists virtual threads.
+   */
+  static Map<Long, String> watchdogStates() {
     try {
       var dump = Files.createTempDirectory("threads").resolve("dump.json");
       ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
@@ -116,8 +123,8 @@ final class SseFixtures {
       return WATCHDOG
           .matcher(text)
           .results()
-          .map(match -> Long.parseLong(match.group(1)))
-          .collect(Collectors.toSet());
+          .collect(
+              Collectors.toMap(match -> Long.parseLong(match.group(1)), match -> match.group(2)));
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
