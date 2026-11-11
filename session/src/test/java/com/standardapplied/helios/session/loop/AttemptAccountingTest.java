@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -35,8 +36,9 @@ import org.junit.jupiter.api.Test;
  * reported, after the model its provider reported serving it and the time from its start to its
  * first chunk and first text are recorded, on every way {@link ModelCall#stream} returns: retries
  * that run out, a transient failure on a run already stopped, a run cancelled while an attempt is
- * accounted or before its back-off, and a run interrupted while a retry is announced under a zero
- * back-off.
+ * accounted or before its back-off, a run interrupted while a retry is announced under a zero
+ * back-off, and a run whose spend, its child runs' included, exceeds its budget once an attempt is
+ * accounted or after its back-off.
  */
 final class AttemptAccountingTest {
 
@@ -71,7 +73,7 @@ final class AttemptAccountingTest {
             QueryEvent.ModelCallEnded.class,
             QueryEvent.TurnRetried.class,
             QueryEvent.ModelCallEnded.class),
-        events.stream().map(Object::getClass).toList());
+        eventTypes());
   }
 
   /** The retried attempt starts as the first ends, 120 ms in, and is timed from there. */
@@ -191,11 +193,100 @@ final class AttemptAccountingTest {
     assertEquals(REPORTED, state.totals().usage());
   }
 
+  @Test
+  void anAttemptThatTakesTheRunOverItsBudgetIsNotRetried() {
+    var model = failingThrice();
+
+    var turn = stream(model, event -> {}, budgeted(50, Duration.ZERO));
+
+    assertEquals(2, turn.streamAttempts());
+    assertEquals(
+        List.of(
+            QueryEvent.ModelCallEnded.class,
+            QueryEvent.TurnRetried.class,
+            QueryEvent.ModelCallEnded.class),
+        eventTypes());
+    assertEquals(2, model.calls().size());
+  }
+
+  @Test
+  void anAttemptThatReachesTheBudgetExactlyIsRetried() {
+    var model = failingThrice();
+
+    var turn = stream(model, event -> {}, budgeted(88, Duration.ZERO));
+
+    assertEquals(3, turn.streamAttempts());
+    assertEquals(3, model.calls().size());
+  }
+
+  /** Under a back-off of a day, returning at all proves no back-off ran. */
+  @Test
+  void anAttemptOverTheBudgetReturnsWithoutBackingOff() {
+    var model = failingThrice();
+
+    var turn = stream(model, event -> {}, budgeted(40, Duration.ofDays(1)));
+
+    assertEquals(1, turn.streamAttempts());
+    assertEquals(List.of(QueryEvent.ModelCallEnded.class), eventTypes());
+    assertEquals(1, model.calls().size());
+  }
+
+  @Test
+  void aChildRunsSpendAddedAsAnAttemptIsAccountedCountsAgainstItsRetry() {
+    var model = failingThrice();
+
+    var turn =
+        stream(model, childSpendsAt(QueryEvent.ModelCallEnded.class), budgeted(50, Duration.ZERO));
+
+    assertEquals(1, turn.streamAttempts());
+    assertEquals(List.of(QueryEvent.ModelCallEnded.class), eventTypes());
+    assertEquals(CostEstimate.ofMicroUsd(44 + 10), state.totals().cost());
+  }
+
+  @Test
+  void aChildRunsSpendAddedWhileARetryIsAnnouncedStopsTheNextAttempt() {
+    var model = failingThrice();
+
+    var turn =
+        stream(model, childSpendsAt(QueryEvent.TurnRetried.class), budgeted(50, Duration.ZERO));
+
+    assertEquals(1, turn.streamAttempts());
+    assertEquals(
+        List.of(QueryEvent.ModelCallEnded.class, QueryEvent.TurnRetried.class), eventTypes());
+    assertEquals(1, model.calls().size());
+  }
+
   /** A model whose first two attempts report {@link #REPORTED} and fail transiently. */
   private static ScriptedModel.Builder failingTwice() {
     return ScriptedModel.newBuilder()
         .withStreamTurn(ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)))
         .withStreamTurn(ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)));
+  }
+
+  /** A model whose three attempts each report {@link #REPORTED} and fail transiently. */
+  private static ScriptedModel failingThrice() {
+    return failingTwice()
+        .withStreamTurn(ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)))
+        .build();
+  }
+
+  /** Three attempts backing off {@code backoff} each, under a budget of {@code microUsd}. */
+  private static SessionLimits budgeted(long microUsd, Duration backoff) {
+    return SessionLimits.newBuilder()
+        .withStreamRetryPolicy(new StreamRetryPolicy(3, Backoff.fixed(backoff), 0.0))
+        .withMaxBudgetMicroUsd(microUsd)
+        .withStopGrace(NOT_REACHED)
+        .build();
+  }
+
+  /** At each event of {@code type}, a child run of this run spends 10 µUSD. */
+  private Consumer<QueryEvent> childSpendsAt(Class<? extends QueryEvent> type) {
+    return event -> {
+      if (type.isInstance(event)) {
+        new SessionTotals(clock, Optional.of(state.totals()))
+            .accumulateCost(CostEstimate.ofMicroUsd(10));
+      }
+    };
   }
 
   private Consumer<QueryEvent> cancelAt(Class<? extends QueryEvent> type) {
@@ -206,12 +297,23 @@ final class AttemptAccountingTest {
     };
   }
 
-  /**
-   * One turn's model call over {@code model} under two attempts with no back-off, each event
-   * recorded, then handed to {@code onEvent}; the reader's close is always waited for.
-   */
+  /** One turn's model call over {@code model} under two attempts with no back-off. */
   private TurnOutcome stream(ScriptedModel.Builder model, Consumer<QueryEvent> onEvent) {
-    var built = model.build();
+    return stream(
+        model.build(),
+        onEvent,
+        SessionLimits.newBuilder()
+            .withStreamRetryPolicy(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
+            .withStopGrace(NOT_REACHED)
+            .build());
+  }
+
+  /**
+   * One turn's model call over {@code built} under {@code limits}, each event recorded, then handed
+   * to {@code onEvent}; the reader's close is always waited for.
+   */
+  private TurnOutcome stream(
+      ScriptedModel built, Consumer<QueryEvent> onEvent, SessionLimits limits) {
     var collaborators =
         new LoopCollaborators(
             HookRegistry.empty(),
@@ -238,12 +340,11 @@ final class AttemptAccountingTest {
             null);
     state.history().append(Message.user("go"));
     state.beginTurn();
-    var limits =
-        SessionLimits.newBuilder()
-            .withStreamRetryPolicy(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
-            .withStopGrace(NOT_REACHED)
-            .build();
     return call.stream(state, limits, List.of());
+  }
+
+  private List<Class<?>> eventTypes() {
+    return events.stream().<Class<?>>map(Object::getClass).toList();
   }
 
   /** The usage of each attempt's {@link QueryEvent.ModelCallEnded}, in order. */
