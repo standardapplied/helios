@@ -112,13 +112,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - A Gemini thinking call reports more output tokens and costs more than in 3.1.0, by its thinking;
   a budget tuned on 3.1.0 numbers stops sooner. `totalTokens` now equals Gemini's `total_tokens`
   when it reports no tool-use tokens.
-- A run's usage, cost and `maxBudgetMicroUsd` check now include failed, retried and cut attempts, so a
-  budget can end a run sooner (the budget is still checked after the turn, not between attempts),
-  and `CostCalculator.cost` is called for each retried attempt, with zero usage when it reported
-  none. A `chatStream` that fails after reporting usage yields one `ModelChunk.UsageDelta` just
-  before its exception. `UsageDelta` is a cumulative snapshot: a `Model` that yields several makes
-  each the total so far. On a failed turn that reported usage, a `PostModelTurnHook` sees that
-  usage, and its prompt size anchors the history's token count.
+- A run's usage, cost and `maxBudgetMicroUsd` check now include failed, retried and cut attempts, so
+  a budget can end a run sooner, and `CostCalculator.cost` is called for each retried attempt, with
+  zero usage when it reported none. A `chatStream` that fails after reporting usage yields one
+  `ModelChunk.UsageDelta` just before its exception. `UsageDelta` is a cumulative snapshot: a
+  `Model` that yields several makes each the total so far. On a failed turn that reported usage, a
+  `PostModelTurnHook` sees that usage, and its prompt size anchors the history's token count.
 - Each provider's assistant messages, and the stored session entries holding them, carry one more
   metadata key, `response.model`; no provider sends it back.
 - A `switch` over `StreamEvent` without `default` gains a case.
