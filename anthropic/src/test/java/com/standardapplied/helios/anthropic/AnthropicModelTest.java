@@ -17,6 +17,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class AnthropicModelTest extends BoundedErrorBodyContract {
 
@@ -67,33 +69,25 @@ class AnthropicModelTest extends BoundedErrorBodyContract {
     assertEquals("cachePolicy is required", ex.getMessage());
   }
 
-  @Test
-  void fable51RejectsForcedToolChoiceAtConstruction() {
-    for (var choice : List.of(ToolChoice.any(), ToolChoice.required("my_tool"))) {
-      var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(choice).build();
-      var ex =
-          assertThrows(
-              IllegalArgumentException.class,
-              () -> model(AnthropicModelId.CLAUDE_FABLE_5_1, config));
-      assertTrue(ex.getMessage().contains("claude-fable-5-1"), ex.getMessage());
+  @ParameterizedTest
+  @EnumSource(
+      names = {
+        "CLAUDE_FABLE_5_2",
+        "CLAUDE_MYTHOS_5_2",
+        "CLAUDE_FABLE_5_1",
+        "CLAUDE_MYTHOS_5_1",
+        "CLAUDE_OPUS_5_5",
+        "CLAUDE_SONNET_5_5"
+      })
+  void aModelRejectingForcedToolChoiceFailsAtConstruction(AnthropicModelId modelId) {
+    for (var forced : List.of(ToolChoice.any(), ToolChoice.required("search_profiles"))) {
+      var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(forced).build();
+
+      var ex = assertThrows(IllegalArgumentException.class, () -> model(modelId, config));
+      assertTrue(ex.getMessage().contains(modelId.id()), ex.getMessage());
       assertTrue(ex.getMessage().contains("forced tool use"), ex.getMessage());
-    }
-    var wireConfig =
-        ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(ToolChoice.any()).build();
-    assertThrows(IllegalArgumentException.class, () -> model("claude-mythos-5-1", wireConfig));
-  }
-
-  @Test
-  void the55ModelsRejectForcedToolChoiceAtConstruction() {
-    for (var modelId :
-        List.of(AnthropicModelId.CLAUDE_OPUS_5_5, AnthropicModelId.CLAUDE_SONNET_5_5)) {
-      for (var forced : List.of(ToolChoice.any(), ToolChoice.required("search_profiles"))) {
-        var config = ModelConfig.newBuilder().withApiKey("test-key").withToolChoice(forced).build();
-
-        var ex = assertThrows(IllegalArgumentException.class, () -> model(modelId, config));
-        assertTrue(ex.getMessage().contains(modelId.id()), ex.getMessage());
-        assertTrue(ex.getMessage().contains("ToolChoice.auto()"), ex.getMessage());
-      }
+      assertTrue(ex.getMessage().contains("ToolChoice.auto()"), ex.getMessage());
+      assertThrows(IllegalArgumentException.class, () -> model(modelId.id(), config));
     }
   }
 

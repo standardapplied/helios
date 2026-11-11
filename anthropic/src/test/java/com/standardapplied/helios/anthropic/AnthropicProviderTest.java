@@ -73,9 +73,10 @@ class AnthropicProviderTest {
     assertEquals(
         "Claude model "
             + id
-            + " is not supported: Helios supports Claude 5 and later (claude-fable-5-1,"
-            + " claude-mythos-5-1, claude-fable-5, claude-mythos-5, claude-opus-5-5,"
-            + " claude-opus-5, claude-sonnet-5-5, claude-sonnet-5, claude-haiku-5-5)",
+            + " is not supported: Helios supports Claude 5 and later (claude-fable-5-2,"
+            + " claude-mythos-5-2, claude-fable-5-1, claude-mythos-5-1, claude-fable-5,"
+            + " claude-mythos-5, claude-opus-5-5, claude-opus-5, claude-sonnet-5-5,"
+            + " claude-sonnet-5, claude-haiku-5-5)",
         thrown.getMessage());
     assertFalse(provider.supports(id));
   }
