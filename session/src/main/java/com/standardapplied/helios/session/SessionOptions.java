@@ -117,6 +117,9 @@ import java.util.Optional;
  *     registers the built-in {@code Agent} tool, which runs one of them per call (see {@link
  *     Builder#withSubagent}). Copied, non-null with no null element, unique by name, defaults to
  *     none
+ * @param skills the skills the model may load; with at least one, the system prompt ends with their
+ *     catalog and the session registers the built-in {@code Skill} tool (see {@link
+ *     Builder#withSkills}). Copied, non-null with no null element, unique by name, defaults to none
  */
 public record SessionOptions(
     Model model,
@@ -141,18 +144,19 @@ public record SessionOptions(
     String agentName,
     TraceDetail traceDetail,
     Map<String, String> traceAttributes,
-    List<Subagent> subagents) {
+    List<Subagent> subagents,
+    List<Skill> skills) {
 
   /**
    * Canonical constructor.
    *
-   * @throws NullPointerException if any argument is null or {@code tools}, {@code hooks} or {@code
-   *     subagents} holds a null element
+   * @throws NullPointerException if any argument is null or {@code tools}, {@code hooks}, {@code
+   *     subagents} or {@code skills} holds a null element
    * @throws IllegalArgumentException if {@code sessionId} breaks the session-id rule, {@code
    *     maxQueuedUserMessages} is not positive, {@code limits} sets a budget while {@code
    *     costCalculator} is {@link CostCalculator#ZERO}, {@code agentName} is blank, a key of {@code
-   *     traceAttributes} does not start with {@code app.}, or {@code subagents} break a rule of
-   *     {@link Builder#withSubagent}
+   *     traceAttributes} does not start with {@code app.}, {@code subagents} break a rule of {@link
+   *     Builder#withSubagent}, or two skills share a name
    */
   public SessionOptions {
     Objects.requireNonNull(model, "model must not be null");
@@ -180,6 +184,17 @@ public record SessionOptions(
     traceAttributes = appAttributes(traceAttributes);
     subagents = List.copyOf(Objects.requireNonNull(subagents, "subagents must not be null"));
     requireValidSubagents(subagents, tools, limits);
+    skills = List.copyOf(Objects.requireNonNull(skills, "skills must not be null"));
+    requireUniqueSkillNames(skills);
+  }
+
+  private static void requireUniqueSkillNames(List<Skill> skills) {
+    var names = new HashSet<String>();
+    for (var skill : skills) {
+      if (!names.add(skill.name())) {
+        throw new IllegalArgumentException("duplicate skill name: " + skill.name());
+      }
+    }
   }
 
   /**
@@ -298,7 +313,8 @@ public record SessionOptions(
         .withAgentName(agentName)
         .withTraceDetail(traceDetail)
         .withTraceAttributes(traceAttributes)
-        .withSubagents(subagents);
+        .withSubagents(subagents)
+        .withSkills(skills);
   }
 
   /**
@@ -771,13 +787,62 @@ public record SessionOptions(
     }
 
     /**
+     * Set the full skill list. Replaces any previously-added skills. Defaults to none.
+     *
+     * <p>With at least one skill, the session's system prompt is the host's prompt, a blank line
+     * and the catalog of every skill's name and description in this order (the catalog alone
+     * without a host prompt), and the session registers the built-in {@code Skill} tool. A call
+     * {@code {"skill": <name>}} loads the skill: it answers with the skill's instructions, its
+     * directory when it has one, and the list of its files; a call that also names a {@code file}
+     * listed there answers with that file's text. A skill already loaded earlier in the
+     * conversation answers that it is loaded and reads nothing. It is a {@link
+     * com.standardapplied.helios.session.tools.ToolCategory#READ READ} tool keyed {@code
+     * Skill(<name>)} or {@code Skill(<name>/<file>)}, so it runs without asking in every mode but
+     * {@code LOCKED_DOWN}, a permission rule allows or denies one skill or its files, and hooks
+     * apply to it as to any tool. A host tool named {@code Skill} fails {@link AgentSession#open}.
+     *
+     * <p>A compaction that removes what the model loaded gets it put back: right after the
+     * compacted history's leading system messages, one user message per skill, tagged {@link
+     * com.standardapplied.helios.session.store.MessageOrigin#SKILL}, with the text the model was
+     * given. A host that sends a skill's instructions in its own message, for a user-typed {@code
+     * /skill-name}, sends no activation, so a compaction does not put that message back.
+     *
+     * <p>Skills are the host's trust decision: what a skill says reaches the model as instructions,
+     * and no preset adds one. Helios runs no skill code; a script runs through {@code Execute}
+     * under the session's permission policy, at the path its activation names.
+     *
+     * @param skills non-null list of skills
+     * @return this builder
+     * @throws NullPointerException if {@code skills} is null or contains null elements
+     */
+    public Builder withSkills(List<Skill> skills) {
+      var copy = List.copyOf(Objects.requireNonNull(skills, "skills must not be null"));
+      wiring.skills.clear();
+      wiring.skills.addAll(copy);
+      return this;
+    }
+
+    /**
+     * Append a skill the model may load, as {@link #withSkills} describes.
+     *
+     * @param skill non-null skill
+     * @return this builder
+     * @throws NullPointerException if {@code skill} is null
+     */
+    public Builder withSkill(Skill skill) {
+      wiring.skills.add(Objects.requireNonNull(skill, "skill must not be null"));
+      return this;
+    }
+
+    /**
      * Build the immutable record.
      *
      * @return the options
      * @throws IllegalStateException if {@code model} was never set
      * @throws IllegalArgumentException if the limits set a budget and no cost calculator is set;
      *     with subagents, if two share a name, a tool of the options is named {@code Agent}, or the
-     *     limits set a budget and a subagent's cost calculator is {@link CostCalculator#ZERO}
+     *     limits set a budget and a subagent's cost calculator is {@link CostCalculator#ZERO}; if
+     *     two skills share a name
      */
     public SessionOptions build() {
       if (model == null) {
@@ -811,14 +876,16 @@ public record SessionOptions(
           wiring.agentName,
           wiring.traceDetail,
           wiring.traceAttributes,
-          wiring.subagents);
+          wiring.subagents,
+          wiring.skills);
     }
 
     /**
      * What {@code SessionWiring} turns into the session's collaborators when it opens: the built-in
      * tools the session registers when switched on (the memory tools over a backend, {@code
-     * Execute} over a provider, {@code AskUserQuestion}, and {@code Agent} over subagents), and its
-     * spans: where they go, what its runs are named and labelled and how much content they carry.
+     * Execute} over a provider, {@code AskUserQuestion}, {@code Agent} over subagents and {@code
+     * Skill} over skills), and its spans: where they go, what its runs are named and labelled and
+     * how much content they carry.
      */
     private static final class Wiring {
 
@@ -830,6 +897,7 @@ public record SessionOptions(
       private TraceDetail traceDetail = TraceDetail.STANDARD;
       private Map<String, String> traceAttributes = Map.of();
       private final List<Subagent> subagents = new ArrayList<>();
+      private final List<Skill> skills = new ArrayList<>();
     }
   }
 }

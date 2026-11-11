@@ -12,8 +12,9 @@ import java.util.regex.Pattern;
  * runs one fresh child session from {@code options}, under a fresh {@code sess-} id and with {@code
  * name} as its {@linkplain SessionOptions#agentName() agent name}, sends it the call's prompt,
  * waits for its run to end and closes it. Nothing is inherited from the parent: {@code options} is
- * the child's whole composition, its model, system prompt, tools, permission, hooks, limits, output
- * schema and store included.
+ * the child's whole composition, its model, system prompt, tools, skills, permission, hooks,
+ * limits, output schema and store included, so a child can load only the skills in {@code options},
+ * never the parent's.
  *
  * <p>A child has no one to answer a question: a call its permission policy answers with {@code ASK}
  * is denied, with a reason its model reads, so allow in {@code options}' permission every tool the
