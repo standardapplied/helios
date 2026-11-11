@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.core.common.CostCalculator;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -129,7 +130,7 @@ class ResponseTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new Response.Usage(counts[0], counts[1], counts[2], counts[3], total, 0));
+            () -> new Response.Usage(counts[0], counts[1], counts[2], counts[3], total, 0, 0));
     assertTrue(ex.getMessage().startsWith("token counts must be non-negative, got ["));
   }
 
@@ -139,19 +140,20 @@ class ResponseTest {
 
     assertThrows(
         ArithmeticException.class,
-        () -> new Response.Usage(quarter, quarter, quarter, quarter, Integer.MAX_VALUE, 0));
+        () -> new Response.Usage(quarter, quarter, quarter, quarter, Integer.MAX_VALUE, 0, 0));
   }
 
   @Test
   void usageRejectsATotalThatIsNotTheSumOfItsCounts() {
     var ex =
-        assertThrows(IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 11, 8));
+        assertThrows(
+            IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 11, 8, 0));
     assertEquals("totalTokens must be the sum of the four counts, 10, got 11", ex.getMessage());
   }
 
   @Test
   void usageAcceptsATotalThatIsTheSumOfItsCounts() {
-    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10, 8));
+    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10, 8, 0));
     assertEquals(10, Response.Usage.of(1, 2, 3, 4).totalTokens());
   }
 
@@ -160,21 +162,71 @@ class ResponseTest {
   void usageRejectsAPromptSizeOutsideTheInputCounts(long promptTokens) {
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> new Response.Usage(1, 2, 3, 4, 10, promptTokens));
+            IllegalArgumentException.class,
+            () -> new Response.Usage(1, 2, 3, 4, 10, promptTokens, 0));
     assertEquals("promptTokens must lie in [0, 8], got " + promptTokens, ex.getMessage());
   }
 
   @ParameterizedTest
   @ValueSource(longs = {0, 8})
   void usageAcceptsAPromptSizeWithinTheInputCounts(long promptTokens) {
-    assertEquals(promptTokens, new Response.Usage(1, 2, 3, 4, 10, promptTokens).promptTokens());
+    assertEquals(promptTokens, new Response.Usage(1, 2, 3, 4, 10, promptTokens, 0).promptTokens());
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {-1, 3})
+  void usageRejectsAReasoningCountOutsideTheOutputCount(int reasoningTokens) {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new Response.Usage(1, 2, 3, 4, 10, 8, reasoningTokens));
+    assertEquals(
+        "reasoningTokens must lie in [0, outputTokens 2], got " + reasoningTokens, ex.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 2})
+  void usageAcceptsAReasoningCountWithinTheOutputCount(int reasoningTokens) {
+    assertEquals(
+        reasoningTokens, new Response.Usage(1, 2, 3, 4, 10, 8, reasoningTokens).reasoningTokens());
+  }
+
+  @Test
+  void usageOfWithoutAReasoningCountReportsNone() {
+    assertEquals(0, Response.Usage.of(10, 300).reasoningTokens());
+    assertEquals(0, Response.Usage.of(10, 300, 20, 30).reasoningTokens());
+  }
+
+  @Test
+  void usageOfWithAReasoningCountIsOneRequestWhoseTotalsIgnoreIt() {
+    var usage = Response.Usage.of(10, 300, 20, 30, 120);
+
+    assertEquals(new Response.Usage(10, 300, 20, 30, 360, 60, 120), usage);
+    assertEquals(Response.Usage.of(10, 300, 20, 30).totalTokens(), usage.totalTokens());
+    assertEquals(Response.Usage.of(10, 300, 20, 30).promptTokens(), usage.promptTokens());
+  }
+
+  @Test
+  void pricingCostsAUsageReportingReasoningAsTheSameUsageWithout() {
+    var pricing = new CostCalculator.Pricing(3_000_000L, 15_000_000L, 3_750_000L, 300_000L);
+
+    assertEquals(
+        pricing.cost(Response.Usage.of(10, 300, 20, 30)),
+        pricing.cost(Response.Usage.of(10, 300, 20, 30, 120)));
+  }
+
+  @Test
+  void usagePlusSumsTheReasoningCounts() {
+    var sum = Response.Usage.of(10, 300, 0, 0, 120).plus(Response.Usage.of(5, 40, 0, 0, 25));
+
+    assertEquals(new Response.Usage(15, 340, 0, 0, 355, 5, 145), sum);
   }
 
   @Test
   void usagePlusSumsClassWise() {
     var sum = Response.Usage.of(100, 50, 20, 10).plus(Response.Usage.of(1, 2, 3, 4));
 
-    assertEquals(new Response.Usage(101, 52, 23, 14, 190, 8), sum);
+    assertEquals(new Response.Usage(101, 52, 23, 14, 190, 8, 0), sum);
   }
 
   @Test

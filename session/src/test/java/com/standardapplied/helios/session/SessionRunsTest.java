@@ -97,7 +97,7 @@ final class SessionRunsTest {
           List.of(Role.ASSISTANT, "one"),
           List.of(calls.get(2).get(4).role(), calls.get(2).get(4).content()));
       assertEquals(
-          List.of(new Usage(15, 2, 0, 0, 17, 5), CostEstimate.ofMicroUsd(15)),
+          List.of(new Usage(15, 2, 0, 0, 17, 5, 0), CostEstimate.ofMicroUsd(15)),
           List.of(first.usage(), first.cost()));
       assertEquals(
           List.of(Usage.of(7, 2), CostEstimate.ofMicroUsd(7)),

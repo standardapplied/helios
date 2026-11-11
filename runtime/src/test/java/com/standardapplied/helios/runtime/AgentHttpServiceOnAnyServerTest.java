@@ -142,7 +142,8 @@ final class AgentHttpServiceOnAnyServerTest {
         "{\"type\":\"Success\",\"runId\":\"run-1\",\"result\":{\"sessionId\":\""
             + sessionId
             + "\",\"runId\":\"run-1\",\"result\":\"ok\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,"
-            + "\"cacheCreationInputTokens\":0,\"cacheReadInputTokens\":0,\"totalTokens\":0,\"promptTokens\":0},"
+            + "\"cacheCreationInputTokens\":0,\"cacheReadInputTokens\":0,\"totalTokens\":0,\"promptTokens\":0,"
+            + "\"reasoningTokens\":0},"
             + "\"cost\":{\"microUsd\":0},\"duration\":\"PT0S\",\"citations\":[]}}",
         result);
 

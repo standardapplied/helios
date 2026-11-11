@@ -87,6 +87,34 @@ class PgTraceStoreTest {
   }
 
   @Test
+  void aRowWrittenWithoutAReasoningCountReadsAsZeroReasoning() {
+    var attributes =
+        Attributes.builder()
+            .put("gen_ai.usage.input_tokens", 10L)
+            .put("gen_ai.usage.output_tokens", 2L)
+            .put("gen_ai.usage.reasoning.output_tokens", 1L)
+            .build();
+    assertTrue(
+        exporter
+            .export(
+                List.of(
+                    run("run-0", "0000000000000001", "agent", 0, attributes),
+                    step("run-0", "0000000000000002", "chat scripted", "chat", 1, attributes)))
+            .isSuccess());
+    PgTestSupport.dbClient()
+        .execute()
+        .dml("UPDATE helios_traces SET reasoning_tokens = NULL WHERE id = ?", "run-0");
+    PgTestSupport.dbClient()
+        .execute()
+        .dml("UPDATE helios_spans SET reasoning_tokens = NULL WHERE run_id = ?", "run-0");
+
+    var found = store.findById("run-0");
+
+    assertEquals(Usage.of(10, 2), found.usage());
+    assertEquals(Usage.of(10, 2), found.spans().getFirst().usage());
+  }
+
+  @Test
   void aFailingDatabaseIsAPgExceptionForEachRead() {
     var failing = new PgTraceStore(new PgConfig(PgTestSupport.failingWrites(true), null, null));
 

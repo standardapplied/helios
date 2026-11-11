@@ -20,6 +20,7 @@ import com.standardapplied.helios.openai.api.ResponsesRequest;
 import java.io.EOFException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class OpenAIStreamParserTest {
@@ -52,6 +53,31 @@ class OpenAIStreamParserTest {
     assertEquals("Hi", response.content());
     assertEquals(FinishReason.STOP, response.finishReason());
     assertNotNull(response.usage());
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        ",\"output_tokens_details\":{\"reasoning_tokens\":250} | 250",
+        "'' | 0",
+        ",\"output_tokens_details\":{} | 0",
+        ",\"output_tokens_details\":{\"reasoning_tokens\":400} | 300"
+      })
+  void theReasoningCountIsThePartOfTheOutputSpentReasoningCutToTheOutput(
+      String details, int reasoningTokens) {
+    var sse =
+        "data: {\"type\":\"response.completed\",\"response\":{"
+            + "\"id\":\"resp_1\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":300,\"total_tokens\":310"
+            + details
+            + "}}}\n\n";
+
+    var usage = drain(sse).usage();
+
+    assertEquals(300, usage.outputTokens());
+    assertEquals(reasoningTokens, usage.reasoningTokens());
+    assertEquals(310, usage.totalTokens());
   }
 
   @Test

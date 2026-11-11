@@ -14,9 +14,19 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param outputTokens number of output tokens
  * @param cacheCreationInputTokens tokens used creating prompt cache entries
  * @param cacheReadInputTokens tokens read from prompt cache
+ * @param outputTokensDetails breakdown of {@code output_tokens}; carries the thinking subset
  */
 public record ApiUsage(
     @JsonProperty("input_tokens") Integer inputTokens,
     @JsonProperty("output_tokens") Integer outputTokens,
     @JsonProperty("cache_creation_input_tokens") Integer cacheCreationInputTokens,
-    @JsonProperty("cache_read_input_tokens") Integer cacheReadInputTokens) {}
+    @JsonProperty("cache_read_input_tokens") Integer cacheReadInputTokens,
+    @JsonProperty("output_tokens_details") OutputTokensDetails outputTokensDetails) {
+
+  /**
+   * Breakdown of {@link ApiUsage#outputTokens}, reported on {@code message_delta}.
+   *
+   * @param thinkingTokens the part of {@code output_tokens} spent thinking
+   */
+  public record OutputTokensDetails(@JsonProperty("thinking_tokens") Integer thinkingTokens) {}
+}

@@ -67,7 +67,8 @@ final class SessionSpansTest {
   static final AttributeKey<Long> INPUT_TOKENS = longKey("gen_ai.usage.input_tokens");
   static final AttributeKey<Long> OUTPUT_TOKENS = longKey("gen_ai.usage.output_tokens");
   static final AttributeKey<Long> CACHE_READ = longKey("gen_ai.usage.cache_read.input_tokens");
-  static final AttributeKey<Long> CACHE_WRITE = longKey("gen_ai.usage.cache_write.input_tokens");
+  static final AttributeKey<Long> CACHE_WRITE = longKey("gen_ai.usage.cache_creation.input_tokens");
+  static final AttributeKey<Long> REASONING = longKey("gen_ai.usage.reasoning.output_tokens");
   static final AttributeKey<Long> TOTAL_TOKENS = longKey("helios.usage.total_tokens");
   static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
 
@@ -333,6 +334,34 @@ final class SessionSpansTest {
     assertNull(plain.get(TOTAL_TOKENS));
     assertTotalsEqual(result, capture.run());
     assertEquals(50L, capture.run().getAttributes().get(CACHE_READ));
+  }
+
+  @Test
+  void theReasoningCountIsOnTheChatSpanThatReportedItAndOnTheRunSpanAndNowhereAsZero() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(Usage.of(10, 300, 0, 0, 120), call("noop", Map.of()))
+            .withTextTurn("done", Usage.of(10, 2))
+            .build();
+
+    var result = run(traced(model).withTool(tool("noop", "ok")).build(), "go");
+
+    var chats = capture.named("chat scripted");
+    assertEquals(120L, chats.getFirst().getAttributes().get(REASONING));
+    assertEquals(300L, chats.getFirst().getAttributes().get(OUTPUT_TOKENS));
+    assertNull(chats.get(1).getAttributes().get(REASONING));
+    assertEquals(120, result.usage().reasoningTokens());
+    assertEquals(120L, capture.run().getAttributes().get(REASONING));
+  }
+
+  @Test
+  void aRunWithoutReasoningCarriesNoReasoningCount() {
+    var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 2)).build();
+
+    run(traced(model).build(), "go");
+
+    assertNull(capture.named("chat scripted").getFirst().getAttributes().get(REASONING));
+    assertNull(capture.run().getAttributes().get(REASONING));
   }
 
   @Test

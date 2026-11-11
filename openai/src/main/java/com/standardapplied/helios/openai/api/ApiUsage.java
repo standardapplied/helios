@@ -66,6 +66,19 @@ public record ApiUsage(
   }
 
   /**
+   * Return the reasoning-tokens count or zero when the details object or its count is absent, as on
+   * a model that does not reason.
+   *
+   * @return the part of {@code output_tokens} spent reasoning
+   */
+  public int reasoningTokensOrZero() {
+    if (outputTokensDetails == null || outputTokensDetails.reasoningTokens() == null) {
+      return 0;
+    }
+    return outputTokensDetails.reasoningTokens();
+  }
+
+  /**
    * Per-class breakdown of {@link ApiUsage#inputTokens}. OpenAI surfaces {@code cached_tokens}
    * everywhere and {@code cache_write_tokens} on gpt-5.6+; the object is modeled separately so
    * future provider additions (e.g. audio-token breakdowns on multimodal models) don't break

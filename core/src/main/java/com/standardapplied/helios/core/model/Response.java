@@ -143,6 +143,13 @@ public record Response<T>(
    *       {@code cacheCreationInputTokens} is always zero from that provider.
    *   <li><b>Providers without cache reporting</b> leave the cache fields at zero — existing {@code
    *       Usage.of(input, output)} call sites need no change.
+   *   <li><b>Reasoning</b> is a part of {@code outputTokens}, not a fifth class: never add it to a
+   *       total or price it apart. OpenAI's {@code output_tokens_details.reasoning_tokens} and
+   *       Anthropic's {@code output_tokens_details.thinking_tokens} are inside the provider's
+   *       output count; Gemini reports {@code total_thought_tokens} apart and the Gemini provider
+   *       adds it to {@code outputTokens}. Each provider caps a count above the output count to it;
+   *       the constructor refuses one. A provider that reports none leaves {@code reasoningTokens}
+   *       at zero.
    * </ul>
    *
    * <p>{@link #totalTokens} sums every billable token across all four classes, so dashboards and
@@ -160,6 +167,9 @@ public record Response<T>(
    *     cache-creation and cache-read tokens are disjoint, so for one request their sum is every
    *     token it sent, for every provider. Usage added over several requests, such as the segments
    *     of an Anthropic {@code pause_turn}, keeps the last one's, never their total
+   * @param reasoningTokens the part of {@code outputTokens} the model spent reasoning; zero when
+   *     the provider reports none. It is already counted in {@code outputTokens} and {@code
+   *     totalTokens}, and billed with the output
    */
   public record Usage(
       int inputTokens,
@@ -167,13 +177,14 @@ public record Response<T>(
       int cacheCreationInputTokens,
       int cacheReadInputTokens,
       int totalTokens,
-      long promptTokens) {
+      long promptTokens,
+      int reasoningTokens) {
     /**
      * Canonical constructor.
      *
      * @throws IllegalArgumentException if a count is negative, {@code totalTokens} is not the sum
-     *     of the four counts, or {@code promptTokens} is negative or greater than the sum of the
-     *     three input counts
+     *     of the four counts, {@code promptTokens} is negative or greater than the sum of the three
+     *     input counts, or {@code reasoningTokens} is negative or greater than {@code outputTokens}
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
     public Usage {
@@ -196,6 +207,13 @@ public record Response<T>(
         throw new IllegalArgumentException(
             "promptTokens must lie in [0, " + inputs + "], got " + promptTokens);
       }
+      if (reasoningTokens < 0 || reasoningTokens > outputTokens) {
+        throw new IllegalArgumentException(
+            "reasoningTokens must lie in [0, outputTokens "
+                + outputTokens
+                + "], got "
+                + reasoningTokens);
+      }
     }
 
     /**
@@ -204,7 +222,8 @@ public record Response<T>(
      *
      * @param input prompt tokens
      * @param output completion tokens
-     * @return a usage record with cache fields zero and {@code totalTokens = input + output}
+     * @return a usage record with cache fields and reasoning zero and {@code totalTokens = input +
+     *     output}
      */
     public static Usage of(int input, int output) {
       return of(input, output, 0, 0);
@@ -232,7 +251,8 @@ public record Response<T>(
           cacheCreation,
           cacheRead,
           sum(input, output, cacheCreation, cacheRead),
-          other.promptTokens > 0 ? other.promptTokens : promptTokens);
+          other.promptTokens > 0 ? other.promptTokens : promptTokens,
+          Math.addExact(reasoningTokens, other.reasoningTokens));
     }
 
     /**
@@ -245,25 +265,44 @@ public record Response<T>(
     }
 
     /**
-     * Build a {@link Usage} including prompt-cache token counts.
+     * {@link #of(int, int, int, int, int)} with no reasoning count.
      *
      * @param input uncached prompt tokens
      * @param output completion tokens
      * @param cacheCreation tokens written to the provider's prompt cache
      * @param cacheRead tokens read from the provider's prompt cache
-     * @return a usage record of one request, with {@code totalTokens} summing all four counts and
-     *     {@code promptTokens} the three input counts
+     * @return a usage record of one request, {@code reasoningTokens} zero
      * @throws IllegalArgumentException if a count is negative
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
     public static Usage of(int input, int output, int cacheCreation, int cacheRead) {
+      return of(input, output, cacheCreation, cacheRead, 0);
+    }
+
+    /**
+     * Build a {@link Usage} of one request including its reasoning count.
+     *
+     * @param input uncached prompt tokens
+     * @param output completion tokens, the reasoning included
+     * @param cacheCreation tokens written to the provider's prompt cache
+     * @param cacheRead tokens read from the provider's prompt cache
+     * @param reasoning the part of {@code output} the model spent reasoning
+     * @return a usage record of one request, with {@code totalTokens} summing all four counts,
+     *     {@code promptTokens} the three input counts and {@code reasoningTokens} the reasoning
+     *     count
+     * @throws IllegalArgumentException if a count is negative or {@code reasoning} is greater than
+     *     {@code output}
+     * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
+     */
+    public static Usage of(int input, int output, int cacheCreation, int cacheRead, int reasoning) {
       return new Usage(
           input,
           output,
           cacheCreation,
           cacheRead,
           sum(input, output, cacheCreation, cacheRead),
-          inputs(input, cacheCreation, cacheRead));
+          inputs(input, cacheCreation, cacheRead),
+          reasoning);
     }
 
     private static int sum(int input, int output, int cacheCreation, int cacheRead) {
