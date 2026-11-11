@@ -110,7 +110,8 @@ The `workspace` preset wires:
 given `ExecutionProvider`, asked before each run, and starts and ends the provider with the
 session; `withAskUserQuestion()` adds the model's `AskUserQuestion` tool; `withSubagent(subagent)`
 adds the `Agent` tool, through which the model runs a child session (see the root README's
-"Subagents").
+"Subagents"); `withSkills(skills)` lists each skill in the system prompt and adds the `Skill` tool,
+through which the model loads one (see the root README's "Skills").
 
 ## Streaming events
 
@@ -351,6 +352,13 @@ The loop swaps the history and emits `HookFired` with phase `PRE_MODEL_TURN` and
 `MutateHistory` as its outcome.
 To see the history on both sides of a compaction, wrap the default compactor and delegate to it,
 as the [root README](../README.md#context-compaction) shows.
+
+A session with skills puts back what a compaction removed of the skills the model loaded, whatever
+the compactor: right after the compacted history's leading system messages, one user message per
+skill, tagged `MessageOrigin.SKILL`, holding the text the model was given, in the order the skills
+were first loaded and before any activation the compactor kept. The default compactor's result is then `[system, skills..., summary, pending
+user turn...]`. The shrink check measures the history with the skills put back; a
+`PreModelTurnHook`'s `MutateHistory` gets nothing put back.
 
 `SessionOptions.Builder.withTokenCounter(...)` swaps the estimator — wire a provider-specific
 tokenizer (Anthropic's, OpenAI's tiktoken, etc.) when the char-based default is too rough.

@@ -14,6 +14,7 @@ import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
 import com.standardapplied.helios.session.SessionPresets;
+import com.standardapplied.helios.session.Skill;
 import com.standardapplied.helios.session.Subagent;
 import com.standardapplied.helios.session.SummarizingCompactor;
 import com.standardapplied.helios.session.UserMessage;
@@ -101,6 +102,21 @@ final class QuickStarts {
             .build();
     try (var session = AgentSession.open(options)) {
       System.out.println(session.send("Which classes form the session's public API?").join());
+    }
+  }
+
+  static void skills(Model model, Path repo) {
+    var releaseNotes =
+        Skill.newBuilder()
+            .withName("release-notes")
+            .withDescription("Writes release notes from the commits since the last tag.")
+            .withInstructions(
+                "List the commits since the last tag, group them by module and write one line for"
+                    + " each change a user of the library would notice.")
+            .build();
+    var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
+    try (var session = AgentSession.open(options)) {
+      System.out.println(session.send("Write the notes for the next release.").join());
     }
   }
 

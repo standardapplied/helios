@@ -95,7 +95,8 @@ public final class AgentSessionImpl implements AgentSession {
     var cancellation = new CancellationToken();
     var state =
         new SessionState(sessionId, cancellation, clock, parent.map(AgentTool.Parent::totals));
-    options.systemPrompt().ifPresent(prompt -> state.history().append(Message.system(prompt)));
+    SkillTool.systemPrompt(options)
+        .ifPresent(prompt -> state.history().append(Message.system(prompt)));
     var storedHistory =
         options
             .store()
