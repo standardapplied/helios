@@ -94,11 +94,9 @@ final class QuickStarts {
         SessionPresets.minimal(model)
             .withSubagent(researcher)
             .withPermission(
-                new Permission(
-                    PermissionMode.DEFAULT,
-                    List.of(PermissionRule.of("Agent", "researcher")),
-                    List.of(),
-                    List.of()))
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withAllow(PermissionRule.of("Agent", "researcher"))
+                    .build())
             .build();
     try (var session = AgentSession.open(options)) {
       System.out.println(session.send("Which classes form the session's public API?").join());
@@ -168,11 +166,11 @@ final class QuickStarts {
 
   static void permissions(Model model, Path root) {
     var policy =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.of("Read", "./src/**")),
-            List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
-            List.of(PermissionRule.of("Read", "**/secrets.*")));
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withAllow(PermissionRule.of("Read", "./src/**"))
+            .withAsk(PermissionRule.of("MemoryWrite", "/memories/**"))
+            .withDeny(PermissionRule.of("Read", "**/secrets.*"))
+            .build();
 
     try (var session =
         AgentSession.open(SessionPresets.workspace(model, root).withPermission(policy).build())) {

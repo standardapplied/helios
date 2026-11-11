@@ -211,11 +211,9 @@ final class ToolOutcomeSessionTest {
     var options =
         withTools(tool("t", (args, ctx) -> ToolResult.success("ran")))
             .withPermission(
-                new Permission(
-                    PermissionMode.DEFAULT,
-                    List.of(),
-                    List.of(),
-                    List.of(PermissionRule.any("t"))));
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withDeny(PermissionRule.any("t"))
+                    .build());
 
     assertEquals(
         expected(

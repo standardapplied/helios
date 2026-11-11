@@ -100,6 +100,8 @@ class ArchitectureRulesTest {
   /** The one class that swaps the JVM-global standard streams: the sandbox's snippet evaluator. */
   private static final String STREAM_SWAPPER = HELIOS + ".repl.sandbox.SnippetEvaluator";
 
+  private static final String PERMISSION = HELIOS + ".session.permissions.Permission";
+
   private static final String REASONING_SUPPORT = HELIOS + ".core.provider.ReasoningSupport";
 
   /**
@@ -632,6 +634,20 @@ class ArchitectureRulesTest {
         .accessTargetWhere(
             targetOwner(type(Files.class)).and(target(name("walk").or(name("walkFileTree")))))
         .because(oneWay)
+        .check(LIBRARY);
+  }
+
+  @Test
+  void aPermissionIsBuiltByNamedRuleLists() {
+    noClasses()
+        .that(not(name(PERMISSION).or(nameStartingWith(PERMISSION + "$"))))
+        .should()
+        .accessTargetWhere(
+            targetOwner(name(PERMISSION)).and(target(name(JavaConstructor.CONSTRUCTOR_NAME))))
+        .because(
+            "a permission is built with Permission.newBuilder(mode), whose withAllow, withAsk and"
+                + " withDeny name the list each rule joins; the canonical constructor takes three"
+                + " rule lists in a row, so a swap there compiles and turns a deny into an allow")
         .check(LIBRARY);
   }
 

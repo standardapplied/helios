@@ -238,7 +238,7 @@ final class HookAndEventRedactionTest {
   @Test
   void aDeniedCallsBlockedEventCarriesRedactedArguments() {
     var deny = PermissionRule.of("Write", "/etc/**");
-    var permission = new Permission(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny));
+    var permission = Permission.newBuilder(PermissionMode.DEFAULT).withDeny(deny).build();
     var options = sessions.options(permission).withSecretRegistry(secrets());
 
     var run = WriteToolSessions.run(options, secretCall("/etc/passwd"));

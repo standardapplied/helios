@@ -13,11 +13,12 @@ import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.loop.ApprovalRequest;
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 final class PermissionTypesTest {
 
@@ -104,82 +105,145 @@ final class PermissionTypesTest {
 
   // ── Permission ───────────────────────────────────────────────────────────
 
+  private static final PermissionRule READ_SRC = PermissionRule.of("Read", "./src/**");
+  private static final PermissionRule READ_DOCS = PermissionRule.of("Read", "./docs/**");
+  private static final PermissionRule WRITE_TMP = PermissionRule.of("Write", "/tmp/**");
+  private static final PermissionRule WRITE_ANY = PermissionRule.any("Write");
+  private static final PermissionRule EXECUTE_RM = PermissionRule.of("Execute", "BASH/rm **");
+  private static final PermissionRule READ_SECRETS = PermissionRule.of("Read", "**/secrets.*");
+
   @Test
-  void permissionCanonicalConstructorDefensivelyCopiesLists() {
-    var allow = new ArrayList<>(List.of(PermissionRule.any("Read")));
-    var ask = new ArrayList<>(List.of(PermissionRule.any("Write")));
-    var deny = new ArrayList<>(List.of(PermissionRule.any("Execute")));
-    var p = new Permission(PermissionMode.DEFAULT, allow, ask, deny);
+  void aBuilderPutsEachRuleInTheListItsMethodNames() {
+    var p =
+        Permission.newBuilder(PermissionMode.ACCEPT_EDITS)
+            .withAllow(READ_SRC, READ_DOCS)
+            .withAsk(WRITE_TMP, WRITE_ANY)
+            .withDeny(EXECUTE_RM, READ_SECRETS)
+            .build();
 
-    allow.clear();
-    ask.clear();
-    deny.clear();
-
-    assertEquals(List.of(PermissionRule.any("Read")), p.allow());
-    assertEquals(List.of(PermissionRule.any("Write")), p.ask());
-    assertEquals(List.of(PermissionRule.any("Execute")), p.deny());
+    assertEquals(PermissionMode.ACCEPT_EDITS, p.mode());
+    assertEquals(List.of(READ_SRC, READ_DOCS), p.allow());
+    assertEquals(List.of(WRITE_TMP, WRITE_ANY), p.ask());
+    assertEquals(List.of(EXECUTE_RM, READ_SECRETS), p.deny());
   }
 
   @Test
-  void permissionRejectsNullMode() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new Permission(null, List.of(), List.of(), List.of()));
+  void repeatedCallsAppendInOrder() {
+    var p =
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withDeny(READ_SECRETS)
+            .withAllow(READ_DOCS)
+            .withAsk(WRITE_ANY)
+            .withDeny(EXECUTE_RM)
+            .withAllow(READ_SRC, WRITE_TMP)
+            .withAsk()
+            .withAsk(WRITE_TMP)
+            .build();
+
+    assertEquals(List.of(READ_DOCS, READ_SRC, WRITE_TMP), p.allow());
+    assertEquals(List.of(WRITE_ANY, WRITE_TMP), p.ask());
+    assertEquals(List.of(READ_SECRETS, EXECUTE_RM), p.deny());
+  }
+
+  @Test
+  void aBuiltPermissionKeepsItsRulesWhileItsBuilderGrows() {
+    var builder =
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withAllow(READ_SRC)
+            .withAsk(WRITE_TMP)
+            .withDeny(EXECUTE_RM);
+    var p = builder.build();
+
+    builder.withAllow(READ_DOCS).withAsk(WRITE_ANY).withDeny(READ_SECRETS);
+
+    assertEquals(List.of(READ_SRC), p.allow());
+    assertEquals(List.of(WRITE_TMP), p.ask());
+    assertEquals(List.of(EXECUTE_RM), p.deny());
+    assertThrows(UnsupportedOperationException.class, () -> p.allow().add(READ_DOCS));
+  }
+
+  @Test
+  void toBuilderBuildsAnEqualPermission() {
+    var original =
+        Permission.newBuilder(PermissionMode.PLAN)
+            .withAllow(READ_SRC, READ_DOCS)
+            .withAsk(WRITE_TMP, WRITE_ANY)
+            .withDeny(EXECUTE_RM, READ_SECRETS)
+            .build();
+
+    assertEquals(original, original.toBuilder().build());
+  }
+
+  @Test
+  void rulesAddedAfterToBuilderFollowTheCopiedOnesInTheirOwnList() {
+    var original =
+        Permission.newBuilder(PermissionMode.ACCEPT_EDITS)
+            .withAllow(READ_SRC)
+            .withAsk(WRITE_TMP)
+            .withDeny(EXECUTE_RM)
+            .build();
+
+    var layered =
+        original.toBuilder().withAllow(READ_DOCS).withAsk(WRITE_ANY).withDeny(READ_SECRETS).build();
+
+    assertEquals(PermissionMode.ACCEPT_EDITS, layered.mode());
+    assertEquals(List.of(READ_SRC, READ_DOCS), layered.allow());
+    assertEquals(List.of(WRITE_TMP, WRITE_ANY), layered.ask());
+    assertEquals(List.of(EXECUTE_RM, READ_SECRETS), layered.deny());
+    assertEquals(List.of(READ_SRC), original.allow());
+    assertEquals(List.of(WRITE_TMP), original.ask());
+    assertEquals(List.of(EXECUTE_RM), original.deny());
+  }
+
+  @ParameterizedTest
+  @EnumSource(PermissionMode.class)
+  void anEmptyBuilderBuildsTheEmptyPolicy(PermissionMode mode) {
+    var p = Permission.newBuilder(mode).build();
+
+    assertEquals(mode, p.mode());
+    assertEquals(List.of(), p.allow());
+    assertEquals(List.of(), p.ask());
+    assertEquals(List.of(), p.deny());
+    assertEquals(Permission.empty(mode), p);
+  }
+
+  @Test
+  void aBuilderRejectsANullMode() {
+    var ex = assertThrows(NullPointerException.class, () -> Permission.newBuilder(null));
     assertEquals("mode must not be null", ex.getMessage());
   }
 
   @Test
-  void permissionRejectsNullAllow() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new Permission(PermissionMode.DEFAULT, null, List.of(), List.of()));
-    assertEquals("allow must not be null", ex.getMessage());
-  }
+  void aBuilderRejectsANullRuleOrArray() {
+    var builder = Permission.newBuilder(PermissionMode.DEFAULT);
+    var none = (PermissionRule[]) null;
 
-  @Test
-  void permissionRejectsNullAsk() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new Permission(PermissionMode.DEFAULT, List.of(), null, List.of()));
-    assertEquals("ask must not be null", ex.getMessage());
-  }
-
-  @Test
-  void permissionRejectsNullDeny() {
-    var ex =
-        assertThrows(
-            NullPointerException.class,
-            () -> new Permission(PermissionMode.DEFAULT, List.of(), List.of(), null));
-    assertEquals("deny must not be null", ex.getMessage());
-  }
-
-  @Test
-  void permissionRejectsANullRule() {
-    var rules = new ArrayList<PermissionRule>();
-    rules.add(null);
-
-    assertThrows(
-        NullPointerException.class,
-        () -> new Permission(PermissionMode.DEFAULT, List.of(), rules, List.of()));
+    assertThrows(NullPointerException.class, () -> builder.withAllow(READ_SRC, null));
+    assertThrows(NullPointerException.class, () -> builder.withAsk(WRITE_TMP, null));
+    assertThrows(NullPointerException.class, () -> builder.withDeny(EXECUTE_RM, null));
+    assertThrows(NullPointerException.class, () -> builder.withAllow(none));
+    assertThrows(NullPointerException.class, () -> builder.withAsk(none));
+    assertThrows(NullPointerException.class, () -> builder.withDeny(none));
+    assertEquals(Permission.empty(PermissionMode.DEFAULT), builder.build());
   }
 
   @Test
   void defaultInWorkspaceOnlyAllowsMemoryWrites() {
-    assertEquals(
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
-            List.of(),
-            List.of()),
-        Permission.defaultInWorkspace());
+    var p = Permission.defaultInWorkspace();
+    assertEquals(PermissionMode.DEFAULT, p.mode());
+    assertEquals(List.of(PermissionRule.of("MemoryWrite", "/memories/**")), p.allow());
+    assertEquals(List.of(), p.ask());
+    assertEquals(List.of(), p.deny());
   }
 
   @Test
   void planModeIsTheEmptyPlanPolicy() {
-    assertEquals(Permission.empty(PermissionMode.PLAN), Permission.planMode());
+    var p = Permission.planMode();
+    assertEquals(PermissionMode.PLAN, p.mode());
+    assertEquals(List.of(), p.allow());
+    assertEquals(List.of(), p.ask());
+    assertEquals(List.of(), p.deny());
+    assertEquals(Permission.empty(PermissionMode.PLAN), p);
   }
 
   @Test

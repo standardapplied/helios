@@ -20,14 +20,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 /** {@link Permission#evaluate}, the policy's pure decision for one key: the host's dry run. */
 final class PermissionEvaluateTest {
 
-  private static Permission rules(
-      PermissionMode mode,
-      List<PermissionRule> allow,
-      List<PermissionRule> ask,
-      List<PermissionRule> deny) {
-    return new Permission(mode, allow, ask, deny);
-  }
-
   private static PermissionDecision byRule(
       PermissionEffect effect, PermissionRule rule, String reason) {
     return new PermissionDecision(effect, reason, Optional.of(rule));
@@ -38,7 +30,7 @@ final class PermissionEvaluateTest {
   private static final PermissionRule READ_SRC = PermissionRule.of("Read", "./src/**");
   private static final PermissionRule NO_RM = PermissionRule.of("Execute", "BASH/rm **");
   private static final Permission PRODUCTION =
-      rules(PermissionMode.DEFAULT, List.of(READ_SRC), List.of(), List.of(NO_RM));
+      Permission.newBuilder(PermissionMode.DEFAULT).withAllow(READ_SRC).withDeny(NO_RM).build();
 
   @Test
   void aDryRunDeniesTheCommandItsDenyRuleNames() {
@@ -78,8 +70,10 @@ final class PermissionEvaluateTest {
   void anAskRuleWinsOverAnAllowForTheSameCall() {
     var ask = PermissionRule.any("Write");
     var permission =
-        rules(
-            PermissionMode.DEFAULT, List.of(PermissionRule.any("Write")), List.of(ask), List.of());
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withAllow(PermissionRule.any("Write"))
+            .withAsk(ask)
+            .build();
     assertEquals(
         byRule(PermissionEffect.ASK, ask, "ask rule Write matched Write"),
         permission.evaluate(ToolPermissionKey.of("Write"), ToolCategory.WRITE));
@@ -88,7 +82,7 @@ final class PermissionEvaluateTest {
   @Test
   void anAskRuleOverridesAnAllowingCategoryDefault() {
     var ask = PermissionRule.any("Read");
-    var permission = rules(PermissionMode.DEFAULT, List.of(), List.of(ask), List.of());
+    var permission = Permission.newBuilder(PermissionMode.DEFAULT).withAsk(ask).build();
     assertEquals(
         byRule(PermissionEffect.ASK, ask, "ask rule Read matched Read"),
         permission.evaluate(ToolPermissionKey.of("Read"), ToolCategory.READ));
@@ -122,12 +116,16 @@ final class PermissionEvaluateTest {
   @ParameterizedTest(name = "{0}: {1}")
   @MethodSource("ruleCombinations")
   void theMostRestrictiveMatchingRuleDecidesInEveryMode(PermissionMode mode, Rules held) {
-    var permission =
-        rules(
-            mode,
-            held.allow() ? List.of(ALLOW_TMP_A) : List.of(),
-            held.ask() ? List.of(ASK_TMP) : List.of(),
-            held.deny() ? List.of(DENY_TMP) : List.of());
+    var builder = Permission.newBuilder(mode);
+    if (held.allow()) {
+      builder.withAllow(ALLOW_TMP_A);
+    }
+    if (held.ask()) {
+      builder.withAsk(ASK_TMP);
+    }
+    if (held.deny()) {
+      builder.withDeny(DENY_TMP);
+    }
     var rule =
         switch (held.expected()) {
           case DENY -> DENY_TMP;
@@ -136,7 +134,7 @@ final class PermissionEvaluateTest {
         };
 
     var decision =
-        permission.evaluate(new ToolPermissionKey("Write", "/tmp/a"), ToolCategory.WRITE);
+        builder.build().evaluate(new ToolPermissionKey("Write", "/tmp/a"), ToolCategory.WRITE);
 
     assertEquals(held.expected(), decision.effect());
     assertEquals(Optional.of(rule), decision.rule());
@@ -152,7 +150,12 @@ final class PermissionEvaluateTest {
   })
   void withNoMatchingRuleTheModesCategoryDefaultDecides(
       PermissionMode mode, PermissionEffect expected) {
-    var permission = rules(mode, List.of(ALLOW_TMP_A), List.of(ASK_TMP), List.of(DENY_TMP));
+    var permission =
+        Permission.newBuilder(mode)
+            .withAllow(ALLOW_TMP_A)
+            .withAsk(ASK_TMP)
+            .withDeny(DENY_TMP)
+            .build();
 
     var decision =
         permission.evaluate(new ToolPermissionKey("Write", "/var/a/b"), ToolCategory.WRITE);
@@ -168,7 +171,11 @@ final class PermissionEvaluateTest {
 
   private static Optional<PermissionRule> decidingRule(
       PermissionMode mode, String tool, String path, ToolCategory category) {
-    return rules(mode, List.of(ALLOW_PUBLIC), List.of(ASK_DOCS), List.of(DENY_SECRETS))
+    return Permission.newBuilder(mode)
+        .withAllow(ALLOW_PUBLIC)
+        .withAsk(ASK_DOCS)
+        .withDeny(DENY_SECRETS)
+        .build()
         .evaluate(new ToolPermissionKey(tool, path), category)
         .rule();
   }

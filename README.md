@@ -362,11 +362,9 @@ var options =
     SessionPresets.minimal(model)
         .withSubagent(researcher)
         .withPermission(
-            new Permission(
-                PermissionMode.DEFAULT,
-                List.of(PermissionRule.of("Agent", "researcher")),
-                List.of(),
-                List.of()))
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withAllow(PermissionRule.of("Agent", "researcher"))
+                .build())
         .build();
 try (var session = AgentSession.open(options)) {
   System.out.println(session.send("Which classes form the session's public API?").join());
