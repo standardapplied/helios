@@ -86,6 +86,20 @@ public record Permission(
   }
 
   /**
+   * Start building a permission from this one's mode and rules, such as a preset with rules of the
+   * host's: each {@code with} method appends after this permission's rules in its list.
+   *
+   * @return a builder seeded with this permission's mode and rule lists
+   */
+  public Builder toBuilder() {
+    var builder = newBuilder(mode);
+    builder.allow.addAll(allow);
+    builder.ask.addAll(ask);
+    builder.deny.addAll(deny);
+    return builder;
+  }
+
+  /**
    * Decide {@code key} for a tool of {@code category}, as the session does before asking or
    * running: the first matching {@code deny} rule, else the first matching {@code ask} rule, else
    * the first matching {@code allow} rule, each with the effect of its list; else the mode's
@@ -201,8 +215,9 @@ public record Permission(
    * where the execution sandbox is the real security boundary and every other tool would be a hole.
    *
    * <p>Adding more tools to a session built with this preset will silently refuse them unless the
-   * caller layers additional allow rules. That's intentional — a misconfigured tool registry should
-   * fail closed, not open.
+   * caller layers additional allow rules, as {@code
+   * Permission.lockedDown().toBuilder().withAllow(PermissionRule.any("Read")).build()} does. That's
+   * intentional — a misconfigured tool registry should fail closed, not open.
    *
    * @return a fresh preset
    */

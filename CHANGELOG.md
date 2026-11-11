@@ -17,8 +17,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `withOutputTokens`, `withCacheCreationInputTokens`, `withCacheReadInputTokens`,
   `withReasoningTokens`, `build`), each zero unless set, so a count added later breaks no caller.
 - `Permission.newBuilder(mode)` in `helios-session`, which builds a permission by named rule lists:
-  `withAllow`, `withAsk` and `withDeny` each append rules to the list they name, and `build()`. No
-  permission decision changes.
+  `withAllow`, `withAsk` and `withDeny` each append rules to the list they name, and `build()`; and
+  `Permission.toBuilder()`, which seeds a builder with a permission's mode and rules, so a host
+  layers its rules onto a preset. No permission decision changes.
 
 ### Compatibility
 
