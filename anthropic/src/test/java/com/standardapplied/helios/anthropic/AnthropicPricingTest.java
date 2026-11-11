@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.standardapplied.helios.core.common.CostCalculator.Pricing;
 import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Response.Usage;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,6 +32,10 @@ class AnthropicPricingTest {
 
   @Test
   void everyModelCarriesItsPublishedListPrice() {
+    assertListPrice(
+        AnthropicModelId.CLAUDE_FABLE_5_2, 8_000_000L, 40_000_000L, 10_000_000L, 200_000L);
+    assertListPrice(
+        AnthropicModelId.CLAUDE_MYTHOS_5_2, 8_000_000L, 40_000_000L, 10_000_000L, 200_000L);
     assertListPrice(
         AnthropicModelId.CLAUDE_FABLE_5_1, 10_000_000L, 50_000_000L, 12_500_000L, 250_000L);
     assertListPrice(
@@ -84,6 +89,17 @@ class AnthropicPricingTest {
     assertEquals(
         5_000_000L,
         AnthropicPricing.pricing(model, CachePolicy.disabled()).cacheWriteMicroUsdPerMillion());
+  }
+
+  @Test
+  void the52ModelsPriceAOneHourCacheWriteAtSixteenDollarsPerMillion() {
+    for (var model :
+        List.of(AnthropicModelId.CLAUDE_FABLE_5_2, AnthropicModelId.CLAUDE_MYTHOS_5_2)) {
+      assertEquals(
+          16_000_000L,
+          AnthropicPricing.pricing(model, CachePolicy.longLived()).cacheWriteMicroUsdPerMillion(),
+          model.name());
+    }
   }
 
   @Test

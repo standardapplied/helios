@@ -36,7 +36,7 @@ import java.util.Objects;
 public final class AnthropicPricing {
 
   /** The date these rates were last checked against Anthropic's pricing page. */
-  public static final LocalDate AS_OF = LocalDate.of(2026, 11, 6);
+  public static final LocalDate AS_OF = LocalDate.of(2026, 11, 11);
 
   private AnthropicPricing() {}
 
@@ -83,6 +83,8 @@ public final class AnthropicPricing {
     Objects.requireNonNull(model, "model must not be null");
     Objects.requireNonNull(cachePolicy, "cachePolicy must not be null");
     return switch (model) {
+      case CLAUDE_FABLE_5_2, CLAUDE_MYTHOS_5_2 ->
+          pricing(8_000_000L, 40_000_000L, 200_000L, cachePolicy);
       case CLAUDE_FABLE_5_1, CLAUDE_MYTHOS_5_1 ->
           pricing(10_000_000L, 50_000_000L, 250_000L, cachePolicy);
       case CLAUDE_FABLE_5, CLAUDE_MYTHOS_5 ->

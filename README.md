@@ -204,9 +204,9 @@ Keep video traffic on `v1beta` until the credential-gated `GeminiVideoIntegratio
 when configured for `v1` with the same model, Files API upload, and structured-output schema. Only
 then change the configured version; endpoint selection is immutable for each model instance.
 
-On Claude models that bind thinking to its prompt (Fable 5.1, Opus 5.5, Sonnet 5.5), a changed
-system prompt or tool set costs the earlier turns' reasoning, and the prompt cache, once, never the
-request.
+On Claude models that bind thinking to its prompt (Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1,
+Opus 5.5, Sonnet 5.5, Haiku 5.5), a changed system prompt or tool set costs the earlier turns'
+reasoning, and the prompt cache, once, never the request.
 
 Anthropic models use managed five-minute prompt caching by default. Select the one-hour
 cache for conversations whose reusable prefixes must survive longer gaps, or disable caching
@@ -421,7 +421,7 @@ The agent loop counts context fill from the input size the provider reported for
 - **0.85** of `SessionLimits.maxContextTokens()` → emits `QueryEvent.ContextWarning(usagePct)` once.
 - **0.95** → invokes the configured `ContextCompactor`, swaps the returned history in if the `TokenCounter` estimates it below the history it was given, and emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being those estimates. The compactor is skipped while what the estimate cannot see, such as inline files and tool definitions, reaches 0.95 by itself; a request that truly overflows ends with the provider's error.
 
-The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.1, Opus 5.5, Sonnet 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. No file survives either: the summary model sees a `{file <mimeType>}` marker where each was, never its bytes, and the summary ends with a list of the files it left behind, to send again if they are still needed. The summary call runs on a virtual thread under a configurable timeout (default 60s), ends when the run is cancelled, and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
+The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. No file survives either: the summary model sees a `{file <mimeType>}` marker where each was, never its bytes, and the summary ends with a list of the files it left behind, to send again if they are still needed. The summary call runs on a virtual thread under a configurable timeout (default 60s), ends when the run is cancelled, and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
 
 Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, turn compaction off with `ContextCompactor.disabled()` (it leaves the history unchanged, so a long session overflows and the provider's error ends it), or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
 

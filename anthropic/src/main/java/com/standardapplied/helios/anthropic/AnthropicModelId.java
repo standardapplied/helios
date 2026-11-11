@@ -27,16 +27,29 @@ import java.util.regex.Pattern;
 public enum AnthropicModelId {
   // contextWindow / maxOutputTokens mirror the documented per-model limits (Models overview, Nov
   // 2026) — operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
-  // ReasoningRules per model (Thinking "Configuring thinking" table and the Fable 5.1 / Opus 5.5 /
-  // Sonnet 5.5 / Haiku 5.5 migration notes, Nov 2026): Fable 5/5.1, Mythos 5/5.1 and Opus 5.5
-  // always think; display "updates" exists on Fable 5/5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5;
-  // Sonnet 5.5 turns up-front thinking off with between_tools; Opus 5, Sonnet 5 and Haiku 5.5 think
-  // unless sent disabled.
+  // ReasoningRules per model (Thinking "Configuring thinking" table and the Fable 5.2 / Fable 5.1 /
+  // Opus 5.5 / Sonnet 5.5 / Haiku 5.5 migration notes, Nov 2026): Fable 5/5.1/5.2, Mythos
+  // 5/5.1/5.2 and Opus 5.5 always think; display "updates" exists on Fable 5/5.1/5.2, Mythos
+  // 5.1/5.2, Opus 5.5 and Sonnet 5.5; Sonnet 5.5 turns up-front thinking off with between_tools;
+  // Opus 5, Sonnet 5 and Haiku 5.5 think unless sent disabled.
+  /**
+   * Claude Fable 5.2: always thinks, progress updates; rejects forced tool use; binds its thinking.
+   */
+  CLAUDE_FABLE_5_2("claude-fable-5-2", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
+  /**
+   * Claude Mythos 5.2: always thinks, progress updates; rejects forced tool use; binds its
+   * thinking.
+   */
+  CLAUDE_MYTHOS_5_2(
+      "claude-mythos-5-2", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
   /**
    * Claude Fable 5.1: always thinks, progress updates; rejects forced tool use; binds its thinking.
    */
   CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
-  /** Claude Mythos 5.1: always thinks, progress updates; rejects forced tool use. */
+  /**
+   * Claude Mythos 5.1: always thinks, progress updates; rejects forced tool use; binds its
+   * thinking.
+   */
   CLAUDE_MYTHOS_5_1(
       "claude-mythos-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
   /** Claude Fable 5: always thinks, with progress updates. */
@@ -89,7 +102,7 @@ public enum AnthropicModelId {
    * and an {@code output_config.effort}.
    */
   public enum ReasoningRules {
-    /** Always thinks, with progress updates (Fable 5 / 5.1, Mythos 5.1, Opus 5.5). */
+    /** Always thinks, with progress updates (Fable 5 / 5.1 / 5.2, Mythos 5.1 / 5.2, Opus 5.5). */
     ALWAYS_ON_WITH_PROGRESS(Off.REJECTED, Level.LOW, Display.PROGRESS, Sampling.REJECTED),
 
     /** Always thinks (Mythos 5). */
@@ -185,16 +198,23 @@ public enum AnthropicModelId {
 
   /**
    * Whether this model accepts forced tool use ({@code tool_choice.type} {@code any} or {@code
-   * tool}). Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 reject both with a 400 on every request;
-   * {@code auto} and {@code none} are unaffected. {@link AnthropicProvider} fails fast when
-   * creating such a model rather than letting the request 400.
+   * tool}). Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1, Opus 5.5 and Sonnet 5.5 reject both with
+   * a 400 on every request; {@code auto} and {@code none} are unaffected. {@link AnthropicProvider}
+   * fails fast when creating such a model rather than letting the request 400.
    *
-   * @return false for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link
-   *     #CLAUDE_OPUS_5_5} and {@link #CLAUDE_SONNET_5_5}, true otherwise
+   * @return false for {@link #CLAUDE_FABLE_5_2}, {@link #CLAUDE_MYTHOS_5_2}, {@link
+   *     #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link #CLAUDE_OPUS_5_5} and {@link
+   *     #CLAUDE_SONNET_5_5}, true otherwise
    */
   public boolean acceptsForcedToolChoice() {
     return switch (this) {
-      case CLAUDE_FABLE_5_1, CLAUDE_MYTHOS_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5 -> false;
+      case CLAUDE_FABLE_5_2,
+          CLAUDE_MYTHOS_5_2,
+          CLAUDE_FABLE_5_1,
+          CLAUDE_MYTHOS_5_1,
+          CLAUDE_OPUS_5_5,
+          CLAUDE_SONNET_5_5 ->
+          false;
       default -> true;
     };
   }
@@ -205,12 +225,20 @@ public enum AnthropicModelId {
    * thinking", Oct 2026). A newly released binding model is catalogued here: an uncatalogued model
    * is taken not to bind.
    *
-   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_OPUS_5_5}, {@link
+   * @return true for {@link #CLAUDE_FABLE_5_2}, {@link #CLAUDE_MYTHOS_5_2}, {@link
+   *     #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link #CLAUDE_OPUS_5_5}, {@link
    *     #CLAUDE_SONNET_5_5} and {@link #CLAUDE_HAIKU_5_5}, false otherwise
    */
   public boolean bindsReasoning() {
     return switch (this) {
-      case CLAUDE_FABLE_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5, CLAUDE_HAIKU_5_5 -> true;
+      case CLAUDE_FABLE_5_2,
+          CLAUDE_MYTHOS_5_2,
+          CLAUDE_FABLE_5_1,
+          CLAUDE_MYTHOS_5_1,
+          CLAUDE_OPUS_5_5,
+          CLAUDE_SONNET_5_5,
+          CLAUDE_HAIKU_5_5 ->
+          true;
       default -> false;
     };
   }
