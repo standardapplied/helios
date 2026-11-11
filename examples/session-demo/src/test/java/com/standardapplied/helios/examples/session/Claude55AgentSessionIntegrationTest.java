@@ -288,6 +288,23 @@ final class Claude55AgentSessionIntegrationTest {
     }
   }
 
+  /**
+   * Sonnet 5.5 interrupted mid-answer: the next run sends the partial turn, and the API accepts it.
+   */
+  @Test
+  void sonnet55AcceptsTheRunAfterAnInterruptedAnswer() {
+    var config =
+        ModelConfig.newBuilder()
+            .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
+            .withMaxOutputTokens(4_000)
+            .build();
+    try (var model =
+        new AnthropicProvider()
+            .create(AnthropicModelId.CLAUDE_SONNET_5_5.id(), config, CachePolicy.shortLived())) {
+      InterruptedSession.interruptThenGoOn(model);
+    }
+  }
+
   /** Open a session from {@code options}, run {@code message} once, close it, check the run. */
   private static void runOnce(SessionOptions options, String message) {
     try (var session = AgentSession.open(options)) {

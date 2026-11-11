@@ -20,7 +20,12 @@ try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build
 ```
 
 `session.interrupt()` cancels the run in progress (`ResultMessage.Cancelled`, reason
-`"interrupted"`); the next `send` starts a new run on the same conversation. `maxTurns`,
+`"interrupted"`); the next `send` starts a new run on the same conversation. The text the model
+streamed before the cut stays as the conversation's last assistant message, tagged
+`MessageOrigin.PARTIAL_TURN` and without its tool calls, so the next run sends it; so does a call
+cut by the wall clock, a stream failure (the failed attempt's text when its retry back-off is cut)
+or the stream idle timeout, and one cut by `close()` (sent by a session reopened from its store).
+`maxTurns`,
 `maxBudgetMicroUsd` and `maxWallClock` count per run.
 
 ## Why sessions

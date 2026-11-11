@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.SecretRegistry;
+import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
@@ -18,13 +20,18 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
+import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -249,6 +256,58 @@ final class TurnRunnerTest {
   }
 
   @Test
+  void aStreamFailingAfterTextAndAToolCallKeepsTheTextAsATaggedPartialAndRunsNoTool() {
+    var call = new ToolCall("c", "delete_everything", Map.of());
+    var model =
+        streaming(
+            ModelStreams.failing(
+                new IllegalStateException("connection reset"),
+                new ModelChunk.TextDelta("Half a sentence"),
+                new ModelChunk.ToolUseStop(call)));
+    var state = freshState();
+
+    var outcome = runner(model).runTurn(state, SessionLimits.defaults());
+
+    assertEquals(FinishReason.ERROR, outcome.finishReason());
+    assertEquals(
+        Message.assistant("Half a sentence", List.of(), MessageOrigin.PARTIAL_TURN.metadata()),
+        state.history().snapshot().getLast());
+    assertEquals(2, state.history().snapshot().size());
+    assertTrue(
+        events.stream()
+            .noneMatch(e -> e instanceof QueryEvent.ToolUse || e instanceof QueryEvent.ToolResult),
+        "a cut turn's tool calls never run");
+  }
+
+  /**
+   * A {@code PostModelTurn} hook still fires on a turn cut short, and its {@code Stop} ends the run
+   * with the hook's answer; the partial is in the history by then.
+   */
+  @Test
+  void aPostModelTurnStopOnACutTurnLeavesThePartialLast() {
+    var model =
+        streaming(
+            ModelStreams.failing(
+                new IllegalStateException("connection reset"),
+                new ModelChunk.TextDelta("Half a sentence")));
+    PostModelTurnHook stop = (response, ctx) -> HookOutcome.stop("stopped by the hook");
+    var runner =
+        fixture.runner(
+            fixture.collaborators(
+                new HookRegistry(List.of(stop), new SecretRegistry()), dispatch, queue),
+            model);
+    var state = freshState();
+
+    runner.runTurn(state, SessionLimits.defaults());
+
+    assertEquals(
+        Message.assistant("Half a sentence", List.of(), MessageOrigin.PARTIAL_TURN.metadata()),
+        state.history().snapshot().getLast());
+    var terminal = assertInstanceOf(ResultMessage.Success.class, state.terminal().orElseThrow());
+    assertEquals("stopped by the hook", terminal.result());
+  }
+
+  @Test
   void unknownStopReasonStringFallsBackToStop() {
     var model =
         syntheticStreamingModel(
@@ -417,5 +476,58 @@ final class TurnRunnerTest {
             .toList());
     assertEquals(
         List.of("pre-existing"), saturatedQueue.drain().stream().map(UserMessage::text).toList());
+  }
+
+  @Test
+  void aSchemaRejectionAfterTextIsCorrectedAndKeepsNoPartial() {
+    var model =
+        streaming(
+            ModelStreams.failing(
+                new StructuredOutputParseException(List.of("field is required"), null),
+                new ModelChunk.TextDelta("{\"wrong\":\"shape\"}")));
+    var runner =
+        fixture.runner(
+            fixture.collaborators(hooks, dispatch, queue),
+            model,
+            CostCalculator.ZERO,
+            OutputSchema.of(Sample.class));
+    var state = freshState();
+
+    runner.runTurn(state, SessionLimits.defaults());
+
+    assertEquals(
+        List.of(
+            Optional.empty(),
+            Optional.of(MessageOrigin.REJECTED_ATTEMPT),
+            Optional.of(MessageOrigin.SCHEMA_CORRECTION)),
+        state.history().snapshot().stream().map(MessageOrigin::of).toList());
+    assertEquals("{\"wrong\":\"shape\"}", state.history().snapshot().get(1).content());
+  }
+
+  @Test
+  void aRetriedAttemptsTextIsNotKeptWhenTheRetrySucceeds() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new TransientStreamException("Stream read error", null, "test"),
+                    new ModelChunk.TextDelta("Half a sentence")))
+            .withStreamTurn(
+                ModelStreams.of(
+                    new ModelChunk.TextDelta("The whole answer."),
+                    new ModelChunk.MessageStop("STOP", Usage.of(4, 3), Map.of())))
+            .build();
+    var limits =
+        SessionLimits.newBuilder()
+            .withStreamRetryPolicy(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
+            .build();
+    var state = freshState();
+
+    var outcome = runner(model).runTurn(state, limits);
+
+    assertEquals(2, outcome.streamAttempts());
+    assertEquals(
+        List.of(Message.user("hello"), Message.assistant("The whole answer.")),
+        state.history().snapshot());
   }
 }

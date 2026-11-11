@@ -128,6 +128,30 @@ public abstract class ConversationRequestContract {
     assertFalse(body.contains("helios.origin") || body.contains("hook-inject"), body);
   }
 
+  /**
+   * A conversation ending in the text a model call streamed before it was cut short, tagged by the
+   * session, then the next user message, as a run after an interrupt sends it: the partial goes as
+   * an ordinary text-only assistant turn, and the tag, metadata only the session reads, is not
+   * sent.
+   */
+  @Test
+  void aPartialTurnIsSentAsATextOnlyAssistantTurnWithoutTheSessionsTag() {
+    var partial =
+        Message.assistant("Once upon a time", List.of(), Map.of("helios.origin", "partial-turn"));
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model ->
+                model.chat(
+                    List.of(Message.user("Tell me a story."), partial, Message.user("Go on.")),
+                    List.of()));
+
+    var body = requests.getFirst().body();
+    assertEquals(List.of("Tell me a story.", "Once upon a time", "Go on."), turnTexts(parse(body)));
+    assertFalse(body.contains("helios.origin") || body.contains("partial-turn"), body);
+  }
+
   @Test
   void aDecodedToolCallIsSentBackWithEveryNullArgument() {
     var arguments = ConversationFixture.nullArguments();
