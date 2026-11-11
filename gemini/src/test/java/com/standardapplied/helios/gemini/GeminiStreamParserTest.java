@@ -95,7 +95,15 @@ class GeminiStreamParserTest {
                 + "\"total_cached_tokens\":33,\"total_output_tokens\":23,"
                 + "\"total_thought_tokens\":49}}");
 
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(7, 72, 0, 33, 49)), reported);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(7)
+                .withOutputTokens(72)
+                .withCacheReadInputTokens(33)
+                .withReasoningTokens(49)
+                .build()),
+        reported);
     assertNull(
         parser.parse(
             "{\"event_type\":\"interaction.in_progress\",\"interaction_id\":\"int_xyz\","

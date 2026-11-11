@@ -313,7 +313,14 @@ final class SessionSpansTest {
   void usageCountsTheCachedTokensAsInputAndNamesEachCacheClassOnlyWhenItHasTokens() {
     var model =
         ScriptedModel.newBuilder()
-            .withToolCallsTurn(Usage.of(100, 20, 30, 50), call("noop", Map.of()))
+            .withToolCallsTurn(
+                Usage.newBuilder()
+                    .withInputTokens(100)
+                    .withOutputTokens(20)
+                    .withCacheCreationInputTokens(30)
+                    .withCacheReadInputTokens(50)
+                    .build(),
+                call("noop", Map.of()))
             .withTextTurn("done", Usage.of(10, 2))
             .build();
 
@@ -340,7 +347,13 @@ final class SessionSpansTest {
   void theReasoningCountIsOnTheChatSpanThatReportedItAndOnTheRunSpanAndNowhereAsZero() {
     var model =
         ScriptedModel.newBuilder()
-            .withToolCallsTurn(Usage.of(10, 300, 0, 0, 120), call("noop", Map.of()))
+            .withToolCallsTurn(
+                Usage.newBuilder()
+                    .withInputTokens(10)
+                    .withOutputTokens(300)
+                    .withReasoningTokens(120)
+                    .build(),
+                call("noop", Map.of()))
             .withTextTurn("done", Usage.of(10, 2))
             .build();
 
@@ -604,7 +617,8 @@ final class SessionSpansTest {
     ContextCompactor compactor =
         (history, context) ->
             compactions.getAndIncrement() == 0
-                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
+                ? new CompactionResult(
+                    history, Usage.newBuilder().withCacheReadInputTokens(900).build(), "summary")
                 : CompactionResult.noOp(history);
     var model = ScriptedModel.newBuilder().withTextTurn("done", Usage.of(10, 1)).build();
     var events = new EventCollector();
@@ -637,7 +651,7 @@ final class SessionSpansTest {
     assertEquals(900L, summary.getAttributes().get(INPUT_TOKENS));
     assertEquals(900L, summary.getAttributes().get(CACHE_READ));
     assertEquals(
-        COSTS.cost("summary", Usage.of(0, 0, 0, 900)).microUsd(),
+        COSTS.cost("summary", Usage.newBuilder().withCacheReadInputTokens(900).build()).microUsd(),
         summary.getAttributes().get(COST));
     assertEquals(
         ended.duration().toNanos(), summary.getEndEpochNanos() - summary.getStartEpochNanos());

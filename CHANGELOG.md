@@ -13,6 +13,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `Skill(<name>/<file>)`). The tool loads a skill's instructions and file list or, once the skill
   is loaded, reads one of its files. After a compaction, the session puts back the skills the model had loaded. Also
   `MessageOrigin.SKILL` (`skill`).
+- `Response.Usage.newBuilder()`, which builds a usage by named counts (`withInputTokens`,
+  `withOutputTokens`, `withCacheCreationInputTokens`, `withCacheReadInputTokens`,
+  `withReasoningTokens`, `build`), each zero unless set, so a count added later breaks no caller.
 
 ### Compatibility
 
@@ -24,6 +27,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   and tools. On Anthropic models that bind reasoning, the next request drops earlier reasoning
   once, with one cache miss; Gemini resends the whole conversation once.
 - A host tool named `Skill` collides only in a session with skills.
+- `Response.Usage.of` with four and with five counts is removed; `Usage.of(input, output)` stays.
+  Replace `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` with
+  `Usage.newBuilder()`, then `withInputTokens(input)`, `withOutputTokens(output)`,
+  `withCacheCreationInputTokens(cacheCreation)`, `withCacheReadInputTokens(cacheRead)`,
+  `withReasoningTokens(reasoning)` and `build()`; for the four-count call, leave out
+  `withReasoningTokens`. The usage built is the same.
 
 ## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
 

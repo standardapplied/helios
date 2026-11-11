@@ -53,7 +53,13 @@ import org.junit.jupiter.params.provider.CsvSource;
 final class ContextCompactionTest {
 
   private static final long TOKENS_PER_MESSAGE = 10L;
-  private static final Usage FIRST_TURN = Usage.of(1_000, 7, 500, 4_000);
+  private static final Usage FIRST_TURN =
+      Usage.newBuilder()
+          .withInputTokens(1_000)
+          .withOutputTokens(7)
+          .withCacheCreationInputTokens(500)
+          .withCacheReadInputTokens(4_000)
+          .build();
   private static final long FIRST_TURN_INPUT = 5_500L;
 
   /**

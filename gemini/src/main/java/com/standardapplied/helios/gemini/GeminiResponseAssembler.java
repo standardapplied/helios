@@ -94,6 +94,11 @@ final class GeminiResponseAssembler {
     var thoughts = usage.thoughtTokensOrZero();
     var output = Math.addExact(visible, thoughts);
     var cached = usage.cachedTokensOrZero();
-    return Response.Usage.of(Math.max(0, input - cached), output, 0, cached, thoughts);
+    return Response.Usage.newBuilder()
+        .withInputTokens(Math.max(0, input - cached))
+        .withOutputTokens(output)
+        .withCacheReadInputTokens(cached)
+        .withReasoningTokens(thoughts)
+        .build();
   }
 }

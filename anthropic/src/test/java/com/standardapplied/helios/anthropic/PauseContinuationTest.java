@@ -234,18 +234,32 @@ class PauseContinuationTest {
         new ArrayDeque<>(
             List.of(
                 reporting(
-                    PAUSED_METADATA, Response.Usage.of(100, 1), Response.Usage.of(100, 4, 0, 0, 3)),
+                    PAUSED_METADATA,
+                    Response.Usage.of(100, 1),
+                    Response.Usage.newBuilder()
+                        .withInputTokens(100)
+                        .withOutputTokens(4)
+                        .withReasoningTokens(3)
+                        .build()),
                 reporting(
                     Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"),
                     Response.Usage.of(40, 1),
-                    Response.Usage.of(40, 9, 0, 0, 6))));
+                    Response.Usage.newBuilder()
+                        .withInputTokens(40)
+                        .withOutputTokens(9)
+                        .withReasoningTokens(6)
+                        .build())));
 
     var events = events(r -> segments.removeFirst());
 
     assertEquals(
         List.of(
             Response.Usage.of(100, 1),
-            Response.Usage.of(100, 4, 0, 0, 3),
+            Response.Usage.newBuilder()
+                .withInputTokens(100)
+                .withOutputTokens(4)
+                .withReasoningTokens(3)
+                .build(),
             new Response.Usage(140, 5, 0, 0, 145, 40, 3),
             new Response.Usage(140, 13, 0, 0, 153, 40, 9)),
         events.stream()
