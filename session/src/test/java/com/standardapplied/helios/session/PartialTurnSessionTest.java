@@ -14,6 +14,7 @@ import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.session.store.SessionEntry;
+import com.standardapplied.helios.session.test.EventCollector;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -68,23 +69,52 @@ final class PartialTurnSessionTest {
     var result = run.apply(this);
 
     assertEquals(terminal, result.getClass().getSimpleName());
-    var last = store.batches.getLast();
-    assertEquals(
-        List.of(
-            new SessionEntry.MessageAdded(result.runId(), now.get(), Message.user("go")),
-            new SessionEntry.MessageAdded(result.runId(), now.get(), PARTIAL),
-            SessionEntry.RunEnded.of(result.runId(), now.get(), result)),
-        last);
+    assertLastBatchKeptThePartial(result);
+  }
+
+  /**
+   * A run cut during the back-off before a retry keeps the failed attempt's text: no later attempt
+   * streamed, so it is the last thing the model said, though {@code TurnRetried} announced it
+   * superseded.
+   */
+  @Test
+  void aRunCutDuringARetryBackOffKeepsTheFailedAttemptsText() {
+    var retried = new CountDownLatch(1);
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new TransientStreamException("Stream read error", null, "test"), HALF))
+            .withTextTurn("never")
+            .build();
+    var limits =
+        SessionLimits.newBuilder()
+            .withStreamRetryPolicy(
+                new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
+            .build();
+    ResultMessage result;
+    try (var session = AgentSession.open(options(model).withLimits(limits).build())) {
+      new EventCollector(
+              event -> {
+                if (event instanceof QueryEvent.TurnRetried) {
+                  retried.countDown();
+                }
+              })
+          .read(session.events());
+      var run = session.send("go");
+      Await.latch("the first attempt's TurnRetried", retried);
+      session.interrupt();
+      result = Await.value("the run cut during its back-off", run);
+    }
+
+    assertInstanceOf(ResultMessage.Cancelled.class, result);
+    assertEquals(1, model.calls().size());
+    assertLastBatchKeptThePartial(result);
   }
 
   @Test
   void aReopenedSessionSendsThePartialBeforeTheNextMessage() {
-    try (var session = open(ScriptedModel.newBuilder().withStreamTurn(stalledAfterText()))) {
-      var result = session.send("go");
-      Await.latch("the model stream to stall after its text", stalled);
-      session.interrupt();
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the interrupted run", result));
-    }
+    assertInstanceOf(ResultMessage.Cancelled.class, interrupted());
     var model = ScriptedModel.newBuilder().withTextTurn("carried on").build();
 
     try (var reopened = AgentSession.open(options(model).build())) {
@@ -97,9 +127,11 @@ final class PartialTurnSessionTest {
 
   @Test
   void theNextRunOfTheSameSessionSendsThePartial() {
-    var script =
-        ScriptedModel.newBuilder().withStreamTurn(stalledAfterText()).withTextTurn("carried on");
-    var model = script.build();
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(stalledAfterText())
+            .withTextTurn("carried on")
+            .build();
 
     try (var session = AgentSession.open(options(model).build())) {
       var interrupted = session.send("go");
@@ -111,6 +143,16 @@ final class PartialTurnSessionTest {
     }
 
     assertEquals(List.of(Message.user("go"), PARTIAL, Message.user("go on")), model.calls().get(1));
+  }
+
+  /** The store's last batch holds the run's first message, its partial and its end. */
+  private void assertLastBatchKeptThePartial(ResultMessage result) {
+    assertEquals(
+        List.of(
+            new SessionEntry.MessageAdded(result.runId(), now.get(), Message.user("go")),
+            new SessionEntry.MessageAdded(result.runId(), now.get(), PARTIAL),
+            SessionEntry.RunEnded.of(result.runId(), now.get(), result)),
+        store.batches.getLast());
   }
 
   private ResultMessage interrupted() {

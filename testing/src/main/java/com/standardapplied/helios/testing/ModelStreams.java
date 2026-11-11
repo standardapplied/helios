@@ -13,9 +13,9 @@ import java.util.concurrent.CountDownLatch;
 
 /**
  * Fixed model streams for tests: one-pass {@link CloseableIterator}s of {@link ModelChunk} that
- * yield a chunk sequence and end, yield one and fail, or yield one and never end. A test that
- * scripts the same stream twice builds it twice. Script one into a {@link ScriptedModel} with
- * {@link ScriptedModel.Builder#withStreamTurn}.
+ * yield a chunk sequence and end, yield one and fail, or yield one, possibly empty, and never end.
+ * A test that scripts the same stream twice builds it twice. Script one into a {@link
+ * ScriptedModel} with {@link ScriptedModel.Builder#withStreamTurn}.
  */
 public final class ModelStreams {
 

@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.QueryEvent;
@@ -35,7 +37,8 @@ final class InterruptedSession {
    * Runs the two runs over {@code model} and asserts what holds whatever the model writes: the
    * first run ended interrupted or, had the model finished first, in success; the second run ended
    * in success; no {@code Error} event. Whether the interrupt cut the answer is a race the model
-   * can win, so a second run that sent no partial skips.
+   * can win: a first run whose answer completed skips, and one whose answer was cut must have sent
+   * it as the partial turn.
    */
   static void interruptThenGoOn(Model model) {
     var firstText = new CountDownLatch(1);
@@ -55,14 +58,14 @@ final class InterruptedSession {
       var events =
           new EventCollector(
               event -> {
-                if (event instanceof QueryEvent.AssistantText) {
+                if (event instanceof QueryEvent.AssistantText text && !text.text().isBlank()) {
                   firstText.countDown();
                 }
               });
       events.read(session.events());
 
       var first = session.send("Write a 600-word story about a lighthouse keeper and a stray cat.");
-      Await.latch("the first run's first AssistantText", firstText);
+      Await.latch("the first run's first non-blank AssistantText", firstText);
       session.interrupt();
       var interrupted = first.join();
       requests.clear();
@@ -78,14 +81,21 @@ final class InterruptedSession {
           continued instanceof ResultMessage.Success,
           () -> model.id() + " ended the run after the interrupt as " + continued);
       assertTrue(events.eventsOf(QueryEvent.Error.class).isEmpty(), model.id());
-      assumeTrue(
-          requests.getFirst().stream()
-              .anyMatch(m -> MessageOrigin.of(m).equals(Optional.of(MessageOrigin.PARTIAL_TURN))),
+      var request = requests.getFirst();
+      var lastOfFirstRun = request.get(request.size() - 2);
+      var answerCompleted =
+          lastOfFirstRun.role() == Role.ASSISTANT && MessageOrigin.of(lastOfFirstRun).isEmpty();
+      assumeFalse(
+          interrupted instanceof ResultMessage.Success || answerCompleted,
           model.id()
               + " finished its answer before the interrupt, so no partial turn was sent;"
               + " PartialTurnSessionTest#theNextRunOfTheSameSessionSendsThePartial and"
               + " ConversationRequestContract#aPartialTurnIsSentAsATextOnlyAssistantTurnWithout"
               + "TheSessionsTag cover the request");
+      assertEquals(
+          Optional.of(MessageOrigin.PARTIAL_TURN),
+          MessageOrigin.of(lastOfFirstRun),
+          () -> model.id() + " cut mid-answer; the next request ends " + request);
     }
   }
 }

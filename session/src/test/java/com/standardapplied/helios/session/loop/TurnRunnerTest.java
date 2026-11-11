@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.FinishReason;
@@ -24,10 +25,13 @@ import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.schema.StructuredOutputParseException;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.QueryEvent;
+import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.UserMessage;
+import com.standardapplied.helios.session.hooks.HookOutcome;
+import com.standardapplied.helios.session.hooks.PostModelTurnHook;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
@@ -273,6 +277,34 @@ final class TurnRunnerTest {
         events.stream()
             .noneMatch(e -> e instanceof QueryEvent.ToolUse || e instanceof QueryEvent.ToolResult),
         "a cut turn's tool calls never run");
+  }
+
+  /**
+   * A {@code PostModelTurn} hook still fires on a turn cut short, and its {@code Stop} ends the run
+   * with the hook's answer; the partial is in the history by then.
+   */
+  @Test
+  void aPostModelTurnStopOnACutTurnLeavesThePartialLast() {
+    var model =
+        streaming(
+            ModelStreams.failing(
+                new IllegalStateException("connection reset"),
+                new ModelChunk.TextDelta("Half a sentence")));
+    PostModelTurnHook stop = (response, ctx) -> HookOutcome.stop("stopped by the hook");
+    var runner =
+        fixture.runner(
+            fixture.collaborators(
+                new HookRegistry(List.of(stop), new SecretRegistry()), dispatch, queue),
+            model);
+    var state = freshState();
+
+    runner.runTurn(state, SessionLimits.defaults());
+
+    assertEquals(
+        Message.assistant("Half a sentence", List.of(), MessageOrigin.PARTIAL_TURN.metadata()),
+        state.history().snapshot().getLast());
+    var terminal = assertInstanceOf(ResultMessage.Success.class, state.terminal().orElseThrow());
+    assertEquals("stopped by the hook", terminal.result());
   }
 
   @Test
