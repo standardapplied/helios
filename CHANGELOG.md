@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
+
 ### Added
 
 - `AnthropicModelId.CLAUDE_FABLE_5_2` and `CLAUDE_MYTHOS_5_2`, released by Anthropic on 2026-11-09:
@@ -96,6 +98,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   no `TurnRetried` and no back-off. Before, the remaining attempts were made and billed first.
 - A run cancelled before its model call is read (by a `PreModelTurnHook`, `interrupt()`, `close()`
   or the wall clock) no longer sends the request; it could, depending on thread timing.
+- A run ended by its wall clock is `ErrorMaxWallClock` whatever the session's clock reads; it could
+  be `Cancelled` when the `InstantSource` had not advanced past the limit.
 
 ### Compatibility
 

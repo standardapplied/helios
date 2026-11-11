@@ -158,6 +158,26 @@ final class StopClassifierTest {
     assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
   }
 
+  @Test
+  void anExpiredWallClockProducesErrorMaxWallClockWhateverTheClockReads() {
+    var token = new CancellationToken();
+    token.cancel("maxWallClock exceeded after 500ms");
+    var s = stateAtElapsed(Duration.ZERO, token);
+    s.expireWallClock();
+    var result = classifyNoError(s, defaults(), FinishReason.STOP, "ignored", false);
+    assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
+  }
+
+  @Test
+  void anExpiredWallClockTakesPriorityOverTheBudget() {
+    var s = stateAtElapsed(Duration.ZERO);
+    s.expireWallClock();
+    s.totals().accumulateCost(CostEstimate.ofMicroUsd(1_500_000L));
+    var limits = SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build();
+    var result = classifyNoError(s, limits, FinishReason.STOP, "x", false);
+    assertInstanceOf(ResultMessage.ErrorMaxWallClock.class, result.orElseThrow());
+  }
+
   // ── late spend ────────────────────────────────────────────────────────────
 
   private static final Duration DECIDED = Duration.ofSeconds(3);
