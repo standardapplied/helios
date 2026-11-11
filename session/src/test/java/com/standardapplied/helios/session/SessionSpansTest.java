@@ -67,7 +67,7 @@ final class SessionSpansTest {
   static final AttributeKey<Long> INPUT_TOKENS = longKey("gen_ai.usage.input_tokens");
   static final AttributeKey<Long> OUTPUT_TOKENS = longKey("gen_ai.usage.output_tokens");
   static final AttributeKey<Long> CACHE_READ = longKey("gen_ai.usage.cache_read.input_tokens");
-  static final AttributeKey<Long> CACHE_WRITE = longKey("gen_ai.usage.cache_write.input_tokens");
+  static final AttributeKey<Long> CACHE_WRITE = longKey("gen_ai.usage.cache_creation.input_tokens");
   static final AttributeKey<Long> REASONING = longKey("gen_ai.usage.reasoning.output_tokens");
   static final AttributeKey<Long> TOTAL_TOKENS = longKey("helios.usage.total_tokens");
   static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");

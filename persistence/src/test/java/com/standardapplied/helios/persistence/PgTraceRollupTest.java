@@ -152,7 +152,7 @@ class PgTraceRollupTest {
                   + usage.cacheCreationInputTokens()
                   + usage.cacheReadInputTokens())
           .put("gen_ai.usage.output_tokens", (long) usage.outputTokens())
-          .put("gen_ai.usage.cache_write.input_tokens", (long) usage.cacheCreationInputTokens())
+          .put("gen_ai.usage.cache_creation.input_tokens", (long) usage.cacheCreationInputTokens())
           .put("gen_ai.usage.cache_read.input_tokens", (long) usage.cacheReadInputTokens())
           .put("helios.cost.micro_usd", costMicroUsd);
     }

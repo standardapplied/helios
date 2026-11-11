@@ -88,7 +88,7 @@ public final class PgSpanExporter implements SpanExporter {
   private static final AttributeKey<Long> CACHE_READ =
       longKey("gen_ai.usage.cache_read.input_tokens");
   private static final AttributeKey<Long> CACHE_WRITE =
-      longKey("gen_ai.usage.cache_write.input_tokens");
+      longKey("gen_ai.usage.cache_creation.input_tokens");
   private static final AttributeKey<Long> REASONING_TOKENS =
       longKey("gen_ai.usage.reasoning.output_tokens");
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");

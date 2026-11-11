@@ -63,6 +63,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Anthropic streams yield `ModelChunk.UsageDelta` at `message_start` and at each `message_delta`,
   and Gemini streams at each `interaction.created` or status event, when its usage reports a token;
   they yielded `ModelChunk.KeepAlive` there.
+- The chat and run spans' cache-write count is `gen_ai.usage.cache_creation.input_tokens`, the
+  OpenTelemetry GenAI registry's name; it was `gen_ai.usage.cache_write.input_tokens`. Stored rows
+  are unaffected: the count has its own column.
 
 ### Fixed
 
@@ -100,7 +103,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 before deploying; replace six-argument `new Response.Usage(...)` calls (see below); add a case to a
 `switch` without `default` over `StreamEvent` (`UsageDelta`), `MessageOrigin` (`PARTIAL_TURN`),
 `AnthropicModelId` (`CLAUDE_FABLE_5_2`, `CLAUDE_MYTHOS_5_2`), `OpenAIModelId` (`GPT_6_1_TERRA`) or
-`GeminiModelId` (`GEMINI_4_CARBON`); recompile test code that calls `ModelStreams.stalled`.
+`GeminiModelId` (`GEMINI_4_CARBON`); recompile test code that calls `ModelStreams.stalled`; read
+`gen_ai.usage.cache_creation.input_tokens` where you read `gen_ai.usage.cache_write.input_tokens`.
 
 - `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
 - A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
