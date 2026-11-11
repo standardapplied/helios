@@ -97,6 +97,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
 
   private final SseRequest request;
   private final Duration idleTimeout;
+  private final long idleNanos;
   private final Parser parser;
   private final ProviderFailure failure;
   private final long origin = System.nanoTime();
@@ -165,6 +166,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       SseRequest request, Duration idleTimeout, Parser parser, ProviderFailure failure) {
     this.request = request;
     this.idleTimeout = Objects.requireNonNull(idleTimeout, "idleTimeout must not be null");
+    this.idleNanos = TimeUnit.NANOSECONDS.convert(idleTimeout);
     this.parser = Objects.requireNonNull(parser, "parser must not be null");
     this.failure = Objects.requireNonNull(failure, "failure must not be null");
   }
@@ -329,7 +331,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       throw new IOException("Stream closed");
     }
     if (watchdog == null) {
-      if (!idleTimeout.isPositive()) {
+      if (idleNanos <= 0) {
         throw idle();
       }
       synchronized (lock) {
@@ -365,11 +367,11 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
    * open, and closes the body once it has claimed a wait that outlasted the timeout.
    */
   private void watchIdle() {
-    var timeout = TimeUnit.NANOSECONDS.convert(idleTimeout);
     try {
       while (true) {
         var mark = wait.get();
-        var left = mark == NOT_WAITING ? timeout : timeout - (System.nanoTime() - origin - mark);
+        var left =
+            mark == NOT_WAITING ? idleNanos : idleNanos - (System.nanoTime() - origin - mark);
         if (mark != NOT_WAITING && left <= 0 && wait.compareAndSet(mark, CLAIMED)) {
           closeQuietly(body);
           return;
