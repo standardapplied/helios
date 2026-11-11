@@ -197,6 +197,58 @@ final class SubagentSessionTest {
   }
 
   @Test
+  void aChildNeverSeesTheParentsSkills() {
+    var childModel =
+        childModel()
+            .withToolCallsTurn(new ToolCall("c-skill", SkillTool.NAME, Map.of("skill", "pdf")))
+            .withTextTurn("found")
+            .build();
+    var parentModel = callingMatching(Usage.of(1, 1));
+
+    var result =
+        run(
+            parent(parentModel, child(childModel))
+                .withSkill(Skill.of("pdf", "Extracts text from PDFs.", "Use pdfplumber."))
+                .build());
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertTrue(
+        parentModel.calls().getFirst().getFirst().content().contains("<name>pdf</name>"),
+        "the parent's catalog");
+    assertEquals(List.of(Message.user("find a match for bob")), childModel.calls().getFirst());
+    assertEquals(
+        Message.tool("c-skill", SkillTool.NAME, ToolResult.notFound(SkillTool.NAME).output()),
+        childModel.calls().get(1).getLast());
+  }
+
+  @Test
+  void aChildLoadsTheSkillsOfItsOwnOptions() {
+    var childModel =
+        childModel()
+            .withToolCallsTurn(
+                new ToolCall("c-skill", SkillTool.NAME, Map.of("skill", "matching-rules")))
+            .withTextTurn("found")
+            .build();
+    var parentModel = callingMatching(Usage.of(1, 1));
+    var rules = Skill.of("matching-rules", "How to match members.", "Prefer shared hobbies.");
+
+    var result = run(parent(parentModel, child(childModel).withSkill(rules)).build());
+
+    assertInstanceOf(ResultMessage.Success.class, result);
+    assertEquals("found", agentResult(parentModel));
+    assertEquals(List.of(Message.user("find a match")), parentModel.calls().getFirst());
+    assertTrue(
+        childModel.calls().getFirst().getFirst().content().contains("<name>matching-rules</name>"),
+        "the child's catalog");
+    assertEquals(
+        Message.tool(
+            "c-skill",
+            SkillTool.NAME,
+            "<skill_content name=\"matching-rules\">\nPrefer shared hobbies.\n</skill_content>"),
+        childModel.calls().get(1).getLast());
+  }
+
+  @Test
   void theUsageAChildsCutCallReportedIsTheParentRunsSpend() {
     var child =
         child(

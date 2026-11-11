@@ -198,7 +198,8 @@ public final class SummarizingCompactor implements ContextCompactor {
         + context.turnIndex();
   }
 
-  private static int leadingSystemMessages(List<Message> history) {
+  /** How many {@code SYSTEM} messages {@code history} starts with. */
+  static int leadingSystemMessages(List<Message> history) {
     var count = 0;
     while (count < history.size() && history.get(count).role() == Role.SYSTEM) {
       count++;

@@ -121,7 +121,8 @@ final class SessionOptionsTest {
         "openTelemetry",
         "agentName",
         "traceDetail",
-        "traceAttributes"
+        "traceAttributes",
+        "skills"
       })
   void canonicalConstructorRejectsANullComponent(String component) {
     var ex = assertThrows(NullPointerException.class, () -> canonical(component, null));
@@ -757,5 +758,53 @@ final class SessionOptionsTest {
     assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullKey));
     assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullValue));
     assertThrows(NullPointerException.class, () -> canonical("traceAttributes", nullValue));
+  }
+
+  // ── skills ────────────────────────────────────────────────────────────────
+
+  @Test
+  void skillsDefaultToNoneAppendReplaceAndSurviveToBuilder() {
+    var a = Skill.of("a", "first", "do a");
+    var b = Skill.of("b", "second", "do b");
+    var c = Skill.of("c", "third", "do c");
+
+    var built =
+        SessionOptions.newBuilder().withModel(stubModel()).withSkill(a).withSkill(b).build();
+
+    assertEquals(List.of(), SessionOptions.newBuilder().withModel(stubModel()).build().skills());
+    assertEquals(List.of(a, b), built.skills());
+    assertEquals(List.of(a, b), built.toBuilder().build().skills());
+    assertEquals(List.of(c), built.toBuilder().withSkills(List.of(c)).build().skills());
+    assertEquals(
+        List.of(c, a), built.toBuilder().withSkills(List.of(c)).withSkill(a).build().skills());
+  }
+
+  @Test
+  void twoSkillsWithOneNameAreRefusedAtBuildNamingIt() {
+    var builder =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withSkill(Skill.of("pdf", "reads PDFs", "a"))
+            .withSkill(Skill.of("pdf", "reads PDFs too", "b"));
+
+    var refused = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals("duplicate skill name: pdf", refused.getMessage());
+  }
+
+  @Test
+  void theSkillSettersRejectNull() {
+    var builder = SessionOptions.newBuilder();
+    var withNull = new ArrayList<Skill>();
+    withNull.add(null);
+
+    assertEquals(
+        "skills must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withSkills(null)).getMessage());
+    assertEquals(
+        "skill must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withSkill(null)).getMessage());
+    assertThrows(NullPointerException.class, () -> builder.withSkills(withNull));
+    assertThrows(NullPointerException.class, () -> canonical("skills", withNull));
   }
 }

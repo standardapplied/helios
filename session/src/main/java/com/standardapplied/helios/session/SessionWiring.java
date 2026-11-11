@@ -29,15 +29,16 @@ import java.util.Optional;
  * Builds one session's agent loop from its options: the tool registry, the options' tools followed
  * by the built-in tools the options switch on (the memory tools for a memory backend, {@code
  * Execute} for an execution provider, {@code AskUserQuestion} when asked for, {@code Agent} for
- * subagents), refusing a hand {@code Execute} binding without a provider, whose start and end would
- * never run; the tool dispatch, whose {@code Agent} calls run under their subagent's limits, the
- * hooks, the permission stage, the loop collaborators and the turn runner. The permission stage is
- * the {@link DefaultPermissionEvaluator} of the session's {@link
+ * subagents, {@code Skill} for skills), refusing a hand {@code Execute} binding without a provider,
+ * whose start and end would never run; the tool dispatch, whose {@code Agent} calls run under their
+ * subagent's limits, the hooks, the permission stage, the loop collaborators and the turn runner.
+ * The permission stage is the {@link DefaultPermissionEvaluator} of the session's {@link
  * com.standardapplied.helios.session.permissions.Permission}, asking the user through the session's
  * questions, or, in the child session of an {@code Agent} call, denying what its policy asks about,
- * with the rules that decide a key withholding what walking tools return. The loop's events reach
- * the session's {@link RunSpans} before its publisher. It acquires nothing, so a failure here
- * leaves only what the caller acquired to release.
+ * with the rules that decide a key withholding what walking tools return. A session with skills
+ * compacts through the options' compactor wrapped to put back the skills the model loaded ({@link
+ * SkillTool#keeping}). The loop's events reach the session's {@link RunSpans} before its publisher.
+ * It acquires nothing, so a failure here leaves only what the caller acquired to release.
  */
 final class SessionWiring {
 
@@ -55,7 +56,8 @@ final class SessionWiring {
       Optional<AgentTool.Parent> parent) {
     this.spans = new RunSpans(options, parent.map(AgentTool.Parent::linkage).orElse(Map.of()));
     var agents = new AgentTool(options.subagents(), options.limits());
-    var tools = registry(options, pendingQuestions, agents);
+    var skills = new SkillTool(options.skills());
+    var tools = registry(options, pendingQuestions, agents, skills);
     var model = options.model();
     var evaluator =
         new DefaultPermissionEvaluator(
@@ -86,7 +88,9 @@ final class SessionWiring {
             turnRunner,
             new StopClassifier(options.secretRegistry()),
             options.tokenCounter(),
-            options.contextCompactor(),
+            options.skills().isEmpty()
+                ? options.contextCompactor()
+                : skills.keeping(options.contextCompactor()),
             storedHistory);
   }
 
@@ -100,7 +104,7 @@ final class SessionWiring {
   }
 
   private static ToolRegistry registry(
-      SessionOptions options, QuestionGateway gateway, AgentTool agents) {
+      SessionOptions options, QuestionGateway gateway, AgentTool agents, SkillTool skills) {
     if (options.executionProvider().isEmpty()
         && options.tools().stream().anyMatch(tool -> ExecuteTool.NAME.equals(tool.name()))) {
       throw new IllegalArgumentException(
@@ -120,6 +124,9 @@ final class SessionWiring {
     }
     if (!options.subagents().isEmpty()) {
       tools.add(agents.binding());
+    }
+    if (!options.skills().isEmpty()) {
+      tools.add(skills.binding());
     }
     return new ToolRegistry(tools);
   }

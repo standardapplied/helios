@@ -9,7 +9,10 @@ package com.standardapplied.helios.session.tools;
  * rule decides them. Each tool registers exactly one category.
  */
 public enum ToolCategory {
-  /** File reads, directory listing and content search ({@code Read}, {@code LS}, {@code Grep}). */
+  /**
+   * File reads, directory listing and content search ({@code Read}, {@code LS}, {@code Grep}), and
+   * loading a skill the host provided ({@code Skill}).
+   */
   READ,
   /** File writes and edits, memory writes included. */
   WRITE,

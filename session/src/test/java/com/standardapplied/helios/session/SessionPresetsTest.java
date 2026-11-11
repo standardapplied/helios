@@ -108,6 +108,18 @@ final class SessionPresetsTest {
   }
 
   @Test
+  void noPresetAddsASkill() {
+    var model = ScriptedModel.newBuilder().build();
+
+    assertEquals(
+        List.of(List.of(), List.of(), List.of()),
+        List.of(
+            SessionPresets.minimal(model).build().skills(),
+            SessionPresets.readOnly(model, root).build().skills(),
+            SessionPresets.workspace(model, root).build().skills()));
+  }
+
+  @Test
   void readOnlyDeniesAWriteWithoutAsking() {
     var sessions = new WriteToolSessions();
     var model = answering(WriteToolSessions.write("notes.txt"));
