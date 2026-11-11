@@ -73,14 +73,15 @@ final class ModelCall {
    * StreamRetryPolicy#nextDelay(int)}; the back-off sleep honours the session's {@link
    * CancellationToken} so wall-clock / explicit-cancel terminations abort cleanly without burning
    * the full delay. A cancelled session or an interrupted thread starts no further attempt, even
-   * one cancelled while a retried attempt's event was delivered. The caller maps a still-failing
-   * transient error to {@link
+   * one cancelled while a retried attempt's event was delivered, which a zero back-off does not
+   * notice. The caller maps a still-failing transient error to {@link
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Every attempt, retried or final, is accounted once through {@link UsageAccounting} with the
-   * usage its provider reported, since the provider bills each: the final attempt as its stream
-   * ends, a retried one once its back-off ended, elapsed or cut short by the run's cancellation.
+   * <p>Every attempt is accounted once through {@link UsageAccounting} as its stream ends, with the
+   * usage its provider reported, since the provider bills each, before it is known whether it is
+   * retried: a retried attempt's {@link QueryEvent.ModelCallEnded} precedes its {@link
+   * QueryEvent.TurnRetried}.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -98,11 +99,10 @@ final class ModelCall {
       attempt++;
       var started = clock.instant();
       var turn = streamOnce(state, limits, visibleTools);
-      var ended = clock.instant();
+      accounting.accountTurn(state, turn, attempt, started, clock.instant());
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
           || stopped(state)) {
-        accounting.accountTurn(state, turn, attempt, started, ended);
         return turn.withStreamAttempts(attempt);
       }
       var backoff = delay(policy, attempt, transientErr);
@@ -117,9 +117,7 @@ final class ModelCall {
               backoff,
               transientErr.providerName(),
               SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
-      var slept = sleepHonouringCancellation(backoff, state.cancellation());
-      accounting.accountTurn(state, turn, attempt, started, ended);
-      if (!slept || stopped(state)) {
+      if (!sleepHonouringCancellation(backoff, state.cancellation()) || stopped(state)) {
         return turn.withStreamAttempts(attempt);
       }
     }

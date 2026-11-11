@@ -43,6 +43,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -415,6 +416,52 @@ final class SessionSpansTest {
     assertEquals(1L, chats.get(1).getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     assertEquals(StatusCode.UNSET, chats.get(1).getStatus().getStatusCode());
     assertTotalsEqual(result, capture.run());
+  }
+
+  /**
+   * The span is read when the retry is announced: it has ended by then, so it does not span the
+   * back-off, which the run's interrupt then cuts.
+   */
+  @Test
+  void aRetriedAttemptThatReportedUsageIsAChatSpanWithItsUsageAndCostEndedBeforeItsBackOff() {
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                ModelStreams.failing(
+                    new TransientStreamException("reset", null, "test"),
+                    new ModelChunk.UsageDelta(Usage.of(40, 4))))
+            .withTextTurn("never")
+            .build();
+    var limits =
+        SessionLimits.newBuilder()
+            .withStreamRetryPolicy(
+                new StreamRetryPolicy(2, Backoff.fixed(Duration.ofHours(1)), 0.0))
+            .build();
+    var endedAtRetry = new AtomicReference<List<SpanData>>();
+    var retried = new CountDownLatch(1);
+
+    try (var session = AgentSession.open(traced(model).withLimits(limits).build())) {
+      new EventCollector(
+              event -> {
+                if (event instanceof QueryEvent.TurnRetried) {
+                  endedAtRetry.set(capture.named("chat scripted"));
+                  retried.countDown();
+                }
+              })
+          .read(session.events());
+      var run = session.send("go");
+      Await.latch("the attempt's TurnRetried", retried);
+      session.interrupt();
+      Await.value("the interrupted run", run);
+    }
+
+    var chat = endedAtRetry.get().getFirst();
+    assertEquals(1, endedAtRetry.get().size());
+    assertEquals(1L, number(chat, "helios.attempt"));
+    assertEquals(StatusCode.ERROR, chat.getStatus().getStatusCode());
+    assertEquals(40L, chat.getAttributes().get(INPUT_TOKENS));
+    assertEquals(4L, chat.getAttributes().get(OUTPUT_TOKENS));
+    assertEquals(40L + 4 * 2, chat.getAttributes().get(COST));
   }
 
   @Test

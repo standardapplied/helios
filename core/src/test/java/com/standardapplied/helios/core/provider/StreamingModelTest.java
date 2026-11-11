@@ -246,6 +246,22 @@ class StreamingModelTest {
   }
 
   @Test
+  void aFailedTurnWhoseUsageReportsNoTokensYieldsNoUsageAndOneReportingOnlyCacheTokensDoes() {
+    var reset = new IOException("reset");
+    var cacheOnly = Response.Usage.of(0, 0, 0, 900);
+    events = List.of(error("Stream read error", reset, Response.Usage.of(0, 0)));
+
+    var zero = streamed();
+    events = List.of(error("Stream read error", reset, cacheOnly));
+    var cached = streamed();
+
+    assertEquals(List.of(), zero.items());
+    assertSame(reset, zero.failure().getCause());
+    assertEquals(List.of(new ModelChunk.UsageDelta(cacheOnly)), cached.items());
+    assertSame(reset, cached.failure().getCause());
+  }
+
+  @Test
   void aStreamClosedOnceAFailedTurnsUsageWasReadThrowsItsExceptionAsTheCancellationsCause() {
     var reset = new IOException("reset");
     events = List.of(error("Stream read error", reset, REPORTED));
@@ -547,15 +563,33 @@ class StreamingModelTest {
   }
 
   @Test
-  void aStructuredStreamAsksForTheSchemaAndThrowsAMismatchAfterTheText() {
+  void aStructuredStreamAsksForTheSchemaAndThrowsAMismatchAfterTheTextAndTheUsageItWasBilled() {
     var schema = OutputSchema.of(Answer.class);
     reply = done("not json");
 
     var read = StreamRead.of(model(config()).chatStream(MESSAGES, List.of(), schema));
 
     assertInstanceOf(StructuredOutputParseException.class, read.failure());
-    assertEquals(List.of(new ModelChunk.TextDelta("not json")), read.items());
+    assertEquals(
+        List.of(
+            new ModelChunk.TextDelta("not json"),
+            new ModelChunk.UsageDelta(Response.Usage.of(2, 1))),
+        read.items());
     assertEquals(schema.schema().toMap(), chatted.getFirst().outputSchema());
+    assertTrue(opened.closed());
+  }
+
+  @Test
+  void aStructuredMismatchWhoseResponseReportsNoUsageIsThrownAfterTheTextAlone() {
+    reply =
+        Response.newBuilder().withContent("not json").withFinishReason(FinishReason.STOP).build();
+
+    var read =
+        StreamRead.of(
+            model(config()).chatStream(MESSAGES, List.of(), OutputSchema.of(Answer.class)));
+
+    assertInstanceOf(StructuredOutputParseException.class, read.failure());
+    assertEquals(List.of(new ModelChunk.TextDelta("not json")), read.items());
   }
 
   @Test
