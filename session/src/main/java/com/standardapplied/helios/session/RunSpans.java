@@ -87,7 +87,7 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<Long> CACHE_WRITE =
       longKey("gen_ai.usage.cache_write.input_tokens");
   private static final AttributeKey<Long> REASONING_TOKENS =
-      longKey("gen_ai.usage.reasoning_tokens");
+      longKey("gen_ai.usage.reasoning.output_tokens");
   private static final AttributeKey<String> TOOL_NAME = stringKey("gen_ai.tool.name");
   private static final AttributeKey<String> TOOL_CALL_ID = stringKey("gen_ai.tool.call.id");
   private static final AttributeKey<String> TOOL_TYPE = stringKey("gen_ai.tool.type");

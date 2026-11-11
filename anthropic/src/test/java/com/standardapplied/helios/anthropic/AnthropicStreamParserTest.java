@@ -283,13 +283,16 @@ class AnthropicStreamParserTest {
   }
 
   @Test
-  void aThinkingCountAboveTheOutputCountIsCutToIt() {
+  void aThinkingCountAboveTheOutputCountIsCutToItUntilTheOutputCatchesUp() {
     var overReported =
         parser.parse(
             "{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":10,"
                 + "\"output_tokens_details\":{\"thinking_tokens\":40}}}");
+    var outputCaughtUp =
+        parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":235}}");
 
     assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 10, 0, 0, 10)), overReported);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 235, 0, 0, 40)), outputCaughtUp);
   }
 
   @Test

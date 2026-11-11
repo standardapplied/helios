@@ -143,12 +143,13 @@ public record Response<T>(
    *       {@code cacheCreationInputTokens} is always zero from that provider.
    *   <li><b>Providers without cache reporting</b> leave the cache fields at zero — existing {@code
    *       Usage.of(input, output)} call sites need no change.
-   *   <li><b>Reasoning</b> is a part of {@code outputTokens}, not a fifth class: Gemini's {@code
-   *       total_thought_tokens}, which Gemini reports apart and the Gemini provider adds to {@code
-   *       outputTokens}, OpenAI's {@code output_tokens_details.reasoning_tokens} and Anthropic's
-   *       {@code output_tokens_details.thinking_tokens}, both already inside the output count. A
-   *       count reported above the output count is cut to it; a provider that reports none leaves
-   *       {@code reasoningTokens} at zero.
+   *   <li><b>Reasoning</b> is a part of {@code outputTokens}, not a fifth class: never add it to a
+   *       total or price it apart. OpenAI's {@code output_tokens_details.reasoning_tokens} and
+   *       Anthropic's {@code output_tokens_details.thinking_tokens} are inside the provider's
+   *       output count; Gemini reports {@code total_thought_tokens} apart and the Gemini provider
+   *       adds it to {@code outputTokens}. Each provider caps a count above the output count to it;
+   *       the constructor refuses one. A provider that reports none leaves {@code reasoningTokens}
+   *       at zero.
    * </ul>
    *
    * <p>{@link #totalTokens} sums every billable token across all four classes, so dashboards and
@@ -264,14 +265,13 @@ public record Response<T>(
     }
 
     /**
-     * Build a {@link Usage} including prompt-cache token counts, with no reasoning count.
+     * {@link #of(int, int, int, int, int)} with no reasoning count.
      *
      * @param input uncached prompt tokens
      * @param output completion tokens
      * @param cacheCreation tokens written to the provider's prompt cache
      * @param cacheRead tokens read from the provider's prompt cache
-     * @return a usage record of one request, with {@code totalTokens} summing all four counts,
-     *     {@code promptTokens} the three input counts and {@code reasoningTokens} zero
+     * @return a usage record of one request, {@code reasoningTokens} zero
      * @throws IllegalArgumentException if a count is negative
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
      */
@@ -287,8 +287,9 @@ public record Response<T>(
      * @param cacheCreation tokens written to the provider's prompt cache
      * @param cacheRead tokens read from the provider's prompt cache
      * @param reasoning the part of {@code output} the model spent reasoning
-     * @return a usage record of one request, with {@code totalTokens} summing all four counts and
-     *     {@code promptTokens} the three input counts
+     * @return a usage record of one request, with {@code totalTokens} summing all four counts,
+     *     {@code promptTokens} the three input counts and {@code reasoningTokens} the reasoning
+     *     count
      * @throws IllegalArgumentException if a count is negative or {@code reasoning} is greater than
      *     {@code output}
      * @throws ArithmeticException if the sum of the four counts overflows an {@code int}

@@ -124,7 +124,7 @@ final class RecordedSessionTest {
         calls.stream()
             .map(call -> call.getAttributes().get(AttributeKey.stringKey("gen_ai.response.model")))
             .toList());
-    var reasoning = AttributeKey.longKey("gen_ai.usage.reasoning_tokens");
+    var reasoning = AttributeKey.longKey("gen_ai.usage.reasoning.output_tokens");
     assertEquals(
         List.of(21L, 95L, 167L, 28L),
         calls.stream().map(call -> call.getAttributes().get(reasoning)).toList());

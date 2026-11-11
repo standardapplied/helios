@@ -192,7 +192,7 @@ final class PgSpanExporterTest {
 
   @Test
   void theReasoningCountOfARunAndOfItsChatStepIsStoredAndReadBack() {
-    var reasoning = "gen_ai.usage.reasoning_tokens";
+    var reasoning = "gen_ai.usage.reasoning.output_tokens";
     var chat =
         step(
             RUN,
@@ -216,6 +216,38 @@ final class PgSpanExporterTest {
     assertEquals(Usage.of(100, 22, 30, 50, 9), found.spans().getFirst().usage());
     assertFalse(found.attributes().containsKey(reasoning));
     assertFalse(found.spans().getFirst().attributes().containsKey(reasoning));
+  }
+
+  @Test
+  void aHostSpansReasoningCountAboveItsOutputCountIsCutToItWithoutFailingTheBatch() {
+    var reasoning = "gen_ai.usage.reasoning.output_tokens";
+    var overReported =
+        host(
+                RUN,
+                "8000000000000001",
+                "host chat",
+                1,
+                Attributes.builder().putAll(usage(10, 4, 0, 0)).put(reasoning, 9L).build())
+            .build();
+    var withoutOutput =
+        host(
+                RUN,
+                "8000000000000002",
+                "host summary",
+                2,
+                Attributes.builder()
+                    .put("gen_ai.usage.input_tokens", 10L)
+                    .put(reasoning, 9L)
+                    .build())
+            .build();
+
+    assertTrue(exporter.export(List.of(overReported, withoutOutput, runSpan(RUN))).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
+    assertEquals(
+        List.of(Usage.of(10, 4, 0, 0, 4), Usage.of(10, 0)),
+        found.spans().stream().map(Span::usage).toList());
   }
 
   @Test
