@@ -33,6 +33,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -48,13 +49,15 @@ import java.util.logging.Logger;
  * helios.parent.run_id} and {@code helios.parent.tool_call_id}. Under it, set as their parent: a
  * {@code chat} span per model attempt, from {@link #modelAttempt} to its {@link
  * QueryEvent.ModelCallEnded}, carrying as {@code gen_ai.response.model} the model the provider
- * reported serving it, if any (a compactor's call, which starts none, spans the event's duration);
- * an {@code execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or its first
- * {@link QueryEvent.ToolResult} when it had none, to that first result; and a zero-length {@code
- * hook} span per {@link QueryEvent.HookFired}. Each carries the {@link QueryEvent#turnIndex()
- * turnIndex} of its events as {@code helios.turn.index}, except the compactor's call, which carries
- * {@code helios.compaction} instead. A span still open when its run ends ends then, with the run's
- * error. Content is added only under {@link TraceDetail#VERBOSE}, each string redacted against the
+ * reported serving it, if any, and as {@code helios.model.first_chunk_ms} and {@code
+ * helios.model.first_text_ms} the milliseconds from its start to its first chunk and its first
+ * text, if any (a compactor's call, which starts none, spans the event's duration); an {@code
+ * execute_tool} span per tool call, from its {@link QueryEvent.ToolUse}, or its first {@link
+ * QueryEvent.ToolResult} when it had none, to that first result; and a zero-length {@code hook}
+ * span per {@link QueryEvent.HookFired}. Each carries the {@link QueryEvent#turnIndex() turnIndex}
+ * of its events as {@code helios.turn.index}, except the compactor's call, which carries {@code
+ * helios.compaction} instead. A span still open when its run ends ends then, with the run's error.
+ * Content is added only under {@link TraceDetail#VERBOSE}, each string redacted against the
  * session's secrets, the tool and hook texts already by their events. It reads every event the loop
  * emits before the session's publisher does. A {@link RuntimeException} the application's
  * OpenTelemetry SDK throws from a span call, such as a span processor's, is logged and changes no
@@ -95,6 +98,8 @@ final class RunSpans implements StepSpans {
   private static final AttributeKey<String> RUN_ID = stringKey("helios.run.id");
   private static final AttributeKey<String> TERMINAL = stringKey("helios.terminal");
   private static final AttributeKey<Long> ATTEMPT = longKey("helios.attempt");
+  private static final AttributeKey<Long> FIRST_CHUNK = longKey("helios.model.first_chunk_ms");
+  private static final AttributeKey<Long> FIRST_TEXT = longKey("helios.model.first_text_ms");
   private static final AttributeKey<Long> TURN_INDEX = longKey("helios.turn.index");
   private static final String COMPACTION = "helios.compaction";
   private static final String PARENT_SESSION_ID = "helios.parent.session_id";
@@ -203,6 +208,16 @@ final class RunSpans implements StepSpans {
     var run = runs.get(state.runId());
     if (run != null && model != null) {
       traced(state.runId(), () -> run.servedModel(model));
+    }
+  }
+
+  /** Set on the run's open attempt span; nothing when there is no span or open attempt. */
+  @Override
+  public void firstOutput(
+      SessionState state, OptionalLong firstChunkMillis, OptionalLong firstTextMillis) {
+    var run = runs.get(state.runId());
+    if (run != null) {
+      traced(state.runId(), () -> run.firstOutput(firstChunkMillis, firstTextMillis));
     }
   }
 
@@ -359,6 +374,13 @@ final class RunSpans implements StepSpans {
     synchronized void servedModel(String served) {
       if (model != null) {
         model.setAttribute(RESPONSE_MODEL, served);
+      }
+    }
+
+    synchronized void firstOutput(OptionalLong firstChunk, OptionalLong firstText) {
+      if (model != null) {
+        firstChunk.ifPresent(millis -> model.setAttribute(FIRST_CHUNK, millis));
+        firstText.ifPresent(millis -> model.setAttribute(FIRST_TEXT, millis));
       }
     }
 

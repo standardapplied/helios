@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import io.opentelemetry.context.Context;
+import java.util.OptionalLong;
 
 /**
  * The spans a run's model attempts and tool calls run under. The loop makes each step's {@link
@@ -26,6 +27,12 @@ public interface StepSpans {
    * null} when it reported none.
    */
   void servedModel(SessionState state, String model);
+
+  /**
+   * Record the milliseconds from {@code state}'s model attempt in progress starting to its first
+   * chunk and to its first text, each empty when it had none.
+   */
+  void firstOutput(SessionState state, OptionalLong firstChunkMillis, OptionalLong firstTextMillis);
 
   /**
    * The context {@code call}'s tool runs in: the span its {@link

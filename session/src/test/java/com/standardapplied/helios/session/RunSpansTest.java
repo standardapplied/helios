@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -36,8 +37,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * {@link RunSpans} on its own: a hook span names the hook, its phase and its outcome, and only a
  * verbose run adds the reason or text the outcome carries; a step's span is a child of its run's
  * span whatever context is current; an event of no run in progress starts no span; the served model
- * is set only on the open attempt's span; and a run's error is the first host {@link Error} its
- * session recorded.
+ * and the first output's timings are set only on the open attempt's span; and a run's error is the
+ * first host {@link Error} its session recorded.
  */
 final class RunSpansTest {
 
@@ -45,6 +46,8 @@ final class RunSpansTest {
   private static final RuntimeException CRASH = new IllegalStateException("crashed");
   private static final String SECRET = "sk-span-secret-0123456789";
   private static final String RESPONSE_MODEL = "gen_ai.response.model";
+  private static final String FIRST_CHUNK = "helios.model.first_chunk_ms";
+  private static final String FIRST_TEXT = "helios.model.first_text_ms";
 
   private final SpanCapture capture = new SpanCapture();
   private final SessionState run =
@@ -190,6 +193,36 @@ final class RunSpansTest {
   @Test
   void theServedModelOfARunWithNoSpanSetsNothing() {
     spans(TraceDetail.STANDARD).servedModel(run, "claude-opus-5-5-20261101");
+
+    assertEquals(List.of(), capture.spans());
+  }
+
+  @Test
+  void theFirstOutputsTimingsAreSetOnTheOpenAttemptsSpanOnlyEachWhenPresent() {
+    var spans = spans(TraceDetail.STANDARD);
+    spans.start(run, Context.root());
+
+    spans.modelAttempt(run);
+    spans.firstOutput(run, OptionalLong.empty(), OptionalLong.empty());
+    spans.accept(attemptEnded(1));
+    spans.modelAttempt(run);
+    spans.firstOutput(run, OptionalLong.of(400), OptionalLong.of(1_000));
+    spans.accept(attemptEnded(2));
+    spans.firstOutput(run, OptionalLong.of(7), OptionalLong.of(8));
+    spans.end(run, null, CRASH);
+
+    var chats = capture.starting("chat ");
+    assertNull(SessionSpansTest.number(chats.get(0), FIRST_CHUNK));
+    assertNull(SessionSpansTest.number(chats.get(0), FIRST_TEXT));
+    assertEquals(400L, SessionSpansTest.number(chats.get(1), FIRST_CHUNK));
+    assertEquals(1_000L, SessionSpansTest.number(chats.get(1), FIRST_TEXT));
+    assertNull(SessionSpansTest.number(capture.run(), FIRST_CHUNK));
+    assertNull(SessionSpansTest.number(capture.run(), FIRST_TEXT));
+  }
+
+  @Test
+  void theFirstOutputOfARunWithNoSpanSetsNothing() {
+    spans(TraceDetail.STANDARD).firstOutput(run, OptionalLong.of(400), OptionalLong.of(1_000));
 
     assertEquals(List.of(), capture.spans());
   }
