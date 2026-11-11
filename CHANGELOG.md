@@ -49,6 +49,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   most 100,000 tokens at $0.10 / $0.125 / $0.20 / $0.01 / $0.50 per million input / five-minute
   write / one-hour write / cache read / output, a longer one at $0.50 / $0.625 / $1 / $0.05 / $2.50
   for all its tokens. It priced every Haiku prompt at the long-prompt rate.
+- Gemini output tokens include the thought tokens Gemini reports apart (`total_thought_tokens`),
+  which it bills at the output rate, so a Gemini call's `outputTokens`, `totalTokens`, cost, budget
+  check and `gen_ai.usage.output_tokens` count its thinking.
 
 ### Compatibility
 
@@ -77,6 +80,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   Claude Sonnet 5.5 cache reads to half, so a budget allows more spend. A
   `CostCalculator.staticTable` built from `pricing(CLAUDE_HAIKU_5_5, ...)` now prices every Haiku
   request at the short-prompt rate; use `AnthropicPricing.calculator` for the two tiers.
+- A Gemini thinking call reports more output tokens and costs more than in 3.1.0, by its thinking;
+  a budget tuned on 3.1.0 numbers stops sooner. `totalTokens` now equals Gemini's `total_tokens`
+  when it reports no tool-use tokens.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 

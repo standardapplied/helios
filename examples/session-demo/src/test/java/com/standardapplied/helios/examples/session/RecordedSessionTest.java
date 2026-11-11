@@ -204,6 +204,7 @@ final class RecordedSessionTest {
     var streamed = replay.events().eventsOf(QueryEvent.AssistantCitations.class);
     assertEquals(1, streamed.size());
     assertEquals(streamed.getFirst().citations().stream().distinct().toList(), success.citations());
+    assertEquals(337 + 542, success.usage().outputTokens(), "output plus thought tokens");
   }
 
   @ParameterizedTest
