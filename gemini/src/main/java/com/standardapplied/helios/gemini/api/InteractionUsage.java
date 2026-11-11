@@ -11,10 +11,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * Token usage statistics from the stable Interactions API.
  *
  * <p>The live wire shape carries {@code total_tokens}, {@code total_input_tokens}, {@code
- * total_output_tokens}, {@code total_cached_tokens} (plus optional per-modality breakdowns and
- * {@code total_thought_tokens} that we don't decode yet). The breaking-change migration doc reads
- * {@code prompt_tokens}/{@code completion_tokens}, but the deployed v2 server still emits the
- * {@code total_*} family. We track the wire reality.
+ * total_output_tokens}, {@code total_cached_tokens} and {@code total_thought_tokens}, which is
+ * decoded and counted as output. {@code total_tool_use_tokens} and the per-modality breakdowns are
+ * not decoded. The breaking-change migration doc reads {@code prompt_tokens}/{@code
+ * completion_tokens}, but the deployed v2 server still emits the {@code total_*} family. We track
+ * the wire reality.
  *
  * <h2>Prompt caching on Gemini 2.5+</h2>
  *
@@ -38,24 +39,28 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param cachedTokens portion of {@code totalInputTokens} served from Gemini's implicit prompt
  *     cache (wire field {@code total_cached_tokens}). May be {@code null} on responses that
  *     pre-date implicit caching (Gemini 1.5/2.0 models) or on proxies that strip the field
+ * @param thoughtTokens tokens a thinking model spent on thoughts, reported apart from {@code
+ *     outputTokens} (wire field {@code total_thought_tokens}). May be {@code null} when the model
+ *     does not think or the field is absent
  */
 public record InteractionUsage(
     @JsonProperty("total_tokens") Integer totalTokens,
     @JsonProperty("total_input_tokens") Integer inputTokens,
     @JsonProperty("total_output_tokens") Integer outputTokens,
-    @JsonProperty("total_cached_tokens") Integer cachedTokens) {
+    @JsonProperty("total_cached_tokens") Integer cachedTokens,
+    @JsonProperty("total_thought_tokens") Integer thoughtTokens) {
 
   /**
    * Pre-cache-aware constructor used by tests and any caller that only cares about the top-level
-   * counts. Leaves {@link #cachedTokens()} as {@code null} so {@link #cachedTokensOrZero()} returns
-   * zero.
+   * counts. Leaves {@link #cachedTokens()} and {@link #thoughtTokens()} as {@code null} so {@link
+   * #cachedTokensOrZero()} and {@link #thoughtTokensOrZero()} return zero.
    *
    * @param totalTokens total tokens
    * @param inputTokens prompt tokens
    * @param outputTokens output tokens
    */
   public InteractionUsage(Integer totalTokens, Integer inputTokens, Integer outputTokens) {
-    this(totalTokens, inputTokens, outputTokens, null);
+    this(totalTokens, inputTokens, outputTokens, null, null);
   }
 
   /**
@@ -67,5 +72,14 @@ public record InteractionUsage(
    */
   public int cachedTokensOrZero() {
     return cachedTokens == null ? 0 : cachedTokens;
+  }
+
+  /**
+   * Return the thought-tokens count or zero when the field is absent or {@code null}.
+   *
+   * @return tokens spent on thoughts
+   */
+  public int thoughtTokensOrZero() {
+    return thoughtTokens == null ? 0 : thoughtTokens;
   }
 }

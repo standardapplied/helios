@@ -936,9 +936,32 @@ class SerializationTest {
   }
 
   @Test
-  void interactionUsageThreeArgConstructorOmitsCachedTokens() {
+  void interactionUsageThreeArgConstructorOmitsCachedAndThoughtTokens() {
     var usage = new InteractionUsage(40, 25, 15);
     assertNull(usage.cachedTokens());
     assertEquals(0, usage.cachedTokensOrZero());
+    assertNull(usage.thoughtTokens());
+    assertEquals(0, usage.thoughtTokensOrZero());
+  }
+
+  @Test
+  void interactionUsageDecodesThoughtTokens() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"total_input_tokens\":7,\"total_output_tokens\":23,"
+                + "\"total_thought_tokens\":49,\"total_tokens\":79}",
+            InteractionUsage.class);
+    assertEquals(49, usage.thoughtTokens());
+    assertEquals(49, usage.thoughtTokensOrZero());
+  }
+
+  @Test
+  void interactionUsageWithoutThoughtTokensCountsNone() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"total_input_tokens\":25,\"total_output_tokens\":15,\"total_tokens\":40}",
+            InteractionUsage.class);
+    assertNull(usage.thoughtTokens());
+    assertEquals(0, usage.thoughtTokensOrZero());
   }
 }

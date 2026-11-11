@@ -209,7 +209,13 @@ class GeminiStreamParserTest {
             + "\"total_output_tokens\":2000000000}}",
         "{\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"int_xyz\","
             + "\"status\":\"completed\",\"usage\":{\"total_input_tokens\":2000000000,"
-            + "\"total_output_tokens\":2000000000}}}"
+            + "\"total_output_tokens\":2000000000}}}",
+        "{\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_output_tokens\":2000000000,"
+            + "\"total_thought_tokens\":2000000000}}",
+        "{\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"int_xyz\","
+            + "\"status\":\"completed\",\"usage\":{\"total_output_tokens\":2000000000,"
+            + "\"total_thought_tokens\":2000000000}}}"
       })
   void usageOverflowingAnIntEndsTheStreamKeepingTheUsageReportedBeforeIt(String overflowing) {
     var checkpoint =
@@ -237,6 +243,52 @@ class GeminiStreamParserTest {
     assertNotNull(done.response().usage());
     assertEquals(0, done.response().usage().inputTokens());
     assertEquals(0, done.response().usage().outputTokens());
+  }
+
+  @Test
+  void thoughtTokensCountAsOutput() {
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":40,\"total_cached_tokens\":33,"
+            + "\"total_output_tokens\":23,\"total_thought_tokens\":49,\"total_tokens\":112}}}\n\n";
+    var usage = ((StreamEvent.Done) drain(envelope).getFirst()).response().usage();
+
+    assertEquals(7, usage.inputTokens());
+    assertEquals(33, usage.cacheReadInputTokens());
+    assertEquals(72, usage.outputTokens());
+    assertEquals(112, usage.totalTokens());
+  }
+
+  @Test
+  void thoughtTokensReportedBeforeAFailedStreamCountAsTheOutputOfItsPartial() {
+    var checkpoint =
+        "data: {\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+            + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":7,"
+            + "\"total_output_tokens\":23,\"total_thought_tokens\":49}}\n\n";
+    var events = drain(checkpoint + MODEL_OUTPUT_START + HELLO_DELTA);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, events.getLast());
+    assertEquals("Hello", error.partial().content());
+    assertEquals(7, error.partial().usage().inputTokens());
+    assertEquals(72, error.partial().usage().outputTokens());
+    assertEquals(79, error.partial().usage().totalTokens());
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"", ",\"total_thought_tokens\":null"})
+  void anAbsentOrNullThoughtCountCountsNoThoughts(String thoughts) {
+    var envelope =
+        "data: {\"event_type\":\"interaction.completed\","
+            + "\"interaction\":{\"id\":\"x\",\"status\":\"completed\","
+            + "\"usage\":{\"total_input_tokens\":7,\"total_output_tokens\":23"
+            + thoughts
+            + "}}}\n\n";
+    var usage = ((StreamEvent.Done) drain(envelope).getFirst()).response().usage();
+
+    assertEquals(7, usage.inputTokens());
+    assertEquals(23, usage.outputTokens());
+    assertEquals(30, usage.totalTokens());
   }
 
   @Test

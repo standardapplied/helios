@@ -77,13 +77,16 @@ final class GeminiResponseAssembler {
    * The usage in Helios's disjoint shape. Gemini reports {@code total_input_tokens} as the total
    * and {@code total_cached_tokens} as a subset of it, so the uncached input is their difference,
    * never below zero: a subset exceeding the total would be a server accounting bug. Gemini does
-   * not charge a premium for implicit cache writes, so none are reported.
+   * not charge a premium for implicit cache writes, so none are reported. Gemini reports {@code
+   * total_thought_tokens} apart from {@code total_output_tokens} and bills them at the output rate,
+   * so the output count is their sum.
    *
-   * @throws ArithmeticException if the total overflows an {@code int}
+   * @throws ArithmeticException if the output or the total overflows an {@code int}
    */
   static Response.Usage usage(InteractionUsage usage) {
     var input = usage.inputTokens() != null ? usage.inputTokens() : 0;
-    var output = usage.outputTokens() != null ? usage.outputTokens() : 0;
+    var visible = usage.outputTokens() != null ? usage.outputTokens() : 0;
+    var output = Math.addExact(visible, usage.thoughtTokensOrZero());
     var cached = usage.cachedTokensOrZero();
     return Response.Usage.of(Math.max(0, input - cached), output, 0, cached);
   }
