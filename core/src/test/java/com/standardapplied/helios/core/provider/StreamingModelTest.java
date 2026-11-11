@@ -197,6 +197,41 @@ class StreamingModelTest {
   }
 
   @Test
+  void aUsageEventIsYieldedAsAUsageChunkInItsPlace() {
+    events =
+        List.of(
+            new StreamEvent.TextDelta("Hel"),
+            new StreamEvent.UsageDelta(REPORTED),
+            new StreamEvent.TextDelta("lo"),
+            new StreamEvent.Done(reply));
+
+    assertEquals(
+        List.of(
+            new ModelChunk.TextDelta("Hel"),
+            new ModelChunk.UsageDelta(REPORTED),
+            new ModelChunk.TextDelta("lo"),
+            ModelChunk.MessageStop.of(reply)),
+        streamed().items());
+  }
+
+  @Test
+  void aStreamClosedAfterItsUsageWasReadThrowsCancellationFromItsNextRead() {
+    events =
+        List.of(
+            new StreamEvent.UsageDelta(REPORTED),
+            new StreamEvent.TextDelta("Hel"),
+            new StreamEvent.Done(reply));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    assertEquals(new ModelChunk.UsageDelta(REPORTED), stream.next());
+
+    stream.close();
+
+    assertThrows(CancellationException.class, stream::hasNext);
+    assertFalse(stream.hasNext());
+    assertTrue(opened.closed());
+  }
+
+  @Test
   void theMessageStopEndsTheStreamAndClosesTheEvents() {
     events = List.of(new StreamEvent.Done(reply), new StreamEvent.TextDelta("late"));
     var stream = model(config()).chatStream(MESSAGES, List.of());

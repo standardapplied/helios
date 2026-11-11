@@ -21,15 +21,15 @@ import java.util.Objects;
 /**
  * Parses one Interactions API stream, one event at a time, into {@link StreamEvent}s: the step
  * events through {@link StreamedSteps}, the interaction's id and usage from its envelope and status
- * updates, the model that served it from its envelope, and the assembled response at {@code
- * interaction.completed}. The stream succeeds only there, when that event's own interaction status
- * is one the assembler counts as an ending and no function call is still open; any other status, an
- * unreadable event and function arguments that are not a JSON object end it in an error, and an
- * {@code error} event in one whose {@link GeminiException} carries the reported code. An error that
- * names recitation is Gemini's recitation filter blocking the response: it ends the stream with
- * what streamed before it, finishing with {@link FinishReason#CONTENT_FILTER} and Gemini's message
- * as the refusal's explanation. A body that ends early with a bare {@code {"error":...}} line ends
- * as that error event would.
+ * updates, each usage as the usage so far, the model that served it from its envelope, and the
+ * assembled response at {@code interaction.completed}. The stream succeeds only there, when that
+ * event's own interaction status is one the assembler counts as an ending and no function call is
+ * still open; any other status, an unreadable event and function arguments that are not a JSON
+ * object end it in an error, and an {@code error} event in one whose {@link GeminiException}
+ * carries the reported code. An error that names recitation is Gemini's recitation filter blocking
+ * the response: it ends the stream with what streamed before it, finishing with {@link
+ * FinishReason#CONTENT_FILTER} and Gemini's message as the refusal's explanation. A body that ends
+ * early with a bare {@code {"error":...}} line ends as that error event would.
  */
 final class GeminiStreamParser implements SseReader.Parser {
 
@@ -175,13 +175,18 @@ final class GeminiStreamParser implements SseReader.Parser {
     return checkpoint(interaction.id(), interaction.usage());
   }
 
+  /**
+   * Records the interaction's {@code id} and the usage it {@code reported}, if any; the usage so
+   * far when it reported some that counts a token, else {@code null}.
+   */
   private StreamEvent checkpoint(String id, InteractionUsage reported) {
     if (id != null) {
       interactionId = id;
     }
-    if (reported != null) {
-      usage = GeminiResponseAssembler.usage(reported);
+    if (reported == null) {
+      return null;
     }
-    return null;
+    usage = GeminiResponseAssembler.usage(reported);
+    return usage.reportsTokens() ? new StreamEvent.UsageDelta(usage) : null;
   }
 }

@@ -27,6 +27,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   chunk of any kind, thinking and keep-alive included) and `helios.model.first_text_ms` (to its
   first non-empty text), whole milliseconds on the session's clock, each absent when the attempt
   had none.
+- `StreamEvent.UsageDelta(Response.Usage)`: the usage a provider reported so far, before its stream
+  ended.
 
 ### Changed
 
@@ -48,15 +50,20 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `QueryEvent.ModelCallEnded` and chat span carry the usage it reported and its cost, which the
   run's totals, budget, terminal and a parent run's spend include. Its `ModelCallEnded` now precedes
   its `TurnRetried`, and its chat span no longer spans the back-off.
+- Anthropic streams yield `ModelChunk.UsageDelta` at `message_start` and at each `message_delta`,
+  and Gemini streams at each `interaction.created` or status event that carries usage, where they
+  yielded `ModelChunk.KeepAlive`.
 
 ### Fixed
 
 - A model call whose stream fails (an error event, a read failure, a body that ends early, the idle
   timeout) or whose structured output fails its schema counts the tokens its provider reported;
   spend, budget and run totals no longer under-count it. A call whose provider reported nothing
-  counts zero; Helios estimates nothing. A call cut by `interrupt()`, `close()` or the wall clock
-  still counts zero with the Anthropic, Gemini and OpenAI models, which pass usage to the session
-  only when the stream ends.
+  counts zero; Helios estimates nothing.
+- A model call cut by `interrupt()`, `close()` or the wall clock counts the tokens its provider
+  reported before the cut: on Anthropic the input and cache tokens of the stream's start and the
+  output streamed so far, on Gemini the usage an earlier event reported. OpenAI reports usage only
+  when a response ends, so a cut OpenAI call still counts zero.
 - `AnthropicModelId.CLAUDE_MYTHOS_5_1` now binds reasoning, as Anthropic's preserved-thinking page
   requires: a Mythos 5.1 session whose system prompt or tools change no longer replays thinking
   blocks from before the change, which the API rejects with a 400.
@@ -113,6 +120,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   usage, and its prompt size anchors the history's token count.
 - Each provider's assistant messages, and the stored session entries holding them, carry one more
   metadata key, `response.model`; no provider sends it back.
+- A `switch` over `StreamEvent` without `default` gains a case; a parser written for `SseReader` may
+  return the new event.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 

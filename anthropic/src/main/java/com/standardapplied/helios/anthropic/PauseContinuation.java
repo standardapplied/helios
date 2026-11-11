@@ -177,6 +177,8 @@ final class PauseContinuation implements Exchange<StampedRequest> {
         case StreamEvent.Error(var message, var cause, var partial) when mergedSoFar != null ->
             end(new StreamEvent.Error(message, cause, SegmentMerge.merge(mergedSoFar, partial)));
         case StreamEvent.Error error -> end(error);
+        case StreamEvent.UsageDelta(var usage) when mergedSoFar != null ->
+            new StreamEvent.UsageDelta(SegmentMerge.usage(mergedSoFar.usage(), usage));
         case StreamEvent.ThinkingDelta delta -> separated(delta);
         default -> event;
       };
