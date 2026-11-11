@@ -344,7 +344,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   private ProviderException idleTimedOut() {
     return failure.create(
         "Stream idle timeout: no data received for "
-            + TimeUnit.NANOSECONDS.toMillis(idleNanos)
+            + Duration.ofNanos(idleNanos).toMillis()
             + " ms",
         0,
         null);

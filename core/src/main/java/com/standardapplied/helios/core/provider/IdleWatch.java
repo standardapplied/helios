@@ -15,12 +15,37 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 final class IdleWatch {
 
+  /** The monotonic time and the sleep the watch paces itself by. */
+  interface Pace {
+
+    /** {@link System#nanoTime()} and {@link Thread#sleep(Duration)}. */
+    Pace SYSTEM =
+        new Pace() {
+          @Override
+          public long nanoTime() {
+            return System.nanoTime();
+          }
+
+          @Override
+          public void sleep(long nanos) throws InterruptedException {
+            Thread.sleep(Duration.ofNanos(nanos));
+          }
+        };
+
+    /** The current monotonic time in nanoseconds, as {@link System#nanoTime()} counts it. */
+    long nanoTime();
+
+    /** Sleeps {@code nanos}, returning at once when it is not positive. */
+    void sleep(long nanos) throws InterruptedException;
+  }
+
   private static final long NOT_WAITING = -1;
   private static final long CLAIMED = -2;
 
   private final long timeoutNanos;
   private final Runnable onIdle;
-  private final long origin = System.nanoTime();
+  private final Pace pace;
+  private final long origin;
 
   /**
    * When the open wait began, in nanoseconds since {@code origin}; {@code NOT_WAITING} between
@@ -40,8 +65,15 @@ final class IdleWatch {
    * @param onIdle runs on the watchdog once it claimed a wait
    */
   IdleWatch(long timeoutNanos, Runnable onIdle) {
+    this(timeoutNanos, onIdle, Pace.SYSTEM);
+  }
+
+  /** Watches waits as {@link #IdleWatch(long, Runnable)} does, by {@code pace}'s time and sleep. */
+  IdleWatch(long timeoutNanos, Runnable onIdle, Pace pace) {
     this.timeoutNanos = timeoutNanos;
     this.onIdle = onIdle;
+    this.pace = pace;
+    this.origin = pace.nanoTime();
   }
 
   /** Marks the start of a wait, starting the watchdog on the first; returns the wait's mark. */
@@ -49,7 +81,7 @@ final class IdleWatch {
     if (watchdog == null) {
       start();
     }
-    var mark = System.nanoTime() - origin;
+    var mark = pace.nanoTime() - origin;
     waitStart.set(mark);
     return mark;
   }
@@ -88,12 +120,12 @@ final class IdleWatch {
       while (true) {
         var mark = waitStart.get();
         var left =
-            mark == NOT_WAITING ? timeoutNanos : timeoutNanos - (System.nanoTime() - origin - mark);
+            mark == NOT_WAITING ? timeoutNanos : timeoutNanos - (pace.nanoTime() - origin - mark);
         if (left <= 0 && waitStart.compareAndSet(mark, CLAIMED)) {
           onIdle.run();
           return;
         }
-        Thread.sleep(Duration.ofNanos(left));
+        pace.sleep(left);
       }
     } catch (InterruptedException stopping) {
       Thread.currentThread().interrupt();
