@@ -31,6 +31,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
   private final String promptStamp;
   private final ContentBlocks blocks = new ContentBlocks();
   private Response.Usage counts = Response.Usage.of(0, 0, 0, 0);
+  private int thinking;
   private String stopReason;
   private ContentDelta.StopDetails stopDetails;
   private ContentDelta.Container container;
@@ -106,15 +107,16 @@ final class AnthropicStreamParser implements SseReader.Parser {
    * {@code message_start} reports the input, cache and initial output counts; each {@code
    * message_delta} reports cumulative counts, which grow past the start's input count when server
    * tools run, so every count it carries replaces the last. The thinking count, which {@code
-   * message_delta} reports with the output count, is cut to the output count, as a subset over its
-   * total is a server accounting bug. Counts whose sum overflows fail here, before they replace any
-   * count, so the partial stays readable.
+   * message_delta} reports with the output count, is kept as reported and cut to the output count
+   * in each usage built from it, as a subset over its total is a server accounting bug. Counts
+   * whose sum overflows fail here, before they replace any count, so the partial stays readable.
    */
   private StreamEvent absorb(ApiUsage usage) {
     if (usage == null) {
       return null;
     }
     var output = Objects.requireNonNullElse(usage.outputTokens(), counts.outputTokens());
+    var reportedThinking = thinking(usage);
     counts =
         Response.Usage.of(
             Objects.requireNonNullElse(usage.inputTokens(), counts.inputTokens()),
@@ -122,16 +124,17 @@ final class AnthropicStreamParser implements SseReader.Parser {
             Objects.requireNonNullElse(
                 usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()),
             Objects.requireNonNullElse(usage.cacheReadInputTokens(), counts.cacheReadInputTokens()),
-            Math.min(thinking(usage), output));
+            Math.min(reportedThinking, output));
+    thinking = reportedThinking;
     return counts.reportsTokens() ? new StreamEvent.UsageDelta(counts) : null;
   }
 
-  /** The thinking count {@code usage} reports, or the last one when it reports none. */
+  /** The thinking count {@code usage} reports, or the last one reported when it reports none. */
   private int thinking(ApiUsage usage) {
     var details = usage.outputTokensDetails();
     return details != null && details.thinkingTokens() != null
         ? details.thinkingTokens()
-        : counts.reasoningTokens();
+        : thinking;
   }
 
   private StreamEvent messageStop() {

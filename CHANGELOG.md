@@ -35,10 +35,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   output count is cut to it. `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` builds
   one request's usage with it; `plus` sums it. It is part of the output count, so totals, prompt
   size and cost do not change.
-- `gen_ai.usage.reasoning_tokens` on a `chat` span whose call reported reasoning tokens, and on the
-  run span, the run's total; a subagent's reasoning rolls up into its parent run's.
+- `gen_ai.usage.reasoning.output_tokens` on a `chat` span whose call reported reasoning tokens,
+  and on the run span, the run's total; a subagent's reasoning rolls up into its parent run's.
 - A `reasoning_tokens` column on `helios_traces` and `helios_spans`, written by `PgSpanExporter` and
-  read into `Span.usage()` and `Trace.usage()`.
+  read into `Span.usage()` and `Trace.usage()` (see the DDL delta under Compatibility).
 
 ### Changed
 
@@ -96,10 +96,13 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Compatibility
 
-- A `switch` over `AnthropicModelId` without `default` gains two cases, `CLAUDE_FABLE_5_2` and
-  `CLAUDE_MYTHOS_5_2`.
-- A `switch` over `OpenAIModelId` or `GeminiModelId` without `default` gains a case;
-  `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
+**Upgrading from 3.1.0.** This release changes source and the trace schema: run the DDL delta below
+before deploying; replace six-argument `new Response.Usage(...)` calls (see below); add a case to a
+`switch` without `default` over `StreamEvent` (`UsageDelta`), `MessageOrigin` (`PARTIAL_TURN`),
+`AnthropicModelId` (`CLAUDE_FABLE_5_2`, `CLAUDE_MYTHOS_5_2`), `OpenAIModelId` (`GPT_6_1_TERRA`) or
+`GeminiModelId` (`GEMINI_4_CARBON`); recompile test code that calls `ModelStreams.stalled`.
+
+- `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
 - A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
   `temperature` or `topP` now fails when the model is created; the API answered it with a 400
   before.
@@ -111,7 +114,6 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `CloseableIterator` requires.
 - A positive idle timeout under one millisecond now waits its real length; it used to fail the first
   line at once. A negative one now always fails the first line; it used to, almost always.
-- A `switch` over `MessageOrigin` without `default` gains a case.
 - On Anthropic models that bind reasoning, the request after a partial turn drops the reasoning of
   earlier turns once, with one cache miss. Gemini resends the whole conversation once instead of
   continuing the previous interaction.
@@ -132,7 +134,6 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `PostModelTurnHook` sees that usage, and its prompt size anchors the history's token count.
 - Each provider's assistant messages, and the stored session entries holding them, carry one more
   metadata key, `response.model`; no provider sends it back.
-- A `switch` over `StreamEvent` without `default` gains a case.
 - `new Response.Usage(...)` takes seven arguments, the last `reasoningTokens`. Replace a
   six-argument call with `Usage.of(input, output, cacheCreation, cacheRead)` for one request with no
   reasoning count, `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` for one with it,
@@ -143,14 +144,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `toString` gains `reasoningTokens=`.
 - **DDL delta** (additive; run it before deploying this release, since an exporter writing to a
   table without the column fails every insert; `schema.sql` creates the column only in a new
-  table):
+  table). It is safe to run while 3.1.0 is serving: 3.1.0 names every column it writes and reads.
 
   ```sql
-  ALTER TABLE helios_traces ADD COLUMN reasoning_tokens INT;
-  ALTER TABLE helios_spans ADD COLUMN reasoning_tokens INT;
+  ALTER TABLE helios_traces ADD COLUMN IF NOT EXISTS reasoning_tokens INT;
+  ALTER TABLE helios_spans ADD COLUMN IF NOT EXISTS reasoning_tokens INT;
   ```
 
-  A row written by 3.1 reads with zero reasoning tokens.
+  A row written by 3.1.0 or earlier reads with zero reasoning tokens.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 

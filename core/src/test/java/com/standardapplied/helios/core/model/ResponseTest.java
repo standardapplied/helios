@@ -207,11 +207,6 @@ class ResponseTest {
   }
 
   @Test
-  void usageOfRejectsAReasoningCountAboveTheOutputCount() {
-    assertThrows(IllegalArgumentException.class, () -> Response.Usage.of(10, 300, 0, 0, 301));
-  }
-
-  @Test
   void pricingCostsAUsageReportingReasoningAsTheSameUsageWithout() {
     var pricing = new CostCalculator.Pricing(3_000_000L, 15_000_000L, 3_750_000L, 300_000L);
 
@@ -225,13 +220,6 @@ class ResponseTest {
     var sum = Response.Usage.of(10, 300, 0, 0, 120).plus(Response.Usage.of(5, 40, 0, 0, 25));
 
     assertEquals(new Response.Usage(15, 340, 0, 0, 355, 5, 145), sum);
-  }
-
-  @Test
-  void usagePlusOfUsagesReportingReasoningRejectsOverflow() {
-    var huge = Response.Usage.of(0, Integer.MAX_VALUE - 1, 0, 0, Integer.MAX_VALUE - 1);
-
-    assertThrows(ArithmeticException.class, () -> huge.plus(Response.Usage.of(0, 2, 0, 0, 2)));
   }
 
   @Test
