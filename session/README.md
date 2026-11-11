@@ -356,7 +356,7 @@ as the [root README](../README.md#context-compaction) shows.
 A session with skills puts back what a compaction removed of the skills the model loaded, whatever
 the compactor: right after the compacted history's leading system messages, one user message per
 skill, tagged `MessageOrigin.SKILL`, holding the text the model was given, in the order the skills
-were first loaded. The default compactor's result is then `[system, skills..., summary, pending
+were first loaded and before any activation the compactor kept. The default compactor's result is then `[system, skills..., summary, pending
 user turn...]`. The shrink check measures the history with the skills put back; a
 `PreModelTurnHook`'s `MutateHistory` gets nothing put back.
 

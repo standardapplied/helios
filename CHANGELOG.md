@@ -6,20 +6,20 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Added
 
-- `Skill(name, description, instructions, directory, files)` and `Skill.of(name, description,
-  instructions)` in `helios-session`; `SessionOptions.skills()`, `Builder.withSkills(List<Skill>)`
-  and `Builder.withSkill(Skill)`. A session with skills lists their names and descriptions in its
+- `Skill` in `helios-session`, built through `Skill.newBuilder()` (`withName`, `withDescription`,
+  `withInstructions`, `withDirectory`, `withFiles`, `withFile`, `build`) and `toBuilder()`;
+  `SessionOptions.skills()`, `Builder.withSkills(List<Skill>)` and `Builder.withSkill(Skill)`. A session with skills lists their names and descriptions in its
   system prompt and registers the built-in `Skill` tool (`READ`, key `Skill(<name>)` or
-  `Skill(<name>/<file>)`). The tool loads a skill's instructions and file list or reads one of its
-  files. After a compaction, the session puts back the skills the model had loaded. Also
+  `Skill(<name>/<file>)`). The tool loads a skill's instructions and file list or, once the skill
+  is loaded, reads one of its files. After a compaction, the session puts back the skills the model had loaded. Also
   `MessageOrigin.SKILL` (`skill`).
 
 ### Compatibility
 
-- `SessionOptions` has one more record component, `skills`, so a direct canonical-constructor call
-  adds an argument.
+- `SessionOptions` gains the record component `skills`, after `subagents`: a call of its canonical
+  constructor, which its Javadoc reserves for framework internals, or a record pattern over it adds
+  the component. The builder and `toBuilder` are unchanged for callers; `toBuilder` carries it.
 - A `switch` over `MessageOrigin` without `default` gains a case.
-- A session with skills sends a longer system prompt and one more tool.
 - Changing a stored session's skills or their descriptions between opens changes its system prompt
   and tools. On Anthropic models that bind reasoning, the next request drops earlier reasoning
   once, with one cache miss; Gemini resends the whole conversation once.
