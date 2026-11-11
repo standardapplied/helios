@@ -93,7 +93,6 @@ class SessionRunCharacterizationTest {
           var expired = new CountDownLatch(1);
           ctx.cancellation().onCancel(expired::countDown);
           Await.latch("the wall-clock deadline", expired);
-          run.now.set(START.plusSeconds(1));
           return HookOutcome.inject("pre-model inject");
         };
 

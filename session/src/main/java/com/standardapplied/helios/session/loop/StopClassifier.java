@@ -22,11 +22,11 @@ import java.util.Optional;
  * <p>Called by the agent loop after every turn. The classifier inspects, in priority order:
  *
  * <ol>
- *   <li>Wall-clock ceiling — elapsed time exceeds {@code limits.maxWallClock()}. Checked
- *       <i>before</i> the cancellation branch because the wall-clock thread implements itself by
- *       cancelling the session token; without this ordering the resulting terminal would be {@link
- *       ResultMessage.Cancelled} instead of the more informative {@link
- *       ResultMessage.ErrorMaxWallClock}.
+ *   <li>Wall-clock ceiling — the run's wall clock reached its deadline, or elapsed time exceeds
+ *       {@code limits.maxWallClock()}. Checked <i>before</i> the cancellation branch because the
+ *       wall-clock thread implements itself by cancelling the session token; without this ordering
+ *       the resulting terminal would be {@link ResultMessage.Cancelled} instead of the more
+ *       informative {@link ResultMessage.ErrorMaxWallClock}.
  *   <li>Budget exhaustion — accumulated cost exceeds {@code limits.maxBudgetMicroUsd()}.
  *   <li>Cancellation — the session's {@link com.standardapplied.helios.core.model.CancellationToken
  *       CancellationToken} is signalled by a path other than wall-clock expiry (explicit {@code
@@ -98,7 +98,7 @@ public final class StopClassifier {
    * @return the wall-clock, budget or cancellation terminal, or empty when none applies
    */
   Optional<ResultMessage> imposed(SessionState state, SessionLimits limits) {
-    if (state.totals().elapsed().compareTo(limits.maxWallClock()) > 0) {
+    if (state.wallClockExpired() || state.totals().elapsed().compareTo(limits.maxWallClock()) > 0) {
       return Optional.of(
           new ResultMessage.ErrorMaxWallClock(
               state.sessionId(),

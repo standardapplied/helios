@@ -12,6 +12,7 @@ import java.time.InstantSource;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -46,6 +47,7 @@ public final class SessionState {
   private final SessionEnding ending;
   private CompletableFuture<Void> cancelling;
   private final AtomicLong turnIndex = new AtomicLong(0);
+  private final AtomicBoolean wallClockExpired = new AtomicBoolean();
   private final AtomicReference<Optional<ResultMessage>> terminal =
       new AtomicReference<>(Optional.empty());
 
@@ -176,6 +178,24 @@ public final class SessionState {
       cancelling = cancellation.cancelAsync(reason, ending::fail);
     }
     return cancelling;
+  }
+
+  /**
+   * Record that the run's wall clock reached its deadline; the wall clock calls it before it
+   * cancels the run, so the run ends {@link ResultMessage.ErrorMaxWallClock} whatever the session's
+   * clock reads.
+   */
+  public void expireWallClock() {
+    wallClockExpired.set(true);
+  }
+
+  /**
+   * Whether the run's wall clock reached its deadline.
+   *
+   * @return {@code true} once {@link #expireWallClock()} was called
+   */
+  public boolean wallClockExpired() {
+    return wallClockExpired.get();
   }
 
   /**
