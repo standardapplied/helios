@@ -50,6 +50,7 @@ class GeminiProviderTest {
     assertTrue(provider.supports("gemini-3.7-flash"));
     assertTrue(provider.supports("gemini-3.8-flash"));
     assertTrue(provider.supports("gemini-4-argon"));
+    assertTrue(provider.supports("gemini-4-carbon"));
   }
 
   @Test
@@ -90,7 +91,7 @@ class GeminiProviderTest {
 
     assertEquals(
         "Unsupported model: gpt-4. Supported models: gemini-3.6-flash, gemini-3.7-flash,"
-            + " gemini-3.8-flash, gemini-4-argon",
+            + " gemini-3.8-flash, gemini-4-argon, gemini-4-carbon",
         exception.getMessage());
   }
 
@@ -115,26 +116,22 @@ class GeminiProviderTest {
         "Unsupported model: "
             + removed
             + ". Supported models: gemini-3.6-flash, gemini-3.7-flash, gemini-3.8-flash,"
-            + " gemini-4-argon",
+            + " gemini-4-argon, gemini-4-carbon",
         exception.getMessage());
   }
 
-  @Test
-  void gemini4ArgonIsCreatedWithItsWindowAndOutputCeiling() {
+  @ParameterizedTest
+  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON"})
+  void aGemini4ModelIsCreatedWithItsWindowAndOutputCeilingAndRequestedById(GeminiModelId model) {
     var config = ModelConfig.of("test-api-key");
 
-    try (var model = provider.create("gemini-4-argon", config)) {
-      assertEquals("gemini-4-argon", model.id());
-      assertEquals(1_048_576, model.contextWindow());
-      assertEquals(65_536, model.maxOutputTokens());
+    try (var created = provider.create(model.id(), config)) {
+      assertEquals(model.id(), created.id());
+      assertEquals(1_048_576, created.contextWindow());
+      assertEquals(65_536, created.maxOutputTokens());
     }
-  }
-
-  @Test
-  void aGemini4ArgonRequestCarriesItsIdAndOutputCeiling() {
-    var body = requestBody(GeminiModelId.GEMINI_4_ARGON, ModelConfig.of("test-api-key"), null);
-
-    assertEquals("gemini-4-argon", body.get("model"));
+    var body = requestBody(model, config, null);
+    assertEquals(model.id(), body.get("model"));
     assertEquals(65_536, generationConfig(body).get("max_output_tokens"));
   }
 

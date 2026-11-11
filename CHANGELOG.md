@@ -11,6 +11,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   no forced tool choice, reasoning bound to its prompt, and list prices of $8 / $40 per million
   input / output tokens with $0.20 cache reads in `AnthropicPricing`, whose `AS_OF` is now
   2026-11-11.
+- `OpenAIModelId.GPT_6_1_TERRA` (`gpt-6.1-terra`): 1,050,000-token context, 128,000 output tokens,
+  effort `none` to `max`, sampling only at `none`.
+- `GeminiModelId.GEMINI_4_CARBON` (`gemini-4-carbon`), generally available 2026-11-10:
+  1,048,576-token context, 65,536 output tokens, thinking `LOW`..`HIGH`, never off.
 - `MessageOrigin.PARTIAL_TURN` (`helios.origin`: `partial-turn`): the text a model call streamed
   before its stream ended without completing; its tool calls and reasoning are not kept.
 - `ModelStreams.stalled(Runnable onStall, ModelChunk... chunks)` in `helios-testing`: a stream that
@@ -50,6 +54,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 - A `switch` over `AnthropicModelId` without `default` gains two cases, `CLAUDE_FABLE_5_2` and
   `CLAUDE_MYTHOS_5_2`.
+- A `switch` over `OpenAIModelId` or `GeminiModelId` without `default` gains a case;
+  `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
 - A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
   `temperature` or `topP` now fails when the model is created; the API answered it with a 400
   before.

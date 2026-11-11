@@ -19,28 +19,29 @@ import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
- * The one test that calls Gemini 4 Argon: a forced function call, then its result sent back in a
- * stateless request that replays the thought signatures from the history.
+ * The one test that calls each Gemini 4 model: a forced function call, then its result sent back in
+ * a stateless request that replays the thought signatures from the history.
  */
 @EnabledIfEnvironmentVariable(named = "GEMINI_API_KEY", matches = ".+")
-class GeminiArgonIntegrationTest {
+class Gemini4IntegrationTest {
 
   private static final String TOOL_NAME = "get_temperature";
 
-  @Test
-  void aForcedToolCallIsAnsweredThroughItsReplayedThoughtSignatures() {
+  @ParameterizedTest
+  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON"})
+  void aForcedToolCallIsAnsweredThroughItsReplayedThoughtSignatures(GeminiModelId modelId) {
     var tools = List.of(temperatureTool());
     var messages = new ArrayList<>(List.of(Message.user("What is the temperature in Paris?")));
     var provider = new GeminiProvider();
 
     try (var forced =
         provider.create(
-            GeminiModelId.GEMINI_4_ARGON.id(),
-            settings().withToolChoice(ToolChoice.required(TOOL_NAME)).build())) {
+            modelId.id(), settings().withToolChoice(ToolChoice.required(TOOL_NAME)).build())) {
       var turn = Accepted.toolTurn(forced.chat(messages, tools));
 
       assertEquals(FinishReason.TOOL_CALLS, turn.finishReason());
@@ -52,7 +53,7 @@ class GeminiArgonIntegrationTest {
       }
     }
 
-    try (var model = provider.create(GeminiModelId.GEMINI_4_ARGON.id(), settings().build())) {
+    try (var model = provider.create(modelId.id(), settings().build())) {
       Accepted.textReply(model.chat(messages, tools));
     }
   }

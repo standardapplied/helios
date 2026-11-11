@@ -25,16 +25,18 @@ public enum OpenAIModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens. Reasoning models
   // (o3, o4-mini) carry higher caps because their output includes reasoning tokens.
-  // ReasoningRules per model (model pages and the reasoning, GPT-5.4 and GPT-6 guides, 2026-10-08):
-  // gpt-6-astra and gpt-6.1-sol take low..max and reject none; gpt-6-sol, gpt-6-luna and the
-  // gpt-5.6 family take none..max; gpt-5.5 and the gpt-5.4 family take none..xhigh, gpt-5.4
-  // defaulting to none; o-series take low..high; gpt-4.1 and gpt-4o do not reason. temperature /
-  // top_p ride only at effort none on the GPT-5.4+ reasoning models, never on o-series or
-  // gpt-6-astra/6.1-sol.
+  // ReasoningRules per model (model pages and the reasoning, GPT-5.4 and GPT-6 guides, 2026-10-08;
+  // the gpt-6.1-terra page, 2026-11-11): gpt-6-astra and gpt-6.1-sol take low..max and reject
+  // none; gpt-6.1-terra, gpt-6-sol, gpt-6-luna and the gpt-5.6 family take none..max; gpt-5.5 and
+  // the gpt-5.4 family take none..xhigh, gpt-5.4 defaulting to none; o-series take low..high;
+  // gpt-4.1 and gpt-4o do not reason. temperature / top_p ride only at effort none on the GPT-5.4+
+  // reasoning models, never on o-series or gpt-6-astra/6.1-sol.
   /** GPT-6 Astra: always reasons, effort {@code low} to {@code max}; rejects sampling. */
   GPT_6_ASTRA("gpt-6-astra", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
   /** GPT-6.1 Sol: always reasons, effort {@code low} to {@code max}; rejects sampling. */
   GPT_6_1_SOL("gpt-6.1-sol", 1_050_000, 128_000, ReasoningRules.ALWAYS_REASONS),
+  /** GPT-6.1 Terra: effort {@code none} to {@code max}; sampling only at {@code none}. */
+  GPT_6_1_TERRA("gpt-6.1-terra", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
   /** GPT-6 Sol: effort {@code none} to {@code max}; sampling only at {@code none}. */
   GPT_6_SOL("gpt-6-sol", 1_050_000, 128_000, ReasoningRules.NONE_TO_MAX),
   /** GPT-6 Luna: effort {@code none} to {@code max}; sampling only at {@code none}. */
@@ -125,7 +127,7 @@ public enum OpenAIModelId {
     /** Always reasons (gpt-6-astra, gpt-6.1-sol). */
     ALWAYS_REASONS(Off.REJECTED, Level.LOW, Level.MAX, Sampling.REJECTED),
 
-    /** {@code none} up to {@code max} (gpt-6-sol, gpt-6-luna, gpt-5.6 family). */
+    /** {@code none} up to {@code max} (gpt-6.1-terra, gpt-6-sol, gpt-6-luna, gpt-5.6 family). */
     NONE_TO_MAX(Off.NONE, Level.LOW, Level.MAX, Sampling.WITH_OFF),
 
     /** {@code none} up to {@code xhigh} (gpt-5.5). */
