@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -97,47 +98,67 @@ class ModelStreamsTest {
   }
 
   @Test
-  void stalledRunsOnFirstPullThenBlocksUntilClosed() {
-    var pulled = new CountDownLatch(1);
-    var stream = ModelStreams.stalled(pulled::countDown);
-    var interruptedAfter = readOnAVirtualThread(stream).interruptedAfter();
+  void stalledYieldsItsChunksThenRunsOnStallAndBlocksUntilClosed() {
+    var stalled = new CountDownLatch(1);
+    var stream = ModelStreams.stalled(stalled::countDown, TEXT, STOP);
+    var reading = readOnAVirtualThread(stream);
 
-    Await.latch("the first pull", pulled);
-    assertFalse(interruptedAfter.isDone(), "a stalled stream ends only when closed or interrupted");
+    Await.latch("the stall", stalled);
+    assertEquals(List.of(TEXT, STOP), reading.items());
+    assertFalse(
+        reading.interruptedAfter().isDone(),
+        "a stalled stream ends only when closed or interrupted");
     stream.close();
 
-    assertFalse(Await.value("the reader's end after the close", interruptedAfter));
+    assertFalse(Await.value("the reader's end after the close", reading.interruptedAfter()));
+  }
+
+  @Test
+  void stalledWithoutChunksRunsOnStallAtTheFirstRead() {
+    var stalled = new CountDownLatch(1);
+    var stream = ModelStreams.stalled(stalled::countDown);
+    var reading = readOnAVirtualThread(stream);
+
+    Await.latch("the stall", stalled);
+    stream.close();
+
+    assertFalse(Await.value("the reader's end after the close", reading.interruptedAfter()));
+    assertEquals(List.of(), reading.items());
   }
 
   @Test
   void stalledEndsOnAnInterruptAndKeepsItSet() {
-    var pulled = new CountDownLatch(1);
-    var reading = readOnAVirtualThread(ModelStreams.stalled(pulled::countDown));
+    var stalled = new CountDownLatch(1);
+    var reading = readOnAVirtualThread(ModelStreams.stalled(stalled::countDown, TEXT));
 
-    Await.latch("the first pull", pulled);
+    Await.latch("the stall", stalled);
     reading.reader().interrupt();
 
     assertTrue(Await.value("the reader's end after the interrupt", reading.interruptedAfter()));
+    assertEquals(List.of(TEXT), reading.items());
   }
 
   @Test
-  void aClosedStalledStreamThrowsOnEveryReadAndRunsOnFirstPullOnce() {
-    var pulls = new AtomicInteger();
-    var stream = ModelStreams.stalled(pulls::incrementAndGet);
+  void aClosedStalledStreamYieldsItsChunksThenThrowsOnEveryReadAndRunsOnStallOnce() {
+    var stalls = new AtomicInteger();
+    var stream = ModelStreams.stalled(stalls::incrementAndGet, TEXT);
     stream.close();
 
+    assertEquals(TEXT, stream.next());
     assertThrows(CancellationException.class, stream::hasNext);
     assertThrows(CancellationException.class, stream::hasNext);
     assertThrows(CancellationException.class, stream::next);
 
-    assertEquals(1, pulls.get());
+    assertEquals(1, stalls.get());
   }
 
   @Test
   void nullArgumentsAreRejected() {
     var error = new IllegalStateException("cut");
     assertNullRejected("error must not be null", () -> ModelStreams.failing(null, TEXT));
-    assertNullRejected("onFirstPull must not be null", () -> ModelStreams.stalled(null));
+    assertNullRejected("onStall must not be null", () -> ModelStreams.stalled(null, TEXT));
+    assertNullRejected(
+        "chunk must not be null", () -> ModelStreams.stalled(() -> {}, TEXT, (ModelChunk) null));
     assertNullRejected("chunks must not be null", () -> ModelStreams.of((ModelChunk[]) null));
     assertNullRejected("chunk must not be null", () -> ModelStreams.of(TEXT, null));
     assertNullRejected(
@@ -148,24 +169,32 @@ class ModelStreamsTest {
     assertEquals(message, assertThrows(NullPointerException.class, call).getMessage());
   }
 
-  private record Reading(Thread reader, CompletableFuture<Boolean> interruptedAfter) {}
+  private record Reading(
+      Thread reader, List<ModelChunk> items, CompletableFuture<Boolean> interruptedAfter) {}
 
+  /**
+   * Reads {@code stream} to its end on a virtual thread, recording each chunk before it asks for
+   * the next, so a chunk is recorded before the stream can stall after it.
+   */
   private static Reading readOnAVirtualThread(CloseableIterator<ModelChunk> stream) {
+    var items = new CopyOnWriteArrayList<ModelChunk>();
     var interruptedAfter = new CompletableFuture<Boolean>();
     var reader =
         Thread.ofVirtual()
             .start(
                 () -> {
                   try {
-                    stream.hasNext();
+                    while (stream.hasNext()) {
+                      items.add(stream.next());
+                    }
                     interruptedAfter.completeExceptionally(
-                        new AssertionError("a stalled stream's hasNext returned"));
+                        new AssertionError("a stalled stream's hasNext returned false"));
                   } catch (CancellationException e) {
                     interruptedAfter.complete(Thread.currentThread().isInterrupted());
                   } catch (RuntimeException e) {
                     interruptedAfter.completeExceptionally(e);
                   }
                 });
-    return new Reading(reader, interruptedAfter);
+    return new Reading(reader, items, interruptedAfter);
   }
 }

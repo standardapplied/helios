@@ -5,6 +5,7 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.CancellationToken;
 import com.standardapplied.helios.core.model.CloseableIterator;
+import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
@@ -28,8 +29,8 @@ import java.util.logging.Logger;
 
 /**
  * The model call of one turn: streams the response with bounded retry on {@link
- * TransientStreamException}, and recovers a structured-output parse failure by putting the wrong
- * attempt in history and asking the model to correct it.
+ * TransientStreamException}, recovers a structured-output parse failure by putting the wrong
+ * attempt in history and asking the model to correct it, and keeps the text of a call cut short.
  *
  * <p>Each attempt reads the turn's stream on a virtual thread of its own, {@code
  * helios-model-stream-<sessionId>}, while the loop thread waits for it; the run's cancellation
@@ -293,6 +294,24 @@ final class ModelCall {
                 .withMetadata(MessageOrigin.SCHEMA_CORRECTION.metadata())
                 .build());
     return true;
+  }
+
+  /**
+   * Keeps what the person saw of a model call cut short. When {@code turn} ended in {@link
+   * FinishReason#ERROR} with text that is not blank, whatever cut it, that text joins the history
+   * as an assistant message tagged {@link MessageOrigin#PARTIAL_TURN}, the conversation's last,
+   * since an {@code ERROR} turn ends its run. The call's tool calls, which may be incomplete, are
+   * not kept, nor its provider metadata: a stream that completed just before the cut leaves raw
+   * content holding unanswered tool calls and signed reasoning, which a provider refuses on replay.
+   */
+  void keepPartial(SessionState state, TurnOutcome turn) {
+    if (turn.finishReason() == FinishReason.ERROR && !Strings.isBlank(turn.assistantContent())) {
+      state
+          .history()
+          .append(
+              Message.assistant(
+                  turn.assistantContent(), List.of(), MessageOrigin.PARTIAL_TURN.metadata()));
+    }
   }
 
   /**

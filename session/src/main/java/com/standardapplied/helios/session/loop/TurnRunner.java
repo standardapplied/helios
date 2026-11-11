@@ -109,6 +109,7 @@ public final class TurnRunner {
           .history()
           .append(Message.assistant(streamed.assistantContent(), toolCalls, streamed.metadata()));
     }
+    modelCall.keepPartial(state, streamed);
     if (!toolCalls.isEmpty() && toolRound.run(state, toolCalls, limits)) {
       return turnEnded(state, outcomeAfterTerminate(state));
     }
