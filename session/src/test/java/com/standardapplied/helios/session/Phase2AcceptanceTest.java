@@ -77,11 +77,9 @@ final class Phase2AcceptanceTest {
 
     // Permission policy: deny Read on the sensitive file, allow everything else by default.
     var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(),
-            List.of(),
-            List.of(new PermissionRule("Read", Optional.of("./sensitive.txt"))));
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withDeny(new PermissionRule("Read", Optional.of("./sensitive.txt")))
+            .build();
 
     // Five-turn script: Grep → Read(allowed) → Read(denied) → AskUserQuestion → final STOP.
     var grepCall = new ToolCall("c1", GrepTool.NAME, Map.of("pattern", "TARGET"));

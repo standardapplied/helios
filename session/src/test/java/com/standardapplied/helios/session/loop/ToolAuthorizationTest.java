@@ -95,7 +95,7 @@ final class ToolAuthorizationTest {
 
   private Function<ToolBinding.CanonicalCall, PermissionDecision> askRule(ToolApprover approver) {
     return asking(
-        new Permission(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()), approver);
+        Permission.newBuilder(PermissionMode.DEFAULT).withAsk(ASK_WRITE).build(), approver);
   }
 
   // ── the check fails closed ───────────────────────────────────────────────
@@ -185,7 +185,7 @@ final class ToolAuthorizationTest {
         model,
         tools,
         new DefaultPermissionEvaluator(
-                new Permission(PermissionMode.DEFAULT, List.of(), List.of(askDocs), List.of()),
+                Permission.newBuilder(PermissionMode.DEFAULT).withAsk(askDocs).build(),
                 tools,
                 request -> {
                   requests.add(request);
@@ -303,11 +303,9 @@ final class ToolAuthorizationTest {
             canonical -> {
               throw new AssertionError("authorization must not run");
             },
-            new Permission(
-                PermissionMode.DEFAULT,
-                List.of(),
-                List.of(),
-                List.of(PermissionRule.any("Missing"))),
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withDeny(PermissionRule.any("Missing"))
+                .build(),
             new SecretRegistry(),
             call);
 

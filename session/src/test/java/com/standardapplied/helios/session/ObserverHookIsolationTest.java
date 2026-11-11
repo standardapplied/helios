@@ -60,11 +60,9 @@ final class ObserverHookIsolationTest {
     var options =
         sessions
             .options(
-                new Permission(
-                    PermissionMode.DEFAULT,
-                    List.of(PermissionRule.any("Write")),
-                    List.of(),
-                    List.of()))
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withAllow(PermissionRule.any("Write"))
+                    .build())
             .withHook(phase.hook(failing))
             .withHook(
                 phase.hook(

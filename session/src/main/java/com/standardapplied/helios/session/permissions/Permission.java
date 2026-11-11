@@ -6,6 +6,7 @@ package com.standardapplied.helios.session.permissions;
 
 import com.standardapplied.helios.session.tools.ToolCategory;
 import com.standardapplied.helios.session.tools.ToolPermissionKey;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -40,6 +41,9 @@ import java.util.Optional;
  * <p>{@link #evaluate} is the policy's pure decision for one key, the one the session enforces, so
  * a host can unit-test its policy without a session: no question is asked and nothing runs.
  *
+ * <p>Build through {@link #newBuilder(PermissionMode)}, which names the list each rule joins; the
+ * canonical constructor takes three lists of one type in a row, so a swap there would compile.
+ *
  * @param mode the coarse policy lever; non-null
  * @param allow rules that, on match, allow the call; non-null
  * @param ask rules that, on match, ask the user for confirmation; non-null
@@ -58,7 +62,8 @@ public record Permission(
   public static final String NAME = "Permission";
 
   /**
-   * Canonical constructor; defensively copies all three rule lists.
+   * Canonical constructor; defensively copies all three rule lists. Build through {@link
+   * #newBuilder(PermissionMode)} instead.
    *
    * @throws NullPointerException if any argument is null or any list contains null elements
    */
@@ -67,6 +72,17 @@ public record Permission(
     allow = List.copyOf(Objects.requireNonNull(allow, "allow must not be null"));
     ask = List.copyOf(Objects.requireNonNull(ask, "ask must not be null"));
     deny = List.copyOf(Objects.requireNonNull(deny, "deny must not be null"));
+  }
+
+  /**
+   * Start building a permission in {@code mode}, with no rules.
+   *
+   * @param mode the coarse mode; non-null
+   * @return a fresh builder
+   * @throws NullPointerException if {@code mode} is null
+   */
+  public static Builder newBuilder(PermissionMode mode) {
+    return new Builder(mode);
   }
 
   /**
@@ -152,11 +168,9 @@ public record Permission(
    * @return a fresh preset
    */
   public static Permission defaultInWorkspace() {
-    return new Permission(
-        PermissionMode.DEFAULT,
-        List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
-        List.of(),
-        List.of());
+    return newBuilder(PermissionMode.DEFAULT)
+        .withAllow(PermissionRule.of("MemoryWrite", "/memories/**"))
+        .build();
   }
 
   /**
@@ -176,7 +190,7 @@ public record Permission(
    * @return a fresh empty permission
    */
   public static Permission empty(PermissionMode mode) {
-    return new Permission(mode, List.of(), List.of(), List.of());
+    return newBuilder(mode).build();
   }
 
   /**
@@ -193,10 +207,69 @@ public record Permission(
    * @return a fresh preset
    */
   public static Permission lockedDown() {
-    return new Permission(
-        PermissionMode.LOCKED_DOWN,
-        List.of(PermissionRule.any("Execute"), PermissionRule.any("AskUserQuestion")),
-        List.of(),
-        List.of());
+    return newBuilder(PermissionMode.LOCKED_DOWN)
+        .withAllow(PermissionRule.any("Execute"), PermissionRule.any("AskUserQuestion"))
+        .build();
+  }
+
+  /**
+   * Builds a {@link Permission} by named rule lists; not thread-safe, so confine one builder to a
+   * thread. Each {@code with} method appends to its list, in order.
+   */
+  public static final class Builder {
+
+    private final PermissionMode mode;
+    private final List<PermissionRule> allow = new ArrayList<>();
+    private final List<PermissionRule> ask = new ArrayList<>();
+    private final List<PermissionRule> deny = new ArrayList<>();
+
+    private Builder(PermissionMode mode) {
+      this.mode = Objects.requireNonNull(mode, "mode must not be null");
+    }
+
+    /**
+     * Append rules that, on match, allow the call.
+     *
+     * @param rules the rules; none may be {@code null}
+     * @return this builder
+     * @throws NullPointerException if {@code rules} or one of them is {@code null}
+     */
+    public Builder withAllow(PermissionRule... rules) {
+      allow.addAll(List.of(rules));
+      return this;
+    }
+
+    /**
+     * Append rules that, on match, ask the user for confirmation.
+     *
+     * @param rules the rules; none may be {@code null}
+     * @return this builder
+     * @throws NullPointerException if {@code rules} or one of them is {@code null}
+     */
+    public Builder withAsk(PermissionRule... rules) {
+      ask.addAll(List.of(rules));
+      return this;
+    }
+
+    /**
+     * Append rules that, on match, refuse the call.
+     *
+     * @param rules the rules; none may be {@code null}
+     * @return this builder
+     * @throws NullPointerException if {@code rules} or one of them is {@code null}
+     */
+    public Builder withDeny(PermissionRule... rules) {
+      deny.addAll(List.of(rules));
+      return this;
+    }
+
+    /**
+     * Build the permission.
+     *
+     * @return the permission, holding copies of the rule lists
+     */
+    public Permission build() {
+      return new Permission(mode, allow, ask, deny);
+    }
   }
 }

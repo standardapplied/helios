@@ -41,7 +41,7 @@ final class Phase4AcceptanceTest {
   private static final Usage USAGE = Usage.of(1, 1);
 
   private static Permission allowing(PermissionRule... rules) {
-    return new Permission(PermissionMode.DEFAULT, List.of(rules), List.of(), List.of());
+    return Permission.newBuilder(PermissionMode.DEFAULT).withAllow(rules).build();
   }
 
   private static PermissionRule allowUnderMemories(String tool) {

@@ -47,9 +47,11 @@ final class ToolAuthorizationSessionTest {
   private final WriteToolSessions sessions = new WriteToolSessions();
   private final List<Map<String, Object>> executed = sessions.executed;
 
-  private static Permission allowAndDeny(
-      PermissionMode mode, List<PermissionRule> allow, List<PermissionRule> deny) {
-    return new Permission(mode, allow, List.of(), deny);
+  private static Permission allowTmpDenyEtc() {
+    return Permission.newBuilder(PermissionMode.DEFAULT)
+        .withAllow(ALLOW_TMP)
+        .withDeny(DENY_ETC)
+        .build();
   }
 
   private SessionOptions.Builder options(Permission permission) {
@@ -83,7 +85,11 @@ final class ToolAuthorizationSessionTest {
 
     var run =
         run(
-            options(allowAndDeny(PermissionMode.DEFAULT, List.of(allowEtc), List.of(DENY_ETC))),
+            options(
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withAllow(allowEtc)
+                    .withDeny(DENY_ETC)
+                    .build()),
             write("/etc/passwd"));
 
     assertEquals(
@@ -97,7 +103,7 @@ final class ToolAuthorizationSessionTest {
   void aDenyRuleCoversATargetWhoseKeyHoldsALineTerminator() {
     var run =
         run(
-            options(allowAndDeny(PermissionMode.ACCEPT_EDITS, List.of(), List.of(DENY_ETC))),
+            options(Permission.newBuilder(PermissionMode.ACCEPT_EDITS).withDeny(DENY_ETC).build()),
             write("/etc/cron.d/x\ny"));
 
     assertEquals(
@@ -215,9 +221,7 @@ final class ToolAuthorizationSessionTest {
     var redirect =
         named(
             "Redirect", priority, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/etc/x")));
-    var options =
-        options(allowAndDeny(PermissionMode.DEFAULT, List.of(ALLOW_TMP), List.of(DENY_ETC)))
-            .withHook(redirect);
+    var options = options(allowTmpDenyEtc()).withHook(redirect);
 
     var run = run(options, write("/tmp/a"));
 
@@ -231,9 +235,7 @@ final class ToolAuthorizationSessionTest {
   void anAllowedMutationRunsOnceWithExactlyTheAuthorizedArguments() {
     var retarget =
         named("Retarget", 90, (call, ctx) -> HookOutcome.mutateArgs(Map.of("path", "/tmp/b")));
-    var options =
-        options(allowAndDeny(PermissionMode.DEFAULT, List.of(ALLOW_TMP), List.of(DENY_ETC)))
-            .withHook(retarget);
+    var options = options(allowTmpDenyEtc()).withHook(retarget);
 
     var run = run(options, write("/tmp/a"));
 
