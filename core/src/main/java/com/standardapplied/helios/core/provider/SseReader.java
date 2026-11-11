@@ -13,31 +13,26 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.Reader;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * The events of one server-sent-event response, sent on the first {@code hasNext()} when built from
- * a request. Owns the response body: reads it a line at a time, failing a line that does not arrive
- * within the idle timeout, hands the data of each event the lines frame to the provider's {@link
- * Parser}, and closes the body and its reader thread once the stream ends, fails or is closed.
- * Every event the lines frame yields one stream event: an event with no data, or whose data the
- * parser yields nothing for, yields a {@link StreamEvent.KeepAlive}, so a consumer sees each frame
- * as proof the stream is alive.
+ * a request. Owns the response body: reads it a line at a time on the consuming thread, failing a
+ * line that does not arrive within the idle timeout, hands the data of each event the lines frame
+ * to the provider's {@link Parser}, and closes the body and ends its idle watchdog, a virtual
+ * thread started by the first line asked for, once the stream ends, fails or is closed. Every event
+ * the lines frame yields one stream event: an event with no data, or whose data the parser yields
+ * nothing for, yields a {@link StreamEvent.KeepAlive}, so a consumer sees each frame as proof the
+ * stream is alive.
  *
  * <p>A stream that is not closed first ends with exactly one terminal event: the {@link
  * StreamEvent.Done} or {@link StreamEvent.Error} the parser yields, or an error this reader raises.
@@ -47,9 +42,14 @@ import java.util.concurrent.TimeoutException;
  * to read ends in an error carrying its {@link IOException}, an idle timeout or an oversized line
  * or event one carrying the provider's own exception. Each error carries the parser's {@link
  * Parser#partial()}. Closing the reader from another thread releases a blocked read as such an
- * error, an interrupt of the reading thread closes the reader and throws a {@link
+ * error, an interrupt of the consuming thread closes the reader and throws a {@link
  * CancellationException} with the interrupt kept, even when an event was read ahead; a reader that
- * ended still has nothing next. {@link SseFrames} frames the lines into events.
+ * ended still has nothing next. A blocked read ends only when the body's read returns or throws:
+ * the idle timeout and a close close the body, and an interrupt is seen once the body answers it or
+ * the read otherwise returns. A body whose read ignores both {@code close()} and an interrupt keeps
+ * its consumer blocked until data arrives, past the idle timeout; the JDK HTTP client's response
+ * body is released by both. A reader neither read to its end nor closed keeps its idle watchdog,
+ * which wakes once per idle timeout. {@link SseFrames} frames the lines into events.
  */
 public final class SseReader implements CloseableIterator<StreamEvent> {
 
@@ -95,13 +95,12 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       Response.newBuilder().withContent("").withFinishReason(FinishReason.ERROR).build();
 
   private final SseRequest request;
-  private final Duration idleTimeout;
+  private final long idleNanos;
   private final Parser parser;
   private final ProviderFailure failure;
-  private final ExecutorService readExecutor = Executors.newVirtualThreadPerTaskExecutor();
+  final IdleWatch idleWatch;
   private final Object lock = new Object();
   private InputStream body;
-  private Reader reader;
   private SseFrames frames;
   private StreamEvent nextEvent;
   private boolean sent;
@@ -111,7 +110,8 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
    * Reads {@code body}, which this reader now owns.
    *
    * @param body the response body
-   * @param idleTimeout the longest wait for one line
+   * @param idleTimeout the longest wait for one line; zero or negative fails the first line at
+   *     once, and one beyond {@link Long#MAX_VALUE} nanoseconds counts as that many
    * @param parser the provider's parser
    * @param failure creates the exception an idle timeout carries
    */
@@ -136,7 +136,9 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
    * @param client the client the request goes through
    * @param request the request
    * @param apiName the API a failure to communicate names, e.g. {@code "Anthropic API"}
-   * @param idleTimeout the longest wait for one line once the headers arrived
+   * @param idleTimeout the longest wait for one line once the headers arrived; zero or negative
+   *     fails the first line at once, and one beyond {@link Long#MAX_VALUE} nanoseconds counts as
+   *     that many
    * @param parser the provider's parser
    * @param failure creates the provider's exception
    * @param providerName the provider name a {@link TransientStreamException} carries
@@ -155,9 +157,12 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
   private SseReader(
       SseRequest request, Duration idleTimeout, Parser parser, ProviderFailure failure) {
     this.request = request;
-    this.idleTimeout = Objects.requireNonNull(idleTimeout, "idleTimeout must not be null");
+    this.idleNanos =
+        TimeUnit.NANOSECONDS.convert(
+            Objects.requireNonNull(idleTimeout, "idleTimeout must not be null"));
     this.parser = Objects.requireNonNull(parser, "parser must not be null");
     this.failure = Objects.requireNonNull(failure, "failure must not be null");
+    this.idleWatch = new IdleWatch(idleNanos, () -> closeQuietly(body));
   }
 
   @Override
@@ -230,8 +235,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
         throw new CancellationException("the stream was closed before its response arrived");
       }
       body = opened;
-      reader = new InputStreamReader(opened, StandardCharsets.UTF_8);
-      frames = new SseFrames(reader, failure);
+      frames = new SseFrames(new InputStreamReader(opened, StandardCharsets.UTF_8), failure);
     }
   }
 
@@ -267,20 +271,20 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     return new StreamEvent.Error(message, cause, partial);
   }
 
-  /** Ends the stream and releases its body and reader thread. */
+  /**
+   * Ends the stream, ends its idle watchdog and closes its body. Closing the body is what releases
+   * a blocked read; the decoder over it is left alone, since a blocked read holds its lock.
+   */
   private void release() {
     InputStream openBody;
-    Reader openReader;
     synchronized (lock) {
       done = true;
       openBody = body;
-      openReader = reader;
     }
     nextEvent = null;
-    readExecutor.shutdownNow();
+    idleWatch.stop();
     if (openBody != null) {
       closeQuietly(openBody);
-      closeQuietly(openReader);
     }
   }
 
@@ -292,32 +296,57 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     }
   }
 
+  /** The next line of the body, or {@code null} at its end. */
   private String readLine() throws IOException {
-    Future<String> line;
+    var mark = startWait();
     try {
-      line = readExecutor.submit((Callable<String>) frames::line);
-    } catch (RejectedExecutionException closed) {
-      throw new IOException("Stream closed", closed);
-    }
-    try {
-      return line.get(idleTimeout.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (TimeoutException e) {
-      line.cancel(true);
-      throw failure.create(
-          "Stream idle timeout: no data received for " + idleTimeout.toMillis() + " ms", 0, null);
-    } catch (ExecutionException e) {
-      if (e.getCause() instanceof IOException ioe) {
-        throw ioe;
-      }
-      if (e.getCause() instanceof ProviderException tooLarge) {
-        throw tooLarge;
-      }
-      throw new IOException("Stream read failed", e.getCause());
-    } catch (InterruptedException e) {
-      line.cancel(true);
-      release();
+      return frames.line();
+    } catch (SocketTimeoutException timedOut) {
+      throw timedOut;
+    } catch (InterruptedIOException interrupted) {
+      // A body may report an interrupt by this exception alone, having cleared the flag.
       Thread.currentThread().interrupt();
+      throw interrupted;
+    } catch (ProviderException tooLarge) {
+      throw tooLarge;
+    } catch (RuntimeException | Error e) {
+      throw new IOException("Stream read failed", e);
+    } finally {
+      endWait(mark);
+    }
+  }
+
+  /** Marks the start of a wait for a line; with a timeout that is not positive it fails at once. */
+  private long startWait() throws IOException {
+    if (done) {
+      throw new IOException("Stream closed");
+    }
+    if (idleNanos <= 0) {
+      throw idleTimedOut();
+    }
+    return idleWatch.begin();
+  }
+
+  /**
+   * Ends the wait {@code mark} began, overriding whatever the read returned or threw: an interrupt
+   * of this thread closes the reader, and a wait the watchdog claimed fails as idle.
+   */
+  private void endWait(long mark) {
+    if (Thread.currentThread().isInterrupted()) {
+      release();
       throw new CancellationException("interrupted while waiting for the next line");
     }
+    if (!idleWatch.end(mark)) {
+      throw idleTimedOut();
+    }
+  }
+
+  private ProviderException idleTimedOut() {
+    return failure.create(
+        "Stream idle timeout: no data received for "
+            + Duration.ofNanos(idleNanos).toMillis()
+            + " ms",
+        0,
+        null);
   }
 }

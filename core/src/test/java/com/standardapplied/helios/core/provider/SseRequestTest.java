@@ -400,6 +400,86 @@ class SseRequestTest {
     return FakeHttpClient.sendingAsync(request -> CompletableFuture.failedFuture(failure));
   }
 
+  @Test
+  void aRealResponseThatStallsTimesOutAndTheWatchdogClosesTheConnection() throws Exception {
+    var reply = HeldSseServer.Reply.of("", "data: never\n\n");
+    try (var server = HeldSseServer.start(reply);
+        var client = HttpClient.newHttpClient()) {
+      var reader =
+          new SseReader(
+              client,
+              post(server.uri()),
+              "Acme API",
+              Duration.ofMillis(1),
+              new EchoParser(),
+              ProviderException::new,
+              "acme");
+
+      var error = onlyError(reader);
+
+      assertEquals("Stream idle timeout: no data received for 1 ms", error.message());
+      reply.awaitClientClosed();
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
+    }
+  }
+
+  @Test
+  void closingWhileAReadIsBlockedOnARealResponseReleasesItAsAnErrorAndClosesTheConnection()
+      throws Exception {
+    var reply = HeldSseServer.Reply.of("data: one\n\n", "data: never\n\n");
+    try (var server = HeldSseServer.start(reply);
+        var client = HttpClient.newHttpClient()) {
+      var reader = lazy(client, post(server.uri()));
+      assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+      var blocked = new FutureTask<>(reader::next);
+      awaitBlockedRead(Thread.ofVirtual().start(blocked));
+
+      reader.close();
+
+      var error =
+          assertInstanceOf(StreamEvent.Error.class, Await.value("the blocked next", blocked));
+      assertEquals("Stream read error", error.message());
+      reply.awaitClientClosed();
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
+    }
+  }
+
+  @Test
+  void anInterruptWhileAReadIsBlockedOnARealResponseThrowsCancellationAndClosesTheConnection()
+      throws Exception {
+    var reply = HeldSseServer.Reply.of("data: one\n\n", "data: never\n\n");
+    var interruptKept = new AtomicBoolean();
+    try (var server = HeldSseServer.start(reply);
+        var client = HttpClient.newHttpClient()) {
+      var reader = lazy(client, post(server.uri()));
+      assertEquals(new StreamEvent.TextDelta("one"), reader.next());
+      var read =
+          new FutureTask<>(
+              () -> {
+                try {
+                  return reader.next();
+                } finally {
+                  interruptKept.set(Thread.currentThread().isInterrupted());
+                }
+              });
+      var thread = Thread.ofVirtual().start(read);
+      awaitBlockedRead(thread);
+
+      thread.interrupt();
+
+      var cancelled =
+          assertInstanceOf(CancellationException.class, Await.failure("the blocked read", read));
+      assertEquals("interrupted while waiting for the next line", cancelled.getMessage());
+      assertTrue(interruptKept.get());
+      reply.awaitClientClosed();
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
+    }
+  }
+
+  private static void awaitBlockedRead(Thread consumer) {
+    Await.until("the read to block on the body", () -> consumer.getState() == Thread.State.WAITING);
+  }
+
   private static StreamEvent.Error onlyError(SseReader reader) {
     var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
     assertFalse(reader.hasNext());

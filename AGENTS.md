@@ -148,7 +148,9 @@ the package must never exist in core's main code; session's equivalent is
 - **To prove something does not happen,** wait for the event that closes the window in which it
   could have happened, then assert. A pause is not such an event.
 - **Drive time-of-day and elapsed-time behaviour with a hand-advanced `InstantSource`.**
-  `CircuitBreakerTest` is the model.
+  `CircuitBreakerTest` is the model. A thread that sleeps against a monotonic deadline takes a
+  package-private seam giving `nanoTime` and `sleep` instead, since an `InstantSource` is wall-clock
+  time and cannot wake a sleeper; `IdleWatch` (`IdleWatch.Pace`) is the example.
 - **Assert one outcome.** No "either is acceptable", no `if (outcome != null)` around
   assertions. Force the interleaving; where two interleavings are both correct, write two tests.
 - **Force an interleaving without relying on scheduling:** a latch the other side waits on, a
