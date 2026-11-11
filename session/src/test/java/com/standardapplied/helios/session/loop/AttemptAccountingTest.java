@@ -11,6 +11,7 @@ import com.standardapplied.helios.core.fault.Backoff;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelChunk;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.session.QueryEvent;
@@ -22,15 +23,17 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 /**
  * Every attempt of a model call is accounted once, as its stream ends, with the usage its stream
- * reported, on every way {@link ModelCall#stream} returns: retries that run out, a transient
- * failure on a run already stopped, a run cancelled while an attempt is accounted or before its
- * back-off, and a run interrupted while a retry is announced under a zero back-off.
+ * reported, after the model its provider reported serving it is recorded, on every way {@link
+ * ModelCall#stream} returns: retries that run out, a transient failure on a run already stopped, a
+ * run cancelled while an attempt is accounted or before its back-off, and a run interrupted while a
+ * retry is announced under a zero back-off.
  */
 final class AttemptAccountingTest {
 
@@ -42,6 +45,7 @@ final class AttemptAccountingTest {
   private final LoopFixture fixture = new LoopFixture("sess-attempts", Instant.EPOCH);
   private final SessionState state = fixture.state();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
+  private final List<String> steps = new CopyOnWriteArrayList<>();
 
   @Test
   void attemptsThatRunOutOfRetriesAreEachAccountedOnceInOrder() {
@@ -64,6 +68,30 @@ final class AttemptAccountingTest {
             QueryEvent.TurnRetried.class,
             QueryEvent.ModelCallEnded.class),
         events.stream().map(Object::getClass).toList());
+  }
+
+  @Test
+  void anAttemptsServedModelIsRecordedBeforeItIsAccounted() {
+    var served =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)))
+            .withStreamTurn(
+                ModelStreams.of(
+                    new ModelChunk.MessageStop(
+                        "STOP",
+                        REPORTED,
+                        Map.of(Response.RESPONSE_MODEL_KEY, "claude-opus-5-5-20261101"))));
+
+    stream(served, event -> steps.add(event.getClass().getSimpleName()));
+
+    assertEquals(
+        List.of(
+            "served null",
+            "ModelCallEnded",
+            "TurnRetried",
+            "served claude-opus-5-5-20261101",
+            "ModelCallEnded"),
+        steps);
   }
 
   @Test
@@ -160,14 +188,19 @@ final class AttemptAccountingTest {
   private TurnOutcome stream(ScriptedModel.Builder model, Consumer<QueryEvent> onEvent) {
     var built = model.build();
     var collaborators =
-        fixture.collaborators(
+        new LoopCollaborators(
             HookRegistry.empty(),
             fixture.dispatch(ToolRegistry.empty()),
+            Authorizations.ADMIT_ALL,
+            Authorizations.NO_RULE,
             new SteeringQueue(1),
             event -> {
               events.add(event);
               onEvent.accept(event);
-            });
+            },
+            fixture::hookContext,
+            fixture.clock,
+            NoSpans.servedTo(served -> steps.add("served " + served)));
     var emitter = collaborators.emitter();
     CostCalculator oneMicroUsdAToken =
         (modelId, usage) -> CostEstimate.ofMicroUsd(usage.totalTokens());

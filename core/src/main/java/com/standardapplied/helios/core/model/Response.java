@@ -48,6 +48,13 @@ public record Response<T>(
   public static final String REFUSAL_EXPLANATION_KEY = "refusal.explanation";
 
   /**
+   * Metadata key under which a provider reports the id of the model that served the response, as
+   * the provider spelled it: it may be a dated snapshot of the requested id, or another model.
+   * Absent when the provider reports none; never filled from the requested model.
+   */
+  public static final String RESPONSE_MODEL_KEY = "response.model";
+
+  /**
    * Starts a builder for an unstructured response, one whose {@link #parsed()} stays {@code null}.
    *
    * @return a new builder with every list and map empty and every other component {@code null}
