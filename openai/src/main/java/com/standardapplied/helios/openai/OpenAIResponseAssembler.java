@@ -103,11 +103,12 @@ final class OpenAIResponseAssembler {
     if (input <= 0 && output <= 0 && cached <= 0 && written <= 0) {
       return null;
     }
-    return Response.Usage.of(
-        Math.max(0, input - cached - written),
-        output,
-        written,
-        cached,
-        Math.min(usage.reasoningTokensOrZero(), output));
+    return Response.Usage.newBuilder()
+        .withInputTokens(Math.max(0, input - cached - written))
+        .withOutputTokens(output)
+        .withCacheCreationInputTokens(written)
+        .withCacheReadInputTokens(cached)
+        .withReasoningTokens(Math.min(usage.reasoningTokensOrZero(), output))
+        .build();
   }
 }

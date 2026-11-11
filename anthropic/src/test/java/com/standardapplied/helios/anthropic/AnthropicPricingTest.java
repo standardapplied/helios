@@ -20,7 +20,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 class AnthropicPricingTest {
 
   private static Usage usage(int input, int cacheWrite, int cacheRead, int output) {
-    return Usage.of(input, output, cacheWrite, cacheRead);
+    return Usage.newBuilder()
+        .withInputTokens(input)
+        .withOutputTokens(output)
+        .withCacheCreationInputTokens(cacheWrite)
+        .withCacheReadInputTokens(cacheRead)
+        .build();
   }
 
   private record ListPrice(long input, long write5m, long write1h, long cacheRead, long output) {}
@@ -103,8 +108,20 @@ class AnthropicPricingTest {
 
   @Test
   void haiku55TiersOnPromptTokensWithOneHundredThousandStillShort() {
-    var atLimit = Usage.of(40_000, 1_000, 10_000, 50_000);
-    var overLimit = Usage.of(40_000, 1_000, 10_000, 50_001);
+    var atLimit =
+        Usage.newBuilder()
+            .withInputTokens(40_000)
+            .withOutputTokens(1_000)
+            .withCacheCreationInputTokens(10_000)
+            .withCacheReadInputTokens(50_000)
+            .build();
+    var overLimit =
+        Usage.newBuilder()
+            .withInputTokens(40_000)
+            .withOutputTokens(1_000)
+            .withCacheCreationInputTokens(10_000)
+            .withCacheReadInputTokens(50_001)
+            .build();
     var shortLived = AnthropicPricing.calculator(CachePolicy.shortLived());
     var longLived = AnthropicPricing.calculator(CachePolicy.longLived());
 
@@ -117,8 +134,8 @@ class AnthropicPricingTest {
   @Test
   void haiku55PricesAPausedTurnAtTheTierOfItsLastRequest() {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
-    var lastShort = Usage.of(60_000, 0, 0, 0).plus(Usage.of(70_000, 0, 0, 0));
-    var lastLong = Usage.of(60_000, 0, 0, 0).plus(Usage.of(110_000, 0, 0, 0));
+    var lastShort = Usage.of(60_000, 0).plus(Usage.of(70_000, 0));
+    var lastLong = Usage.of(60_000, 0).plus(Usage.of(110_000, 0));
 
     assertEquals(CostEstimate.ofMicroUsd(13_000L), calculator.cost("claude-haiku-5-5", lastShort));
     assertEquals(CostEstimate.ofMicroUsd(85_000L), calculator.cost("claude-haiku-5-5", lastLong));

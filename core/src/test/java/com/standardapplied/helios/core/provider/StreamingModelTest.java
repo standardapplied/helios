@@ -283,7 +283,7 @@ class StreamingModelTest {
   @Test
   void aFailedTurnWhoseUsageReportsNoTokensYieldsNoUsageAndOneReportingOnlyCacheTokensDoes() {
     var reset = new IOException("reset");
-    var cacheOnly = Response.Usage.of(0, 0, 0, 900);
+    var cacheOnly = Response.Usage.newBuilder().withCacheReadInputTokens(900).build();
     events = List.of(error("Stream read error", reset, Response.Usage.of(0, 0)));
 
     var zero = streamed();

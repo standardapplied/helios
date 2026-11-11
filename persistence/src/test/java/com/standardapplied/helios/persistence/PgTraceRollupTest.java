@@ -40,10 +40,34 @@ class PgTraceRollupTest {
 
   @Test
   void rollupByNameAggregatesCountsTokensAndCost() {
-    seed("analytics", "model-x", BASE, 1000, null, Usage.of(100, 50, 20, 10), 1_000L);
-    seed("analytics", "model-x", BASE, 2000, null, Usage.of(200, 100, 0, 0), 2_000L);
-    seed("analytics", "model-y", BASE, 3000, "boom", Usage.of(10, 5, 0, 0), 500L);
-    seed("matchmaking", "model-x", BASE, 4000, null, Usage.of(1, 1, 1, 1), 4L);
+    seed(
+        "analytics",
+        "model-x",
+        BASE,
+        1000,
+        null,
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(50)
+            .withCacheCreationInputTokens(20)
+            .withCacheReadInputTokens(10)
+            .build(),
+        1_000L);
+    seed("analytics", "model-x", BASE, 2000, null, Usage.of(200, 100), 2_000L);
+    seed("analytics", "model-y", BASE, 3000, "boom", Usage.of(10, 5), 500L);
+    seed(
+        "matchmaking",
+        "model-x",
+        BASE,
+        4000,
+        null,
+        Usage.newBuilder()
+            .withInputTokens(1)
+            .withOutputTokens(1)
+            .withCacheCreationInputTokens(1)
+            .withCacheReadInputTokens(1)
+            .build(),
+        4L);
 
     var byName = index(store.summarize(TraceRollupKey.NAME, TraceFilter.none()), "name");
 

@@ -152,7 +152,14 @@ final class PgSpanExporterTest {
     assertEquals(START, found.startTime());
     assertEquals(START.plusSeconds(1), found.endTime());
     assertTrue(found.success());
-    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
+    assertEquals(
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(22)
+            .withCacheCreationInputTokens(30)
+            .withCacheReadInputTokens(50)
+            .build(),
+        found.usage());
     assertEquals(202, found.totalTokens());
     assertEquals(CostEstimate.ofMicroUsd(42), found.cost());
     assertEquals(
@@ -172,7 +179,14 @@ final class PgSpanExporterTest {
     assertEquals("1000000000000001", chatRow.id());
     assertEquals(START.plusSeconds(1), chatRow.startTime());
     assertEquals(START.plusSeconds(2), chatRow.endTime());
-    assertEquals(Usage.of(100, 22, 30, 50), chatRow.usage());
+    assertEquals(
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(22)
+            .withCacheCreationInputTokens(30)
+            .withCacheReadInputTokens(50)
+            .build(),
+        chatRow.usage());
     assertEquals(CostEstimate.ofMicroUsd(42), chatRow.cost());
     assertEquals(
         Map.of(
@@ -212,8 +226,24 @@ final class PgSpanExporterTest {
     assertTrue(exporter.export(List.of(chat, run)).isSuccess());
 
     var found = store.findById(RUN);
-    assertEquals(Usage.of(100, 22, 30, 50, 12), found.usage());
-    assertEquals(Usage.of(100, 22, 30, 50, 9), found.spans().getFirst().usage());
+    assertEquals(
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(22)
+            .withCacheCreationInputTokens(30)
+            .withCacheReadInputTokens(50)
+            .withReasoningTokens(12)
+            .build(),
+        found.usage());
+    assertEquals(
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(22)
+            .withCacheCreationInputTokens(30)
+            .withCacheReadInputTokens(50)
+            .withReasoningTokens(9)
+            .build(),
+        found.spans().getFirst().usage());
     assertFalse(found.attributes().containsKey(reasoning));
     assertFalse(found.spans().getFirst().attributes().containsKey(reasoning));
   }
@@ -244,9 +274,22 @@ final class PgSpanExporterTest {
     assertTrue(exporter.export(List.of(overReported, withoutOutput, runSpan(RUN))).isSuccess());
 
     var found = store.findById(RUN);
-    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
     assertEquals(
-        List.of(Usage.of(10, 4, 0, 0, 4), Usage.of(10, 0)),
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(22)
+            .withCacheCreationInputTokens(30)
+            .withCacheReadInputTokens(50)
+            .build(),
+        found.usage());
+    assertEquals(
+        List.of(
+            Usage.newBuilder()
+                .withInputTokens(10)
+                .withOutputTokens(4)
+                .withReasoningTokens(4)
+                .build(),
+            Usage.of(10, 0)),
         found.spans().stream().map(Span::usage).toList());
   }
 

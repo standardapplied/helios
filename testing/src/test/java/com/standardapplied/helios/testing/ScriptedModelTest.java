@@ -60,11 +60,28 @@ class ScriptedModelTest {
 
   @Test
   void textTurnCarriesScriptedUsage() {
-    var model = ScriptedModel.newBuilder().withTextTurn("hello", Usage.of(100, 50, 20, 10)).build();
+    var model =
+        ScriptedModel.newBuilder()
+            .withTextTurn(
+                "hello",
+                Usage.newBuilder()
+                    .withInputTokens(100)
+                    .withOutputTokens(50)
+                    .withCacheCreationInputTokens(20)
+                    .withCacheReadInputTokens(10)
+                    .build())
+            .build();
 
     var response = model.chat(List.of(Message.user("hi")), List.of());
 
-    assertEquals(Usage.of(100, 50, 20, 10), response.usage());
+    assertEquals(
+        Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(50)
+            .withCacheCreationInputTokens(20)
+            .withCacheReadInputTokens(10)
+            .build(),
+        response.usage());
   }
 
   @Test
@@ -243,7 +260,13 @@ class ScriptedModelTest {
         Response.newBuilder()
             .withContent("I can't judge that.")
             .withFinishReason(reason)
-            .withUsage(Usage.of(412, 3, 2, 1))
+            .withUsage(
+                Usage.newBuilder()
+                    .withInputTokens(412)
+                    .withOutputTokens(3)
+                    .withCacheCreationInputTokens(2)
+                    .withCacheReadInputTokens(1)
+                    .build())
             .withThinking("weighing it")
             .withCitations(List.of(Citation.of("doc-1", "policy")))
             .withMetadata(Map.of(Response.REFUSAL_CATEGORY_KEY, "cyber"))

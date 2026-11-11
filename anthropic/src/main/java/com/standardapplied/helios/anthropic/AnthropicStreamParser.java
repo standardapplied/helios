@@ -30,7 +30,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
 
   private final String promptStamp;
   private final ContentBlocks blocks = new ContentBlocks();
-  private Response.Usage counts = Response.Usage.of(0, 0, 0, 0);
+  private Response.Usage counts = Response.Usage.of(0, 0);
   private int thinking;
   private String stopReason;
   private ContentDelta.StopDetails stopDetails;
@@ -118,13 +118,17 @@ final class AnthropicStreamParser implements SseReader.Parser {
     var output = Objects.requireNonNullElse(usage.outputTokens(), counts.outputTokens());
     var reportedThinking = thinking(usage);
     counts =
-        Response.Usage.of(
-            Objects.requireNonNullElse(usage.inputTokens(), counts.inputTokens()),
-            output,
-            Objects.requireNonNullElse(
-                usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()),
-            Objects.requireNonNullElse(usage.cacheReadInputTokens(), counts.cacheReadInputTokens()),
-            Math.min(reportedThinking, output));
+        Response.Usage.newBuilder()
+            .withInputTokens(Objects.requireNonNullElse(usage.inputTokens(), counts.inputTokens()))
+            .withOutputTokens(output)
+            .withCacheCreationInputTokens(
+                Objects.requireNonNullElse(
+                    usage.cacheCreationInputTokens(), counts.cacheCreationInputTokens()))
+            .withCacheReadInputTokens(
+                Objects.requireNonNullElse(
+                    usage.cacheReadInputTokens(), counts.cacheReadInputTokens()))
+            .withReasoningTokens(Math.min(reportedThinking, output))
+            .build();
     thinking = reportedThinking;
     return counts.reportsTokens() ? new StreamEvent.UsageDelta(counts) : null;
   }

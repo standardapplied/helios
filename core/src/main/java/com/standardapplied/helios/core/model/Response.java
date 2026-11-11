@@ -156,6 +156,11 @@ public record Response<T>(
    * traces still have a single "what did I spend" handle even though sub-counts bill at different
    * rates.
    *
+   * <p>Build one request's usage with {@link #newBuilder()}, which sets each count by name and
+   * derives the total and the prompt size, or with {@link #of(int, int)} when only input and output
+   * are reported. The canonical constructor is for a usage whose prompt size is not its own input,
+   * such as one summed over several requests.
+   *
    * @param inputTokens uncached prompt tokens billed at the base input rate
    * @param outputTokens completion tokens billed at the base output rate
    * @param cacheCreationInputTokens tokens written to the provider's prompt cache; typically billed
@@ -217,8 +222,17 @@ public record Response<T>(
     }
 
     /**
+     * Starts a builder for the usage of one request, every count zero.
+     *
+     * @return a new builder
+     */
+    public static Builder newBuilder() {
+      return new Builder();
+    }
+
+    /**
      * Build a {@link Usage} from input and output token counts. Cache counts default to zero — use
-     * {@link #of(int, int, int, int)} when the provider reported prompt-caching activity.
+     * {@link #newBuilder()} when the provider reported prompt-caching activity or reasoning.
      *
      * @param input prompt tokens
      * @param output completion tokens
@@ -226,7 +240,7 @@ public record Response<T>(
      *     output}
      */
     public static Usage of(int input, int output) {
-      return of(input, output, 0, 0);
+      return newBuilder().withInputTokens(input).withOutputTokens(output).build();
     }
 
     /**
@@ -264,53 +278,102 @@ public record Response<T>(
       return totalTokens > 0;
     }
 
-    /**
-     * {@link #of(int, int, int, int, int)} with no reasoning count.
-     *
-     * @param input uncached prompt tokens
-     * @param output completion tokens
-     * @param cacheCreation tokens written to the provider's prompt cache
-     * @param cacheRead tokens read from the provider's prompt cache
-     * @return a usage record of one request, {@code reasoningTokens} zero
-     * @throws IllegalArgumentException if a count is negative
-     * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
-     */
-    public static Usage of(int input, int output, int cacheCreation, int cacheRead) {
-      return of(input, output, cacheCreation, cacheRead, 0);
-    }
-
-    /**
-     * Build a {@link Usage} of one request including its reasoning count.
-     *
-     * @param input uncached prompt tokens
-     * @param output completion tokens, the reasoning included
-     * @param cacheCreation tokens written to the provider's prompt cache
-     * @param cacheRead tokens read from the provider's prompt cache
-     * @param reasoning the part of {@code output} the model spent reasoning
-     * @return a usage record of one request, with {@code totalTokens} summing all four counts,
-     *     {@code promptTokens} the three input counts and {@code reasoningTokens} the reasoning
-     *     count
-     * @throws IllegalArgumentException if a count is negative or {@code reasoning} is greater than
-     *     {@code output}
-     * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
-     */
-    public static Usage of(int input, int output, int cacheCreation, int cacheRead, int reasoning) {
-      return new Usage(
-          input,
-          output,
-          cacheCreation,
-          cacheRead,
-          sum(input, output, cacheCreation, cacheRead),
-          inputs(input, cacheCreation, cacheRead),
-          reasoning);
-    }
-
     private static int sum(int input, int output, int cacheCreation, int cacheRead) {
       return Math.addExact(Math.addExact(input, output), Math.addExact(cacheCreation, cacheRead));
     }
 
     private static long inputs(int input, int cacheCreation, int cacheRead) {
       return (long) input + cacheCreation + cacheRead;
+    }
+
+    /**
+     * Builds the {@link Usage} of one request by named counts, each zero unless set. The {@code
+     * with*} methods validate nothing; {@link #build()} validates as the canonical constructor
+     * does. Not thread-safe.
+     */
+    public static class Builder {
+      private int inputTokens;
+      private int outputTokens;
+      private int cacheCreationInputTokens;
+      private int cacheReadInputTokens;
+      private int reasoningTokens;
+
+      private Builder() {}
+
+      /**
+       * Sets the uncached prompt tokens.
+       *
+       * @param inputTokens the count
+       * @return this builder
+       */
+      public Builder withInputTokens(int inputTokens) {
+        this.inputTokens = inputTokens;
+        return this;
+      }
+
+      /**
+       * Sets the completion tokens, the reasoning included.
+       *
+       * @param outputTokens the count
+       * @return this builder
+       */
+      public Builder withOutputTokens(int outputTokens) {
+        this.outputTokens = outputTokens;
+        return this;
+      }
+
+      /**
+       * Sets the tokens written to the provider's prompt cache.
+       *
+       * @param cacheCreationInputTokens the count
+       * @return this builder
+       */
+      public Builder withCacheCreationInputTokens(int cacheCreationInputTokens) {
+        this.cacheCreationInputTokens = cacheCreationInputTokens;
+        return this;
+      }
+
+      /**
+       * Sets the tokens read from the provider's prompt cache.
+       *
+       * @param cacheReadInputTokens the count
+       * @return this builder
+       */
+      public Builder withCacheReadInputTokens(int cacheReadInputTokens) {
+        this.cacheReadInputTokens = cacheReadInputTokens;
+        return this;
+      }
+
+      /**
+       * Sets the part of the output tokens the model spent reasoning.
+       *
+       * @param reasoningTokens the count
+       * @return this builder
+       */
+      public Builder withReasoningTokens(int reasoningTokens) {
+        this.reasoningTokens = reasoningTokens;
+        return this;
+      }
+
+      /**
+       * Builds the usage of one request: {@code totalTokens} sums the four counts and {@code
+       * promptTokens} the three input counts.
+       *
+       * @return the usage
+       * @throws IllegalArgumentException if a count is negative or the reasoning count is greater
+       *     than the output count
+       * @throws ArithmeticException if the sum of the four counts overflows an {@code int}
+       */
+      public Usage build() {
+        return new Usage(
+            inputTokens,
+            outputTokens,
+            cacheCreationInputTokens,
+            cacheReadInputTokens,
+            sum(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens),
+            inputs(inputTokens, cacheCreationInputTokens, cacheReadInputTokens),
+            reasoningTokens);
+      }
     }
   }
 
