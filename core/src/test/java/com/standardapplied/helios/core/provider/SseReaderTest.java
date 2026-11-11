@@ -3,13 +3,11 @@
 package com.standardapplied.helios.core.provider;
 
 import static com.standardapplied.helios.core.provider.SseFixtures.NEVER_IDLE;
-import static com.standardapplied.helios.core.provider.SseFixtures.awaitNoWatchdogBut;
 import static com.standardapplied.helios.core.provider.SseFixtures.stream;
-import static com.standardapplied.helios.core.provider.SseFixtures.watchdogStates;
-import static com.standardapplied.helios.core.provider.SseFixtures.watchdogs;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,11 +25,12 @@ import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -94,6 +93,49 @@ class SseReaderTest {
     @Override
     public void close() {
       closed.countDown();
+    }
+  }
+
+  /**
+   * Serves {@code line} once {@code gate} opens, blocking through interrupts until then, and ends
+   * after it; counts {@code closed} down on each close, which opens the gate when asked to.
+   */
+  private static final class GatedBody extends InputStream {
+    final CountDownLatch reading = new CountDownLatch(1);
+    final CountDownLatch gate = new CountDownLatch(1);
+    final CountDownLatch closed = new CountDownLatch(1);
+    private final byte[] line;
+    private final boolean closeOpensGate;
+    private boolean served;
+
+    GatedBody(String line, boolean closeOpensGate) {
+      this.line = line.getBytes(StandardCharsets.UTF_8);
+      this.closeOpensGate = closeOpensGate;
+    }
+
+    @Override
+    public int read() {
+      throw new UnsupportedOperationException("read in bulk");
+    }
+
+    @Override
+    public int read(byte[] target, int offset, int length) {
+      if (served) {
+        return -1;
+      }
+      reading.countDown();
+      Uninterruptible.await(gate);
+      served = true;
+      System.arraycopy(line, 0, target, offset, line.length);
+      return line.length;
+    }
+
+    @Override
+    public void close() {
+      closed.countDown();
+      if (closeOpensGate) {
+        gate.countDown();
+      }
     }
   }
 
@@ -611,7 +653,7 @@ class SseReaderTest {
             new EchoParser(),
             (message, status, cause) -> new ProviderException("acme: " + message, status, cause))) {
 
-      var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+      var error = assertInstanceOf(StreamEvent.Error.class, consume(reader::next));
 
       assertEquals(FinishReason.ERROR, error.partial().finishReason());
       assertTrue(body.closed);
@@ -784,47 +826,46 @@ class SseReaderTest {
 
   @Test
   void theConsumingThreadReadsEveryLineAndOneWatchdogWatchesTheStreamUntilItEnds() {
-    var before = watchdogs();
     var body = new Closing(byteByByte("data: x\n\n".repeat(149) + "data: stop\n\n"));
     var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
 
-    assertTrue(reader.hasNext());
-    var started = new HashSet<>(watchdogs());
-    started.removeAll(before);
-    assertEquals(150, drain(reader).size());
+    assertEquals(new StreamEvent.TextDelta("x"), reader.next());
+    var watchdog = reader.idleWatch.watchdog();
+    for (var i = 1; i < 149; i++) {
+      reader.next();
+    }
+    assertSame(watchdog, reader.idleWatch.watchdog());
+    assertInstanceOf(StreamEvent.Done.class, reader.next());
 
-    assertEquals(1, started.size());
+    assertEquals("helios-sse-idle", watchdog.getName());
     assertEquals(Set.of(Thread.currentThread()), body.readers);
-    awaitNoWatchdogBut(before);
+    Await.termination("the watchdog", watchdog);
   }
 
   @Test
   void aReaderClosedBeforeItsFirstLineStartsNoWatchdogAndNeverReadsTheBody() {
-    var before = watchdogs();
     var body = new Closing(stream("data: stop\n\n"));
     var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
-    var afterBuilding = watchdogs();
+    assertNull(reader.idleWatch.watchdog());
 
     reader.close();
 
-    assertTrue(before.containsAll(afterBuilding));
     assertFalse(reader.hasNext());
     assertTrue(body.closed);
     assertEquals(Set.of(), body.readers);
-    assertTrue(before.containsAll(watchdogs()));
+    assertNull(reader.idleWatch.watchdog());
   }
 
   @ParameterizedTest
   @MethodSource("streamEndings")
   void theWatchdogEndsAndTheBodyIsClosedOnceTheStreamEnds(InputStream content) {
-    var before = watchdogs();
     var body = new Closing(content);
     var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
 
     drain(reader);
 
     assertTrue(body.closed);
-    awaitNoWatchdogBut(before);
+    Await.termination("the watchdog", reader.idleWatch.watchdog());
   }
 
   static List<Named<InputStream>> streamEndings() {
@@ -838,7 +879,6 @@ class SseReaderTest {
 
   @Test
   void aBodyThatFailsAfterTwoEventsYieldsBothAndThenTheOneError() {
-    var before = watchdogs();
     var feed = new FeedableInputStream();
     feed.feed("data: one\n\ndata: two\n\n");
     var failure = new IOException("connection reset");
@@ -854,12 +894,11 @@ class SseReaderTest {
     assertSame(failure, assertInstanceOf(StreamEvent.Error.class, events.get(2)).cause());
     assertEquals(3, events.size());
     assertTrue(body.closed);
-    awaitNoWatchdogBut(before);
+    Await.termination("the watchdog", reader.idleWatch.watchdog());
   }
 
   @Test
   void aStalledBodyIsClosedByTheWatchdogAndEndsInTheIdleTimeoutWithThePartial() {
-    var before = watchdogs();
     var body = new Closing(new FeedableInputStream());
     var parser =
         new EchoParser() {
@@ -878,9 +917,122 @@ class SseReaderTest {
     assertEquals("Stream idle timeout: no data received for 1 ms", error.message());
     assertInstanceOf(ProviderException.class, error.cause());
     assertEquals("so far", error.partial().content());
-    assertEquals("helios-sse-idle", body.closers.getFirst().getName());
+    assertSame(reader.idleWatch.watchdog(), body.closers.getFirst());
     assertFalse(reader.hasNext());
-    awaitNoWatchdogBut(before);
+    Await.termination("the watchdog", reader.idleWatch.watchdog());
+  }
+
+  @Test
+  void aLineTheBodyDeliversOnlyWhenTheWatchdogClosesItStillFailsAsIdle() {
+    var body = new GatedBody("data: one\n\n", true);
+    var reader =
+        new SseReader(body, Duration.ofMillis(1), new EchoParser(), ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, consume(reader::next));
+
+    assertEquals("Stream idle timeout: no data received for 1 ms", error.message());
+  }
+
+  @Test
+  void aWaitBothClaimedAndInterruptedEndsInCancellation() {
+    var body = new GatedBody("data: one\n\n", false);
+    var reader =
+        new SseReader(body, Duration.ofMillis(1), new EchoParser(), ProviderException::new);
+    var read = blockedRead(reader, body);
+
+    read.thread.interrupt();
+    Await.latch("the watchdog to close the body", body.closed);
+    body.gate.countDown();
+
+    assertInstanceOf(CancellationException.class, Await.failure("the read", read.task));
+    assertTrue(read.interruptKept.get());
+  }
+
+  @Test
+  void anInterruptTheBodyAnswersByReturningALineWithTheFlagSetStillCancels() {
+    var body = new GatedBody("data: one\n\n", false);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var read = blockedRead(reader, body);
+
+    read.thread.interrupt();
+    body.gate.countDown();
+
+    assertInstanceOf(CancellationException.class, Await.failure("the read", read.task));
+    assertTrue(read.interruptKept.get());
+  }
+
+  @Test
+  void anInterruptTheBodyReportsOnlyByAnInterruptedIoExceptionStillCancels() {
+    var reader =
+        new SseReader(
+            failing(new InterruptedIOException("Pipe broken by interrupt")),
+            NEVER_IDLE,
+            new EchoParser(),
+            ProviderException::new);
+    var interruptKept = new AtomicBoolean();
+
+    var cancelled =
+        consume(
+            () -> {
+              try {
+                return assertThrows(CancellationException.class, reader::next);
+              } finally {
+                interruptKept.set(Thread.interrupted());
+              }
+            });
+
+    assertEquals("interrupted while waiting for the next line", cancelled.getMessage());
+    assertTrue(interruptKept.get());
+  }
+
+  @Test
+  void aSocketTimeoutIsAReadFailureNotAnInterrupt() {
+    var timedOut = new SocketTimeoutException("Read timed out");
+    var reader =
+        new SseReader(failing(timedOut), NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+
+    assertEquals("Stream read error", error.message());
+    assertSame(timedOut, error.cause());
+    assertFalse(Thread.currentThread().isInterrupted());
+  }
+
+  @Test
+  void anErrorThrownByTheReadIsAReadFailureCarryingIt() {
+    var broken = new AssertionError("decoder bug");
+    var body =
+        new InputStream() {
+          @Override
+          public int read() {
+            throw broken;
+          }
+        };
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+
+    var error = assertInstanceOf(StreamEvent.Error.class, reader.next());
+
+    var cause = assertInstanceOf(IOException.class, error.cause());
+    assertEquals("Stream read failed", cause.getMessage());
+    assertSame(broken, cause.getCause());
+  }
+
+  @Test
+  void closeReturnsAtOnceWhileABodyThatIgnoresItHoldsTheReadAndTheReadThenFailsAsClosed() {
+    var body = new GatedBody("data: one\n", false);
+    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
+    var read = blockedRead(reader, body);
+    var closing = Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      Await.value("the close", closing.submit(reader::close));
+      body.gate.countDown();
+
+      var error = assertInstanceOf(StreamEvent.Error.class, Await.value("the read", read.task));
+      assertEquals("Stream read error", error.message());
+      assertEquals("Stream closed", error.cause().getMessage());
+    } finally {
+      closing.shutdownNow();
+    }
   }
 
   @Test
@@ -920,56 +1072,9 @@ class SseReaderTest {
     }
   }
 
-  @Test
-  void aWaitTheWatchdogClaimsFirstFailsAsIdleEvenWhenItsLineArrives() {
-    var feed = new FeedableInputStream();
-    var body = new Closing(feed);
-    var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new);
-    var consumer = Executors.newVirtualThreadPerTaskExecutor();
-    try {
-      var next = consumer.submit(reader::next);
-      feed.awaitBlockedRead();
-
-      assertTrue(reader.wait.compareAndSet(reader.wait.get(), SseReader.CLAIMED));
-      feed.feed("data: one\n\n");
-
-      var error = assertInstanceOf(StreamEvent.Error.class, Await.value("the next event", next));
-      assertEquals(
-          "Stream idle timeout: no data received for " + NEVER_IDLE.toMillis() + " ms",
-          error.message());
-      assertTrue(body.closed);
-    } finally {
-      consumer.shutdownNow();
-    }
-  }
-
-  @Test
-  void aWaitWhoseLineArrivesFirstCannotBeClaimedAndKeepsTheBodyOpen() {
-    var feed = new FeedableInputStream();
-    var body = new Closing(feed);
-    try (var reader = new SseReader(body, NEVER_IDLE, new EchoParser(), ProviderException::new)) {
-      var consumer = Executors.newVirtualThreadPerTaskExecutor();
-      try {
-        var next = consumer.submit(reader::next);
-        feed.awaitBlockedRead();
-        var mark = reader.wait.get();
-
-        feed.feed("data: one\n\n");
-
-        assertEquals(new StreamEvent.TextDelta("one"), Await.value("the next event", next));
-        assertFalse(reader.wait.compareAndSet(mark, SseReader.CLAIMED));
-        assertEquals(SseReader.NOT_WAITING, reader.wait.get());
-        assertFalse(body.closed);
-      } finally {
-        consumer.shutdownNow();
-      }
-    }
-  }
-
   @ParameterizedTest
   @MethodSource("timeoutsBeyondTheNanosecondRange")
   void anIdleTimeoutBeyondTheNanosecondRangeReadsTheStreamWhileItsWatchdogSleeps(Duration timeout) {
-    var before = watchdogs();
     var reader =
         new SseReader(
             stream("data: one\n\ndata: stop\n\n"),
@@ -977,16 +1082,12 @@ class SseReaderTest {
             new EchoParser(),
             ProviderException::new);
     assertEquals(new StreamEvent.TextDelta("one"), reader.next());
-    var started = new HashSet<>(watchdogs());
-    started.removeAll(before);
-    assertEquals(1, started.size());
-    var watchdog = started.iterator().next();
+    var watchdog = reader.idleWatch.watchdog();
 
-    Await.until(
-        "the watchdog to sleep", () -> "TIMED_WAITING".equals(watchdogStates().get(watchdog)));
+    Await.until("the watchdog to sleep", () -> watchdog.getState() == Thread.State.TIMED_WAITING);
 
     assertInstanceOf(StreamEvent.Done.class, reader.next());
-    awaitNoWatchdogBut(before);
+    Await.termination("the watchdog", watchdog);
   }
 
   static List<Duration> timeoutsBeyondTheNanosecondRange() {
@@ -996,7 +1097,6 @@ class SseReaderTest {
   @ParameterizedTest
   @ValueSource(longs = {0, -1})
   void anIdleTimeoutThatIsNotPositiveFailsTheFirstLineAtOnceWithoutAWatchdog(long millis) {
-    var before = watchdogs();
     var body = new Closing(stream("data: one\n\n"));
     var reader =
         new SseReader(body, Duration.ofMillis(millis), new EchoParser(), ProviderException::new);
@@ -1006,8 +1106,28 @@ class SseReaderTest {
     assertEquals("Stream idle timeout: no data received for " + millis + " ms", error.message());
     assertTrue(body.closed);
     assertEquals(Set.of(), body.readers);
-    assertTrue(before.containsAll(watchdogs()));
+    assertNull(reader.idleWatch.watchdog());
     assertFalse(reader.hasNext());
+  }
+
+  /** A {@code next()} on a thread of its own, blocked in the body's read. */
+  private record BlockedRead(
+      Thread thread, FutureTask<StreamEvent> task, AtomicBoolean interruptKept) {}
+
+  private static BlockedRead blockedRead(SseReader reader, GatedBody body) {
+    var interruptKept = new AtomicBoolean();
+    var task =
+        new FutureTask<>(
+            () -> {
+              try {
+                return reader.next();
+              } finally {
+                interruptKept.set(Thread.currentThread().isInterrupted());
+              }
+            });
+    var thread = Thread.ofVirtual().start(task);
+    Await.latch("the read to block on the body", body.reading);
+    return new BlockedRead(thread, task, interruptKept);
   }
 
   /** Returns once at least {@code timeout} has passed: a stalled stream with it has timed out. */

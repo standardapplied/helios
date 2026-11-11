@@ -7,12 +7,24 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 ### Changed
 
 - `SseReader` reads a stream's lines on the consuming thread, with one idle watchdog per stream, a
-  virtual thread named `helios-sse-idle` started by the first line asked for; it used to read every
-  line on a virtual thread of its own. The idle timeout, the read failures, `close()` from another
-  thread and an interrupt of the consuming thread end the stream as before.
-- A blocked read is now released only by closing the body or by the body's response to an
-  interrupt, so a body whose `read` ignores both keeps its consumer blocked until data arrives; the
-  JDK HTTP client's response body, which every provider reads, is released by both.
+  virtual thread named `helios-sse-idle` started by the first line asked for and ended with the
+  stream; it used to read every line on a virtual thread of its own.
+
+### Fixed
+
+- An idle timeout too long to count in milliseconds, such as `ChronoUnit.FOREVER.getDuration()`, no
+  longer throws `ArithmeticException` from `SseReader.hasNext()`.
+
+### Compatibility
+
+- A blocked read is released only by the body: the idle timeout and `close()` close it, and an
+  interrupt is seen once the body answers it. A body given to the `InputStream` constructor whose
+  `read` ignores both keeps its consumer blocked past the idle timeout. The JDK HTTP client's
+  response body, which every provider reads, is released by both.
+- A reader neither read to its end nor closed keeps its watchdog thread until it is closed, as
+  `CloseableIterator` requires.
+- A positive idle timeout under one millisecond now waits its real length; it used to fail the first
+  line at once. A negative one now always fails the first line; it used to, almost always.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 
