@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -314,19 +315,26 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
     } catch (RuntimeException | Error e) {
       throw new IOException("Stream read failed", e);
     } finally {
+      // An interrupt or the watchdog's claim decides the outcome over the read's own result.
       endWait(mark);
     }
   }
 
-  /** Marks the start of a wait for a line, starting the idle watchdog on the first. */
+  /**
+   * Marks the start of a wait for a line, starting the idle watchdog on the first; with an idle
+   * timeout that is not positive, the first wait times out at once.
+   */
   private long startWait() throws IOException {
+    if (done) {
+      throw new IOException("Stream closed");
+    }
     if (watchdog == null) {
+      if (!idleTimeout.isPositive()) {
+        throw idle();
+      }
       synchronized (lock) {
         watchdog = Thread.ofVirtual().name("helios-sse-idle").start(this::watchIdle);
       }
-    }
-    if (done) {
-      throw new IOException("Stream closed");
     }
     var mark = System.nanoTime() - origin;
     wait.set(mark);
@@ -343,9 +351,13 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
       throw new CancellationException("interrupted while waiting for the next line");
     }
     if (!wait.compareAndSet(mark, NOT_WAITING)) {
-      throw failure.create(
-          "Stream idle timeout: no data received for " + idleTimeout.toMillis() + " ms", 0, null);
+      throw idle();
     }
+  }
+
+  private ProviderException idle() {
+    return failure.create(
+        "Stream idle timeout: no data received for " + idleTimeout.toMillis() + " ms", 0, null);
   }
 
   /**
@@ -353,7 +365,7 @@ public final class SseReader implements CloseableIterator<StreamEvent> {
    * open, and closes the body once it has claimed a wait that outlasted the timeout.
    */
   private void watchIdle() {
-    var timeout = idleTimeout.toNanos();
+    var timeout = TimeUnit.NANOSECONDS.convert(idleTimeout);
     try {
       while (true) {
         var mark = wait.get();
