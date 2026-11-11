@@ -108,8 +108,7 @@ public final class StopClassifier {
               state.totals().elapsed()));
     }
 
-    if (limits.maxBudgetMicroUsd().isPresent()
-        && state.totals().cost().microUsd() > limits.maxBudgetMicroUsd().getAsLong()) {
+    if (overBudget(state, limits)) {
       return Optional.of(
           new ResultMessage.ErrorMaxBudgetUsd(
               state.sessionId(),
@@ -131,6 +130,12 @@ public final class StopClassifier {
               state.totals().elapsed()));
     }
     return Optional.empty();
+  }
+
+  /** Whether the run's spend, its children's included, is strictly above its budget, if any. */
+  static boolean overBudget(SessionState state, SessionLimits limits) {
+    return limits.maxBudgetMicroUsd().isPresent()
+        && state.totals().cost().microUsd() > limits.maxBudgetMicroUsd().getAsLong();
   }
 
   /**

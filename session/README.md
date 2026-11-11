@@ -178,7 +178,8 @@ needs a calculator: `build()` throws when `maxBudgetMicroUsd` is set without one
 never prices a model it does not hold at zero: the call throws, naming the id, and the run ends in
 `ErrorDuringExecution`, so list every model the session calls, a compaction summary model included.
 Every model attempt is priced at the usage its provider reported, a failed or retried one
-included; Helios estimates nothing.
+included; Helios estimates nothing. A transient failure is not retried once the run is over its
+budget, so a run overshoots it by at most the attempt that crossed it.
 
 ## Permissions
 
