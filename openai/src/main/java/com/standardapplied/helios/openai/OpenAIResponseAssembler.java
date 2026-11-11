@@ -90,7 +90,8 @@ final class OpenAIResponseAssembler {
    * The usage in Helios's disjoint shape. OpenAI reports {@code input_tokens} as the total and the
    * cached and cache-write counts as subsets of it, so both are subtracted, never below zero: a
    * subset exceeding the total would be a server accounting bug, better under-reported than
-   * negative. Cache writes bill at a premium on gpt-5.6 and later and are zero elsewhere.
+   * negative. Cache writes bill at a premium on gpt-5.6 and later and are zero elsewhere. The
+   * reasoning count is a subset of {@code output_tokens}, cut to it for the same reason.
    *
    * @throws ArithmeticException if the counts sum past {@link Integer#MAX_VALUE}
    */
@@ -102,6 +103,11 @@ final class OpenAIResponseAssembler {
     if (input <= 0 && output <= 0 && cached <= 0 && written <= 0) {
       return null;
     }
-    return Response.Usage.of(Math.max(0, input - cached - written), output, written, cached);
+    return Response.Usage.of(
+        Math.max(0, input - cached - written),
+        output,
+        written,
+        cached,
+        Math.min(usage.reasoningTokensOrZero(), output));
   }
 }

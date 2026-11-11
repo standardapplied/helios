@@ -191,6 +191,34 @@ final class PgSpanExporterTest {
   }
 
   @Test
+  void theReasoningCountOfARunAndOfItsChatStepIsStoredAndReadBack() {
+    var reasoning = "gen_ai.usage.reasoning_tokens";
+    var chat =
+        step(
+            RUN,
+            "1000000000000001",
+            "chat scripted",
+            "chat",
+            1,
+            Attributes.builder().putAll(usage(180, 22, 30, 50)).put(reasoning, 9L).build());
+    var run =
+        run(
+            RUN,
+            "00f067aa0ba902b7",
+            "matchmaking",
+            0,
+            Attributes.builder().putAll(usage(180, 22, 30, 50)).put(reasoning, 12L).build());
+
+    assertTrue(exporter.export(List.of(chat, run)).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals(Usage.of(100, 22, 30, 50, 12), found.usage());
+    assertEquals(Usage.of(100, 22, 30, 50, 9), found.spans().getFirst().usage());
+    assertFalse(found.attributes().containsKey(reasoning));
+    assertFalse(found.spans().getFirst().attributes().containsKey(reasoning));
+  }
+
+  @Test
   void aStepWithAnOkStatusAndNoUsageStoresNoErrorAndNoTokenColumn() {
     var ok =
         span(

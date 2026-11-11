@@ -8,6 +8,7 @@ package com.standardapplied.helios.anthropic.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.tool.ParameterType;
@@ -446,6 +447,18 @@ class SerializationTest {
     assertEquals(50, usage.outputTokens());
     assertEquals(10, usage.cacheCreationInputTokens());
     assertEquals(20, usage.cacheReadInputTokens());
+    assertNull(usage.outputTokensDetails());
+  }
+
+  @Test
+  void deserializeApiUsageWithThinkingTokens() throws Exception {
+    var usage =
+        objectMapper.readValue(
+            "{\"output_tokens\":235,\"output_tokens_details\":{\"thinking_tokens\":95}}",
+            ApiUsage.class);
+
+    assertEquals(235, usage.outputTokens());
+    assertEquals(95, usage.outputTokensDetails().thinkingTokens());
   }
 
   @Test

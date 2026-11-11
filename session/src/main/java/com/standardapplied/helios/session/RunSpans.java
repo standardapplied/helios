@@ -86,6 +86,8 @@ final class RunSpans implements StepSpans {
       longKey("gen_ai.usage.cache_read.input_tokens");
   private static final AttributeKey<Long> CACHE_WRITE =
       longKey("gen_ai.usage.cache_write.input_tokens");
+  private static final AttributeKey<Long> REASONING_TOKENS =
+      longKey("gen_ai.usage.reasoning_tokens");
   private static final AttributeKey<String> TOOL_NAME = stringKey("gen_ai.tool.name");
   private static final AttributeKey<String> TOOL_CALL_ID = stringKey("gen_ai.tool.call.id");
   private static final AttributeKey<String> TOOL_TYPE = stringKey("gen_ai.tool.type");
@@ -295,7 +297,8 @@ final class RunSpans implements StepSpans {
 
   /**
    * Set the usage attributes when {@code usage} reports tokens, OpenTelemetry's input count
-   * including the cached tokens, and the cost when there is one.
+   * including the cached tokens, each cache and the reasoning count only when not zero, and the
+   * cost when there is one.
    */
   private static void usage(Span span, Usage usage, CostEstimate cost) {
     if (usage.reportsTokens()) {
@@ -310,6 +313,9 @@ final class RunSpans implements StepSpans {
       }
       if (usage.cacheCreationInputTokens() != 0) {
         span.setAttribute(CACHE_WRITE, (long) usage.cacheCreationInputTokens());
+      }
+      if (usage.reasoningTokens() != 0) {
+        span.setAttribute(REASONING_TOKENS, (long) usage.reasoningTokens());
       }
     }
     if (cost.microUsd() != 0) {

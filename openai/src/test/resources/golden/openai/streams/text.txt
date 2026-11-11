@@ -2,7 +2,7 @@
 KeepAlive[]
 TextDelta[text=Hello]
 TextDelta[text=, world.]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006], metadata={response.model=gpt-5.6}, citations=[]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0], metadata={response.model=gpt-5.6}, citations=[]]
 onComplete
 == chat
-Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006], thinking=null, citations=[], metadata={response.model=gpt-5.6}]
+Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0], thinking=null, citations=[], metadata={response.model=gpt-5.6}]

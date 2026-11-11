@@ -7,7 +7,7 @@ ToolUseStop[toolCall=ToolCall[id=call_1, name=weather, arguments={city=Paris}]]
 ToolUseStart[callId=call_2, toolName=weather]
 ToolUseDelta[callId=call_2, argumentsDelta={"city":"Rome"}]
 ToolUseStop[toolCall=ToolCall[id=call_2, name=weather, arguments={city=Rome}]]
-MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006], metadata={response.model=gpt-5.6}, citations=[]]
+MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0], metadata={response.model=gpt-5.6}, citations=[]]
 onComplete
 == chat
-Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris}], ToolCall[id=call_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006], thinking=null, citations=[], metadata={response.model=gpt-5.6}]
+Response[content=Checking both., parsed=null, toolCalls=[ToolCall[id=call_1, name=weather, arguments={city=Paris}], ToolCall[id=call_2, name=weather, arguments={city=Rome}]], finishReason=TOOL_CALLS, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0], thinking=null, citations=[], metadata={response.model=gpt-5.6}]

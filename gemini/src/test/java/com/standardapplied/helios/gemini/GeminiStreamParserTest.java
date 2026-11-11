@@ -95,7 +95,7 @@ class GeminiStreamParserTest {
                 + "\"total_cached_tokens\":33,\"total_output_tokens\":23,"
                 + "\"total_thought_tokens\":49}}");
 
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(7, 72, 0, 33)), reported);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(7, 72, 0, 33, 49)), reported);
     assertNull(
         parser.parse(
             "{\"event_type\":\"interaction.in_progress\",\"interaction_id\":\"int_xyz\","
@@ -327,6 +327,7 @@ class GeminiStreamParserTest {
     assertEquals(7, usage.inputTokens());
     assertEquals(33, usage.cacheReadInputTokens());
     assertEquals(72, usage.outputTokens());
+    assertEquals(49, usage.reasoningTokens());
     assertEquals(112, usage.totalTokens());
   }
 
@@ -342,6 +343,7 @@ class GeminiStreamParserTest {
     assertEquals("Hello", error.partial().content());
     assertEquals(7, error.partial().usage().inputTokens());
     assertEquals(72, error.partial().usage().outputTokens());
+    assertEquals(49, error.partial().usage().reasoningTokens());
     assertEquals(79, error.partial().usage().totalTokens());
   }
 
@@ -358,6 +360,7 @@ class GeminiStreamParserTest {
 
     assertEquals(7, usage.inputTokens());
     assertEquals(23, usage.outputTokens());
+    assertEquals(0, usage.reasoningTokens());
     assertEquals(30, usage.totalTokens());
   }
 

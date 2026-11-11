@@ -174,8 +174,8 @@ final class SessionStateTest {
     grandchild.totals().accumulateUsage(Usage.of(10, 1));
     grandchild.totals().accumulateCost(CostEstimate.ofMicroUsd(7));
 
-    assertEquals(new Usage(150, 15, 0, 0, 165, 100), parent.totals().usage());
-    assertEquals(new Usage(50, 5, 0, 0, 55, 40), child.totals().usage());
+    assertEquals(new Usage(150, 15, 0, 0, 165, 100, 0), parent.totals().usage());
+    assertEquals(new Usage(50, 5, 0, 0, 55, 40, 0), child.totals().usage());
     assertEquals(CostEstimate.ofMicroUsd(7), parent.totals().cost());
     assertEquals(CostEstimate.ofMicroUsd(7), child.totals().cost());
   }
