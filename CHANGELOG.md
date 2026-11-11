@@ -23,6 +23,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   response, from Anthropic's `message.model`, Gemini's `interaction.model` and OpenAI's
   `response.model`; absent when the provider reports none. A session's `chat` span carries it as
   `gen_ai.response.model`.
+- Each `chat` span carries `helios.model.first_chunk_ms` (from the attempt's start to its first
+  chunk of any kind, thinking and keep-alive included) and `helios.model.first_text_ms` (to its
+  first non-empty text), whole milliseconds on the session's clock, each absent when the attempt
+  had none.
 
 ### Changed
 

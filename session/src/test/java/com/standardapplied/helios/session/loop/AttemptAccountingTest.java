@@ -3,6 +3,7 @@
 package com.standardapplied.helios.session.loop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.common.CostCalculator;
@@ -18,6 +19,7 @@ import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SteeringQueue;
 import com.standardapplied.helios.session.StreamRetryPolicy;
+import com.standardapplied.helios.session.test.HandClock;
 import com.standardapplied.helios.testing.ModelStreams;
 import com.standardapplied.helios.testing.ScriptedModel;
 import java.time.Duration;
@@ -30,10 +32,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Every attempt of a model call is accounted once, as its stream ends, with the usage its stream
- * reported, after the model its provider reported serving it is recorded, on every way {@link
- * ModelCall#stream} returns: retries that run out, a transient failure on a run already stopped, a
- * run cancelled while an attempt is accounted or before its back-off, and a run interrupted while a
- * retry is announced under a zero back-off.
+ * reported, after the model its provider reported serving it and the time from its start to its
+ * first chunk and first text are recorded, on every way {@link ModelCall#stream} returns: retries
+ * that run out, a transient failure on a run already stopped, a run cancelled while an attempt is
+ * accounted or before its back-off, and a run interrupted while a retry is announced under a zero
+ * back-off.
  */
 final class AttemptAccountingTest {
 
@@ -46,6 +49,7 @@ final class AttemptAccountingTest {
   private final SessionState state = fixture.state();
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final List<String> steps = new CopyOnWriteArrayList<>();
+  private final HandClock clock = new HandClock(Instant.EPOCH);
 
   @Test
   void attemptsThatRunOutOfRetriesAreEachAccountedOnceInOrder() {
@@ -70,27 +74,48 @@ final class AttemptAccountingTest {
         events.stream().map(Object::getClass).toList());
   }
 
+  /** The retried attempt starts as the first ends, 120 ms in, and is timed from there. */
   @Test
-  void anAttemptsServedModelIsRecordedBeforeItIsAccounted() {
+  void anAttemptsServedModelAndFirstOutputAreRecordedBeforeItIsAccounted() {
     var served =
         ScriptedModel.newBuilder()
-            .withStreamTurn(ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)))
             .withStreamTurn(
-                ModelStreams.of(
-                    new ModelChunk.MessageStop(
-                        "STOP",
-                        REPORTED,
-                        Map.of(Response.RESPONSE_MODEL_KEY, "claude-opus-5-5-20261101"))));
+                clock.paced(
+                    ModelStreams.failing(OVERLOADED, new ModelChunk.UsageDelta(REPORTED)), 120))
+            .withStreamTurn(
+                clock.paced(
+                    ModelStreams.of(
+                        new ModelChunk.KeepAlive(),
+                        new ModelChunk.TextDelta("Hi"),
+                        new ModelChunk.MessageStop(
+                            "STOP",
+                            REPORTED,
+                            Map.of(Response.RESPONSE_MODEL_KEY, "claude-opus-5-5-20261101"))),
+                    40,
+                    60));
 
     stream(served, event -> steps.add(event.getClass().getSimpleName()));
 
     assertEquals(
         List.of(
             "served null",
+            "first chunk OptionalLong[120], first text OptionalLong.empty",
             "ModelCallEnded",
             "TurnRetried",
+            "AssistantText",
             "served claude-opus-5-5-20261101",
+            "first chunk OptionalLong[40], first text OptionalLong[100]",
             "ModelCallEnded"),
+        steps);
+  }
+
+  @Test
+  void anAttemptWhoseStreamDoesNotOpenHasNoFirstOutput() {
+    var turn = stream(ScriptedModel.newBuilder(), event -> {});
+
+    assertInstanceOf(IllegalStateException.class, turn.streamError());
+    assertEquals(
+        List.of("served null", "first chunk OptionalLong.empty, first text OptionalLong.empty"),
         steps);
   }
 
@@ -199,8 +224,8 @@ final class AttemptAccountingTest {
               onEvent.accept(event);
             },
             fixture::hookContext,
-            fixture.clock,
-            NoSpans.servedTo(served -> steps.add("served " + served)));
+            clock,
+            NoSpans.recordingTo(steps::add));
     var emitter = collaborators.emitter();
     CostCalculator oneMicroUsdAToken =
         (modelId, usage) -> CostEstimate.ofMicroUsd(usage.totalTokens());

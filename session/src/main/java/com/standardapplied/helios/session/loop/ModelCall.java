@@ -22,6 +22,7 @@ import com.standardapplied.helios.session.StreamRetryPolicy;
 import com.standardapplied.helios.session.store.MessageOrigin;
 import io.opentelemetry.context.Context;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
@@ -99,7 +100,7 @@ final class ModelCall {
     while (true) {
       attempt++;
       var started = clock.instant();
-      var turn = streamOnce(state, limits, visibleTools);
+      var turn = streamOnce(state, limits, visibleTools, started);
       accounting.accountTurn(state, turn, attempt, started, clock.instant());
       if (!(turn.streamError() instanceof TransientStreamException transientErr)
           || attempt >= policy.maxAttempts()
@@ -138,21 +139,25 @@ final class ModelCall {
   }
 
   /**
-   * One attempt, its span current while its stream is opened and read, and given the model the
-   * provider reported serving it before the attempt is accounted. What opening the stream throws
-   * ends the turn; an {@link Error} also ends the session ({@link TurnReader}), and one the turn
-   * ended with is thrown as itself, so it leaves the loop as a tool's or a hook's does.
+   * One attempt, {@code started} at that instant, its span current while its stream is opened and
+   * read, and given the model the provider reported serving it and the time to its first output
+   * before the attempt is accounted. What opening the stream throws ends the turn; an {@link Error}
+   * also ends the session ({@link TurnReader}), and one the turn ended with is thrown as itself, so
+   * it leaves the loop as a tool's or a hook's does.
    */
-  private TurnOutcome streamOnce(SessionState state, SessionLimits limits, List<Tool> tools) {
+  private TurnOutcome streamOnce(
+      SessionState state, SessionLimits limits, List<Tool> tools, Instant started) {
     try (var scope = collaborators.spans().modelAttempt(state).makeCurrent()) {
-      var turn = thrownIfError(attempt(state, limits, tools));
+      var reader = new TurnReader(state, emitter, collaborators.clock(), started);
+      var turn = thrownIfError(attempt(state, limits, tools, reader));
       collaborators.spans().servedModel(state, turn.metadata().get(Response.RESPONSE_MODEL_KEY));
+      collaborators.spans().firstOutput(state, reader.firstChunkMillis(), reader.firstTextMillis());
       return turn;
     }
   }
 
-  private TurnOutcome attempt(SessionState state, SessionLimits limits, List<Tool> tools) {
-    var reader = new TurnReader(state, emitter, collaborators.clock());
+  private TurnOutcome attempt(
+      SessionState state, SessionLimits limits, List<Tool> tools, TurnReader reader) {
     CloseableIterator<ModelChunk> stream;
     try {
       var history = state.history().snapshot();

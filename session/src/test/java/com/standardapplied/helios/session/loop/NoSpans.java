@@ -4,6 +4,7 @@ package com.standardapplied.helios.session.loop;
 
 import com.standardapplied.helios.core.model.ToolCall;
 import io.opentelemetry.context.Context;
+import java.util.OptionalLong;
 import java.util.function.Consumer;
 
 /**
@@ -11,20 +12,20 @@ import java.util.function.Consumer;
  */
 final class NoSpans implements StepSpans {
 
-  static final StepSpans INSTANCE = new NoSpans(model -> {});
+  static final StepSpans INSTANCE = new NoSpans(step -> {});
 
-  private final Consumer<String> served;
+  private final Consumer<String> steps;
 
-  private NoSpans(Consumer<String> served) {
-    this.served = served;
+  private NoSpans(Consumer<String> steps) {
+    this.steps = steps;
   }
 
   /**
-   * Spans that start nothing and pass each attempt's served model, or {@code null}, to {@code
-   * served}.
+   * Spans that start nothing and describe to {@code steps} each attempt's served model, {@code
+   * served <model or null>}, and first output, {@code first chunk <millis>, first text <millis>}.
    */
-  static StepSpans servedTo(Consumer<String> served) {
-    return new NoSpans(served);
+  static StepSpans recordingTo(Consumer<String> steps) {
+    return new NoSpans(steps);
   }
 
   @Override
@@ -34,7 +35,13 @@ final class NoSpans implements StepSpans {
 
   @Override
   public void servedModel(SessionState state, String model) {
-    served.accept(model);
+    steps.accept("served " + model);
+  }
+
+  @Override
+  public void firstOutput(
+      SessionState state, OptionalLong firstChunkMillis, OptionalLong firstTextMillis) {
+    steps.accept("first chunk " + firstChunkMillis + ", first text " + firstTextMillis);
   }
 
   @Override
