@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
+
 ### Added
 
 - `AnthropicModelId.CLAUDE_FABLE_5_2` and `CLAUDE_MYTHOS_5_2`, released by Anthropic on 2026-11-09:
