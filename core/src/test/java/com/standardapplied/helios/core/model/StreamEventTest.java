@@ -103,6 +103,18 @@ class StreamEventTest {
   }
 
   @Test
+  void usageDeltaCarriesTheUsageReportedSoFarAndRefusesNone() {
+    var usage = Response.Usage.of(25, 1, 5, 7);
+
+    assertEquals(usage, new StreamEvent.UsageDelta(usage).usage());
+    assertEquals(
+        "usage must not be null",
+        assertThrows(NullPointerException.class, () -> new StreamEvent.UsageDelta(null))
+            .getMessage());
+    assertEquals("usage", classify(new StreamEvent.UsageDelta(usage)));
+  }
+
+  @Test
   void thinkingDelta() {
     var event = new StreamEvent.ThinkingDelta("Let me reason about this");
 
@@ -135,6 +147,7 @@ class StreamEventTest {
       case StreamEvent.ToolCallDelta(var id, var delta) -> "delta";
       case StreamEvent.ToolCallComplete(var tc) -> "complete";
       case StreamEvent.KeepAlive() -> "keep-alive";
+      case StreamEvent.UsageDelta(var usage) -> "usage";
       case StreamEvent.Done(var r) -> "done";
       case StreamEvent.Error(var msg, var cause, var partial) -> "error: " + msg;
     };

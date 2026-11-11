@@ -1,5 +1,5 @@
 == chatStream
-KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
 KeepAlive[]
 TextDelta[text=Before]
 UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]

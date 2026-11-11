@@ -241,10 +241,11 @@ public sealed interface ModelChunk
 
   /**
    * The usage the provider has reported so far: a cumulative snapshot, which replaces any earlier
-   * one, never adds to it. A completed stream's final usage arrives on {@link MessageStop}; a
-   * stream that fails after its provider reported usage yields one {@code UsageDelta} carrying it
-   * just before the failure, since the provider bills the call either way; a stream closed or
-   * interrupted first yields none.
+   * one, never adds to it. A completed stream's final usage arrives on {@link MessageStop}. A
+   * provider that reports usage while it streams yields one each time, so a reader that closes or
+   * interrupts the stream afterwards already holds that usage; a stream that fails after its
+   * provider reported usage yields one carrying it just before the failure, since the provider
+   * bills the call either way.
    *
    * @param usage the usage reported so far; non-null
    */
