@@ -70,9 +70,7 @@ final class ToolApprovalSessionTest {
     secrets.register("PASSWORD", "secret*value");
     var run =
         run(
-            options(
-                    new Permission(
-                        PermissionMode.DEFAULT, List.of(), List.of(askSecret), List.of()))
+            options(Permission.newBuilder(PermissionMode.DEFAULT).withAsk(askSecret).build())
                 .withSecretRegistry(secrets),
             session -> QuestionAnswers.selecting(session, "Deny"),
             write("secretXvalue"));

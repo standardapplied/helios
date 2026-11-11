@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -52,11 +51,9 @@ final class ExecutePermissionSessionTest {
   }
 
   private static Permission lockedDownAllowing(String glob) {
-    return new Permission(
-        PermissionMode.LOCKED_DOWN,
-        List.of(PermissionRule.of(ExecuteTool.NAME, glob)),
-        List.of(),
-        List.of());
+    return Permission.newBuilder(PermissionMode.LOCKED_DOWN)
+        .withAllow(PermissionRule.of(ExecuteTool.NAME, glob))
+        .build();
   }
 
   private static ToolOutcome lockedDownRefusal(String key) {
@@ -107,8 +104,7 @@ final class ExecutePermissionSessionTest {
   @Test
   void aDenyRuleMatchesACommandAfterTheFirstOne() {
     var deny = PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **");
-    var permission =
-        new Permission(PermissionMode.ACCEPT_EDITS, List.of(), List.of(), List.of(deny));
+    var permission = Permission.newBuilder(PermissionMode.ACCEPT_EDITS).withDeny(deny).build();
 
     var run =
         run(
@@ -184,11 +180,9 @@ final class ExecutePermissionSessionTest {
   @Test
   void aDenyGlobMatchesACallThatSetsAnExtra() {
     var permission =
-        new Permission(
-            PermissionMode.BYPASS_PERMISSIONS,
-            List.of(),
-            List.of(),
-            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **")));
+        Permission.newBuilder(PermissionMode.BYPASS_PERMISSIONS)
+            .withDeny(PermissionRule.of(ExecuteTool.NAME, "BASH/**rm **"))
+            .build();
 
     var run =
         run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", "y"));
@@ -203,11 +197,9 @@ final class ExecutePermissionSessionTest {
   @Test
   void aDenyRuleEndingInADoubleStarHoldsWhateverACallSets() {
     var permission =
-        new Permission(
-            PermissionMode.BYPASS_PERMISSIONS,
-            List.of(),
-            List.of(),
-            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~**")));
+        Permission.newBuilder(PermissionMode.BYPASS_PERMISSIONS)
+            .withDeny(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~**"))
+            .build();
 
     var run =
         run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", ""));
@@ -223,11 +215,9 @@ final class ExecutePermissionSessionTest {
   @Test
   void anExactDenyRuleStopsAtTheBareCall() {
     var permission =
-        new Permission(
-            PermissionMode.BYPASS_PERMISSIONS,
-            List.of(),
-            List.of(),
-            List.of(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~")));
+        Permission.newBuilder(PermissionMode.BYPASS_PERMISSIONS)
+            .withDeny(PermissionRule.of(ExecuteTool.NAME, "BASH/rm -rf ~"))
+            .build();
 
     var run =
         run(options(permission), execute("runtime", "bash", "script", "rm -rf ~", "stdin", "y"));
@@ -240,14 +230,12 @@ final class ExecutePermissionSessionTest {
   void aUsersAllowRuleAddedToTheWorkspacePresetRunsWithoutAQuestion() {
     var preset = Permission.defaultInWorkspace();
     var permission =
-        new Permission(
-            preset.mode(),
-            Stream.concat(
-                    preset.allow().stream(),
-                    Stream.of(PermissionRule.of(ExecuteTool.NAME, "BASH/ls")))
-                .toList(),
-            preset.ask(),
-            preset.deny());
+        Permission.newBuilder(preset.mode())
+            .withAllow(preset.allow().toArray(PermissionRule[]::new))
+            .withAllow(PermissionRule.of(ExecuteTool.NAME, "BASH/ls"))
+            .withAsk(preset.ask().toArray(PermissionRule[]::new))
+            .withDeny(preset.deny().toArray(PermissionRule[]::new))
+            .build();
 
     var run =
         run(

@@ -114,18 +114,18 @@ final class PathToolSessions {
 
   /** A policy of {@code mode} holding {@code rules}, each in the list of its effect. */
   static Permission policy(PermissionMode mode, ListedRule... rules) {
-    return new Permission(
-        mode,
-        listOf(rules, PermissionEffect.ALLOW),
-        listOf(rules, PermissionEffect.ASK),
-        listOf(rules, PermissionEffect.DENY));
+    return Permission.newBuilder(mode)
+        .withAllow(listOf(rules, PermissionEffect.ALLOW))
+        .withAsk(listOf(rules, PermissionEffect.ASK))
+        .withDeny(listOf(rules, PermissionEffect.DENY))
+        .build();
   }
 
-  private static List<PermissionRule> listOf(ListedRule[] rules, PermissionEffect effect) {
+  private static PermissionRule[] listOf(ListedRule[] rules, PermissionEffect effect) {
     return Stream.of(rules)
         .filter(listed -> listed.effect() == effect)
         .map(ListedRule::rule)
-        .toList();
+        .toArray(PermissionRule[]::new);
   }
 
   static ToolCall call(String tool, Map<String, Object> args) {

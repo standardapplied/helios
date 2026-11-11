@@ -16,6 +16,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - `Response.Usage.newBuilder()`, which builds a usage by named counts (`withInputTokens`,
   `withOutputTokens`, `withCacheCreationInputTokens`, `withCacheReadInputTokens`,
   `withReasoningTokens`, `build`), each zero unless set, so a count added later breaks no caller.
+- `Permission.newBuilder(mode)` in `helios-session`, which builds a permission by named rule lists:
+  `withAllow`, `withAsk` and `withDeny` each append rules to the list they name, and `build()`. No
+  permission decision changes.
 
 ### Compatibility
 
@@ -33,6 +36,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `withCacheCreationInputTokens(cacheCreation)`, `withCacheReadInputTokens(cacheRead)`,
   `withReasoningTokens(reasoning)` and `build()`; for the four-count call, leave out
   `withReasoningTokens`. The usage built is the same.
+- `Permission.newBuilder(mode)`: none; the canonical constructor remains, since a record cannot
+  hide it.
 
 ## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
 

@@ -70,14 +70,6 @@ final class DefaultPermissionEvaluatorTest {
     return new ToolRegistry(List.of(bindings));
   }
 
-  private static Permission rules(
-      PermissionMode mode,
-      List<PermissionRule> allow,
-      List<PermissionRule> ask,
-      List<PermissionRule> deny) {
-    return new Permission(mode, allow, ask, deny);
-  }
-
   private static PermissionDecision byRule(
       PermissionEffect effect, PermissionRule rule, String reason) {
     return new PermissionDecision(effect, reason, Optional.of(rule));
@@ -108,7 +100,7 @@ final class DefaultPermissionEvaluatorTest {
   /** An evaluator whose ask rule {@link #ASK_WRITE} goes to {@code approver}. */
   private static DefaultPermissionEvaluator asking(ToolApprover approver) {
     return evaluator(
-        rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+        Permission.newBuilder(PermissionMode.DEFAULT).withAsk(ASK_WRITE).build(),
         tools(pathKeyed("Write", ToolCategory.WRITE)),
         approver,
         new SecretRegistry());
@@ -132,7 +124,7 @@ final class DefaultPermissionEvaluatorTest {
     var requests = new ArrayList<ApprovalRequest>();
     var e =
         evaluator(
-            rules(PermissionMode.DEFAULT, List.of(), List.of(askSecret), List.of()),
+            Permission.newBuilder(PermissionMode.DEFAULT).withAsk(askSecret).build(),
             tools(pathKeyed("Write", ToolCategory.WRITE)),
             request -> {
               requests.add(request);
@@ -161,7 +153,7 @@ final class DefaultPermissionEvaluatorTest {
     secrets.register("API_KEY", "key-0123456789");
     var requests = new ArrayList<ApprovalRequest>();
     evaluator(
-            rules(PermissionMode.DEFAULT, List.of(), List.of(ASK_WRITE), List.of()),
+            Permission.newBuilder(PermissionMode.DEFAULT).withAsk(ASK_WRITE).build(),
             tools(pathKeyed("Write", ToolCategory.WRITE)),
             request -> {
               requests.add(request);
@@ -179,8 +171,9 @@ final class DefaultPermissionEvaluatorTest {
   void aPermissionKeyNamingAnotherToolDeniesTheCall() {
     var e =
         evaluator(
-            rules(
-                PermissionMode.DEFAULT, List.of(PermissionRule.any("Read")), List.of(), List.of()),
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withAllow(PermissionRule.any("Read"))
+                .build(),
             tools(binding("Write", ToolCategory.WRITE)));
     var impostor =
         new ToolBinding.CanonicalCall(call("Write").call(), new ToolPermissionKey("Read", "/etc"));
@@ -194,7 +187,7 @@ final class DefaultPermissionEvaluatorTest {
     var deny = PermissionRule.of("Read", "./secrets/**");
     var e =
         evaluator(
-            rules(PermissionMode.DEFAULT, List.of(), List.of(), List.of(deny)),
+            Permission.newBuilder(PermissionMode.DEFAULT).withDeny(deny).build(),
             tools(pathKeyed("Read", ToolCategory.READ)));
     var handed =
         new ToolBinding.CanonicalCall(
@@ -215,11 +208,10 @@ final class DefaultPermissionEvaluatorTest {
     var deny = PermissionRule.any("Read");
     var e =
         evaluator(
-            rules(
-                PermissionMode.DEFAULT,
-                List.of(PermissionRule.any("Read")),
-                List.of(),
-                List.of(deny)),
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withAllow(PermissionRule.any("Read"))
+                .withDeny(deny)
+                .build(),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
         byRule(PermissionEffect.DENY, deny, "deny rule Read matched Read"),
@@ -231,11 +223,10 @@ final class DefaultPermissionEvaluatorTest {
     var deny = PermissionRule.any("Read");
     var e =
         evaluator(
-            rules(
-                PermissionMode.DEFAULT,
-                List.of(),
-                List.of(PermissionRule.any("Read")),
-                List.of(deny)),
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withAsk(PermissionRule.any("Read"))
+                .withDeny(deny)
+                .build(),
             tools(binding("Read", ToolCategory.READ)));
     assertEquals(
         byRule(PermissionEffect.DENY, deny, "deny rule Read matched Read"),
@@ -258,7 +249,7 @@ final class DefaultPermissionEvaluatorTest {
     var deny = PermissionRule.any("Execute");
     var e =
         evaluator(
-            rules(PermissionMode.BYPASS_PERMISSIONS, List.of(), List.of(), List.of(deny)),
+            Permission.newBuilder(PermissionMode.BYPASS_PERMISSIONS).withDeny(deny).build(),
             tools(binding("Execute", ToolCategory.EXECUTION)));
     assertEquals(
         byRule(PermissionEffect.DENY, deny, "deny rule Execute matched Execute"),
@@ -270,7 +261,7 @@ final class DefaultPermissionEvaluatorTest {
     var allow = PermissionRule.of("Write", "/workspace/**");
     var e =
         evaluator(
-            rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
+            Permission.newBuilder(PermissionMode.DEFAULT).withAllow(allow).build(),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
         byRule(
@@ -285,7 +276,7 @@ final class DefaultPermissionEvaluatorTest {
     var allow = PermissionRule.of("Write", "/workspace/**");
     var e =
         evaluator(
-            rules(PermissionMode.DEFAULT, List.of(allow), List.of(), List.of()),
+            Permission.newBuilder(PermissionMode.DEFAULT).withAllow(allow).build(),
             tools(pathKeyed("Write", ToolCategory.WRITE)));
     assertEquals(
         PermissionDecision.deny("refused by the test: default-ask on WRITE (Write(/etc/passwd))"),
@@ -306,11 +297,11 @@ final class DefaultPermissionEvaluatorTest {
 
   /** A policy with {@code rule} as its only rule, in the list {@code effect} names. */
   private static Permission only(PermissionEffect effect, PermissionRule rule) {
-    var rules = List.of(rule);
+    var builder = Permission.newBuilder(PermissionMode.DEFAULT);
     return switch (effect) {
-      case ALLOW -> rules(PermissionMode.DEFAULT, rules, List.of(), List.of());
-      case ASK -> rules(PermissionMode.DEFAULT, List.of(), rules, List.of());
-      case DENY -> rules(PermissionMode.DEFAULT, List.of(), List.of(), rules);
+      case ALLOW -> builder.withAllow(rule).build();
+      case ASK -> builder.withAsk(rule).build();
+      case DENY -> builder.withDeny(rule).build();
     };
   }
 

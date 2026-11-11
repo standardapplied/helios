@@ -32,7 +32,6 @@ import com.standardapplied.helios.testing.ScriptedModel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -69,11 +68,10 @@ final class Phase5AcceptanceTest {
    * Allows Execute — DEFAULT mode otherwise routes to ASK and blocks — and applies {@code deny}.
    */
   private static Permission allowingExecute(PermissionRule... deny) {
-    return new Permission(
-        PermissionMode.DEFAULT,
-        List.of(PermissionRule.any(ExecuteTool.NAME)),
-        List.of(),
-        List.of(deny));
+    return Permission.newBuilder(PermissionMode.DEFAULT)
+        .withAllow(PermissionRule.any(ExecuteTool.NAME))
+        .withDeny(deny)
+        .build();
   }
 
   /** Runs {@code prompt} through a session with Execute on a local process provider. */

@@ -24,7 +24,6 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,11 +39,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 final class MemoryStoreIsolationTest {
 
   private static final Permission DENY_PRIVATE =
-      new Permission(
-          PermissionMode.DEFAULT,
-          List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
-          List.of(),
-          List.of(PermissionRule.of(MemoryReadTool.NAME, "/memories/private/**")));
+      Permission.newBuilder(PermissionMode.DEFAULT)
+          .withAllow(PermissionRule.of("MemoryWrite", "/memories/**"))
+          .withDeny(PermissionRule.of(MemoryReadTool.NAME, "/memories/private/**"))
+          .build();
 
   @TempDir Path tmp;
 

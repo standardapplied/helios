@@ -191,11 +191,11 @@ nothing for OpenAI, which reports usage only when the response ends.
 <!-- snippet: QuickStarts#permissions -->
 ```java
 var policy =
-    new Permission(
-        PermissionMode.DEFAULT,
-        List.of(PermissionRule.of("Read", "./src/**")),
-        List.of(PermissionRule.of("MemoryWrite", "/memories/**")),
-        List.of(PermissionRule.of("Read", "**/secrets.*")));
+    Permission.newBuilder(PermissionMode.DEFAULT)
+        .withAllow(PermissionRule.of("Read", "./src/**"))
+        .withAsk(PermissionRule.of("MemoryWrite", "/memories/**"))
+        .withDeny(PermissionRule.of("Read", "**/secrets.*"))
+        .build();
 
 try (var session =
     AgentSession.open(SessionPresets.workspace(model, root).withPermission(policy).build())) {

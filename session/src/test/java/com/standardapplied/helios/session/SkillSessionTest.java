@@ -382,8 +382,9 @@ final class SkillSessionTest {
   // ── permissions ─────────────────────────────────────────────────────────
 
   private static Permission denying(String glob) {
-    return new Permission(
-        PermissionMode.DEFAULT, List.of(), List.of(), List.of(PermissionRule.of("Skill", glob)));
+    return Permission.newBuilder(PermissionMode.DEFAULT)
+        .withDeny(PermissionRule.of("Skill", glob))
+        .build();
   }
 
   @Test
@@ -444,11 +445,9 @@ final class SkillSessionTest {
             allowing,
             options(allowing, PDF)
                 .withPermission(
-                    new Permission(
-                        PermissionMode.LOCKED_DOWN,
-                        List.of(PermissionRule.any("Skill")),
-                        List.of(),
-                        List.of())));
+                    Permission.newBuilder(PermissionMode.LOCKED_DOWN)
+                        .withAllow(PermissionRule.any("Skill"))
+                        .build()));
 
     assertEquals(
         new ToolOutcome.Rejected(

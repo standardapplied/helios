@@ -146,11 +146,9 @@ final class SessionDemoIntegrationTest {
     var ws = WorkspaceRoot.of(tmp);
     var memoryBackend = FileSystemMemoryBackend.of(ws);
     var permission =
-        new Permission(
-            PermissionMode.DEFAULT,
-            List.of(PermissionRule.of("MemoryRead", "/memories/**")),
-            List.of(),
-            List.of());
+        Permission.newBuilder(PermissionMode.DEFAULT)
+            .withAllow(PermissionRule.of("MemoryRead", "/memories/**"))
+            .build();
     EventCollector events;
     var memoryWrite = ToolChoice.required(MemoryWriteTool.NAME);
     try (var forced = gemini(ModelConfig.newBuilder().withToolChoice(memoryWrite));

@@ -289,11 +289,11 @@ final class CanonicalPermissionPathsTest {
   void aUsersAskRuleAddedToTheWorkspacePresetAsksBeforeTheRead() {
     var preset = Permission.defaultInWorkspace();
     var permission =
-        new Permission(
-            preset.mode(),
-            preset.allow(),
-            List.of(PermissionRule.of(ReadTool.NAME, "./secrets/**")),
-            preset.deny());
+        Permission.newBuilder(preset.mode())
+            .withAllow(preset.allow().toArray(PermissionRule[]::new))
+            .withAsk(PermissionRule.of(ReadTool.NAME, "./secrets/**"))
+            .withDeny(preset.deny().toArray(PermissionRule[]::new))
+            .build();
 
     var run = run(sessions.options(permission), denyingQuestions(), read("secrets/key"));
 
