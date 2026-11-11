@@ -47,7 +47,7 @@ excluded.
 |---|---|---|
 | PMD (`maven-pmd-plugin`, every module) | Per-method and per-class complexity, size and coupling limits; no wildcard imports; in test code, no sleep, piped stream, clock read or self-chosen wait limit | `config/quality/pmd-main.xml`, `config/quality/pmd-test.xml` |
 | CPD (same plugin, aggregated at the reactor root) | No duplicated block of 100 tokens or more, main and test code, within or across modules | plugin configuration in the root `pom.xml` |
-| ArchUnit (`architecture` module) | One way to do each thing: module dependencies, naming, single owners of a pattern | `architecture/src/test/java/.../ArchitectureRulesTest.java` |
+| ArchUnit (`architecture` module) | One way to do each thing: module dependencies, naming, single owners of a pattern; no four arguments of one type in a row in the published API | `architecture/src/test/java/.../ArchitectureRulesTest.java` |
 | Javadoc doclint (`maven-javadoc-plugin`, every shipped module; not `architecture` or the examples) | Doclint `all` on main code: every public and protected type and member documented, every `@param`, `@return` and `@throws`, every `{@link}` resolving, well-formed HTML; a warning fails the build | plugin configuration in the root `pom.xml` |
 
 ### Limits
@@ -110,7 +110,11 @@ the `onnx` module may call; `java.lang.ProcessBuilder` is used only by `core.pro
 `BoundedProcess` every other child process goes through) and `repl.sandbox.SandboxLauncher`;
 `jdk.jshell` is used only in `repl.sandbox` and its sub-packages, the bootstrap side of the process
 boundary; `System.setOut` and `System.setErr` are called only by `repl.sandbox.SnippetEvaluator`; `runtime.Authenticator.authenticate` is called only by `runtime.AuthenticationGate`, and only it accesses `io.helidon.http.Status.UNAUTHORIZED_401`, so every `401` carries the authenticator's challenge (no other runtime class names a status by number through `Status.create` or `ServerResponse.status(int)`, or throws Helidon's `UnauthorizedException`); a public
-instance method on a `*Builder` type that returns that builder is named `with...`; only `session.permissions.Permission` calls its own canonical constructor, so every other class builds one through `Permission.newBuilder(mode)` (the rule sees main code only; tests and examples keep to the builder too); no top-level type is
+instance method on a `*Builder` type that returns that builder is named `with...`; only `session.permissions.Permission` calls its own canonical constructor, so every other class builds one through `Permission.newBuilder(mode)` (the rule sees main code only; tests and examples keep to the builder too); in the published API
+(public and protected constructors and methods of public types in the packages a module exports),
+nothing takes four or more arguments of one type in a row, except the canonical constructor of a
+record that declares a static `newBuilder()`; a host-built record with such a run gets a builder,
+never reordered components; no top-level type is
 named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager`; `System.out`, `System.err` and
 `printStackTrace` are used only in `repl.sandbox` and the example modules; no class in `core` depends
 on OpenTelemetry and no class outside `persistence` on its SDK (the session emits spans through the
