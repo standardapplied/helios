@@ -70,6 +70,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Gemini output tokens include the thought tokens Gemini reports apart (`total_thought_tokens`),
   which it bills at the output rate, so a Gemini call's `outputTokens`, `totalTokens`, cost, budget
   check and `gen_ai.usage.output_tokens` count its thinking.
+- A transiently failed model call is no longer retried once the run's spend exceeds
+  `maxBudgetMicroUsd`: the run ends in `ErrorMaxBudgetUsd` after the attempt that crossed it, with
+  no `TurnRetried` and no back-off. Before, the remaining attempts were made and billed first.
 
 ### Compatibility
 

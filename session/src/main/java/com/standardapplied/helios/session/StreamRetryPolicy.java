@@ -17,7 +17,9 @@ import java.util.Objects;
  * marks retryable mid-stream. On each failure the loop emits a {@link QueryEvent.TurnRetried}
  * carrying the next back-off delay, sleeps with cancellation honoured, and re-invokes {@code
  * model.chatStream(...)} from the same history snapshot. When the attempt budget is exhausted, the
- * loop terminates the session as {@link ResultMessage.ErrorTransientStream}.
+ * loop terminates the session as {@link ResultMessage.ErrorTransientStream}. A failed attempt is
+ * not retried once the run's spend exceeds {@link SessionLimits#maxBudgetMicroUsd()}; the run then
+ * ends in {@link ResultMessage.ErrorMaxBudgetUsd}.
  *
  * <p>The delay is the answer's {@code Retry-After}, capped by {@link Backoff#maxDelay()} and
  * without jitter, when the failed answer carried one, and {@link #nextDelay(int)} otherwise.
