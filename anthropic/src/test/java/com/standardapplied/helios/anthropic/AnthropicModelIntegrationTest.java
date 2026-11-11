@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeAll;
@@ -121,7 +122,11 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
       List.of(
           AnthropicModelId.CLAUDE_OPUS_5_5,
           AnthropicModelId.CLAUDE_SONNET_5_5,
-          AnthropicModelId.CLAUDE_FABLE_5_1);
+          AnthropicModelId.CLAUDE_FABLE_5_1,
+          AnthropicModelId.CLAUDE_FABLE_5_2);
+
+  private static final Set<AnthropicModelId> NEEDS_DATA_RETENTION =
+      EnumSet.of(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.CLAUDE_FABLE_5_2);
 
   private static Model modelFor(String modelId, Reasoning reasoning) {
     return new AnthropicProvider()
@@ -200,7 +205,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void the55AndFable51ModelsAcceptEveryDocumentedReasoning() {
+  void theLiveModelsAcceptEveryDocumentedReasoning() {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
     for (var modelId : LIVE_MODELS) {
       for (var reasoning : documentedReasonings(modelId)) {
@@ -238,7 +243,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   @Test
-  void the55AndFable51ModelsReplayTheirThinkingBlocksAcrossAToolLoop() {
+  void theLiveModelsReplayTheirThinkingBlocksAcrossAToolLoop() {
     var weatherTool =
         stringTool("get_weather", "Get the current weather for a location", "location");
     var calledNoTool = new ArrayList<String>();
@@ -317,9 +322,9 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
   }
 
   /**
-   * {@code call}'s result, or a skipped test when {@code modelId} is Fable 5.1 and not available to
-   * this API key: Fable 5.1 needs an organization with 30-day data retention. Any other model's
-   * rejection fails, since its id is one Helios sends.
+   * {@code call}'s result, or a skipped test when {@code modelId} is Fable 5.1 or 5.2 and not
+   * available to this API key: both need an organization with 30-day data retention. Any other
+   * model's rejection fails, since its id is one Helios sends.
    */
   private static <T> T availableOrSkip(AnthropicModelId modelId, Supplier<T> call) {
     try {
@@ -330,7 +335,7 @@ class AnthropicModelIntegrationTest extends ModelIntegrationContract {
               || e.statusCode() == 404
               || e.getMessage().contains("data retention");
       assumeTrue(
-          modelId != AnthropicModelId.CLAUDE_FABLE_5_1 || !unavailable,
+          !NEEDS_DATA_RETENTION.contains(modelId) || !unavailable,
           () -> modelId.id() + " is not available to this API key");
       throw e;
     }

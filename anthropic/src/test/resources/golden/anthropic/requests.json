@@ -529,6 +529,184 @@
       "name" : "weather"
     } ]
   },
+  "claude-fable-5-2 absent tools" : {
+    "max_tokens" : 128000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-fable-5-2",
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
+  "claude-fable-5-2 medium summary tools" : {
+    "max_tokens" : 128000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-fable-5-2",
+    "output_config" : {
+      "effort" : "medium"
+    },
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
+      "display" : "summarized",
+      "type" : "adaptive"
+    },
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
   "claude-haiku-5-5 absent tools" : {
     "max_tokens" : 128000,
     "messages" : [ {
@@ -1036,6 +1214,187 @@
       "type" : "text"
     } ],
     "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
+      "display" : "summarized",
+      "type" : "adaptive"
+    },
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
+  "claude-mythos-5-2 absent tools" : {
+    "max_tokens" : 128000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-mythos-5-2",
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "tools" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "description" : "Current weather for a city",
+      "input_schema" : {
+        "properties" : {
+          "city" : {
+            "description" : "The city name",
+            "type" : "string"
+          }
+        },
+        "required" : [ "city" ],
+        "type" : "object"
+      },
+      "name" : "weather"
+    } ]
+  },
+  "claude-mythos-5-2 medium summary tools" : {
+    "max_tokens" : 128000,
+    "messages" : [ {
+      "content" : [ {
+        "source" : {
+          "data" : "iVBORw==",
+          "media_type" : "image/png",
+          "type" : "base64"
+        },
+        "type" : "image"
+      }, {
+        "text" : "What is in this picture, and what is the weather in Paris and Rome?",
+        "type" : "text"
+      } ],
+      "role" : "user"
+    }, {
+      "content" : [ {
+        "signature" : "sig-1",
+        "thinking" : "Two cities, two calls.",
+        "type" : "thinking"
+      }, {
+        "text" : "Let me check both cities.",
+        "type" : "text"
+      }, {
+        "id" : "call_1",
+        "input" : {
+          "city" : "Paris"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "id" : "call_2",
+        "input" : {
+          "city" : "Rome"
+        },
+        "name" : "weather",
+        "type" : "tool_use"
+      } ],
+      "role" : "assistant"
+    }, {
+      "content" : [ {
+        "content" : "18C and sunny",
+        "tool_use_id" : "call_1",
+        "type" : "tool_result"
+      }, {
+        "cache_control" : {
+          "type" : "ephemeral"
+        },
+        "content" : "22C and cloudy",
+        "tool_use_id" : "call_2",
+        "type" : "tool_result"
+      } ],
+      "role" : "user"
+    } ],
+    "model" : "claude-mythos-5-2",
+    "output_config" : {
+      "effort" : "medium"
+    },
+    "stream" : true,
+    "system" : [ {
+      "cache_control" : {
+        "type" : "ephemeral"
+      },
+      "text" : "You are a precise assistant.",
+      "type" : "text"
+    } ],
+    "thinking" : {
+      "block_binding" : {
+        "prefix_mismatch_behavior" : "error"
+      },
       "display" : "summarized",
       "type" : "adaptive"
     },

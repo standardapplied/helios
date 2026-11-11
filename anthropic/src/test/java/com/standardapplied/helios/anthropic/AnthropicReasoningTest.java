@@ -51,7 +51,10 @@ class AnthropicReasoningTest {
   /** The models "Preserved thinking" lists as binding a thinking block to its prefix (Nov 2026). */
   private static final Set<AnthropicModelId> BINDING =
       EnumSet.of(
+          AnthropicModelId.CLAUDE_FABLE_5_2,
+          AnthropicModelId.CLAUDE_MYTHOS_5_2,
           AnthropicModelId.CLAUDE_FABLE_5_1,
+          AnthropicModelId.CLAUDE_MYTHOS_5_1,
           AnthropicModelId.CLAUDE_OPUS_5_5,
           AnthropicModelId.CLAUDE_SONNET_5_5,
           AnthropicModelId.CLAUDE_HAIKU_5_5);
@@ -73,6 +76,8 @@ class AnthropicReasoningTest {
 
   private static final Map<AnthropicModelId, Documented> DOCUMENTED =
       Map.ofEntries(
+          Map.entry(AnthropicModelId.CLAUDE_FABLE_5_2, ALWAYS_ON_WITH_PROGRESS),
+          Map.entry(AnthropicModelId.CLAUDE_MYTHOS_5_2, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_FABLE_5_1, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_MYTHOS_5_1, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_FABLE_5, ALWAYS_ON_WITH_PROGRESS),
@@ -226,10 +231,10 @@ class AnthropicReasoningTest {
   }
 
   @Test
-  void progressOnMythos51SendsUpdatesWithTheBetaTheCallerNeverNamed() {
+  void progressOnFable5SendsUpdatesWithTheBetaTheCallerNeverNamed() {
     var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
 
-    var request = exchange("claude-mythos-5-1", builder(progress));
+    var request = exchange("claude-fable-5", builder(progress));
 
     assertEquals(PROGRESS_BETA, request.headers().get("anthropic-beta"));
     assertEquals(
@@ -242,7 +247,7 @@ class AnthropicReasoningTest {
     var progress = new Reasoning.Effort(Level.MEDIUM, Display.PROGRESS);
 
     var request =
-        exchange("claude-mythos-5-1", builder(progress).withHeader("Anthropic-Beta", "own-beta"));
+        exchange("claude-fable-5", builder(progress).withHeader("Anthropic-Beta", "own-beta"));
 
     assertEquals("own-beta," + PROGRESS_BETA, request.headers().get("anthropic-beta"));
   }
@@ -251,14 +256,14 @@ class AnthropicReasoningTest {
   void noOtherDisplayAndNoAbsentReasoningAddsTheBeta() {
     for (var display : List.of(Display.HIDDEN, Display.SUMMARY)) {
       var request =
-          exchange("claude-mythos-5-1", builder(new Reasoning.Effort(Level.MEDIUM, display)));
+          exchange("claude-fable-5", builder(new Reasoning.Effort(Level.MEDIUM, display)));
 
       assertNull(request.headers().get("anthropic-beta"), display::toString);
     }
-    var absent = exchange("claude-mythos-5-1", ModelConfig.newBuilder().withApiKey("test-key"));
+    var absent = exchange("claude-fable-5", ModelConfig.newBuilder().withApiKey("test-key"));
     var own =
         exchange(
-            "claude-mythos-5-1",
+            "claude-fable-5",
             builder(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))
                 .withHeader("anthropic-beta", "own-beta"));
 
