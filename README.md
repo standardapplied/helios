@@ -204,9 +204,9 @@ Keep video traffic on `v1beta` until the credential-gated `GeminiVideoIntegratio
 when configured for `v1` with the same model, Files API upload, and structured-output schema. Only
 then change the configured version; endpoint selection is immutable for each model instance.
 
-On Claude models that bind thinking to its prompt (Fable 5.1, Opus 5.5, Sonnet 5.5), a changed
-system prompt or tool set costs the earlier turns' reasoning, and the prompt cache, once, never the
-request.
+On Claude models that bind thinking to its prompt (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5,
+Haiku 5.5), a changed system prompt or tool set costs the earlier turns' reasoning, and the prompt
+cache, once, never the request.
 
 Anthropic models use managed five-minute prompt caching by default. Select the one-hour
 cache for conversations whose reusable prefixes must survive longer gaps, or disable caching

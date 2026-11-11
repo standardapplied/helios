@@ -36,10 +36,11 @@ import java.util.logging.Logger;
  * message holding {@link #SUMMARY_PREFIX} and the summary, and the pending user turn (the {@code
  * USER} messages the history ends with, after its last assistant turn) unchanged. No earlier
  * assistant turn is carried over, so no reasoning a provider signed against the old conversation
- * (Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 bind every thinking block to its exact request prefix)
- * is replayed, and no tool call or tool result remains: the result is valid for every provider.
- * Everything the agent knew before the summary survives only through it, so the default prompt asks
- * for the goal, the facts found, the decisions made, the open questions and the work left.
+ * (Claude Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 bind every thinking block to
+ * its exact request prefix) is replayed, and no tool call or tool result remains: the result is
+ * valid for every provider. Everything the agent knew before the summary survives only through it,
+ * so the default prompt asks for the goal, the facts found, the decisions made, the open questions
+ * and the work left.
  *
  * <p>No file survives a compaction. The summary model sees each summarised message's inline files
  * and file references as {@code {file <mimeType>}} and {@code {file <mimeType> <uri>}} markers,

@@ -36,7 +36,10 @@ public enum AnthropicModelId {
    * Claude Fable 5.1: always thinks, progress updates; rejects forced tool use; binds its thinking.
    */
   CLAUDE_FABLE_5_1("claude-fable-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
-  /** Claude Mythos 5.1: always thinks, progress updates; rejects forced tool use. */
+  /**
+   * Claude Mythos 5.1: always thinks, progress updates; rejects forced tool use; binds its
+   * thinking.
+   */
   CLAUDE_MYTHOS_5_1(
       "claude-mythos-5-1", 1_000_000, 128_000, ReasoningRules.ALWAYS_ON_WITH_PROGRESS),
   /** Claude Fable 5: always thinks, with progress updates. */
@@ -205,12 +208,18 @@ public enum AnthropicModelId {
    * thinking", Oct 2026). A newly released binding model is catalogued here: an uncatalogued model
    * is taken not to bind.
    *
-   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_OPUS_5_5}, {@link
-   *     #CLAUDE_SONNET_5_5} and {@link #CLAUDE_HAIKU_5_5}, false otherwise
+   * @return true for {@link #CLAUDE_FABLE_5_1}, {@link #CLAUDE_MYTHOS_5_1}, {@link
+   *     #CLAUDE_OPUS_5_5}, {@link #CLAUDE_SONNET_5_5} and {@link #CLAUDE_HAIKU_5_5}, false
+   *     otherwise
    */
   public boolean bindsReasoning() {
     return switch (this) {
-      case CLAUDE_FABLE_5_1, CLAUDE_OPUS_5_5, CLAUDE_SONNET_5_5, CLAUDE_HAIKU_5_5 -> true;
+      case CLAUDE_FABLE_5_1,
+          CLAUDE_MYTHOS_5_1,
+          CLAUDE_OPUS_5_5,
+          CLAUDE_SONNET_5_5,
+          CLAUDE_HAIKU_5_5 ->
+          true;
       default -> false;
     };
   }
