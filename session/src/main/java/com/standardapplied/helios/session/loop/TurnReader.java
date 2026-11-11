@@ -8,10 +8,13 @@ import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.session.QueryEvent;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.InstantSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -33,6 +36,11 @@ import java.util.logging.Logger;
  * the waiting runner is released once that event is out, so every event of the turn precedes the
  * runner's next one.
  *
+ * <h2>First output</h2>
+ *
+ * The reader stamps, on its clock, the first chunk it accepts, of any kind, and the first non-empty
+ * {@link ModelChunk.TextDelta}, each in whole milliseconds since the attempt {@code started}.
+ *
  * <h2>Host errors</h2>
  *
  * Every {@link Error} that reaches the turn, from the stream, a chunk's emission or the stream's
@@ -48,21 +56,26 @@ final class TurnReader {
   private final EventEmitter emitter;
   private final InstantSource clock;
   private final SessionEnding ending;
+  private final Instant started;
   private final CountDownLatch done = new CountDownLatch(1);
   private final Object lock = new Object();
   private final StringBuilder content = new StringBuilder();
   private final List<ToolCall> toolCalls = new ArrayList<>();
   private Usage reported = Usage.of(0, 0);
   private ModelChunk.MessageStop stop;
+  private Instant firstChunk;
+  private Instant firstText;
   private boolean emitting;
   private TurnOutcome outcome;
   private boolean closed;
 
-  TurnReader(SessionState state, EventEmitter emitter, InstantSource clock) {
+  /** A reader of the attempt that {@code started} at that instant of {@code clock}. */
+  TurnReader(SessionState state, EventEmitter emitter, InstantSource clock, Instant started) {
     this.state = state;
     this.emitter = emitter;
     this.clock = clock;
     this.ending = state.ending();
+    this.started = started;
   }
 
   /**
@@ -104,6 +117,27 @@ final class TurnReader {
     }
   }
 
+  /** Milliseconds from the attempt's start to its first chunk; empty when it had none. */
+  OptionalLong firstChunkMillis() {
+    synchronized (lock) {
+      return sinceStarted(firstChunk);
+    }
+  }
+
+  /** Milliseconds from the attempt's start to its first non-empty text; empty when it had none. */
+  OptionalLong firstTextMillis() {
+    synchronized (lock) {
+      return sinceStarted(firstText);
+    }
+  }
+
+  /** Whole milliseconds from {@link #started} to {@code seen}, zero when the clock stepped back. */
+  private OptionalLong sinceStarted(Instant seen) {
+    return seen == null
+        ? OptionalLong.empty()
+        : OptionalLong.of(Math.max(0L, Duration.between(started, seen).toMillis()));
+  }
+
   /**
    * The one terminal transition: unless the turn already ended, snapshot it with {@code error}, or
    * none for a stream that ended, and release the runner, or leave its release to the chunk whose
@@ -133,6 +167,7 @@ final class TurnReader {
       if (outcome != null) {
         return false;
       }
+      stamp(chunk);
       accumulate(chunk);
       emitting = true;
     }
@@ -149,6 +184,17 @@ final class TurnReader {
       }
     }
     return true;
+  }
+
+  private void stamp(ModelChunk chunk) {
+    if (firstChunk == null) {
+      firstChunk = clock.instant();
+    }
+    if (firstText == null
+        && chunk instanceof ModelChunk.TextDelta(String text)
+        && !text.isEmpty()) {
+      firstText = clock.instant();
+    }
   }
 
   private void accumulate(ModelChunk chunk) {

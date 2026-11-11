@@ -23,13 +23,16 @@ import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.hooks.DefaultHookContext;
+import com.standardapplied.helios.session.test.HandClock;
 import com.standardapplied.helios.session.test.LogCapture;
 import com.standardapplied.helios.testing.ModelStreams;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -45,7 +48,8 @@ import org.junit.jupiter.api.Test;
 /**
  * The turn's one terminal transition: whichever ending comes first — the stream's end, a failure it
  * or a chunk's emission throws, or an ending from another thread — snapshots what was read, makes
- * every later chunk a no-op that emits nothing, and leaves the stream closed.
+ * every later chunk a no-op that emits nothing, and leaves the stream closed. The reader times the
+ * first chunk it accepts and the first non-empty text from the attempt's start.
  */
 final class TurnReaderTest {
 
@@ -58,6 +62,7 @@ final class TurnReaderTest {
   private final List<QueryEvent> events = new CopyOnWriteArrayList<>();
   private final List<LogRecord> logged = new CopyOnWriteArrayList<>();
   private final TurnReader reader = newReader(events::add);
+  private final HandClock clock = new HandClock(Instant.EPOCH);
 
   @Test
   void aKeepAliveAddsNothingToTheTurnAndEmitsNothing() {
@@ -73,6 +78,77 @@ final class TurnReaderTest {
         reader.outcome());
     assertEquals(1, events.size());
     assertTrue(reader.released());
+  }
+
+  @Test
+  void theFirstChunkOfAnyKindAndTheFirstNonEmptyTextAreTimedFromTheAttemptsStart() {
+    var timed = timedReader(Instant.EPOCH);
+
+    timed.read(
+        clock.paced(
+            ModelStreams.of(
+                new ModelChunk.KeepAlive(),
+                new ModelChunk.ThinkingDelta("Hm."),
+                new ModelChunk.TextDelta(""),
+                new ModelChunk.TextDelta("Hi"),
+                STOP),
+            250,
+            300,
+            200,
+            100));
+
+    assertEquals(OptionalLong.of(250), timed.firstChunkMillis());
+    assertEquals(OptionalLong.of(850), timed.firstTextMillis());
+  }
+
+  @Test
+  void aToolOnlyTurnHasAFirstChunkAndNoFirstText() {
+    var timed = timedReader(Instant.EPOCH);
+    var call = ToolCall.newBuilder().withId("c1").withName("lookup").build();
+
+    timed.read(
+        clock.paced(
+            ModelStreams.of(
+                new ModelChunk.ToolUseStart("c1", "lookup"),
+                new ModelChunk.ToolUseDelta("c1", "{}"),
+                new ModelChunk.ToolUseStop(call),
+                new ModelChunk.MessageStop("TOOL_CALLS", USAGE, Map.of())),
+            70,
+            10));
+
+    assertEquals(OptionalLong.of(70), timed.firstChunkMillis());
+    assertEquals(OptionalLong.empty(), timed.firstTextMillis());
+  }
+
+  @Test
+  void aStreamThatFailsBeforeAnyChunkHasNoFirstOutput() {
+    var timed = timedReader(Instant.EPOCH);
+
+    timed.read(ModelStreams.failing(new IllegalStateException("reset")));
+
+    assertEquals(OptionalLong.empty(), timed.firstChunkMillis());
+    assertEquals(OptionalLong.empty(), timed.firstTextMillis());
+  }
+
+  @Test
+  void aChunkReadAfterTheTurnEndedIsNotTimed() {
+    var timed = timedReader(Instant.EPOCH);
+
+    timed.end(new CancellationException("closed"));
+    timed.read(clock.paced(ModelStreams.of(new ModelChunk.TextDelta("late"), STOP), 40));
+
+    assertEquals(OptionalLong.empty(), timed.firstChunkMillis());
+    assertEquals(OptionalLong.empty(), timed.firstTextMillis());
+  }
+
+  @Test
+  void aClockBehindTheAttemptsStartTimesItsFirstOutputAtZero() {
+    var timed = timedReader(Instant.EPOCH.plusSeconds(1));
+
+    timed.read(clock.paced(ModelStreams.of(new ModelChunk.TextDelta("Hi"), STOP), 250));
+
+    assertEquals(OptionalLong.of(0), timed.firstChunkMillis());
+    assertEquals(OptionalLong.of(0), timed.firstTextMillis());
   }
 
   @Test
@@ -311,7 +387,16 @@ final class TurnReaderTest {
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
+  /** A reader on {@link #clock} of an attempt that {@code started} then. */
+  private TurnReader timedReader(Instant started) {
+    return newReader(events::add, clock, started);
+  }
+
   private TurnReader newReader(Consumer<QueryEvent> sink) {
+    return newReader(sink, CLOCK, Instant.EPOCH);
+  }
+
+  private TurnReader newReader(Consumer<QueryEvent> sink, InstantSource clock, Instant started) {
     var model =
         new BlockingModel() {
           @Override
@@ -336,9 +421,9 @@ final class TurnReaderTest {
             s ->
                 new DefaultHookContext(
                     s.sessionId(), s.runId(), s.currentTurnIndex(), s.cancellation(), model),
-            CLOCK,
+            clock,
             new SecretRegistry());
-    return new TurnReader(state, emitter, CLOCK);
+    return new TurnReader(state, emitter, clock, started);
   }
 
   /** A stream that records its close and throws {@code onClose}, if any, from it. */
