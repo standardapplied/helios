@@ -121,7 +121,8 @@ final class SessionOptionsTest {
         "openTelemetry",
         "agentName",
         "traceDetail",
-        "traceAttributes"
+        "traceAttributes",
+        "skills"
       })
   void canonicalConstructorRejectsANullComponent(String component) {
     var ex = assertThrows(NullPointerException.class, () -> canonical(component, null));
@@ -757,5 +758,72 @@ final class SessionOptionsTest {
     assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullKey));
     assertThrows(NullPointerException.class, () -> builder.withTraceAttributes(nullValue));
     assertThrows(NullPointerException.class, () -> canonical("traceAttributes", nullValue));
+  }
+
+  // ── skills ────────────────────────────────────────────────────────────────
+
+  @Test
+  void skillsDefaultToNoneAppendReplaceAndSurviveToBuilder() {
+    var a = skill("a", "first", "do a");
+    var b = skill("b", "second", "do b");
+    var c = skill("c", "third", "do c");
+
+    var built =
+        SessionOptions.newBuilder().withModel(stubModel()).withSkill(a).withSkill(b).build();
+
+    assertEquals(List.of(), SessionOptions.newBuilder().withModel(stubModel()).build().skills());
+    assertEquals(List.of(a, b), built.skills());
+    assertEquals(List.of(a, b), built.toBuilder().build().skills());
+    assertEquals(List.of(c), built.toBuilder().withSkills(List.of(c)).build().skills());
+    assertEquals(
+        List.of(c, a), built.toBuilder().withSkills(List.of(c)).withSkill(a).build().skills());
+  }
+
+  private static Skill skill(String name, String description, String instructions) {
+    return Skill.newBuilder()
+        .withName(name)
+        .withDescription(description)
+        .withInstructions(instructions)
+        .build();
+  }
+
+  @Test
+  void theOptionsDoNotShareTheBuildersSkills() {
+    var builder =
+        SessionOptions.newBuilder().withModel(stubModel()).withSkill(skill("a", "first", "do a"));
+    var built = builder.build();
+
+    builder.withSkill(skill("b", "second", "do b"));
+
+    assertEquals(List.of("a"), built.skills().stream().map(Skill::name).toList());
+  }
+
+  @Test
+  void twoSkillsWithOneNameAreRefusedAtBuildNamingIt() {
+    var builder =
+        SessionOptions.newBuilder()
+            .withModel(stubModel())
+            .withSkill(skill("pdf", "reads PDFs", "a"))
+            .withSkill(skill("pdf", "reads PDFs too", "b"));
+
+    var refused = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals("duplicate skill name: pdf", refused.getMessage());
+  }
+
+  @Test
+  void theSkillSettersRejectNull() {
+    var builder = SessionOptions.newBuilder();
+    var withNull = new ArrayList<Skill>();
+    withNull.add(null);
+
+    assertEquals(
+        "skills must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withSkills(null)).getMessage());
+    assertEquals(
+        "skill must not be null",
+        assertThrows(NullPointerException.class, () -> builder.withSkill(null)).getMessage());
+    assertThrows(NullPointerException.class, () -> builder.withSkills(withNull));
+    assertThrows(NullPointerException.class, () -> canonical("skills", withNull));
   }
 }

@@ -22,7 +22,8 @@ final class MessageOriginTest {
             Map.of("helios.origin", "schema-correction"),
             Map.of("helios.origin", "rejected-attempt"),
             Map.of("helios.origin", "hook-inject"),
-            Map.of("helios.origin", "partial-turn")),
+            Map.of("helios.origin", "partial-turn"),
+            Map.of("helios.origin", "skill")),
         List.of(MessageOrigin.values()).stream().map(MessageOrigin::metadata).toList());
   }
 

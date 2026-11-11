@@ -309,7 +309,7 @@ try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build
 
 `maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run. A run that ends with tool calls unanswered (a hook's `Stop`, an interrupt, an error) answers each with a "not run" tool message, so the next run's history is one a provider accepts. An execution provider that refuses at `open` makes it throw `SessionUnavailableException`.
 
-**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore`, `FileSessionStore` (one JSON-lines file per session) and, in `helios-persistence`, `PgSessionStore` (one Postgres row per entry); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A run's last turn is stored with a `SessionEntry.RunEnded` naming the run and its terminal, in one batch, so after a crash `store.load(id).lastRunEnded()` tells whether the run that wrote last ended. A `Success` run's answer is `lastRunEnded().orElseThrow().result()`, whether the model's reply, a hook's `Stop` text or empty. The messages the session writes itself, a rejected structured output, its correction, a hook's `Inject` and a partial turn, carry a `MessageOrigin` tag in their metadata. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
+**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore`, `FileSessionStore` (one JSON-lines file per session) and, in `helios-persistence`, `PgSessionStore` (one Postgres row per entry); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A run's last turn is stored with a `SessionEntry.RunEnded` naming the run and its terminal, in one batch, so after a crash `store.load(id).lastRunEnded()` tells whether the run that wrote last ended. A `Success` run's answer is `lastRunEnded().orElseThrow().result()`, whether the model's reply, a hook's `Stop` text or empty. The messages the session writes itself, a rejected structured output, its correction, a hook's `Inject`, a partial turn and a skill put back after a compaction, carry a `MessageOrigin` tag in their metadata. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
 
 <!-- snippet: QuickStarts#storedChat -->
 ```java
@@ -343,13 +343,13 @@ try (var session =
 - `readOnly(model, root)` — `Read` / `Glob` / `Grep` / `LS` rooted at the workspace, gated by `Permission.planMode()`.
 - `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
 
-Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), and `withAskUserQuestion()` adds `AskUserQuestion`. Two tools with one name fail `AgentSession.open`.
+Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), `withAskUserQuestion()` adds `AskUserQuestion`, and skills add `Skill` (see *Skills* below). Two tools with one name fail `AgentSession.open`.
 
 Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
 
 ### Subagents
 
-A subagent is a child agent the model delegates a task to. `withSubagent(new Subagent(name, description, options))` registers the built-in `Agent` tool, whose call names the subagent and gives it a prompt; each call runs one fresh child session from the subagent's own options, waits for its run and closes it. Nothing is inherited from the parent: the child's model, prompt, tools, permission, limits, output schema and store are all in its options.
+A subagent is a child agent the model delegates a task to. `withSubagent(new Subagent(name, description, options))` registers the built-in `Agent` tool, whose call names the subagent and gives it a prompt; each call runs one fresh child session from the subagent's own options, waits for its run and closes it. Nothing is inherited from the parent: the child's model, prompt, tools, skills, permission, limits, output schema and store are all in its options.
 
 <!-- snippet: QuickStarts#subagents -->
 ```java
@@ -377,6 +377,7 @@ try (var session = AgentSession.open(options)) {
 - **Spend.** The child's usage and cost are added to the parent run's as it spends, so the parent's `ResultMessage` and budget count them; under `maxBudgetMicroUsd` the child gets at most what the run has left, and with nothing left the call fails without starting one. Under a budget every subagent needs a cost calculator.
 - **Time and cancellation.** The call's deadline is the subagent's `maxWallClock` plus its `stopGrace`, not `toolTimeoutDefault`. An interrupt, a close, the deadline or the parent's wall clock interrupts the child, which ends `Cancelled`; at the deadline the call waits the subagent's `stopGrace` for it to close.
 - **Permissions.** `Agent` is an `EXECUTION` tool keyed `Agent(<name>)`, so a rule allows, asks or denies one subagent, and hooks apply as to any tool. A child has no one to answer: its `ASK` is denied, so allow in its own permission what it needs.
+- **Skills.** A child sees only the skills in its subagent's own options, never the parent's.
 - **Linkage.** The child's run span nests under the call's `execute_tool` span and carries `helios.parent.session_id`, `helios.parent.run_id` and `helios.parent.tool_call_id`; `PgTraceStore.list` with the filter `attributes eq "${\"helios.parent.session_id\":\"<id>\"}"` finds a session's children.
 
 Helios runs subagents in the foreground of the parent's call. Background work, delivery into the parent (`send`), caps on concurrent children and idempotency are the host's job, and a child session the host starts itself is linked with its own `withTraceAttributes` labels.
@@ -396,6 +397,34 @@ session.send(UserMessage.text("Refactor the loop module's package-info comments.
 ```
 
 Hooks, declarative permissions, cost tracking, budget caps, session limits, context compaction, the HTTP + SSE surface — see [`session/README.md`](session/README.md) for the full quickstart.
+
+### Skills
+
+A skill, in the [Agent Skills](https://agentskills.io) format, is a name, a description and instructions, with optional files. Build one with `Skill.newBuilder()`: `withName`, `withDescription` and `withInstructions` are required; `withDirectory(path)` says where its files live, and `withFile(path, content)` (or `withFiles(map)`) adds a file, its content a `Supplier<String>` called each time the model reads that file. A `Skill` shared by several sessions has its suppliers called concurrently. A name is at most 64 characters of `[a-z0-9]+(-[a-z0-9]+)*`; a file path or the directory holds no `&`, `<`, `>`, `"` and no control, format or line or paragraph separator character, so the model sees each exactly as it must spell it. `withSkill(skill)` appends one and `withSkills(list)` replaces them. No preset adds a skill: adding one is your trust decision, since what a skill says reaches the model as instructions.
+
+<!-- snippet: QuickStarts#skills -->
+```java
+var releaseNotes =
+    Skill.newBuilder()
+        .withName("release-notes")
+        .withDescription("Writes release notes from the commits since the last tag.")
+        .withInstructions(
+            "List the commits since the last tag, group them by module and write one line for"
+                + " each change a user of the library would notice.")
+        .build();
+var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
+try (var session = AgentSession.open(options)) {
+  System.out.println(session.send("Write the notes for the next release.").join());
+}
+```
+
+- **Catalog.** The session's one system message is your prompt, a blank line, a line telling the model to load a matching skill before it starts, a blank line, then an `<available_skills>` list of each skill's name and XML-escaped description, in `withSkills` order. `SessionOptions.systemPrompt()` stays your text. A session without skills sends exactly what it sent before: no catalog and no tool.
+- **The `Skill` tool.** `{"skill": "<name>"}` answers the skill's instructions inside `<skill_content name="<name>">`, followed by its directory and its `<skill_resources>` list of files when it has them. Once the skill is loaded in the conversation, `{"skill": "<name>", "file": "<path>"}` answers one listed file inside `<skill_file>`, calling only that file's supplier; before, it answers that the skill must be loaded first, and a path that is not exactly one of the skill's files reads nothing. A skill already loaded in the conversation answers that it is loaded. Results are redacted, cut to `maxToolResultChars` and evented like any tool's: instructions longer than that are cut once, and the cut part is not served again.
+- **Permissions.** `Skill` is a `READ` tool keyed `Skill(<name>)` or `Skill(<name>/<file>)`, so it runs without asking in every mode but `LOCKED_DOWN`. Since a skill's files are readable only once it is loaded, denying `Skill(pdf)` (`PermissionRule.of("Skill", "pdf")`) covers the skill and its files, while a rule over `Skill(pdf/**)` restricts its files alone; hooks apply as to any tool. A tool of yours named `Skill` collides only in a session with skills.
+- **Compaction.** When a compaction removes what the model loaded, the session puts each such skill back right after the system message, as a user message tagged `MessageOrigin.SKILL` holding the text the model was given, whatever compactor you set; it survives any number of compactions. Skills put back come in the order they were first loaded, before any activation your compactor kept. A `PreModelTurnHook`'s `MutateHistory` is yours: nothing is put back after it.
+- **Reopening.** What the model loaded is read from the history, so a reopened session needs nothing more in its store. A skill no longer in the options stays in the conversation as sent, but cannot be loaded and is not put back; changed instructions reach the model only in a new session. Changing a session's skills or their descriptions between runs changes its system prompt and tool list: on Anthropic models that bind reasoning the next request drops earlier reasoning once, with one cache miss, and Gemini resends the whole conversation once.
+- **Subagents.** A child sees only the skills in its subagent's own options, never the parent's.
+- **Scripts.** Helios runs no skill code. A script runs through `Execute`, under your permission policy, at the path the activation's "Skill directory" names; making that path visible to your execution provider's sandbox is yours. To offer a user-typed `/skill-name`, find the skill in `options.skills()` and send its `instructions()` in a message of your own; such a message is not a load, so a compaction does not put it back.
 
 ### Terminal classification
 
@@ -421,7 +450,7 @@ A host that forwards the stream to a browser forwards the marker too (the SSE ro
 The agent loop counts context fill from the input size the provider reported for the last request, system prompt and tool definitions included, plus a pluggable `TokenCounter`'s estimate (default char-based, ~4 chars/token) of the messages added since. Before the first report, after a history replacement and after a turn with no report, the estimate covers the whole history. It reacts at two watermarks:
 
 - **0.85** of `SessionLimits.maxContextTokens()` → emits `QueryEvent.ContextWarning(usagePct)` once.
-- **0.95** → invokes the configured `ContextCompactor`, swaps the returned history in if the `TokenCounter` estimates it below the history it was given, and emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being those estimates. The compactor is skipped while what the estimate cannot see, such as inline files and tool definitions, reaches 0.95 by itself; a request that truly overflows ends with the provider's error.
+- **0.95** → invokes the configured `ContextCompactor` (in a session with skills, its result gets the skills the model loaded put back before the shrink check, after any wrapper of yours has seen it), swaps the returned history in if the `TokenCounter` estimates it below the history it was given, and emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being those estimates. The compactor is skipped while what the estimate cannot see, such as inline files and tool definitions, reaches 0.95 by itself; a request that truly overflows ends with the provider's error.
 
 The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. No file survives either: the summary model sees a `{file <mimeType>}` marker where each was, never its bytes, and the summary ends with a list of the files it left behind, to send again if they are still needed. The summary call runs on a virtual thread under a configurable timeout (default 60s), ends when the run is cancelled, and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
 

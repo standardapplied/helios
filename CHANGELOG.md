@@ -4,6 +4,27 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- `Skill` in `helios-session`, built through `Skill.newBuilder()` (`withName`, `withDescription`,
+  `withInstructions`, `withDirectory`, `withFiles`, `withFile`, `build`) and `toBuilder()`;
+  `SessionOptions.skills()`, `Builder.withSkills(List<Skill>)` and `Builder.withSkill(Skill)`. A session with skills lists their names and descriptions in its
+  system prompt and registers the built-in `Skill` tool (`READ`, key `Skill(<name>)` or
+  `Skill(<name>/<file>)`). The tool loads a skill's instructions and file list or, once the skill
+  is loaded, reads one of its files. After a compaction, the session puts back the skills the model had loaded. Also
+  `MessageOrigin.SKILL` (`skill`).
+
+### Compatibility
+
+- `SessionOptions` gains the record component `skills`, after `subagents`: a call of its canonical
+  constructor, which its Javadoc reserves for framework internals, or a record pattern over it adds
+  the component. The builder and `toBuilder` are unchanged for callers; `toBuilder` carries it.
+- A `switch` over `MessageOrigin` without `default` gains a case.
+- Changing a stored session's skills or their descriptions between opens changes its system prompt
+  and tools. On Anthropic models that bind reasoning, the next request drops earlier reasoning
+  once, with one cache miss; Gemini resends the whole conversation once.
+- A host tool named `Skill` collides only in a session with skills.
+
 ## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
 
 ### Added
