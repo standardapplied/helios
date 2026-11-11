@@ -27,11 +27,11 @@ import java.util.regex.Pattern;
  * ToolOutcome.Threw}. A skill shared by several sessions has its suppliers called concurrently, so
  * a supplier must be thread-safe.
  *
- * <p>A file path and the directory hold no {@code &}, {@code <}, {@code >} or {@code "} and no
- * control, format, line separator or paragraph separator character, so the tool lists each exactly
- * as a call must spell it, with nothing invisible. The name's 64-character bound keeps the opening
- * tag by which the session recognises a loaded skill within the half of a tool result any cut
- * keeps.
+ * <p>A file path and the directory hold no {@code <}, {@code >} or {@code "}, which could close or
+ * forge a tag or the {@code path} attribute in the tool's result, and no control, format, line
+ * separator or paragraph separator character, so the tool lists each exactly as a call must spell
+ * it, with nothing invisible. The name's 64-character bound keeps the opening tag by which the
+ * session recognises a loaded skill within the half of a tool result any cut keeps.
  *
  * @param name the skill's name, at most 64 lowercase letters and digits in groups joined by single
  *     hyphens ({@code [a-z0-9]+(-[a-z0-9]+)*})
@@ -56,7 +56,7 @@ public record Skill(
   private static final Pattern NAME = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
   private static final int MAX_NAME_LENGTH = 64;
   private static final String REFUSED =
-      "no &, <, >, \" and no control, format, line separator or paragraph separator character";
+      "no <, >, \" and no control, format, line separator or paragraph separator character";
 
   /**
    * Canonical constructor; build through {@link #newBuilder()} instead.
@@ -135,7 +135,7 @@ public record Skill(
     return text.codePoints()
         .noneMatch(
             c ->
-                "&<>\"".indexOf(c) >= 0
+                "<>\"".indexOf(c) >= 0
                     || Character.isISOControl(c)
                     || switch (Character.getType(c)) {
                       case Character.FORMAT,

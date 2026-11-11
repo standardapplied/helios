@@ -22,7 +22,7 @@ final class SkillTest {
 
   private static final Supplier<String> TEXT = () -> "text";
   private static final String REFUSED =
-      "no &, <, >, \" and no control, format, line separator or paragraph separator character";
+      "no <, >, \" and no control, format, line separator or paragraph separator character";
 
   private static Skill.Builder valid() {
     return Skill.newBuilder().withName("a").withDescription("d").withInstructions("i");
@@ -39,7 +39,7 @@ final class SkillTest {
             .withName("pdf")
             .withDescription("Extracts text from PDFs.")
             .withInstructions("Use pdfplumber.")
-            .withDirectory("/skills/pdf")
+            .withDirectory("/skills/R&D/pdf")
             .withFile("a.md", TEXT)
             .build();
 
@@ -48,7 +48,7 @@ final class SkillTest {
             "pdf",
             "Extracts text from PDFs.",
             "Use pdfplumber.",
-            Optional.of("/skills/pdf"),
+            Optional.of("/skills/R&D/pdf"),
             Map.of("a.md", TEXT)),
         List.of(
             skill.name(),
@@ -157,7 +157,7 @@ final class SkillTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"a.md", "scripts/x/y.py", "docs/a b-ü.md"})
+  @ValueSource(strings = {"a.md", "scripts/x/y.py", "docs/a b-ü.md", "R&D/a.md"})
   void aRelativeFilePathIsAccepted(String path) {
     assertDoesNotThrow(() -> withFile(path));
   }
@@ -168,9 +168,9 @@ final class SkillTest {
     assertRefusedFileKey(path);
   }
 
-  /** A refused character of each class: the four XML ones, control, format, line and paragraph. */
+  /** A refused character of each class: the three XML ones, control, format, line and paragraph. */
   @ParameterizedTest
-  @ValueSource(ints = {'&', '<', '>', '"', 0x09, 0x85, 0x200B, 0x2028, 0x2029})
+  @ValueSource(ints = {'<', '>', '"', 0x09, 0x85, 0x200B, 0x2028, 0x2029})
   void aFileKeyWithARefusedCharacterIsRefusedNamingTheRule(int refused) {
     assertRefusedFileKey("a" + Character.toString(refused) + "b");
   }
@@ -187,7 +187,7 @@ final class SkillTest {
   }
 
   @ParameterizedTest
-  @ValueSource(ints = {'&', '<', '>', '"', 0x0A, 0x85, 0x200B, 0x2028, 0x2029})
+  @ValueSource(ints = {'<', '>', '"', 0x0A, 0x85, 0x200B, 0x2028, 0x2029})
   void aDirectoryWithARefusedCharacterIsRefusedNamingTheRule(int refused) {
     var directory = "/s" + Character.toString(refused) + "k";
 
