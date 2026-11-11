@@ -23,11 +23,11 @@ import java.util.Objects;
  * CostCalculator#staticTable(java.util.Map)} for those. Prices change without a Helios release —
  * compare {@link #AS_OF} against the pricing page before trusting the numbers for billing.
  *
- * <p>Claude Haiku 5.5 is priced at its rate for prompts over 100K tokens, $0.50 / $2.50 per million
- * input / output tokens, for every prompt. Anthropic bills a prompt of 100K tokens or fewer at
- * $0.10 / $0.50, so the estimate errs high for short prompts; a caller who wants the lower rate
- * passes its own {@link CostCalculator}, for example through {@link
- * CostCalculator#staticTable(java.util.Map)}.
+ * <p>Claude Haiku 5.5 is priced by the length of each request's prompt, as Anthropic bills it: a
+ * request whose prompt ({@code Usage.promptTokens()}, input, cache writes and cache reads together)
+ * is over 100,000 tokens pays $0.50 / $2.50 per million input / output tokens for all of its
+ * tokens, a shorter one $0.10 / $0.50; a {@code pause_turn} turn is priced at the tier of its last
+ * request.
  *
  * <p>The calculator prices the token usage a turn reports and nothing else: per-request server-tool
  * fees (web search) are not included, and a refusal the API does not bill still reports usage, so
@@ -37,6 +37,8 @@ public final class AnthropicPricing {
 
   /** The date these rates were last checked against Anthropic's pricing page. */
   public static final LocalDate AS_OF = LocalDate.of(2026, 11, 11);
+
+  private static final long HAIKU_SHORT_PROMPT_LIMIT = 100_000L;
 
   private AnthropicPricing() {}
 
@@ -58,6 +60,7 @@ public final class AnthropicPricing {
     for (var model : AnthropicModelId.values()) {
       rateCard.put(model, pricing(model, cachePolicy));
     }
+    var haikuLongPrompt = pricing(500_000L, 2_500_000L, 50_000L, cachePolicy);
     return (modelId, usage) -> {
       Objects.requireNonNull(modelId, "modelId must not be null");
       Objects.requireNonNull(usage, "usage must not be null");
@@ -66,12 +69,16 @@ public final class AnthropicPricing {
         throw new IllegalArgumentException(
             "no price for model '" + modelId + "'; add it to the pricing table");
       }
-      return rateCard.get(model).cost(usage);
+      var longHaikuPrompt =
+          model == AnthropicModelId.CLAUDE_HAIKU_5_5
+              && usage.promptTokens() > HAIKU_SHORT_PROMPT_LIMIT;
+      return (longHaikuPrompt ? haikuLongPrompt : rateCard.get(model)).cost(usage);
     };
   }
 
   /**
-   * The list price of one model.
+   * The list price of one model. For Claude Haiku 5.5 this is the rate of a request whose prompt is
+   * at most 100,000 tokens; {@link #calculator} prices a longer one at five times every rate.
    *
    * @param model the model to price; non-null
    * @param cachePolicy selects the cache-write rate: 2× base input for {@link
@@ -91,9 +98,9 @@ public final class AnthropicPricing {
           pricing(10_000_000L, 50_000_000L, 1_000_000L, cachePolicy);
       case CLAUDE_OPUS_5_5 -> pricing(4_000_000L, 20_000_000L, 200_000L, cachePolicy);
       case CLAUDE_OPUS_5 -> pricing(5_000_000L, 25_000_000L, 500_000L, cachePolicy);
-      case CLAUDE_SONNET_5_5, CLAUDE_SONNET_5 ->
-          pricing(2_000_000L, 10_000_000L, 200_000L, cachePolicy);
-      case CLAUDE_HAIKU_5_5 -> pricing(500_000L, 2_500_000L, 50_000L, cachePolicy);
+      case CLAUDE_SONNET_5_5 -> pricing(2_000_000L, 10_000_000L, 100_000L, cachePolicy);
+      case CLAUDE_SONNET_5 -> pricing(2_000_000L, 10_000_000L, 200_000L, cachePolicy);
+      case CLAUDE_HAIKU_5_5 -> pricing(100_000L, 500_000L, 10_000L, cachePolicy);
     };
   }
 
