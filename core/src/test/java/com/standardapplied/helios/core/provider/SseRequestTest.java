@@ -3,9 +3,7 @@
 package com.standardapplied.helios.core.provider;
 
 import static com.standardapplied.helios.core.provider.SseFixtures.NEVER_IDLE;
-import static com.standardapplied.helios.core.provider.SseFixtures.awaitNoWatchdogBut;
 import static com.standardapplied.helios.core.provider.SseFixtures.stream;
-import static com.standardapplied.helios.core.provider.SseFixtures.watchdogs;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -404,7 +402,6 @@ class SseRequestTest {
 
   @Test
   void aRealResponseThatStallsTimesOutAndTheWatchdogClosesTheConnection() throws Exception {
-    var before = watchdogs();
     var reply = HeldSseServer.Reply.of("", "data: never\n\n");
     try (var server = HeldSseServer.start(reply);
         var client = HttpClient.newHttpClient()) {
@@ -422,22 +419,20 @@ class SseRequestTest {
 
       assertEquals("Stream idle timeout: no data received for 1 ms", error.message());
       reply.awaitClientClosed();
-      awaitNoWatchdogBut(before);
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
     }
   }
 
   @Test
   void closingWhileAReadIsBlockedOnARealResponseReleasesItAsAnErrorAndClosesTheConnection()
       throws Exception {
-    var before = watchdogs();
     var reply = HeldSseServer.Reply.of("data: one\n\n", "data: never\n\n");
     try (var server = HeldSseServer.start(reply);
-        var client = HttpClient.newHttpClient();
-        var reading = Executors.newVirtualThreadPerTaskExecutor()) {
+        var client = HttpClient.newHttpClient()) {
       var reader = lazy(client, post(server.uri()));
       assertEquals(new StreamEvent.TextDelta("one"), reader.next());
-      var blocked = reading.submit(reader::next);
-      awaitWaitingForALine(reader);
+      var blocked = new FutureTask<>(reader::next);
+      awaitBlockedRead(Thread.ofVirtual().start(blocked));
 
       reader.close();
 
@@ -445,14 +440,13 @@ class SseRequestTest {
           assertInstanceOf(StreamEvent.Error.class, Await.value("the blocked next", blocked));
       assertEquals("Stream read error", error.message());
       reply.awaitClientClosed();
-      awaitNoWatchdogBut(before);
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
     }
   }
 
   @Test
   void anInterruptWhileAReadIsBlockedOnARealResponseThrowsCancellationAndClosesTheConnection()
       throws Exception {
-    var before = watchdogs();
     var reply = HeldSseServer.Reply.of("data: one\n\n", "data: never\n\n");
     var interruptKept = new AtomicBoolean();
     try (var server = HeldSseServer.start(reply);
@@ -469,7 +463,7 @@ class SseRequestTest {
                 }
               });
       var thread = Thread.ofVirtual().start(read);
-      awaitWaitingForALine(reader);
+      awaitBlockedRead(thread);
 
       thread.interrupt();
 
@@ -478,13 +472,12 @@ class SseRequestTest {
       assertEquals("interrupted while waiting for the next line", cancelled.getMessage());
       assertTrue(interruptKept.get());
       reply.awaitClientClosed();
-      awaitNoWatchdogBut(before);
+      Await.termination("the watchdog", reader.idleWatch.watchdog());
     }
   }
 
-  private static void awaitWaitingForALine(SseReader reader) {
-    Await.until(
-        "the consumer to wait for a line", () -> reader.wait.get() != SseReader.NOT_WAITING);
+  private static void awaitBlockedRead(Thread consumer) {
+    Await.until("the read to block on the body", () -> consumer.getState() == Thread.State.WAITING);
   }
 
   private static StreamEvent.Error onlyError(SseReader reader) {
