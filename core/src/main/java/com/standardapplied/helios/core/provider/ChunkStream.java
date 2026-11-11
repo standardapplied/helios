@@ -14,14 +14,14 @@ import java.util.function.Consumer;
 /**
  * A turn's event stream as the {@link ModelChunk}s a model yields, one chunk per event; the {@link
  * StreamEvent.Done} becomes the {@link ModelChunk.MessageStop} once its response passes the turn's
- * check. A {@link StreamEvent.Error}, a {@code Done} that fails the check, and events that end
- * without a {@code Done}, are thrown from {@code hasNext()} after closing the events; an error
- * whose partial reports tokens, and a {@code Done} that fails the check whose response does, first
- * yield that usage as a {@link ModelChunk.UsageDelta}, so a reader counts what the provider billed.
- * Once the stream is closed or its reading thread interrupted (the interrupt kept), whatever is
- * read, a chunk read ahead included, is thrown as a {@link CancellationException}, unless it is an
- * {@link Error} or a {@link CompletionException} carrying one, so nothing retries a failure read
- * then.
+ * check, and a provider's {@link StreamEvent.UsageDelta} becomes a {@link ModelChunk.UsageDelta}. A
+ * {@link StreamEvent.Error}, a {@code Done} that fails the check, and events that end without a
+ * {@code Done}, are thrown from {@code hasNext()} after closing the events; an error whose partial
+ * reports tokens, and a {@code Done} that fails the check whose response does, first yield that
+ * usage as a {@link ModelChunk.UsageDelta}, so a reader counts what the provider billed. Once the
+ * stream is closed or its reading thread interrupted (the interrupt kept), whatever is read, a
+ * chunk read ahead included, is thrown as a {@link CancellationException}, unless it is an {@link
+ * Error} or a {@link CompletionException} carrying one, so nothing retries a failure read then.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -130,6 +130,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       case StreamEvent.TextDelta(var text) -> new ModelChunk.TextDelta(text);
       case StreamEvent.ThinkingDelta(var text) -> new ModelChunk.ThinkingDelta(text);
       case StreamEvent.KeepAlive _ -> new ModelChunk.KeepAlive();
+      case StreamEvent.UsageDelta(var usage) -> new ModelChunk.UsageDelta(usage);
       case StreamEvent.ToolCallStart(var callId, var toolName) ->
           new ModelChunk.ToolUseStart(callId, toolName);
       case StreamEvent.ToolCallDelta(var callId, var arguments) ->

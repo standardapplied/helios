@@ -8,12 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.standardapplied.helios.anthropic.AnthropicException;
 import com.standardapplied.helios.anthropic.AnthropicModelId;
 import com.standardapplied.helios.anthropic.AnthropicProvider;
+import com.standardapplied.helios.core.common.CostCalculator;
+import com.standardapplied.helios.core.common.CostCalculator.Pricing;
+import com.standardapplied.helios.core.common.CostEstimate;
 import com.standardapplied.helios.core.model.Citation;
 import com.standardapplied.helios.core.model.CloseableIterator;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelChunk;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response.Usage;
 import com.standardapplied.helios.core.schema.OutputSchema;
 import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.core.test.Golden;
@@ -55,12 +59,14 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * A session streams each provider's answer through the real provider client as it arrives, and
- * cancelling a session releases its request and connection alone. A localhost fixture holds each
- * reply open until the test releases it, and reports when the client closes the connection.
+ * A session streams each provider's answer through the real provider client as it arrives, counts
+ * the usage each reports as it reports it, and cancelling a session releases its request and
+ * connection alone. A localhost fixture holds each reply open until the test releases it, and
+ * reports when the client closes the connection.
  *
  * <p>{@code <provider>/sessions/held-text.sse} (anthropic, gemini, openai) is hand-built from the
  * provider's documented stream shape, the text turn of its {@code streams/text.sse} golden, split
@@ -84,6 +90,25 @@ final class StreamingSessionTest {
 
   static final String HOLD = "=== hold ===\n";
 
+  private static final Map<String, Usage> REPORTED_BEFORE_THE_HOLD =
+      Map.of(
+          "anthropic", Usage.of(25, 1, 5, 7),
+          "gemini", Usage.of(0, 0),
+          "openai", Usage.of(0, 0));
+
+  private static final Map<String, Usage> COMPLETED_USAGE =
+      Map.of(
+          "anthropic", Usage.of(25, 15, 5, 7),
+          "gemini", Usage.of(86, 150, 0, 1920),
+          "openai", Usage.of(46, 150, 40, 1920));
+
+  private static final CostCalculator ONE_MICRO_USD_A_TOKEN =
+      CostCalculator.staticTable(
+          Map.of(
+              AnthropicModelId.CLAUDE_OPUS_5_5.id(), new Pricing(1_000_000L, 1_000_000L),
+              GeminiModelId.GEMINI_3_8_FLASH.id(), new Pricing(1_000_000L, 1_000_000L),
+              OpenAIModelId.GPT_5_6.id(), new Pricing(1_000_000L, 1_000_000L)));
+
   private static final Map<String, Class<? extends RuntimeException>> PROVIDER_EXCEPTIONS =
       Map.of(
           "anthropic", AnthropicException.class,
@@ -106,7 +131,52 @@ final class StreamingSessionTest {
       assertEquals("Hello", first.text());
       var success = assertInstanceOf(ResultMessage.Success.class, result(run));
       assertEquals("Hello, world.", success.result());
+      assertEquals(COMPLETED_USAGE.get(provider), success.usage());
       assertEquals(1, server.requests());
+    }
+  }
+
+  @ParameterizedTest(name = "{0} cut by {1}")
+  @CsvSource({
+    "anthropic, interrupt, 38",
+    "anthropic, close,     38",
+    "gemini,    interrupt,  0",
+    "gemini,    close,      0",
+    "openai,    interrupt,  0",
+    "openai,    close,      0"
+  })
+  void aCallCutAfterItsFirstTextCountsTheUsageItsProviderReportedBeforeTheCut(
+      String provider, String cut, long microUsd) throws IOException {
+    var reported = REPORTED_BEFORE_THE_HOLD.get(provider);
+    var reply = held(provider);
+    try (var server = HeldSseServer.start(reply);
+        var model = modelAt(provider, server.uri());
+        var session =
+            AgentSession.open(
+                SessionOptions.newBuilder()
+                    .withModel(model)
+                    .withCostCalculator(ONE_MICRO_USD_A_TOKEN)
+                    .build())) {
+      var texts = assistantTexts(session);
+      var events = new EventCollector().read(session.events());
+      var run = session.send(UserMessage.text("Hi"));
+      Await.next("the first text delta", texts);
+
+      if ("interrupt".equals(cut)) {
+        session.interrupt();
+      } else {
+        session.close();
+      }
+
+      var cancelled = assertInstanceOf(ResultMessage.Cancelled.class, result(run));
+      events.awaitRunEnded();
+      assertEquals(reported, cancelled.usage());
+      assertEquals(CostEstimate.ofMicroUsd(microUsd), cancelled.cost());
+      assertEquals(
+          List.of(reported),
+          events.eventsOf(QueryEvent.ModelCallEnded.class).stream()
+              .map(QueryEvent.ModelCallEnded::usage)
+              .toList());
     }
   }
 
@@ -397,7 +467,7 @@ final class StreamingSessionTest {
 
   private static ModelChunk nextContent(LinkedBlockingQueue<ModelChunk> chunks) {
     var chunk = Await.next("the next chunk", chunks);
-    while (chunk instanceof ModelChunk.KeepAlive) {
+    while (chunk instanceof ModelChunk.KeepAlive || chunk instanceof ModelChunk.UsageDelta) {
       chunk = Await.next("the next chunk", chunks);
     }
     return chunk;

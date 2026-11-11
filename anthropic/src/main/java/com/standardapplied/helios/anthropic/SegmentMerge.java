@@ -60,7 +60,8 @@ final class SegmentMerge {
     return !toolCalls.isEmpty() && last == FinishReason.STOP ? FinishReason.TOOL_CALLS : last;
   }
 
-  private static Response.Usage usage(Response.Usage first, Response.Usage second) {
+  /** {@code first} plus {@code second}, either of which may be {@code null} for none. */
+  static Response.Usage usage(Response.Usage first, Response.Usage second) {
     if (first == null) {
       return second;
     }

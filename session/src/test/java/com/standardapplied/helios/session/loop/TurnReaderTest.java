@@ -187,6 +187,19 @@ final class TurnReaderTest {
   }
 
   @Test
+  void aCompletedStreamCountsItsMessageStopsUsageAloneWhateverUsageItReportedBefore() {
+    reader.read(
+        ModelStreams.of(
+            new ModelChunk.UsageDelta(Response.Usage.of(7, 1)),
+            new ModelChunk.TextDelta("Hel"),
+            new ModelChunk.UsageDelta(Response.Usage.of(7, 2)),
+            STOP));
+
+    assertNull(reader.outcome().streamError());
+    assertEquals(USAGE, reader.outcome().usage());
+  }
+
+  @Test
   void aStreamThatEndsWithoutAMessageStopEndsTheTurnWithAnIllegalState() {
     reader.read(ModelStreams.of(new ModelChunk.TextDelta("Hel")));
     var turn = reader.outcome();

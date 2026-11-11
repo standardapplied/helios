@@ -229,6 +229,33 @@ class PauseContinuationTest {
   }
 
   @Test
+  void aPausedTurnsUsageEventsAddEachContinuationsUsageToTheTurnsSoFar() {
+    var segments =
+        new ArrayDeque<>(
+            List.of(
+                reporting(PAUSED_METADATA, Response.Usage.of(100, 1), Response.Usage.of(100, 4)),
+                reporting(
+                    Map.of(AnthropicResponseAssembler.STOP_REASON_KEY, "end_turn"),
+                    Response.Usage.of(40, 1),
+                    Response.Usage.of(40, 9))));
+
+    var events = events(r -> segments.removeFirst());
+
+    assertEquals(
+        List.of(
+            Response.Usage.of(100, 1),
+            Response.Usage.of(100, 4),
+            new Response.Usage(140, 5, 0, 0, 145, 40),
+            new Response.Usage(140, 13, 0, 0, 153, 40)),
+        events.stream()
+            .filter(StreamEvent.UsageDelta.class::isInstance)
+            .map(event -> ((StreamEvent.UsageDelta) event).usage())
+            .toList());
+    var done = assertInstanceOf(StreamEvent.Done.class, events.getLast());
+    assertEquals(new Response.Usage(140, 13, 0, 0, 153, 40), done.response().usage());
+  }
+
+  @Test
   void aPausedTurnReportsTheModelThatServedItsLastSegment() {
     var segments =
         new ArrayDeque<>(
@@ -550,6 +577,26 @@ class PauseContinuationTest {
         .withUsage(Response.Usage.of(inputTokens, 1))
         .withMetadata(metadata)
         .build();
+  }
+
+  /**
+   * A segment whose wire reports {@code started} at its start and {@code streamed} once its text
+   * streamed, and which completes with {@code metadata} and the {@code streamed} usage.
+   */
+  private static Events reporting(
+      Map<String, String> metadata, Response.Usage started, Response.Usage streamed) {
+    return new Events(
+        List.of(
+            new StreamEvent.UsageDelta(started),
+            new StreamEvent.TextDelta("Text."),
+            new StreamEvent.UsageDelta(streamed),
+            new StreamEvent.Done(
+                Response.newBuilder()
+                    .withContent("Text.")
+                    .withFinishReason(FinishReason.STOP)
+                    .withUsage(streamed)
+                    .withMetadata(metadata)
+                    .build())));
   }
 
   private static Response<Void> pausedWithContent() {

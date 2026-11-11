@@ -43,6 +43,8 @@ class StreamingIteratorTest {
               + "\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\","
               + "\"stop_reason\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}");
 
+  private static final StreamEvent STARTED = new StreamEvent.UsageDelta(Response.Usage.of(25, 1));
+
   private static final String TEXT_BLOCK_START =
       named(
           "content_block_start",
@@ -82,9 +84,11 @@ class StreamingIteratorTest {
   void textDeltaEvents() {
     var events = drain(HELLO_TURN);
 
-    assertEquals(2, events.size());
-    assertEquals("Hello", assertInstanceOf(StreamEvent.TextDelta.class, events.get(0)).text());
-    var done = assertInstanceOf(StreamEvent.Done.class, events.get(1));
+    assertEquals(4, events.size());
+    assertEquals(STARTED, events.get(0));
+    assertEquals("Hello", assertInstanceOf(StreamEvent.TextDelta.class, events.get(1)).text());
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 15)), events.get(2));
+    var done = assertInstanceOf(StreamEvent.Done.class, events.get(3));
     assertEquals("Hello", done.response().content());
     assertEquals(FinishReason.STOP, done.response().finishReason());
   }
@@ -130,16 +134,18 @@ class StreamingIteratorTest {
                 + messageDeltaToolUse
                 + MESSAGE_STOP);
 
-    assertEquals(5, events.size());
-    assertEquals(new StreamEvent.ToolCallStart("toolu_1", "get_weather"), events.get(0));
-    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", "{\"city\""), events.get(1));
-    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", ":\"NYC\"}"), events.get(2));
-    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(3)).toolCall();
+    assertEquals(7, events.size());
+    assertEquals(STARTED, events.get(0));
+    assertEquals(new StreamEvent.ToolCallStart("toolu_1", "get_weather"), events.get(1));
+    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", "{\"city\""), events.get(2));
+    assertEquals(new StreamEvent.ToolCallDelta("toolu_1", ":\"NYC\"}"), events.get(3));
+    var tc = assertInstanceOf(StreamEvent.ToolCallComplete.class, events.get(4)).toolCall();
     assertEquals("get_weather", tc.name());
     assertEquals("toolu_1", tc.id());
     assertEquals(Map.of("city", "NYC"), tc.arguments());
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 30)), events.get(5));
 
-    var done = (StreamEvent.Done) events.get(4);
+    var done = (StreamEvent.Done) events.get(6);
     assertEquals(FinishReason.TOOL_CALLS, done.response().finishReason());
     assertFalse(done.response().toolCalls().isEmpty());
   }
@@ -190,8 +196,10 @@ class StreamingIteratorTest {
 
     assertEquals(
         List.of(
+            STARTED,
             new StreamEvent.ThinkingDelta("Let me think..."),
             new StreamEvent.TextDelta("Hello"),
+            new StreamEvent.UsageDelta(Response.Usage.of(25, 15)),
             done),
         events);
   }
@@ -204,7 +212,7 @@ class StreamingIteratorTest {
 
     assertEquals(
         List.of(
-            new StreamEvent.KeepAlive(),
+            STARTED,
             new StreamEvent.KeepAlive(),
             new StreamEvent.ThinkingDelta("Weighing it."),
             new StreamEvent.KeepAlive(),
@@ -248,13 +256,13 @@ class StreamingIteratorTest {
   void emptyAndDoneDataLinesAreSkipped() {
     var events = drain("data: \n\ndata: [DONE]\n\n" + HELLO_TURN);
 
-    assertEquals(2, events.size());
-    assertInstanceOf(StreamEvent.TextDelta.class, events.get(0));
+    assertEquals(4, events.size());
+    assertInstanceOf(StreamEvent.TextDelta.class, events.get(1));
   }
 
   @Test
   void nonDataLinesAreIgnored() {
-    assertEquals(2, drain("event: ping\n\n" + HELLO_TURN).size());
+    assertEquals(4, drain("event: ping\n\n" + HELLO_TURN).size());
   }
 
   @Test
@@ -319,7 +327,7 @@ class StreamingIteratorTest {
                 + MESSAGE_DELTA_END_TURN
                 + MESSAGE_STOP);
 
-    assertEquals(3, events.size());
+    assertEquals(5, events.size());
     assertEquals("Hello World", ((StreamEvent.Done) events.getLast()).response().content());
   }
 
@@ -327,8 +335,8 @@ class StreamingIteratorTest {
   void emptyStreamProducesDoneWithEmptyContent() {
     var events = drain(MESSAGE_START + MESSAGE_DELTA_END_TURN + MESSAGE_STOP);
 
-    assertEquals(1, events.size());
-    var done = (StreamEvent.Done) events.getFirst();
+    assertEquals(3, events.size());
+    var done = (StreamEvent.Done) events.getLast();
     assertEquals("", done.response().content());
     assertEquals(FinishReason.STOP, done.response().finishReason());
   }
@@ -360,8 +368,8 @@ class StreamingIteratorTest {
     var events =
         drain(MESSAGE_START + toolBlockStart + CONTENT_BLOCK_STOP_0 + messageDelta + MESSAGE_STOP);
 
-    assertEquals(3, events.size());
-    var tc = ((StreamEvent.ToolCallComplete) events.get(1)).toolCall();
+    assertEquals(5, events.size());
+    var tc = ((StreamEvent.ToolCallComplete) events.get(2)).toolCall();
     assertEquals("list_items", tc.name());
     assertEquals(Map.of(), tc.arguments());
   }
@@ -681,7 +689,10 @@ class StreamingIteratorTest {
 
   private StreamEvent.Error streamError(String errorObject) {
     var sse = MESSAGE_START + named("error", "{\"type\":\"error\"" + errorObject + "}");
-    return assertInstanceOf(StreamEvent.Error.class, drain(sse).getFirst());
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertEquals(STARTED, events.getFirst());
+    return assertInstanceOf(StreamEvent.Error.class, events.getLast());
   }
 
   @Test

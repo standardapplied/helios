@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
+import com.standardapplied.helios.core.model.Response;
 import com.standardapplied.helios.core.model.StreamEvent;
 import com.standardapplied.helios.core.model.TransientStreamException;
 import com.standardapplied.helios.core.provider.Exchange;
@@ -93,7 +94,7 @@ class StreamReadErrorCausePreservationReproTest {
             Duration.ofSeconds(5),
             new AnthropicStreamParser("stamp"),
             AnthropicException::new)) {
-      assertEquals(new StreamEvent.KeepAlive(), iterator.next());
+      assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 1)), iterator.next());
       assertEquals(new StreamEvent.KeepAlive(), iterator.next());
       assertTrue(iterator.hasNext());
       assertInstanceOf(StreamEvent.TextDelta.class, iterator.next());

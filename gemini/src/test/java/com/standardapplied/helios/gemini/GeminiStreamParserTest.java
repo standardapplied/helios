@@ -85,6 +85,41 @@ class GeminiStreamParserTest {
   }
 
   @Test
+  void aStatusEventReportingUsageYieldsTheAssembledUsageSoFar() {
+    var parser = new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION, "stamp");
+
+    var reported =
+        parser.parse(
+            "{\"event_type\":\"interaction.status_update\",\"interaction_id\":\"int_xyz\","
+                + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":40,"
+                + "\"total_cached_tokens\":33,\"total_output_tokens\":23,"
+                + "\"total_thought_tokens\":49}}");
+
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(7, 72, 0, 33)), reported);
+    assertNull(
+        parser.parse(
+            "{\"event_type\":\"interaction.in_progress\",\"interaction_id\":\"int_xyz\","
+                + "\"usage\":{\"total_input_tokens\":0,\"total_output_tokens\":0}}"));
+  }
+
+  @Test
+  void anInteractionCreatedYieldsTheUsageItCarriesAndNothingWithoutOne() {
+    var parser = new GeminiStreamParser(true, GeminiEndpoint.DEFAULT_API_VERSION, "stamp");
+
+    var bare =
+        parser.parse(
+            "{\"event_type\":\"interaction.created\","
+                + "\"interaction\":{\"id\":\"int_xyz\",\"status\":\"in_progress\"}}");
+    var reporting =
+        parser.parse(
+            "{\"event_type\":\"interaction.created\",\"interaction\":{\"id\":\"int_xyz\","
+                + "\"status\":\"in_progress\",\"usage\":{\"total_input_tokens\":12}}}");
+
+    assertNull(bare);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(12, 0)), reporting);
+  }
+
+  @Test
   void theModelAnEnvelopeNamesIsTheModelThatServedTheResponse() {
     var created =
         "data: {\"event_type\":\"interaction.created\","

@@ -38,9 +38,11 @@ import org.junit.jupiter.params.provider.MethodSource;
  *
  * <p>A failed stream reports usage ahead of its failure as a shipped provider's does. The cuts by
  * {@code interrupt()}, {@code close()} and the wall clock need a stream that yields a {@link
- * ModelChunk.UsageDelta} before the cut, which {@code ScriptedModel} does and no shipped provider
- * does yet: those providers pass usage to the session only when the stream ends, so such a call of
- * theirs still counts zero. These cases pin that the session keeps a usage it read before the cut.
+ * ModelChunk.UsageDelta} before the cut, as {@code ScriptedModel} does here, Anthropic does at the
+ * stream's start and Gemini does when an event carries usage; OpenAI reports usage only when its
+ * response ends. These cases pin that the session keeps a usage it read before the cut; {@code
+ * StreamingSessionTest.aCallCutAfterItsFirstTextCountsTheUsageItsProviderReportedBeforeTheCut}
+ * proves it through each real provider client.
  */
 final class CutCallUsageSessionTest {
 

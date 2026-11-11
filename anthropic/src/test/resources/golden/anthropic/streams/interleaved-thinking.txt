@@ -1,5 +1,5 @@
 == chatStream
-KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
 KeepAlive[]
 ThinkingDelta[text=First Paris.]
 KeepAlive[]
@@ -16,7 +16,7 @@ KeepAlive[]
 ToolUseStart[callId=toolu_2, toolName=weather]
 ToolUseDelta[callId=toolu_2, argumentsDelta={"city":"Rome"}]
 ToolUseStop[toolCall=ToolCall[id=toolu_2, name=weather, arguments={city=Rome}]]
-KeepAlive[]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=50, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=87, promptTokens=37]]
 MessageStop[stopReason=TOOL_CALLS, usage=Usage[inputTokens=25, outputTokens=50, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=87, promptTokens=37], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.rawContent=[{"signature":"SIG-1","thinking":"First Paris.","type":"thinking"},{"id":"toolu_1","input":{"city":"Paris"},"name":"weather","type":"tool_use"},{"signature":"SIG-2","thinking":"Now Rome.","type":"thinking"},{"id":"toolu_2","input":{"city":"Rome"},"name":"weather","type":"tool_use"}], anthropic.stopReason=tool_use, anthropic.thinkingBlocks=[{"signature":"SIG-1","text":"First Paris."},{"signature":"SIG-2","text":"Now Rome."}], response.model=claude-opus-5-5}, citations=[]]
 onComplete
 == chat
