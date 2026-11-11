@@ -15,6 +15,7 @@ import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.core.model.Role;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.test.ConversationFixture;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -258,6 +259,15 @@ class AnthropicMessagesTest {
     assertEquals(List.of(false, false, false, false), thinkingKept(requests, "x", "x", "z", "z"));
     assertEquals(List.of(false, false, true), thinkingKept(requests, current, "x", current));
     assertEquals(List.of(false, true), thinkingKept(requests, null, current));
+  }
+
+  @Test
+  void mythos51SendsNoReasoningFromBeforeItsToolsChanged() {
+    var requests = requests(AnthropicModelId.CLAUDE_MYTHOS_5_1, ModelConfig.of("k"));
+    var withTools = requests.build(List.of(), ConversationFixture.tools(), null).promptStamp();
+    var withoutTools = currentStamp(requests);
+
+    assertEquals(List.of(false, true), thinkingKept(requests, withTools, withoutTools));
   }
 
   @Test

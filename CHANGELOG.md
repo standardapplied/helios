@@ -12,6 +12,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Fixed
 
+- `AnthropicModelId.CLAUDE_MYTHOS_5_1` now binds reasoning, as Anthropic's preserved-thinking page
+  requires: a Mythos 5.1 session whose system prompt or tools change no longer replays thinking
+  blocks from before the change, which the API rejects with a 400.
 - An idle timeout too long to count in milliseconds, such as `ChronoUnit.FOREVER.getDuration()`, no
   longer throws `ArithmeticException` from `SseReader.hasNext()`.
 

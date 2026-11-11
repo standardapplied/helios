@@ -297,8 +297,8 @@ The default compactor — `SummarizingCompactor` — keeps every leading system 
 pending user turn (the user messages after the last assistant turn), and replaces the rest of the
 conversation with one user-role summary, prefixed `SummarizingCompactor.SUMMARY_PREFIX`, produced
 by one call against the session's `Model`. No earlier assistant turn survives, so no reasoning a
-provider signed against the old conversation (Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 bind each
-thinking block to its exact request prefix) is replayed, and no `tool_call` or `TOOL` message is
+provider signed against the old conversation (Claude Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5
+and Haiku 5.5 bind each thinking block to its exact request prefix) is replayed, and no `tool_call` or `TOOL` message is
 left to pair: the result is valid for every provider. The agent continues from the summary alone,
 so the default prompt asks for the user's goal, the facts found, the decisions made, the open
 questions and the work left. No file survives a compaction: the summary model sees each
