@@ -219,18 +219,7 @@ class AnthropicStreamParserTest {
   }
 
   @Test
-  void aMessageDeltaWithOnlyOutputTokensKeepsTheInputCountsOfMessageStart() {
-    parser.parse(
-        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,"
-            + "\"cache_creation_input_tokens\":5,\"cache_read_input_tokens\":7,"
-            + "\"output_tokens\":1}}}");
-    parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}");
-
-    assertEquals(Response.Usage.of(25, 15, 5, 7), parser.partial().usage());
-  }
-
-  @Test
-  void eachEventReportingUsageYieldsTheCumulativeCountsSoFar() {
+  void eachEventReportingUsageYieldsTheCountsSoFarAndAnOutputOnlyDeltaKeepsTheInputCounts() {
     var started =
         parser.parse(
             "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,"
@@ -246,6 +235,7 @@ class AnthropicStreamParserTest {
     assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 1, 5, 7)), started);
     assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 15, 5, 7)), streamedText);
     assertNull(withoutUsage);
+    assertEquals(Response.Usage.of(25, 15, 5, 7), parser.partial().usage());
   }
 
   @Test

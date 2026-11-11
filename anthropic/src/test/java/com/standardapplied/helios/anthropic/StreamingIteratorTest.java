@@ -689,7 +689,10 @@ class StreamingIteratorTest {
 
   private StreamEvent.Error streamError(String errorObject) {
     var sse = MESSAGE_START + named("error", "{\"type\":\"error\"" + errorObject + "}");
-    return assertInstanceOf(StreamEvent.Error.class, drain(sse).getLast());
+    var events = drain(sse);
+    assertEquals(2, events.size());
+    assertEquals(STARTED, events.getFirst());
+    return assertInstanceOf(StreamEvent.Error.class, events.getLast());
   }
 
   @Test

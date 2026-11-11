@@ -83,11 +83,10 @@ final class AnthropicStreamParser implements SseReader.Parser {
     if (message == null) {
       return null;
     }
-    var reported = absorb(message.usage());
     if (!Strings.isBlank(message.model())) {
       model = message.model();
     }
-    return reported;
+    return absorb(message.usage());
   }
 
   private StreamEvent messageDelta(ContentDelta delta, ApiUsage usage) {
@@ -102,12 +101,12 @@ final class AnthropicStreamParser implements SseReader.Parser {
   }
 
   /**
-   * The token counts {@code usage} reports, as the usage the stream reported so far, or {@code
-   * null} when it reports none or nothing has reported a token yet. {@code message_start} reports
-   * the input, cache and initial output counts; each {@code message_delta} reports cumulative
-   * counts, which grow past the start's input count when server tools run, so every count it
-   * carries replaces the last. Counts whose sum overflows fail here, before they replace any count,
-   * so the partial stays readable.
+   * Replaces the counts {@code usage} carries; the counts so far as a {@link
+   * StreamEvent.UsageDelta}, or {@code null} when {@code usage} is null or no count is non-zero.
+   * {@code message_start} reports the input, cache and initial output counts; each {@code
+   * message_delta} reports cumulative counts, which grow past the start's input count when server
+   * tools run, so every count it carries replaces the last. Counts whose sum overflows fail here,
+   * before they replace any count, so the partial stays readable.
    */
   private StreamEvent absorb(ApiUsage usage) {
     if (usage == null) {

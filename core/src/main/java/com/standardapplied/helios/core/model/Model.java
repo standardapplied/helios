@@ -24,10 +24,10 @@ public interface Model extends AutoCloseable {
   /**
    * Stream the model's answer to {@code messages} as normalized {@link ModelChunk}s, read with
    * {@code hasNext()} / {@code next()} by one reader in one pass: text, thinking, tool-call
-   * fragments and completions as the provider streams them, ending with one {@link
-   * ModelChunk.MessageStop} carrying the finish reason, usage, metadata and citations. A {@link
-   * ModelChunk.KeepAlive} is published for each part of the provider's stream that carries nothing,
-   * as proof of life only.
+   * fragments and completions as the provider streams them, and a {@link ModelChunk.UsageDelta}
+   * each time the provider reports usage, ending with one {@link ModelChunk.MessageStop} carrying
+   * the finish reason, usage, metadata and citations. A {@link ModelChunk.KeepAlive} is published
+   * for each part of the provider's stream that carries nothing, as proof of life only.
    *
    * <ul>
    *   <li><b>Lazy.</b> This method sends nothing and runs no model work; the work starts at the

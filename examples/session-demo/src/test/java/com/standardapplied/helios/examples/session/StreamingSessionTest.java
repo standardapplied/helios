@@ -157,15 +157,8 @@ final class StreamingSessionTest {
                     .withModel(model)
                     .withCostCalculator(ONE_MICRO_USD_A_TOKEN)
                     .build())) {
-      var texts = new LinkedBlockingQueue<QueryEvent.AssistantText>();
-      var events =
-          new EventCollector(
-                  event -> {
-                    if (event instanceof QueryEvent.AssistantText text) {
-                      texts.add(text);
-                    }
-                  })
-              .read(session.events());
+      var texts = assistantTexts(session);
+      var events = new EventCollector().read(session.events());
       var run = session.send(UserMessage.text("Hi"));
       Await.next("the first text delta", texts);
 
