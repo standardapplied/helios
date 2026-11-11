@@ -33,6 +33,7 @@ import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.PostToolUseHook;
 import com.standardapplied.helios.session.hooks.PreToolUseHook;
 import com.standardapplied.helios.session.test.EventCollector;
+import com.standardapplied.helios.session.test.HandClock;
 import com.standardapplied.helios.session.test.SpanCapture;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.testing.ModelStreams;
@@ -42,6 +43,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,6 +76,8 @@ final class SessionSpansTest {
   private static final String SENTINEL = "S3NT1NEL";
   private static final String RESPONSE_MODEL = "gen_ai.response.model";
   private static final String SERVED = "claude-opus-5-5-20261101";
+  private static final String FIRST_CHUNK = "helios.model.first_chunk_ms";
+  private static final String FIRST_TEXT = "helios.model.first_text_ms";
   private static final List<AttributeKey<String>> CONTENT =
       List.of(
           stringKey("gen_ai.input.messages"),
@@ -236,6 +240,72 @@ final class SessionSpansTest {
     assertEquals(SERVED, string(chats.get(0), RESPONSE_MODEL));
     assertEquals("scripted", string(chats.get(1), "gen_ai.request.model"));
     assertNull(string(chats.get(1), RESPONSE_MODEL));
+  }
+
+  @Test
+  void aChatSpanTimesItsFirstChunkOfAnyKindAndItsFirstTextOnTheSessionsClock() {
+    var clock = new HandClock(Instant.EPOCH);
+    var noop = call("noop", Map.of());
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                clock.paced(
+                    ModelStreams.of(
+                        new ModelChunk.ToolUseStart(noop.id(), noop.name()),
+                        new ModelChunk.ToolUseStop(noop),
+                        new ModelChunk.MessageStop("TOOL_CALLS", Usage.of(1, 1), Map.of())),
+                    250))
+            .withStreamTurn(
+                clock.paced(
+                    ModelStreams.of(
+                        new ModelChunk.ThinkingDelta("Hm."),
+                        new ModelChunk.TextDelta("done"),
+                        new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of())),
+                    400,
+                    600))
+            .build();
+
+    run(traced(model).withTool(tool("noop", "ok")).withClock(clock).build(), "go");
+
+    var chats = capture.named("chat scripted");
+    assertEquals(250L, number(chats.get(0), FIRST_CHUNK));
+    assertNull(number(chats.get(0), FIRST_TEXT));
+    assertEquals(400L, number(chats.get(1), FIRST_CHUNK));
+    assertEquals(1_000L, number(chats.get(1), FIRST_TEXT));
+    assertNull(number(capture.run(), FIRST_CHUNK));
+  }
+
+  @Test
+  void aRetriedAttemptsChatSpanCarriesItsOwnFirstChunk() {
+    var clock = new HandClock(Instant.EPOCH);
+    var model =
+        ScriptedModel.newBuilder()
+            .withStreamTurn(
+                clock.paced(
+                    ModelStreams.failing(
+                        new TransientStreamException("reset", null, "test"),
+                        new ModelChunk.KeepAlive()),
+                    30))
+            .withStreamTurn(
+                clock.paced(
+                    ModelStreams.of(
+                        new ModelChunk.TextDelta("ok"),
+                        new ModelChunk.MessageStop("STOP", Usage.of(1, 1), Map.of())),
+                    50))
+            .build();
+    var limits =
+        SessionLimits.newBuilder()
+            .withStreamRetryPolicy(new StreamRetryPolicy(2, Backoff.fixed(Duration.ZERO), 0.0))
+            .build();
+
+    run(traced(model).withLimits(limits).withClock(clock).build(), "go");
+
+    var chats = capture.named("chat scripted");
+    assertEquals(StatusCode.ERROR, chats.get(0).getStatus().getStatusCode());
+    assertEquals(30L, number(chats.get(0), FIRST_CHUNK));
+    assertNull(number(chats.get(0), FIRST_TEXT));
+    assertEquals(50L, number(chats.get(1), FIRST_CHUNK));
+    assertEquals(50L, number(chats.get(1), FIRST_TEXT));
   }
 
   @Test
@@ -529,6 +599,8 @@ final class SessionSpansTest {
     var summary = capture.only("chat summary");
     assertEquals("summary", string(summary, "gen_ai.request.model"));
     assertEquals(true, summary.getAttributes().get(SessionSpanTurnsTest.COMPACTION));
+    assertNull(number(summary, FIRST_CHUNK));
+    assertNull(number(summary, FIRST_TEXT));
     assertNull(summary.getAttributes().get(SessionSpanTurnsTest.TURN_INDEX));
     var turn = capture.only("chat scripted");
     assertNull(turn.getAttributes().get(SessionSpanTurnsTest.COMPACTION));
