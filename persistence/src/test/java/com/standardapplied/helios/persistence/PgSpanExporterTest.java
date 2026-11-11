@@ -84,7 +84,7 @@ final class PgSpanExporterTest {
             .put("gen_ai.usage.output_tokens", output)
             .put("helios.cost.micro_usd", 42L);
     if (write != 0) {
-      usage.put("gen_ai.usage.cache_write.input_tokens", write);
+      usage.put("gen_ai.usage.cache_creation.input_tokens", write);
     }
     if (read != 0) {
       usage.put("gen_ai.usage.cache_read.input_tokens", read);
