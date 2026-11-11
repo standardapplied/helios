@@ -233,11 +233,9 @@ final class PgSessionTracingTest {
                 ScriptedModel.newBuilder().withToolCallsTurn(calls).withTextTurn("done").build())
             .withSessionId(sessionId)
             .withPermission(
-                new Permission(
-                    PermissionMode.DEFAULT,
-                    List.of(PermissionRule.any("Agent")),
-                    List.of(),
-                    List.of()))
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withAllow(PermissionRule.any("Agent"))
+                    .build())
             .withSubagent(new Subagent("matching", "finds a match", matching))
             .withOpenTelemetry(capture.openTelemetry())
             .build();

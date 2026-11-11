@@ -113,11 +113,9 @@ final class SubagentSessionTest {
         .withCostCalculator(COSTS)
         .withOpenTelemetry(capture.openTelemetry())
         .withPermission(
-            new Permission(
-                PermissionMode.DEFAULT,
-                List.of(PermissionRule.any(AgentTool.NAME)),
-                List.of(),
-                List.of()))
+            Permission.newBuilder(PermissionMode.DEFAULT)
+                .withAllow(PermissionRule.any(AgentTool.NAME))
+                .build())
         .withSubagent(new Subagent("matching", "finds a match", child.build()));
   }
 
@@ -579,11 +577,10 @@ final class SubagentSessionTest {
     var options =
         parent(parentModel, child(childModel().withTextTurn("found").build()))
             .withPermission(
-                new Permission(
-                    PermissionMode.DEFAULT,
-                    List.of(PermissionRule.any(AgentTool.NAME)),
-                    List.of(),
-                    List.of(PermissionRule.of(AgentTool.NAME, "matching"))))
+                Permission.newBuilder(PermissionMode.DEFAULT)
+                    .withAllow(PermissionRule.any(AgentTool.NAME))
+                    .withDeny(PermissionRule.of(AgentTool.NAME, "matching"))
+                    .build())
             .build();
 
     run(options);
