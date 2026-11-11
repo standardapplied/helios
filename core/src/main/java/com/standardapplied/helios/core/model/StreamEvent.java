@@ -57,15 +57,18 @@ public sealed interface StreamEvent {
 
   /**
    * The usage the provider has reported so far: a cumulative snapshot, which replaces any earlier
-   * one. A parser yields one each time its wire reports usage before the stream's terminal event,
-   * so a reader that stops early keeps what was reported. It does not end the stream.
+   * one, never adds to it. A parser yields one each time its wire reports usage before the stream's
+   * terminal event, so a reader that stops early keeps what was reported; a parser whose wire
+   * reports no usage before its terminal event yields none. It does not end the stream: the {@link
+   * Done}'s or {@link Error}'s response still carries the final usage, and a completed stream
+   * counts the {@code Done}'s alone.
    *
-   * @param usage the usage reported so far
+   * @param usage the usage reported so far; non-null
    */
   record UsageDelta(Response.Usage usage) implements StreamEvent {
 
     /**
-     * Creates a usage report.
+     * Creates a mid-stream usage update.
      *
      * @throws NullPointerException if {@code usage} is null
      */
