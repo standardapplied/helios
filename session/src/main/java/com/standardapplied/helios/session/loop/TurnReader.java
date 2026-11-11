@@ -79,14 +79,14 @@ final class TurnReader {
   }
 
   /**
-   * Read {@code stream} to its end, or until the turn ended otherwise, then close it. What reading
-   * or emitting throws ends the turn with it.
+   * Read {@code stream} to its end, or until the turn ended otherwise, then close it. A chunk is
+   * asked for only while the turn has not ended, so a turn ended before its first read never makes
+   * its provider send the request. What reading or emitting throws ends the turn with it.
    */
   void read(CloseableIterator<ModelChunk> stream) {
     try {
-      var reading = true;
-      while (reading && stream.hasNext()) {
-        reading = accept(stream.next());
+      while (!ended() && stream.hasNext()) {
+        accept(stream.next());
       }
       end(null);
     } catch (Throwable failure) {
@@ -162,10 +162,16 @@ final class TurnReader {
     }
   }
 
-  private boolean accept(ModelChunk chunk) {
+  private boolean ended() {
+    synchronized (lock) {
+      return outcome != null;
+    }
+  }
+
+  private void accept(ModelChunk chunk) {
     synchronized (lock) {
       if (outcome != null) {
-        return false;
+        return;
       }
       stamp(chunk);
       accumulate(chunk);
@@ -183,7 +189,6 @@ final class TurnReader {
         done.countDown();
       }
     }
-    return true;
   }
 
   private void stamp(ModelChunk chunk) {

@@ -30,6 +30,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.InstantSource;
 import java.time.ZoneOffset;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -39,7 +40,6 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -47,9 +47,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The turn's one terminal transition: whichever ending comes first — the stream's end, a failure it
- * or a chunk's emission throws, or an ending from another thread — snapshots what was read, makes
- * every later chunk a no-op that emits nothing, and leaves the stream closed. The reader times the
- * first chunk it accepts and the first non-empty text from the attempt's start.
+ * or a chunk's emission throws, or an ending from another thread — snapshots what was read, makes a
+ * chunk read after it a no-op that emits nothing, asks the stream for no further chunk, and leaves
+ * the stream closed. The reader times the first chunk it accepts and the first non-empty text from
+ * the attempt's start.
  */
 final class TurnReaderTest {
 
@@ -134,8 +135,7 @@ final class TurnReaderTest {
   void aChunkReadAfterTheTurnEndedIsNotTimed() {
     var timed = timedReader(Instant.EPOCH);
 
-    timed.end(new CancellationException("closed"));
-    timed.read(clock.paced(ModelStreams.of(new ModelChunk.TextDelta("late"), STOP), 40));
+    timed.read(clock.paced(endingOnTake(timed, new ModelChunk.TextDelta("late"), STOP), 40));
 
     assertEquals(OptionalLong.empty(), timed.firstChunkMillis());
     assertEquals(OptionalLong.empty(), timed.firstTextMillis());
@@ -183,7 +183,7 @@ final class TurnReaderTest {
             new QueryEvent.AssistantCitations(
                 "sess", state.runId(), 0, Instant.EPOCH, List.of(cite))),
         events);
-    assertTrue(stream.closed.get());
+    assertEquals(1, stream.closes);
   }
 
   @Test
@@ -220,7 +220,7 @@ final class TurnReaderTest {
     assertSame(refused, turn.streamError());
     assertEquals(FinishReason.ERROR, turn.finishReason());
     assertEquals(USAGE, turn.usage());
-    assertTrue(stream.closed.get());
+    assertEquals(1, stream.closes);
     assertTrue(state.ending().seal().isEmpty());
   }
 
@@ -294,30 +294,60 @@ final class TurnReaderTest {
 
     assertSame(failure, failing.outcome().streamError());
     assertTrue(failing.released());
-    assertTrue(stream.closed.get());
+    assertEquals(1, stream.closes);
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
   @Test
-  void aChunkReadAfterAnotherEndingIsDroppedAndTheStreamClosed() {
+  void aReaderEndedBeforeItsReadAsksItsStreamForNothingAndClosesItOnce() {
     var stream = new Tracked(ModelStreams.of(new ModelChunk.TextDelta("late"), STOP));
 
     reader.end(new CancellationException("closed"));
     reader.read(stream);
 
     assertInstanceOf(CancellationException.class, reader.outcome().streamError());
+    assertEquals(0, stream.asked);
+    assertEquals(0, stream.taken);
+    assertEquals(1, stream.closes);
+  }
+
+  @Test
+  void aReaderEndedBetweenTwoChunksDropsTheChunkReadAndAsksForNoOther() {
+    var stream = new Tracked(endingOnTake(reader, new ModelChunk.TextDelta("late"), STOP));
+
+    reader.read(stream);
+
+    assertInstanceOf(CancellationException.class, reader.outcome().streamError());
     assertEquals("", reader.outcome().assistantContent());
     assertEquals(List.of(), events);
+    assertEquals(1, stream.asked);
     assertEquals(1, stream.taken);
-    assertTrue(stream.closed.get());
+    assertEquals(1, stream.closes);
   }
 
   @Test
   void anErrorTheStreamThrowsAfterAnotherEndingStillEndsTheSession() {
     var failure = new AssertionError("late");
+    var failing = ModelStreams.failing(failure);
 
-    reader.end(new CancellationException("closed"));
-    reader.read(ModelStreams.failing(failure));
+    reader.read(
+        new CloseableIterator<>() {
+          @Override
+          public boolean hasNext() {
+            reader.end(new CancellationException("closed while reading"));
+            return failing.hasNext();
+          }
+
+          @Override
+          public ModelChunk next() {
+            return failing.next();
+          }
+
+          @Override
+          public void close() {
+            failing.close();
+          }
+        });
 
     assertInstanceOf(CancellationException.class, reader.outcome().streamError());
     assertSame(failure, state.ending().seal().orElseThrow());
@@ -400,6 +430,25 @@ final class TurnReaderTest {
     assertSame(failure, state.ending().seal().orElseThrow());
   }
 
+  /** A stream of {@code chunks} whose every {@code next()} ends {@code target} first. */
+  private static CloseableIterator<ModelChunk> endingOnTake(
+      TurnReader target, ModelChunk... chunks) {
+    var source = List.of(chunks).iterator();
+    return CloseableIterator.of(
+        new Iterator<>() {
+          @Override
+          public boolean hasNext() {
+            return source.hasNext();
+          }
+
+          @Override
+          public ModelChunk next() {
+            target.end(new CancellationException("ended as a chunk was taken"));
+            return source.next();
+          }
+        });
+  }
+
   /** A reader on {@link #clock} of an attempt that {@code started} then. */
   private TurnReader timedReader(Instant started) {
     return newReader(events::add, clock, started);
@@ -439,12 +488,16 @@ final class TurnReaderTest {
     return new TurnReader(state, emitter, clock, started);
   }
 
-  /** A stream that records its close and throws {@code onClose}, if any, from it. */
+  /**
+   * A stream that counts the chunks it is asked for and taken and its closes, and throws {@code
+   * onClose}, if any, from its close.
+   */
   private static final class Tracked implements CloseableIterator<ModelChunk> {
     private final CloseableIterator<ModelChunk> chunks;
     private final Throwable onClose;
-    private final AtomicBoolean closed = new AtomicBoolean();
+    private int asked;
     private int taken;
+    private int closes;
 
     Tracked(CloseableIterator<ModelChunk> chunks) {
       this(chunks, null);
@@ -457,6 +510,7 @@ final class TurnReaderTest {
 
     @Override
     public boolean hasNext() {
+      asked++;
       return chunks.hasNext();
     }
 
@@ -468,7 +522,7 @@ final class TurnReaderTest {
 
     @Override
     public void close() {
-      closed.set(true);
+      closes++;
       if (onClose instanceof RuntimeException unchecked) {
         throw unchecked;
       }
