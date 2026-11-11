@@ -208,7 +208,12 @@ final class SubagentSessionTest {
     var result =
         run(
             parent(parentModel, child(childModel))
-                .withSkill(Skill.of("pdf", "Extracts text from PDFs.", "Use pdfplumber."))
+                .withSkill(
+                    Skill.newBuilder()
+                        .withName("pdf")
+                        .withDescription("Extracts text from PDFs.")
+                        .withInstructions("Use pdfplumber.")
+                        .build())
                 .build());
 
     assertInstanceOf(ResultMessage.Success.class, result);
@@ -230,7 +235,12 @@ final class SubagentSessionTest {
             .withTextTurn("found")
             .build();
     var parentModel = callingMatching(Usage.of(1, 1));
-    var rules = Skill.of("matching-rules", "How to match members.", "Prefer shared hobbies.");
+    var rules =
+        Skill.newBuilder()
+            .withName("matching-rules")
+            .withDescription("How to match members.")
+            .withInstructions("Prefer shared hobbies.")
+            .build();
 
     var result = run(parent(parentModel, child(childModel).withSkill(rules)).build());
 

@@ -400,27 +400,29 @@ Hooks, declarative permissions, cost tracking, budget caps, session limits, cont
 
 ### Skills
 
-A skill, in the [Agent Skills](https://agentskills.io) format, is a name, a description and instructions, with optional files. `Skill.of(name, description, instructions)` builds one from strings; `new Skill(name, description, instructions, directory, files)` adds where its files live and the files themselves, each a `Supplier<String>` called only when the model reads that file. `withSkill(skill)` appends one and `withSkills(list)` replaces them. No preset adds a skill: adding one is your trust decision, since what a skill says reaches the model as instructions.
+A skill, in the [Agent Skills](https://agentskills.io) format, is a name, a description and instructions, with optional files. Build one with `Skill.newBuilder()`: `withName`, `withDescription` and `withInstructions` are required; `withDirectory(path)` says where its files live, and `withFile(path, content)` (or `withFiles(map)`) adds a file, its content a `Supplier<String>` called each time the model reads that file. A `Skill` shared by several sessions has its suppliers called concurrently. A name is at most 64 characters of `[a-z0-9]+(-[a-z0-9]+)*`; a file path or the directory holds no `&`, `<`, `>`, `"` and no control, format or line or paragraph separator character, so the model sees each exactly as it must spell it. `withSkill(skill)` appends one and `withSkills(list)` replaces them. No preset adds a skill: adding one is your trust decision, since what a skill says reaches the model as instructions.
 
 <!-- snippet: QuickStarts#skills -->
 ```java
 var releaseNotes =
-    Skill.of(
-        "release-notes",
-        "Writes release notes from the commits since the last tag.",
-        "List the commits since the last tag, group them by module and write one line for"
-            + " each change a user of the library would notice.");
+    Skill.newBuilder()
+        .withName("release-notes")
+        .withDescription("Writes release notes from the commits since the last tag.")
+        .withInstructions(
+            "List the commits since the last tag, group them by module and write one line for"
+                + " each change a user of the library would notice.")
+        .build();
 var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
 try (var session = AgentSession.open(options)) {
   System.out.println(session.send("Write the notes for the next release.").join());
 }
 ```
 
-- **Catalog.** The session's one system message is your prompt, a blank line, then an `<available_skills>` list of each skill's name and XML-escaped description, in `withSkills` order, after a line telling the model to load a matching skill before it starts. `SessionOptions.systemPrompt()` stays your text. A session without skills sends exactly what it sent before: no catalog and no tool.
-- **The `Skill` tool.** `{"skill": "<name>"}` answers the skill's instructions inside `<skill_content name="<name>">`, followed by its directory and its `<skill_resources>` list of files when it has them. `{"skill": "<name>", "file": "<path>"}` answers one listed file inside `<skill_file>`, calling only that file's supplier; a path that is not exactly one of the skill's files reads nothing. A skill already loaded in the conversation answers that it is loaded. Results are redacted, cut to `maxToolResultChars` and evented like any tool's.
-- **Permissions.** `Skill` is a `READ` tool keyed `Skill(<name>)` or `Skill(<name>/<file>)`, so it runs without asking in every mode but `LOCKED_DOWN`. `PermissionRule.of("Skill", "pdf")` covers loading `pdf` only and `"pdf/**"` the skill and its files; hooks apply as to any tool. A tool of yours named `Skill` collides only in a session with skills.
-- **Compaction.** When a compaction removes what the model loaded, the session puts each such skill back right after the system message, as a user message tagged `MessageOrigin.SKILL` holding the text the model was given, whatever compactor you set; it survives any number of compactions. A `PreModelTurnHook`'s `MutateHistory` is yours: nothing is put back after it.
-- **Reopening.** What the model loaded is read from the history, so a reopened session needs nothing more in its store. A skill no longer in the options stays in the conversation as sent, but cannot be loaded and is not put back; changed instructions reach the model only in a new session.
+- **Catalog.** The session's one system message is your prompt, a blank line, a line telling the model to load a matching skill before it starts, a blank line, then an `<available_skills>` list of each skill's name and XML-escaped description, in `withSkills` order. `SessionOptions.systemPrompt()` stays your text. A session without skills sends exactly what it sent before: no catalog and no tool.
+- **The `Skill` tool.** `{"skill": "<name>"}` answers the skill's instructions inside `<skill_content name="<name>">`, followed by its directory and its `<skill_resources>` list of files when it has them. Once the skill is loaded in the conversation, `{"skill": "<name>", "file": "<path>"}` answers one listed file inside `<skill_file>`, calling only that file's supplier; before, it answers that the skill must be loaded first, and a path that is not exactly one of the skill's files reads nothing. A skill already loaded in the conversation answers that it is loaded. Results are redacted, cut to `maxToolResultChars` and evented like any tool's: instructions longer than that are cut once, and the cut part is not served again.
+- **Permissions.** `Skill` is a `READ` tool keyed `Skill(<name>)` or `Skill(<name>/<file>)`, so it runs without asking in every mode but `LOCKED_DOWN`. Since a skill's files are readable only once it is loaded, denying `Skill(pdf)` (`PermissionRule.of("Skill", "pdf")`) covers the skill and its files, while a rule over `Skill(pdf/**)` restricts its files alone; hooks apply as to any tool. A tool of yours named `Skill` collides only in a session with skills.
+- **Compaction.** When a compaction removes what the model loaded, the session puts each such skill back right after the system message, as a user message tagged `MessageOrigin.SKILL` holding the text the model was given, whatever compactor you set; it survives any number of compactions. Skills put back come in the order they were first loaded, before any activation your compactor kept. A `PreModelTurnHook`'s `MutateHistory` is yours: nothing is put back after it.
+- **Reopening.** What the model loaded is read from the history, so a reopened session needs nothing more in its store. A skill no longer in the options stays in the conversation as sent, but cannot be loaded and is not put back; changed instructions reach the model only in a new session. Changing a session's skills or their descriptions between runs changes its system prompt and tool list: on Anthropic models that bind reasoning the next request drops earlier reasoning once, with one cache miss, and Gemini resends the whole conversation once.
 - **Subagents.** A child sees only the skills in its subagent's own options, never the parent's.
 - **Scripts.** Helios runs no skill code. A script runs through `Execute`, under your permission policy, at the path the activation's "Skill directory" names; making that path visible to your execution provider's sandbox is yours. To offer a user-typed `/skill-name`, find the skill in `options.skills()` and send its `instructions()` in a message of your own; such a message is not a load, so a compaction does not put it back.
 

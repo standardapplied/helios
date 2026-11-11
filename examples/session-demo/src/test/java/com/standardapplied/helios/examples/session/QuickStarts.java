@@ -107,11 +107,13 @@ final class QuickStarts {
 
   static void skills(Model model, Path repo) {
     var releaseNotes =
-        Skill.of(
-            "release-notes",
-            "Writes release notes from the commits since the last tag.",
-            "List the commits since the last tag, group them by module and write one line for"
-                + " each change a user of the library would notice.");
+        Skill.newBuilder()
+            .withName("release-notes")
+            .withDescription("Writes release notes from the commits since the last tag.")
+            .withInstructions(
+                "List the commits since the last tag, group them by module and write one line for"
+                    + " each change a user of the library would notice.")
+            .build();
     var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
     try (var session = AgentSession.open(options)) {
       System.out.println(session.send("Write the notes for the next release.").join());

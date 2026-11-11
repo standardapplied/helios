@@ -793,18 +793,20 @@ public record SessionOptions(
      * and the catalog of every skill's name and description in this order (the catalog alone
      * without a host prompt), and the session registers the built-in {@code Skill} tool. A call
      * {@code {"skill": <name>}} loads the skill: it answers with the skill's instructions, its
-     * directory when it has one, and the list of its files; a call that also names a {@code file}
-     * listed there answers with that file's text. A skill already loaded earlier in the
-     * conversation answers that it is loaded and reads nothing. It is a {@link
+     * directory when it has one, and the list of its files; once the skill is loaded, a call that
+     * also names a {@code file} listed there answers with that file's text. A skill already loaded
+     * in the conversation answers that it is loaded and reads nothing. It is a {@link
      * com.standardapplied.helios.session.tools.ToolCategory#READ READ} tool keyed {@code
      * Skill(<name>)} or {@code Skill(<name>/<file>)}, so it runs without asking in every mode but
-     * {@code LOCKED_DOWN}, a permission rule allows or denies one skill or its files, and hooks
-     * apply to it as to any tool. A host tool named {@code Skill} fails {@link AgentSession#open}.
+     * {@code LOCKED_DOWN}; denying {@code Skill(<name>)} keeps the skill and so its files from the
+     * model, a rule over {@code Skill(<name>/**)} governs its files alone, and hooks apply to it as
+     * to any tool. A host tool named {@code Skill} fails {@link AgentSession#open}.
      *
      * <p>A compaction that removes what the model loaded gets it put back: right after the
      * compacted history's leading system messages, one user message per skill, tagged {@link
      * com.standardapplied.helios.session.store.MessageOrigin#SKILL}, with the text the model was
-     * given. A host that sends a skill's instructions in its own message, for a user-typed {@code
+     * given, in the order the skills were first loaded and before any activation the compactor
+     * kept. A host that sends a skill's instructions in its own message, for a user-typed {@code
      * /skill-name}, sends no activation, so a compaction does not put that message back.
      *
      * <p>Skills are the host's trust decision: what a skill says reaches the model as instructions,

@@ -27,7 +27,10 @@ import java.util.Optional;
  * files, and the compactor wrapper that puts back what a compaction removed of the skills the model
  * loaded. Which skills are loaded is read from the history alone: a {@code Skill} tool result, or a
  * user message tagged {@link MessageOrigin#SKILL}, that opens with a session skill's {@code
- * <skill_content>} tag. The tool reaches its run's history through {@link Run#stateOfThisThread}.
+ * <skill_content>} tag. Only a loaded skill's files can be read, so a rule over {@code
+ * Skill(<name>)} governs the skill and its files. The tool reaches its run's history through {@link
+ * Run#stateOfThisThread}. The description is the one text it escapes: {@link Skill} refuses every
+ * character a path or the directory would need escaped.
  */
 final class SkillTool {
 
@@ -92,7 +95,8 @@ final class SkillTool {
   /**
    * {@code compactor}, followed by putting back, right after the compacted history's leading system
    * messages, one tagged user message per skill loaded before the compaction and not after it,
-   * carrying its latest activation's text, in the order of each skill's first activation.
+   * carrying its latest activation's text, in the order of each skill's first activation. A skill
+   * whose activation the compactor kept stays where the compactor left it, after the ones put back.
    */
   ContextCompactor keeping(ContextCompactor compactor) {
     return (history, context) -> putBack(history, compactor.compact(history, context));
@@ -155,17 +159,23 @@ final class SkillTool {
       return ToolResult.failure(
           "Skill: no skill is named \"" + name + "\"; the skills are " + skills.keySet());
     }
+    var loaded = activations(Run.stateOfThisThread().history().snapshot()).containsKey(name);
     var file = ToolArgs.stringArg(args, "file");
     if (!Strings.isBlank(file)) {
-      return read(skill, file);
+      return loaded ? read(skill, file) : notLoaded(name);
     }
-    if (activations(Run.stateOfThisThread().history().snapshot()).containsKey(name)) {
+    if (loaded) {
       return ToolResult.success(
           "Skill \""
               + name
               + "\" is already loaded; its instructions are earlier in this conversation.");
     }
     return ToolResult.success(content(skill));
+  }
+
+  private static ToolResult notLoaded(String name) {
+    return ToolResult.failure(
+        "Skill: skill \"" + name + "\" is not loaded; load the skill before you read its files");
   }
 
   private static ToolResult read(Skill skill, String path) {
@@ -185,7 +195,7 @@ final class SkillTool {
         "<skill_file skill=\""
             + skill.name()
             + "\" path=\""
-            + escaped(path)
+            + path
             + "\">\n"
             + text
             + "\n</skill_file>");
@@ -203,14 +213,14 @@ final class SkillTool {
             directory ->
                 content
                     .append("\nSkill directory: ")
-                    .append(escaped(directory))
+                    .append(directory)
                     .append(
                         "\nRelative paths in this skill are relative to the skill directory.\n"));
     if (!skill.files().isEmpty()) {
       content.append("\n<skill_resources>\n");
       skill.files().keySet().stream()
           .sorted()
-          .forEach(path -> content.append("<file>").append(escaped(path)).append("</file>\n"));
+          .forEach(path -> content.append("<file>").append(path).append("</file>\n"));
       content.append("</skill_resources>\n");
     }
     return content.append("</skill_content>").toString();

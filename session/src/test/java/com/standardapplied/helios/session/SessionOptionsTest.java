@@ -764,9 +764,9 @@ final class SessionOptionsTest {
 
   @Test
   void skillsDefaultToNoneAppendReplaceAndSurviveToBuilder() {
-    var a = Skill.of("a", "first", "do a");
-    var b = Skill.of("b", "second", "do b");
-    var c = Skill.of("c", "third", "do c");
+    var a = skill("a", "first", "do a");
+    var b = skill("b", "second", "do b");
+    var c = skill("c", "third", "do c");
 
     var built =
         SessionOptions.newBuilder().withModel(stubModel()).withSkill(a).withSkill(b).build();
@@ -779,13 +779,32 @@ final class SessionOptionsTest {
         List.of(c, a), built.toBuilder().withSkills(List.of(c)).withSkill(a).build().skills());
   }
 
+  private static Skill skill(String name, String description, String instructions) {
+    return Skill.newBuilder()
+        .withName(name)
+        .withDescription(description)
+        .withInstructions(instructions)
+        .build();
+  }
+
+  @Test
+  void theOptionsDoNotShareTheBuildersSkills() {
+    var builder =
+        SessionOptions.newBuilder().withModel(stubModel()).withSkill(skill("a", "first", "do a"));
+    var built = builder.build();
+
+    builder.withSkill(skill("b", "second", "do b"));
+
+    assertEquals(List.of("a"), built.skills().stream().map(Skill::name).toList());
+  }
+
   @Test
   void twoSkillsWithOneNameAreRefusedAtBuildNamingIt() {
     var builder =
         SessionOptions.newBuilder()
             .withModel(stubModel())
-            .withSkill(Skill.of("pdf", "reads PDFs", "a"))
-            .withSkill(Skill.of("pdf", "reads PDFs too", "b"));
+            .withSkill(skill("pdf", "reads PDFs", "a"))
+            .withSkill(skill("pdf", "reads PDFs too", "b"));
 
     var refused = assertThrows(IllegalArgumentException.class, builder::build);
 
