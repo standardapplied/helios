@@ -202,6 +202,34 @@ class GeminiConversationRequestTest extends ConversationRequestContract {
     assertEquals(List.of("Hi", "Hello, world.", "Again"), turnTexts(second));
   }
 
+  /**
+   * A partial turn, the text a cut call streamed, carries no interaction, so the request after it
+   * sends the whole conversation once instead of continuing the interaction before it.
+   */
+  @Test
+  void aPartialTurnAfterAnInteractionIsSentWholeWithoutAPreviousInteraction() {
+    var history = new ArrayList<>(List.of(Message.system("sys"), Message.user("Hi")));
+    var partial =
+        Message.assistant("Once upon", List.of(), Map.of("helios.origin", "partial-turn"));
+
+    var requests =
+        ModelHarness.exchange(
+            List.of(Golden.read(reply())),
+            modelAt(),
+            model -> {
+              history.add(model.chat(history, List.of()).toMessage());
+              history.add(Message.user("Tell me a story."));
+              history.add(partial);
+              history.add(Message.user("Go on."));
+              model.chat(history, List.of());
+            });
+
+    var last = parse(requests.getLast().body());
+    assertNull(last.get("previous_interaction_id"));
+    assertEquals(
+        List.of("Hi", "Hello, world.", "Tell me a story.", "Once upon", "Go on."), turnTexts(last));
+  }
+
   @Test
   void aRolledBackPromptDoesNotContinuePastATurnMadeWithoutContinuation() {
     var history = new ArrayList<>(List.of(Message.system("before"), Message.user("Hi")));

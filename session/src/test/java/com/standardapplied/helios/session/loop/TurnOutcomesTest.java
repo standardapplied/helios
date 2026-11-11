@@ -113,7 +113,8 @@ final class TurnOutcomesTest {
   @Test
   void aTurnCancelledWhileItsStreamIsOpenRunsNoToolAndEndsCancelled() {
     var callDelivered = new CountDownLatch(1);
-    var model = streaming(openAfterCall(callDelivered));
+    var model =
+        streaming(ModelStreams.stalled(callDelivered::countDown, new ModelChunk.ToolUseStop(CALL)));
     var run = new FutureTask<>(() -> run(model, SessionLimits.defaults()));
     Thread.ofVirtual().start(run);
 
@@ -250,35 +251,5 @@ final class TurnOutcomesTest {
 
   private static Model failingAfterCall(RuntimeException failure) {
     return streaming(ModelStreams.failing(failure, new ModelChunk.ToolUseStop(CALL)));
-  }
-
-  /**
-   * A stream that yields the tool call, counts {@code delivered} down at the next read and then
-   * stays open until closed.
-   */
-  private static CloseableIterator<ModelChunk> openAfterCall(CountDownLatch delivered) {
-    var open = ModelStreams.stalled(delivered::countDown);
-    return new CloseableIterator<>() {
-      private boolean sent;
-
-      @Override
-      public boolean hasNext() {
-        return !sent || open.hasNext();
-      }
-
-      @Override
-      public ModelChunk next() {
-        if (sent) {
-          return open.next();
-        }
-        sent = true;
-        return new ModelChunk.ToolUseStop(CALL);
-      }
-
-      @Override
-      public void close() {
-        open.close();
-      }
-    };
   }
 }

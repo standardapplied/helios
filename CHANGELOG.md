@@ -11,9 +11,21 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   no forced tool choice, reasoning bound to its prompt, and list prices of $8 / $40 per million
   input / output tokens with $0.20 cache reads in `AnthropicPricing`, whose `AS_OF` is now
   2026-11-11.
+- `MessageOrigin.PARTIAL_TURN` (`helios.origin`: `partial-turn`): the text a model call streamed
+  before its stream ended without completing; its tool calls and reasoning are not kept.
+- `ModelStreams.stalled(Runnable onStall, ModelChunk... chunks)` in `helios-testing`: a stream that
+  yields `chunks`, runs `onStall` once, then stalls until closed, keeping an interrupt. It takes the
+  place of `stalled(Runnable)`, which every existing call still compiles against.
 
 ### Changed
 
+- A model call whose stream ends without completing (`interrupt()`, `close()`, the wall clock, a
+  stream failure, the last attempt's once retries run out, the stream idle timeout) keeps the text
+  it streamed as the run's last assistant message, tagged `PARTIAL_TURN`, without tool calls or
+  provider metadata; blank text keeps nothing. It is stored with the run's `RunEnded`, and a later
+  run, in the same session or one reopened under its id, sends it as a text-only assistant turn
+  before its user message. A schema rejection still keeps its `REJECTED_ATTEMPT` and
+  `SCHEMA_CORRECTION` and no partial; a retried attempt's text is never kept.
 - `SseReader` reads a stream's lines on the consuming thread, with one idle watchdog per stream, a
   virtual thread named `helios-sse-idle` started by the first line asked for and ended with the
   stream; it used to read every line on a virtual thread of its own.
@@ -33,6 +45,11 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
   `temperature` or `topP` now fails when the model is created; the API answered it with a 400
   before.
+- A `switch` over `MessageOrigin` without `default` gains a case.
+- On Anthropic models that bind reasoning, the request after a partial turn drops the reasoning of
+  earlier turns once, with one cache miss. Gemini resends the whole conversation once instead of
+  continuing the previous interaction.
+- Code compiled against `ModelStreams.stalled(Runnable)` is recompiled; the source is unchanged.
 - A blocked read is released only by the body: the idle timeout and `close()` close it, and an
   interrupt is seen once the body answers it. A body given to the `InputStream` constructor whose
   `read` ignores both keeps its consumer blocked past the idle timeout. The JDK HTTP client's

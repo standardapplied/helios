@@ -12,8 +12,8 @@ import java.util.Optional;
  * Who wrote a message the session added to its history itself, rather than the caller or the
  * model's answer: the tag rides in {@link Message#metadata()} under {@link #KEY}, as the value's
  * lower-case name with hyphens ({@code schema-correction}, {@code rejected-attempt}, {@code
- * hook-inject}), so every store keeps it and no provider sends it. A message without the tag is the
- * caller's input or the model's own turn.
+ * hook-inject}, {@code partial-turn}), so every store keeps it and no provider sends it. A message
+ * without the tag is the caller's input or the model's own turn.
  */
 public enum MessageOrigin {
 
@@ -24,7 +24,13 @@ public enum MessageOrigin {
   REJECTED_ATTEMPT,
 
   /** The user message a hook's {@code Inject} outcome queued. */
-  HOOK_INJECT;
+  HOOK_INJECT,
+
+  /**
+   * The text a model call streamed before its stream ended without completing; its tool calls and
+   * reasoning are not kept.
+   */
+  PARTIAL_TURN;
 
   /** The {@link Message#metadata()} key the tag is stored under. */
   public static final String KEY = "helios.origin";
