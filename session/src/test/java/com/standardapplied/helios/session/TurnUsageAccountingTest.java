@@ -45,8 +45,15 @@ class TurnUsageAccountingTest {
   private static final CostCalculator RATES =
       CostCalculator.staticTable(
           Map.of(
-              MAIN, new Pricing(1_000_000L, 2_000_000L),
-              SUMMARIZER, new Pricing(0L, 0L, 1_000_000L, 500_000L)));
+              MAIN,
+              new Pricing(1_000_000L, 2_000_000L),
+              SUMMARIZER,
+              Pricing.newBuilder()
+                  .withInputMicroUsdPerMillion(0L)
+                  .withOutputMicroUsdPerMillion(0L)
+                  .withCacheWriteMicroUsdPerMillion(1_000_000L)
+                  .withCacheReadMicroUsdPerMillion(500_000L)
+                  .build()));
 
   @Test
   void aPreToolUseStopCarriesTheTurnThatCalledTheTool() {

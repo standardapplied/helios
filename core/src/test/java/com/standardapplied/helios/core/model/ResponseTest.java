@@ -256,7 +256,13 @@ class ResponseTest {
 
   @Test
   void pricingCostsAUsageReportingReasoningAsTheSameUsageWithout() {
-    var pricing = new CostCalculator.Pricing(3_000_000L, 15_000_000L, 3_750_000L, 300_000L);
+    var pricing =
+        CostCalculator.Pricing.newBuilder()
+            .withInputMicroUsdPerMillion(3_000_000L)
+            .withOutputMicroUsdPerMillion(15_000_000L)
+            .withCacheWriteMicroUsdPerMillion(3_750_000L)
+            .withCacheReadMicroUsdPerMillion(300_000L)
+            .build();
 
     assertEquals(
         pricing.cost(cachedCounts().build()),
