@@ -123,12 +123,9 @@ final class RunEndedTerminalsTest {
             .withLimits(SessionLimits.newBuilder().withMaxBudgetMicroUsd(1_000_000L).build()));
   }
 
+  /** The session's clock never moves, so the wall clock alone ends the run. */
   private ResultMessage pastItsWallClock() {
-    return stalledThen(
-        session -> {
-          now.set(now.get().plus(SessionLimits.defaults().maxWallClock()).plusSeconds(1));
-          ((AgentSessionImpl) session).lifecycle.expireWallClock();
-        });
+    return stalledThen(session -> ((AgentSessionImpl) session).lifecycle.expireWallClock());
   }
 
   private ResultMessage failedTransiently() {

@@ -173,6 +173,7 @@ final class Run {
 
   /** What the wall clock does at its deadline, package-private so a test can run it at once. */
   void expireWallClock() {
+    state.expireWallClock();
     state.cancel("maxWallClock exceeded after " + maxWallClock.toMillis() + "ms");
   }
 

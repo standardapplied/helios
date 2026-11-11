@@ -313,12 +313,15 @@ final class SubagentSessionTest {
 
   static Stream<Arguments> waysTheParentStopsItsCall() {
     return Stream.of(
-        Arguments.of("an interrupt"), Arguments.of("a close"), Arguments.of("its wall clock"));
+        Arguments.of("an interrupt", ResultMessage.Cancelled.class),
+        Arguments.of("a close", ResultMessage.Cancelled.class),
+        Arguments.of("its wall clock", ResultMessage.ErrorMaxWallClock.class));
   }
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("waysTheParentStopsItsCall")
-  void whatStopsTheParentsRunCancelsTheChildAndClosesIt(String how) {
+  void whatStopsTheParentsRunCancelsTheChildAndClosesIt(
+      String how, Class<? extends ResultMessage> parentTerminal) {
     var started = new CountDownLatch(1);
     var closed = new CountDownLatch(1);
     var provider = new RecordingProvider(new ArrayList<>());
@@ -333,7 +336,7 @@ final class SubagentSessionTest {
         case "a close" -> session.close();
         default -> ((AgentSessionImpl) session).lifecycle.expireWallClock();
       }
-      assertInstanceOf(ResultMessage.Cancelled.class, Await.value("the parent's result", result));
+      assertInstanceOf(parentTerminal, Await.value("the parent's result", result));
       Await.latch("the child's close", closed);
     }
 
