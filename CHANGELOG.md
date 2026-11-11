@@ -81,6 +81,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - A transiently failed model call is no longer retried once the run's spend exceeds
   `maxBudgetMicroUsd`: the run ends in `ErrorMaxBudgetUsd` after the attempt that crossed it, with
   no `TurnRetried` and no back-off. Before, the remaining attempts were made and billed first.
+- A run cancelled before its model call is read (by a `PreModelTurnHook`, `interrupt()`, `close()`
+  or the wall clock) no longer sends the request; it could, depending on thread timing.
 
 ### Compatibility
 
