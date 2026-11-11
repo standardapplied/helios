@@ -24,10 +24,12 @@ import java.util.Objects;
  * never null, possibly empty (a tool-call-only turn produces empty content); on a failed turn it is
  * the text streamed before the failure. {@code usage} is the {@link
  * com.standardapplied.helios.core.model.ModelChunk.MessageStop MessageStop} usage from the same
- * turn — the authoritative final tally for the turn. {@code metadata} carries provider-round-trip
- * data (Gemini thought signatures, Anthropic citation pointers, …) lifted off the {@code
- * MessageStop} chunk; the agent loop stores it on the assistant message so it survives into the
- * next turn's follow-up request.
+ * turn — the authoritative final tally for the turn — or, for a turn that ended without one, the
+ * latest {@link com.standardapplied.helios.core.model.ModelChunk.UsageDelta UsageDelta} usage, zero
+ * when the provider reported none. {@code metadata} carries provider-round-trip data (Gemini
+ * thought signatures, Anthropic citation pointers, …) lifted off the {@code MessageStop} chunk; the
+ * agent loop stores it on the assistant message so it survives into the next turn's follow-up
+ * request.
  *
  * <p>{@code streamError} carries the throwable that ended the turn's stream — including its full
  * cause chain — so {@link StopClassifier} can surface {@code SerializedError.of(streamError)}
@@ -43,7 +45,7 @@ import java.util.Objects;
  * @param toolCalls the tool calls the stream completed, in order; non-null, copied
  * @param citations the grounding citations on the stream's message stop; non-null, copied, may be
  *     empty
- * @param usage final usage at message end; non-null
+ * @param usage the usage the turn's provider reported; non-null
  * @param metadata provider-specific assistant-message metadata; non-null, copied, may be empty
  * @param streamError the throwable that terminated the final attempt of the turn, or {@code null}
  *     when the stream completed

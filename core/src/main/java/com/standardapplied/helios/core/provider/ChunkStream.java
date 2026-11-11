@@ -15,10 +15,11 @@ import java.util.function.Consumer;
  * A turn's event stream as the {@link ModelChunk}s a model yields, one chunk per event; the {@link
  * StreamEvent.Done} becomes the {@link ModelChunk.MessageStop} once its response passes the turn's
  * check. A {@link StreamEvent.Error}, and events that end without a {@code Done}, are thrown from
- * {@code hasNext()} after closing the events. Once the stream is closed or its reading thread
- * interrupted (the interrupt kept), whatever is read, a chunk read ahead included, is thrown as a
- * {@link CancellationException}, unless it is an {@link Error} or a {@link CompletionException}
- * carrying one, so nothing retries a failure read then.
+ * {@code hasNext()} after closing the events; an error whose partial reports usage first yields it
+ * as a {@link ModelChunk.UsageDelta}, so a reader counts what the provider billed. Once the stream
+ * is closed or its reading thread interrupted (the interrupt kept), whatever is read, a chunk read
+ * ahead included, is thrown as a {@link CancellationException}, unless it is an {@link Error} or a
+ * {@link CompletionException} carrying one, so nothing retries a failure read then.
  */
 final class ChunkStream implements CloseableIterator<ModelChunk> {
 
@@ -26,6 +27,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
   private final StreamFailure failures;
   private final Consumer<Response<Void>> check;
   private ModelChunk next;
+  private RuntimeException failed;
   private boolean ended;
   private volatile boolean closed;
 
@@ -53,7 +55,7 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
       next = null;
       ended = true;
       close();
-      throw cancelled(null);
+      throw cancelled(failed);
     }
     if (next == null) {
       next = read();
@@ -63,12 +65,15 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
 
   private ModelChunk read() {
     try {
+      if (failed != null) {
+        throw failed;
+      }
       if (!events.hasNext()) {
         throw failures.unterminated();
       }
       var chunk = chunkOf(events.next());
       if (stopped()) {
-        throw cancelled(null);
+        throw cancelled(failed);
       }
       return chunk;
     } catch (RuntimeException failure) {
@@ -135,7 +140,16 @@ final class ChunkStream implements CloseableIterator<ModelChunk> {
         events.close();
         yield ModelChunk.MessageStop.of(response);
       }
-      case StreamEvent.Error error -> throw failures.of(error);
+      case StreamEvent.Error error -> usageBefore(failures.of(error), error.partial().usage());
     };
+  }
+
+  /** The usage a failed turn reported, with {@code failure} thrown next; else {@code failure}. */
+  private ModelChunk usageBefore(RuntimeException failure, Response.Usage usage) {
+    if (usage == null) {
+      throw failure;
+    }
+    failed = failure;
+    return new ModelChunk.UsageDelta(usage);
   }
 }

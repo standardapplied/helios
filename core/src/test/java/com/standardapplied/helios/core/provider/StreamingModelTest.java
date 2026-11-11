@@ -62,6 +62,7 @@ class StreamingModelTest {
           (map, type) -> new Answer((String) map.get("summary")));
 
   private static final List<Message> MESSAGES = List.of(Message.user("hi"));
+  private static final Response.Usage REPORTED = Response.Usage.of(25, 3);
 
   private final List<Request> chatted = new CopyOnWriteArrayList<>();
   private Response<Void> reply = done("{\"summary\":\"ok\"}");
@@ -226,6 +227,39 @@ class StreamingModelTest {
   }
 
   @Test
+  void aFailedTurnsReportedUsageIsYieldedBeforeItsExceptionAndChatThrowsTheSame() {
+    var reset = new IOException("reset");
+    events = List.of(new StreamEvent.TextDelta("Hel"), error("Stream read error", reset, REPORTED));
+
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+
+    assertEquals(new ModelChunk.TextDelta("Hel"), stream.next());
+    assertEquals(new ModelChunk.UsageDelta(REPORTED), stream.next());
+    var thrown = assertThrows(TransientStreamException.class, stream::hasNext);
+    assertSame(reset, thrown.getCause());
+    assertFalse(stream.hasNext());
+    assertTrue(opened.closed());
+    var chatThrown =
+        assertThrows(
+            TransientStreamException.class, () -> model(config()).chat(MESSAGES, List.of()));
+    assertSame(reset, chatThrown.getCause());
+  }
+
+  @Test
+  void aStreamClosedOnceAFailedTurnsUsageWasReadThrowsItsExceptionAsTheCancellationsCause() {
+    var reset = new IOException("reset");
+    events = List.of(error("Stream read error", reset, REPORTED));
+    var stream = model(config()).chatStream(MESSAGES, List.of());
+    assertEquals(new ModelChunk.UsageDelta(REPORTED), stream.next());
+
+    stream.close();
+
+    var cancelled = assertThrows(CancellationException.class, stream::hasNext);
+    assertSame(reset, cancelled.getCause().getCause());
+    assertFalse(stream.hasNext());
+  }
+
+  @Test
   void chatStreamFailsAStreamThatEndsWithoutItsTerminalEvent() {
     events = List.of(new StreamEvent.TextDelta("Hel"));
 
@@ -319,7 +353,7 @@ class StreamingModelTest {
   @Test
   void aRetryableErrorReadWhileTheReaderIsInterruptedIsThrownAsCancellationAndKeepsTheInterrupt() {
     var reset = new IOException("Connection reset");
-    var interrupting = new InterruptingEvents(error("Stream read error", reset));
+    var interrupting = new InterruptingEvents(error("Stream read error", reset, REPORTED));
     var stream =
         parts(config())
             .withExchange(request -> interrupting)
@@ -739,8 +773,15 @@ class StreamingModelTest {
   }
 
   private static StreamEvent.Error error(String message, Exception cause) {
+    return error(message, cause, null);
+  }
+
+  /** A failed turn's error event whose partial reports {@code usage}, or none when null. */
+  private static StreamEvent.Error error(String message, Exception cause, Response.Usage usage) {
     return new StreamEvent.Error(
-        message, cause, Response.newBuilder().withFinishReason(FinishReason.ERROR).build());
+        message,
+        cause,
+        Response.newBuilder().withFinishReason(FinishReason.ERROR).withUsage(usage).build());
   }
 
   /** The events of a completed {@code response}: its text, its tool calls, then its completion. */

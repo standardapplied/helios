@@ -18,9 +18,10 @@ import java.time.Instant;
  * CostCalculator} — the main model's turns at its own rate, and a {@link
  * com.standardapplied.helios.session.ContextCompactor}'s summary call at the compactor's model
  * rate, so a cheap Haiku compactor wired against an Opus main loop is not priced at Opus rates —
- * and its event carries exactly that usage and cost. A retried attempt is reported with zero usage
- * and is not accounted. A clock that stepped back during an attempt reports it with a zero
- * duration. No call is accounted without its event, and no event adds usage without it.
+ * and its event carries exactly that usage and cost. A failed attempt, retried or not, is accounted
+ * with the usage its provider reported before it failed. A clock that stepped back during an
+ * attempt reports it with a zero duration. No call is accounted without its event, and no event
+ * adds usage without it.
  */
 final class UsageAccounting {
 
@@ -41,7 +42,7 @@ final class UsageAccounting {
   }
 
   /**
-   * Account a turn's final attempt at the main model's rate and report it.
+   * Account a turn's attempt at the main model's rate and report it.
    *
    * @param turn the attempt's outcome, whose usage, finish reason and error are reported
    * @param attempt the attempt's 1-based number
@@ -55,15 +56,6 @@ final class UsageAccounting {
         new Call(model.id(), attempt, turn.finishReason(), turn.usage(), turn.streamError()),
         started,
         ended);
-  }
-
-  /**
-   * Report an attempt that failed transiently and is retried, with zero usage; it is not accounted.
-   */
-  void reportRetried(
-      SessionState state, int attempt, Throwable error, Instant started, Instant ended) {
-    var call = new Call(model.id(), attempt, FinishReason.ERROR, Usage.of(0, 0), error);
-    emit(state, call, CostEstimate.zero(), started, ended);
   }
 
   /**

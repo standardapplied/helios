@@ -469,13 +469,12 @@ public sealed interface QueryEvent
   }
 
   /**
-   * A model attempt ended: one event per attempt, a compactor's summary call included. An attempt
-   * the session accounts (a turn's final attempt, which a schema self-correction also is, and a
-   * compactor's call that reports tokens) carries exactly the usage it added to the run's totals
-   * and the cost computed for that usage, so the events' usage sums to the run's; an attempt that
-   * failed transiently and is retried carries zero usage and cost, and follows its {@link
-   * TurnRetried} once the back-off elapsed. An attempt a host {@link java.lang.Error} ended has
-   * none. A cost calculator that fails leaves the call's usage accounted at zero cost.
+   * A model attempt ended: one event per attempt, a compactor's summary call included. Each carries
+   * exactly the usage the session added to the run's totals for it, the usage its provider reported
+   * even when the attempt failed or was cut short, and the cost computed for that usage, so the
+   * events' usage sums to the run's; an attempt that failed transiently and is retried follows its
+   * {@link TurnRetried} once the back-off ended. An attempt a host {@link java.lang.Error} ended
+   * has none. A cost calculator that fails leaves the call's usage accounted at zero cost.
    *
    * @param sessionId the session id
    * @param runId the run id

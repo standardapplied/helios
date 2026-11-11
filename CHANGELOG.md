@@ -39,6 +39,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Fixed
 
+- A model call cut short counts the tokens its provider reported; spend and budget no longer
+  under-count it. A stream that fails yields a `ModelChunk.UsageDelta` with the usage its error's
+  partial reports just before the failure, the session keeps the latest usage a call reported
+  whatever ends it (a stream failure, the idle timeout, `interrupt()`, `close()`, the wall clock),
+  and a transiently failed attempt that is retried is accounted like any other: its
+  `QueryEvent.ModelCallEnded` carries its usage and cost, which the run's totals, its budget check,
+  its terminal and a parent run's spend include. A call whose provider reported nothing still
+  counts zero.
 - `AnthropicModelId.CLAUDE_MYTHOS_5_1` now binds reasoning, as Anthropic's preserved-thinking page
   requires: a Mythos 5.1 session whose system prompt or tools change no longer replays thinking
   blocks from before the change, which the API rejects with a 400.

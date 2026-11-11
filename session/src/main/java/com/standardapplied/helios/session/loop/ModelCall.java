@@ -78,11 +78,9 @@ final class ModelCall {
    * com.standardapplied.helios.session.ResultMessage.ErrorTransientStream} via {@link
    * StopClassifier}.
    *
-   * <p>Every attempt is reported once through {@link UsageAccounting}, when it is known whether it
-   * is retried: the final attempt is accounted, a retried one is reported with zero usage once its
-   * back-off elapsed, so an attempt whose back-off the run's cancellation cuts short is the final
-   * one and is accounted, while one whose event delivery the run's cancellation follows stays
-   * reported as retried.
+   * <p>Every attempt, retried or final, is accounted once through {@link UsageAccounting} with the
+   * usage its provider reported, since the provider bills each: the final attempt as its stream
+   * ends, a retried one once its back-off ended, elapsed or cut short by the run's cancellation.
    *
    * <p>Non-transient throwables ({@link StructuredOutputParseException}, the provider's exception
    * of an idle stream, or any other unchecked exception opening or reading the stream) end the
@@ -119,12 +117,9 @@ final class ModelCall {
               backoff,
               transientErr.providerName(),
               SerializedError.of(transientErr).redactedBy(collaborators.secrets().redactor())));
-      if (!sleepHonouringCancellation(backoff, state.cancellation())) {
-        accounting.accountTurn(state, turn, attempt, started, ended);
-        return turn.withStreamAttempts(attempt);
-      }
-      accounting.reportRetried(state, attempt, transientErr, started, ended);
-      if (stopped(state)) {
+      var slept = sleepHonouringCancellation(backoff, state.cancellation());
+      accounting.accountTurn(state, turn, attempt, started, ended);
+      if (!slept || stopped(state)) {
         return turn.withStreamAttempts(attempt);
       }
     }
