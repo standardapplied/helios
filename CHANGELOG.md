@@ -19,6 +19,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   before its stream ended without completing; its tool calls and reasoning are not kept.
 - `ModelStreams.stalled(Runnable onStall, ModelChunk... chunks)` in `helios-testing`: a stream that
   yields `chunks`, runs `onStall` once, then stalls until closed, keeping an interrupt.
+- `Response.RESPONSE_MODEL_KEY` (`response.model`): the model the provider reports served a
+  response, from Anthropic's `message.model`, Gemini's `interaction.model` and OpenAI's
+  `response.model`; absent when the provider reports none. A session's `chat` span carries it as
+  `gen_ai.response.model`.
 
 ### Changed
 
@@ -100,6 +104,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   before its exception. `UsageDelta` is a cumulative snapshot: a `Model` that yields several makes
   each the total so far. On a failed turn that reported usage, a `PostModelTurnHook` sees that
   usage, and its prompt size anchors the history's token count.
+- Each provider's assistant messages, and the stored session entries holding them, carry one more
+  metadata key, `response.model`; no provider sends it back.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 

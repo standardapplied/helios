@@ -2,6 +2,7 @@
 
 package com.standardapplied.helios.gemini;
 
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
@@ -20,14 +21,15 @@ import java.util.Objects;
 /**
  * Parses one Interactions API stream, one event at a time, into {@link StreamEvent}s: the step
  * events through {@link StreamedSteps}, the interaction's id and usage from its envelope and status
- * updates, and the assembled response at {@code interaction.completed}. The stream succeeds only
- * there, when that event's own interaction status is one the assembler counts as an ending and no
- * function call is still open; any other status, an unreadable event and function arguments that
- * are not a JSON object end it in an error, and an {@code error} event in one whose {@link
- * GeminiException} carries the reported code. An error that names recitation is Gemini's recitation
- * filter blocking the response: it ends the stream with what streamed before it, finishing with
- * {@link FinishReason#CONTENT_FILTER} and Gemini's message as the refusal's explanation. A body
- * that ends early with a bare {@code {"error":...}} line ends as that error event would.
+ * updates, the model that served it from its envelope, and the assembled response at {@code
+ * interaction.completed}. The stream succeeds only there, when that event's own interaction status
+ * is one the assembler counts as an ending and no function call is still open; any other status, an
+ * unreadable event and function arguments that are not a JSON object end it in an error, and an
+ * {@code error} event in one whose {@link GeminiException} carries the reported code. An error that
+ * names recitation is Gemini's recitation filter blocking the response: it ends the stream with
+ * what streamed before it, finishing with {@link FinishReason#CONTENT_FILTER} and Gemini's message
+ * as the refusal's explanation. A body that ends early with a bare {@code {"error":...}} line ends
+ * as that error event would.
  */
 final class GeminiStreamParser implements SseReader.Parser {
 
@@ -39,6 +41,7 @@ final class GeminiStreamParser implements SseReader.Parser {
   private final StreamedSteps steps = new StreamedSteps();
   private Response.Usage usage;
   private String interactionId;
+  private String model;
 
   /**
    * A parser for a stream of the interactions API {@code apiVersion} answering a request built
@@ -155,6 +158,7 @@ final class GeminiStreamParser implements SseReader.Parser {
         steps.result(),
         usage,
         propagateInteractionId ? interactionId : null,
+        model,
         apiVersion,
         promptStamp,
         finishReason,
@@ -162,7 +166,13 @@ final class GeminiStreamParser implements SseReader.Parser {
   }
 
   private StreamEvent envelope(InteractionResponse interaction) {
-    return interaction == null ? null : checkpoint(interaction.id(), interaction.usage());
+    if (interaction == null) {
+      return null;
+    }
+    if (!Strings.isBlank(interaction.model())) {
+      model = interaction.model();
+    }
+    return checkpoint(interaction.id(), interaction.usage());
   }
 
   private StreamEvent checkpoint(String id, InteractionUsage reported) {

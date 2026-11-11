@@ -12,10 +12,10 @@ import java.util.Map;
 
 /**
  * Assembles the response of a streamed turn, at its end or as far as it got: its text, tool calls,
- * finish reason, usage, thinking and citations, and the metadata a later turn needs to echo it —
- * each signed thinking block, the raw stop reason and refusal details, the verbatim content when
- * the turn needs it, the code execution container it ran in, and the stamp of the prompt the turn
- * was produced under.
+ * finish reason, usage, thinking and citations, the model the API reported serving it, and the
+ * metadata a later turn needs to echo it — each signed thinking block, the raw stop reason and
+ * refusal details, the verbatim content when the turn needs it, the code execution container it ran
+ * in, and the stamp of the prompt the turn was produced under.
  */
 final class AnthropicResponseAssembler {
 
@@ -26,8 +26,8 @@ final class AnthropicResponseAssembler {
 
   /**
    * The completion event of the turn in {@code blocks}, whose {@code stopReason} {@link
-   * #finishReason} knows, run in {@code container} and produced under {@code promptStamp}. A turn
-   * that called tools and stopped finishes with {@code TOOL_CALLS}.
+   * #finishReason} knows, run in {@code container}, produced under {@code promptStamp} and served
+   * by {@code model}. A turn that called tools and stopped finishes with {@code TOOL_CALLS}.
    */
   static StreamEvent.Done done(
       ContentBlocks blocks,
@@ -35,18 +35,21 @@ final class AnthropicResponseAssembler {
       String stopReason,
       ContentDelta.StopDetails stopDetails,
       ContentDelta.Container container,
-      String promptStamp) {
+      String promptStamp,
+      String model) {
     var finishReason = finishReason(stopReason);
     if (!blocks.toolUses().calls().isEmpty() && finishReason == FinishReason.STOP) {
       finishReason = FinishReason.TOOL_CALLS;
     }
     return new StreamEvent.Done(
-        response(blocks, usage, stopReason, stopDetails, container, promptStamp, finishReason));
+        response(
+            blocks, usage, stopReason, stopDetails, container, promptStamp, model, finishReason));
   }
 
   /**
-   * The response of the turn in {@code blocks} so far, run in {@code container} and produced under
-   * {@code promptStamp}, finishing with {@code finishReason}.
+   * The response of the turn in {@code blocks} so far, run in {@code container}, produced under
+   * {@code promptStamp} and served by {@code model}, or {@code null} when the API named none,
+   * finishing with {@code finishReason}.
    */
   static Response<Void> response(
       ContentBlocks blocks,
@@ -55,6 +58,7 @@ final class AnthropicResponseAssembler {
       ContentDelta.StopDetails stopDetails,
       ContentDelta.Container container,
       String promptStamp,
+      String model,
       FinishReason finishReason) {
     var thinkingBlocks = blocks.thinking().signed();
     return Response.newBuilder()
@@ -65,7 +69,8 @@ final class AnthropicResponseAssembler {
         .withThinking(blocks.thinking().text())
         .withCitations(blocks.text().citations())
         .withMetadata(
-            metadata(blocks, thinkingBlocks, stopReason, stopDetails, container, promptStamp))
+            metadata(
+                blocks, thinkingBlocks, stopReason, stopDetails, container, promptStamp, model))
         .build();
   }
 
@@ -90,13 +95,15 @@ final class AnthropicResponseAssembler {
       String stopReason,
       ContentDelta.StopDetails stopDetails,
       ContentDelta.Container container,
-      String promptStamp) {
+      String promptStamp,
+      String model) {
     var metadata = new HashMap<String, String>();
     if (!thinkingBlocks.isEmpty()) {
       metadata.put(ThinkingBlock.THINKING_BLOCKS_KEY, ThinkingBlock.encodeAll(thinkingBlocks));
     }
     putIfPresent(metadata, STOP_REASON_KEY, stopReason);
     putIfPresent(metadata, ReasoningReplay.PROMPT_STAMP_KEY, promptStamp);
+    putIfPresent(metadata, Response.RESPONSE_MODEL_KEY, model);
     if (stopDetails != null) {
       putIfPresent(metadata, Response.REFUSAL_CATEGORY_KEY, stopDetails.category());
       putIfPresent(metadata, Response.REFUSAL_EXPLANATION_KEY, stopDetails.explanation());

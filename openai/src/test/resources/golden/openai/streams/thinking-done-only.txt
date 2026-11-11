@@ -17,7 +17,7 @@ MessageStop[stopReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cache
 
 Let me think about this.
 
-Then answer.}, citations=[]]
+Then answer., response.model=gpt-5.6}, citations=[]]
 onComplete
 == chat
 Response[content=Hello!, parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=46, outputTokens=150, cacheCreationInputTokens=40, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006], thinking=**Planning**
@@ -28,4 +28,4 @@ Then answer., citations=[], metadata={openai.reasoning=**Planning**
 
 Let me think about this.
 
-Then answer.}]
+Then answer., response.model=gpt-5.6}]

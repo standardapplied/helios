@@ -7,6 +7,7 @@ import com.standardapplied.helios.anthropic.api.ApiStreamEvent;
 import com.standardapplied.helios.anthropic.api.ApiUsage;
 import com.standardapplied.helios.anthropic.api.ContentDelta;
 import com.standardapplied.helios.anthropic.api.MessagesResponse;
+import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.FinishReason;
 import com.standardapplied.helios.core.model.ProviderException;
 import com.standardapplied.helios.core.model.Response;
@@ -32,6 +33,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
   private String stopReason;
   private ContentDelta.StopDetails stopDetails;
   private ContentDelta.Container container;
+  private String model;
 
   /** A parser for the response to a request built under {@code promptStamp}. */
   AnthropicStreamParser(String promptStamp) {
@@ -52,7 +54,14 @@ final class AnthropicStreamParser implements SseReader.Parser {
   @Override
   public Response<Void> partial() {
     return AnthropicResponseAssembler.response(
-        blocks, usage(), stopReason, stopDetails, container, promptStamp, FinishReason.ERROR);
+        blocks,
+        usage(),
+        stopReason,
+        stopDetails,
+        container,
+        promptStamp,
+        model,
+        FinishReason.ERROR);
   }
 
   private StreamEvent on(ApiStreamEvent event, String payload) {
@@ -72,6 +81,9 @@ final class AnthropicStreamParser implements SseReader.Parser {
   private StreamEvent messageStart(MessagesResponse message) {
     if (message != null) {
       absorb(message.usage());
+      if (!Strings.isBlank(message.model())) {
+        model = message.model();
+      }
     }
     return null;
   }
@@ -121,7 +133,7 @@ final class AnthropicStreamParser implements SseReader.Parser {
       return failed("message_stop with unknown stop_reason: " + stopReason, null);
     }
     return AnthropicResponseAssembler.done(
-        blocks, usage(), stopReason, stopDetails, container, promptStamp);
+        blocks, usage(), stopReason, stopDetails, container, promptStamp, model);
   }
 
   private StreamEvent error(ApiStreamEvent.ApiError error) {
