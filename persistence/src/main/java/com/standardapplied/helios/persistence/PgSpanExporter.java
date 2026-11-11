@@ -88,11 +88,13 @@ public final class PgSpanExporter implements SpanExporter {
   private static final AttributeKey<Long> CACHE_READ =
       longKey("gen_ai.usage.cache_read.input_tokens");
   private static final AttributeKey<Long> CACHE_WRITE =
-      longKey("gen_ai.usage.cache_write.input_tokens");
+      longKey("gen_ai.usage.cache_creation.input_tokens");
+  private static final AttributeKey<Long> REASONING_TOKENS =
+      longKey("gen_ai.usage.reasoning.output_tokens");
   private static final AttributeKey<Long> COST = longKey("helios.cost.micro_usd");
 
   private static final Set<AttributeKey<?>> SHARED_COLUMNS =
-      Set.of(RUN_ID, INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, COST);
+      Set.of(RUN_ID, INPUT_TOKENS, OUTPUT_TOKENS, CACHE_READ, CACHE_WRITE, REASONING_TOKENS, COST);
   private static final Set<AttributeKey<?>> RUN_COLUMNS =
       Set.of(AGENT_NAME, CONVERSATION_ID, REQUEST_MODEL, INPUT_MESSAGES, OUTPUT_MESSAGES);
 
@@ -256,7 +258,9 @@ public final class PgSpanExporter implements SpanExporter {
 
   /**
    * The usage the session's attributes describe, its input count without the cached tokens
-   * OpenTelemetry's includes and its total the four counts' sum; null when the span carries none.
+   * OpenTelemetry's includes and its total the four counts' sum, an absent count zero; null when
+   * the span carries none. A reasoning count above the output count, which a host's span may carry,
+   * is cut to it, so one span cannot fail its batch.
    */
   private static Usage usage(Attributes attributes) {
     var input = attributes.get(INPUT_TOKENS);
@@ -265,11 +269,13 @@ public final class PgSpanExporter implements SpanExporter {
     }
     var cacheWrite = count(attributes, CACHE_WRITE);
     var cacheRead = count(attributes, CACHE_READ);
+    var output = count(attributes, OUTPUT_TOKENS);
     return Usage.of(
         Math.toIntExact(input - cacheWrite - cacheRead),
-        count(attributes, OUTPUT_TOKENS),
+        output,
         cacheWrite,
-        cacheRead);
+        cacheRead,
+        Math.min(count(attributes, REASONING_TOKENS), output));
   }
 
   private static int count(Attributes attributes, AttributeKey<Long> key) {

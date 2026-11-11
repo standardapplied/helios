@@ -1,11 +1,11 @@
 == chatStream
-UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37, reasoningTokens=0]]
 KeepAlive[]
 TextDelta[text=Hello]
 TextDelta[text=, world.]
 KeepAlive[]
-UsageDelta[usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37]]
-MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, response.model=claude-opus-5-5}, citations=[]]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37, reasoningTokens=0]]
+MessageStop[stopReason=STOP, usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37, reasoningTokens=0], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, response.model=claude-opus-5-5}, citations=[]]
 onComplete
 == chat
-Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, response.model=claude-opus-5-5}]
+Response[content=Hello, world., parsed=null, toolCalls=[], finishReason=STOP, usage=Usage[inputTokens=25, outputTokens=15, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=52, promptTokens=37, reasoningTokens=0], thinking=null, citations=[], metadata={anthropic.promptStamp=95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738, anthropic.stopReason=end_turn, response.model=claude-opus-5-5}]

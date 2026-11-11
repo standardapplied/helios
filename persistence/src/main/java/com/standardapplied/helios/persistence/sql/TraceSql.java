@@ -14,7 +14,8 @@ public final class TraceSql {
       """
       id, otel_trace_id, otel_span_id, name, start_time, end_time, error, attributes,
           input_text, output_text, session_id, model_id, total_tokens,
-          input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_micro_usd\
+          input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, reasoning_tokens,
+          cost_micro_usd\
       """;
 
   static final String FROM_TRACES_WITH_FEEDBACK =
@@ -35,7 +36,7 @@ public final class TraceSql {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB),
               ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?)
+              ?, ?, ?, ?, ?, ?)
           """;
 
   private static final String SELECT_WITH_FEEDBACK =

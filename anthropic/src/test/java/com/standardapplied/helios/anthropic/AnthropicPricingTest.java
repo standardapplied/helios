@@ -98,14 +98,13 @@ class AnthropicPricingTest {
     var calculator = AnthropicPricing.calculator(CachePolicy.shortLived());
 
     assertEquals(
-        CostEstimate.ofMicroUsd(5_000L),
-        calculator.cost("claude-haiku-5-5", new Usage(50_000, 0, 0, 0, 50_000, 50_000)));
+        CostEstimate.ofMicroUsd(5_000L), calculator.cost("claude-haiku-5-5", Usage.of(50_000, 0)));
   }
 
   @Test
   void haiku55TiersOnPromptTokensWithOneHundredThousandStillShort() {
-    var atLimit = new Usage(40_000, 1_000, 10_000, 50_000, 101_000, 100_000);
-    var overLimit = new Usage(40_000, 1_000, 10_000, 50_001, 101_001, 100_001);
+    var atLimit = Usage.of(40_000, 1_000, 10_000, 50_000);
+    var overLimit = Usage.of(40_000, 1_000, 10_000, 50_001);
     var shortLived = AnthropicPricing.calculator(CachePolicy.shortLived());
     var longLived = AnthropicPricing.calculator(CachePolicy.longLived());
 

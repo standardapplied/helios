@@ -618,6 +618,8 @@ A `chat` span carries `gen_ai.response.model` when the provider reported the mod
 `Response.metadata()` holds under `Response.RESPONSE_MODEL_KEY`, and `helios.model.first_chunk_ms` and `helios.model.first_text_ms`,
 whole milliseconds from the attempt's start to its first chunk of any kind and to its first text, each absent when the attempt had none;
 tokens per second is yours to derive.
+A `chat` span carries `gen_ai.usage.reasoning.output_tokens` when the provider reported reasoning tokens, a part of its output tokens
+(`Response.Usage.reasoningTokens()`); the run span carries the run's total.
 A compactor's summary call is a `chat` span with `helios.compaction` = `true` and no turn index.
 `TraceDetail.STANDARD` (the default) records no content; `VERBOSE` adds prompts, answers, tool arguments and results, redacted.
 `PgSpanExporter` stores the spans for `PgTraceStore`; your application adds `io.opentelemetry:opentelemetry-sdk`:
@@ -719,7 +721,7 @@ var promptRegistry = new PgPromptRegistry(pgConfig);
 var sessionStore = new PgSessionStore(pgConfig);
 ```
 
-Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
+Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. It only creates tables that are missing, so an upgrade also runs the release's DDL delta from `CHANGELOG.md`. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
 
 **Annotations.** `persistence.Annotation` is a structured note attached to a stored run or span (`subjectId`, the run id or the span id). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
 

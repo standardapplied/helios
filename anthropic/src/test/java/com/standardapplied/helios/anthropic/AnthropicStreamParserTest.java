@@ -239,6 +239,63 @@ class AnthropicStreamParserTest {
   }
 
   @Test
+  void theThinkingCountOfAMessageDeltaIsTheReasoningCountUntilADeltaReportsAnother() {
+    var started =
+        parser.parse(
+            "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2,"
+                + "\"cache_creation_input_tokens\":568,\"cache_read_input_tokens\":904,"
+                + "\"output_tokens\":3}}}");
+    var thought =
+        parser.parse(
+            "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},"
+                + "\"usage\":{\"output_tokens\":235,"
+                + "\"output_tokens_details\":{\"thinking_tokens\":95}}}");
+    var withoutDetails =
+        parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":240}}");
+    var withoutThinking =
+        parser.parse(
+            "{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":241,"
+                + "\"output_tokens_details\":{}}}");
+
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(2, 3, 568, 904)), started);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(2, 235, 568, 904, 95)), thought);
+    assertEquals(
+        new StreamEvent.UsageDelta(Response.Usage.of(2, 240, 568, 904, 95)), withoutDetails);
+    assertEquals(
+        new StreamEvent.UsageDelta(Response.Usage.of(2, 241, 568, 904, 95)), withoutThinking);
+    var done =
+        assertInstanceOf(StreamEvent.Done.class, parser.parse("{\"type\":\"message_stop\"}"));
+    assertEquals(95, done.response().usage().reasoningTokens());
+  }
+
+  @Test
+  void anErrorAfterAThinkingCountKeepsItInThePartial() {
+    parser.parse(
+        "{\"type\":\"message_delta\",\"usage\":{\"input_tokens\":4,\"output_tokens\":408,"
+            + "\"output_tokens_details\":{\"thinking_tokens\":21}}}");
+
+    var error =
+        assertInstanceOf(
+            StreamEvent.Error.class,
+            parser.parse("{\"type\":\"error\",\"error\":{\"type\":\"api_error\"}}"));
+
+    assertEquals(Response.Usage.of(4, 408, 0, 0, 21), error.partial().usage());
+  }
+
+  @Test
+  void aThinkingCountAboveTheOutputCountIsCutToItUntilTheOutputCatchesUp() {
+    var overReported =
+        parser.parse(
+            "{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":10,"
+                + "\"output_tokens_details\":{\"thinking_tokens\":40}}}");
+    var outputCaughtUp =
+        parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":235}}");
+
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 10, 0, 0, 10)), overReported);
+    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 235, 0, 0, 40)), outputCaughtUp);
+  }
+
+  @Test
   void aMessageStartReportingNoTokensYieldsNoUsage() {
     assertNull(
         parser.parse(

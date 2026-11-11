@@ -1,8 +1,8 @@
 == chatStream
-UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37, reasoningTokens=0]]
 KeepAlive[]
 TextDelta[text=Partial]
-UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37]]
+UsageDelta[usage=Usage[inputTokens=25, outputTokens=1, cacheCreationInputTokens=5, cacheReadInputTokens=7, totalTokens=38, promptTokens=37, reasoningTokens=0]]
 onError TransientStreamException(API stream error: overloaded_error: Overloaded) provider=anthropic
 == chat
 threw TransientStreamException(API stream error: overloaded_error: Overloaded) provider=anthropic

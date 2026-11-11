@@ -84,7 +84,7 @@ final class PgSpanExporterTest {
             .put("gen_ai.usage.output_tokens", output)
             .put("helios.cost.micro_usd", 42L);
     if (write != 0) {
-      usage.put("gen_ai.usage.cache_write.input_tokens", write);
+      usage.put("gen_ai.usage.cache_creation.input_tokens", write);
     }
     if (read != 0) {
       usage.put("gen_ai.usage.cache_read.input_tokens", read);
@@ -188,6 +188,66 @@ final class PgSpanExporterTest {
     assertNull(toolRow.cost());
     assertEquals(Map.of("gen_ai.tool.name", "noop"), toolRow.attributes());
     assertEquals(Map.of("helios.hook.phase", "PRE_STOP"), found.spans().get(2).attributes());
+  }
+
+  @Test
+  void theReasoningCountOfARunAndOfItsChatStepIsStoredAndReadBack() {
+    var reasoning = "gen_ai.usage.reasoning.output_tokens";
+    var chat =
+        step(
+            RUN,
+            "1000000000000001",
+            "chat scripted",
+            "chat",
+            1,
+            Attributes.builder().putAll(usage(180, 22, 30, 50)).put(reasoning, 9L).build());
+    var run =
+        run(
+            RUN,
+            "00f067aa0ba902b7",
+            "matchmaking",
+            0,
+            Attributes.builder().putAll(usage(180, 22, 30, 50)).put(reasoning, 12L).build());
+
+    assertTrue(exporter.export(List.of(chat, run)).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals(Usage.of(100, 22, 30, 50, 12), found.usage());
+    assertEquals(Usage.of(100, 22, 30, 50, 9), found.spans().getFirst().usage());
+    assertFalse(found.attributes().containsKey(reasoning));
+    assertFalse(found.spans().getFirst().attributes().containsKey(reasoning));
+  }
+
+  @Test
+  void aHostSpansReasoningCountAboveItsOutputCountIsCutToItWithoutFailingTheBatch() {
+    var reasoning = "gen_ai.usage.reasoning.output_tokens";
+    var overReported =
+        host(
+                RUN,
+                "8000000000000001",
+                "host chat",
+                1,
+                Attributes.builder().putAll(usage(10, 4, 0, 0)).put(reasoning, 9L).build())
+            .build();
+    var withoutOutput =
+        host(
+                RUN,
+                "8000000000000002",
+                "host summary",
+                2,
+                Attributes.builder()
+                    .put("gen_ai.usage.input_tokens", 10L)
+                    .put(reasoning, 9L)
+                    .build())
+            .build();
+
+    assertTrue(exporter.export(List.of(overReported, withoutOutput, runSpan(RUN))).isSuccess());
+
+    var found = store.findById(RUN);
+    assertEquals(Usage.of(100, 22, 30, 50), found.usage());
+    assertEquals(
+        List.of(Usage.of(10, 4, 0, 0, 4), Usage.of(10, 0)),
+        found.spans().stream().map(Span::usage).toList());
   }
 
   @Test

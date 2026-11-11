@@ -3,7 +3,7 @@ KeepAlive[]
 KeepAlive[]
 TextDelta[text=Partial]
 KeepAlive[]
-UsageDelta[usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006]]
+UsageDelta[usage=Usage[inputTokens=86, outputTokens=150, cacheCreationInputTokens=0, cacheReadInputTokens=1920, totalTokens=2156, promptTokens=2006, reasoningTokens=0]]
 onError GeminiException(Interaction completed with status failed) status=0
 == chat
 threw GeminiException(Interaction completed with status failed) status=0

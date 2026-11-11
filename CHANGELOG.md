@@ -29,6 +29,16 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   had none.
 - `StreamEvent.UsageDelta(Response.Usage)`: the usage a provider reported so far, before its stream
   ended.
+- `Response.Usage.reasoningTokens()`: the part of `outputTokens` a model spent reasoning, from
+  Gemini's `total_thought_tokens`, OpenAI's `output_tokens_details.reasoning_tokens` and Anthropic's
+  `output_tokens_details.thinking_tokens`, zero when none is reported. A count reported above the
+  output count is cut to it. `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` builds
+  one request's usage with it; `plus` sums it. It is part of the output count, so totals, prompt
+  size and cost do not change.
+- `gen_ai.usage.reasoning.output_tokens` on a `chat` span whose call reported reasoning tokens,
+  and on the run span, the run's total; a subagent's reasoning rolls up into its parent run's.
+- A `reasoning_tokens` column on `helios_traces` and `helios_spans`, written by `PgSpanExporter` and
+  read into `Span.usage()` and `Trace.usage()` (see the DDL delta under Compatibility).
 
 ### Changed
 
@@ -53,6 +63,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 - Anthropic streams yield `ModelChunk.UsageDelta` at `message_start` and at each `message_delta`,
   and Gemini streams at each `interaction.created` or status event, when its usage reports a token;
   they yielded `ModelChunk.KeepAlive` there.
+- The chat and run spans' cache-write count is `gen_ai.usage.cache_creation.input_tokens`, the
+  OpenTelemetry GenAI registry's name; it was `gen_ai.usage.cache_write.input_tokens`. Stored rows
+  are unaffected: the count has its own column.
 
 ### Fixed
 
@@ -86,10 +99,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Compatibility
 
-- A `switch` over `AnthropicModelId` without `default` gains two cases, `CLAUDE_FABLE_5_2` and
-  `CLAUDE_MYTHOS_5_2`.
-- A `switch` over `OpenAIModelId` or `GeminiModelId` without `default` gains a case;
-  `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
+**Upgrading from 3.1.0.** This release changes source and the trace schema: run the DDL delta below
+before deploying; replace six-argument `new Response.Usage(...)` calls (see below); add a case to a
+`switch` without `default` over `StreamEvent` (`UsageDelta`), `MessageOrigin` (`PARTIAL_TURN`),
+`AnthropicModelId` (`CLAUDE_FABLE_5_2`, `CLAUDE_MYTHOS_5_2`), `OpenAIModelId` (`GPT_6_1_TERRA`) or
+`GeminiModelId` (`GEMINI_4_CARBON`); recompile test code that calls `ModelStreams.stalled`; read
+`gen_ai.usage.cache_creation.input_tokens` where you read `gen_ai.usage.cache_write.input_tokens`.
+
+- `GeminiProvider`'s unsupported-model message lists `gemini-4-carbon`.
 - A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
   `temperature` or `topP` now fails when the model is created; the API answered it with a 400
   before.
@@ -101,7 +118,6 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `CloseableIterator` requires.
 - A positive idle timeout under one millisecond now waits its real length; it used to fail the first
   line at once. A negative one now always fails the first line; it used to, almost always.
-- A `switch` over `MessageOrigin` without `default` gains a case.
 - On Anthropic models that bind reasoning, the request after a partial turn drops the reasoning of
   earlier turns once, with one cache miss. Gemini resends the whole conversation once instead of
   continuing the previous interaction.
@@ -122,7 +138,24 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `PostModelTurnHook` sees that usage, and its prompt size anchors the history's token count.
 - Each provider's assistant messages, and the stored session entries holding them, carry one more
   metadata key, `response.model`; no provider sends it back.
-- A `switch` over `StreamEvent` without `default` gains a case.
+- `new Response.Usage(...)` takes seven arguments, the last `reasoningTokens`. Replace a
+  six-argument call with `Usage.of(input, output, cacheCreation, cacheRead)` for one request with no
+  reasoning count, `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` for one with it,
+  `plus` to add requests, and the seven-argument constructor only where an explicit prompt size is
+  needed. A record pattern over `Usage` gains a component. The constructor throws
+  `IllegalArgumentException` when `reasoningTokens` is negative or greater than `outputTokens`.
+- `Usage`'s JSON, in `helios-runtime`'s event stream and result bodies, gains `reasoningTokens`; its
+  `toString` gains `reasoningTokens=`.
+- **DDL delta** (additive; run it before deploying this release, since an exporter writing to a
+  table without the column fails every insert; `schema.sql` creates the column only in a new
+  table). It is safe to run while 3.1.0 is serving: 3.1.0 names every column it writes and reads.
+
+  ```sql
+  ALTER TABLE helios_traces ADD COLUMN IF NOT EXISTS reasoning_tokens INT;
+  ALTER TABLE helios_spans ADD COLUMN IF NOT EXISTS reasoning_tokens INT;
+  ```
+
+  A row written by 3.1.0 or earlier reads with zero reasoning tokens.
 
 ## [3.1.0] — 2026-11-10 — Subagents, host spans in the trace store and a marker where a reader missed events
 
