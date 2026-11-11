@@ -727,7 +727,13 @@ final class SummarizingCompactorTest {
   @CsvSource({"10, 5, 0, 0", "0, 0, 0, 900", "0, 0, 900, 0"})
   void compactionResultRejectsUsageWithoutModelId(
       int input, int output, int cacheWrites, int cacheReads) {
-    var usage = Usage.of(input, output, cacheWrites, cacheReads);
+    var usage =
+        Usage.newBuilder()
+            .withInputTokens(input)
+            .withOutputTokens(output)
+            .withCacheCreationInputTokens(cacheWrites)
+            .withCacheReadInputTokens(cacheReads)
+            .build();
     var ex =
         assertThrows(
             IllegalArgumentException.class, () -> new CompactionResult(List.of(), usage, " "));

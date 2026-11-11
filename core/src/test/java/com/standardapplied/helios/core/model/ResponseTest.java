@@ -104,20 +104,51 @@ class ResponseTest {
   }
 
   @Test
-  void usageOfWithCacheTokens() {
-    var usage = Response.Usage.of(100, 50, 200, 5000);
+  void usageBuilderSetsEachCountByNameAndDerivesTheTotalAndThePromptSize() {
+    var usage =
+        Response.Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(50)
+            .withCacheCreationInputTokens(200)
+            .withCacheReadInputTokens(5000)
+            .withReasoningTokens(30)
+            .build();
 
-    assertEquals(100, usage.inputTokens());
-    assertEquals(50, usage.outputTokens());
-    assertEquals(200, usage.cacheCreationInputTokens());
-    assertEquals(5000, usage.cacheReadInputTokens());
-    assertEquals(
-        100 + 50 + 200 + 5000, usage.totalTokens(), "totalTokens sums every billable token class");
+    assertEquals(new Response.Usage(100, 50, 200, 5000, 5350, 5300, 30), usage);
+  }
+
+  @Test
+  void usageBuilderWithNoCountSetIsAnEmptyUsage() {
+    assertEquals(Response.Usage.of(0, 0), Response.Usage.newBuilder().build());
+  }
+
+  @Test
+  void usageBuilderRejectsAReasoningCountAboveTheOutputCount() {
+    var builder = Response.Usage.newBuilder().withOutputTokens(2).withReasoningTokens(3);
+
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertEquals("reasoningTokens must lie in [0, outputTokens 2], got 3", ex.getMessage());
+  }
+
+  @Test
+  void usageBuilderRejectsANegativeCount() {
+    var builder = Response.Usage.newBuilder().withCacheReadInputTokens(-1);
+
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertEquals("token counts must be non-negative, got [0, 0, 0, -1]", ex.getMessage());
   }
 
   @Test
   void promptTokensSumEveryInputClassAndNotTheOutput() {
-    assertEquals(5_500L, Response.Usage.of(1_000, 7, 500, 4_000).promptTokens());
+    assertEquals(
+        5_500L,
+        Response.Usage.newBuilder()
+            .withInputTokens(1_000)
+            .withOutputTokens(7)
+            .withCacheCreationInputTokens(500)
+            .withCacheReadInputTokens(4_000)
+            .build()
+            .promptTokens());
   }
 
   @ParameterizedTest
@@ -153,8 +184,16 @@ class ResponseTest {
 
   @Test
   void usageAcceptsATotalThatIsTheSumOfItsCounts() {
-    assertEquals(Response.Usage.of(1, 2, 3, 4), new Response.Usage(1, 2, 3, 4, 10, 8, 0));
-    assertEquals(10, Response.Usage.of(1, 2, 3, 4).totalTokens());
+    var usage =
+        Response.Usage.newBuilder()
+            .withInputTokens(1)
+            .withOutputTokens(2)
+            .withCacheCreationInputTokens(3)
+            .withCacheReadInputTokens(4)
+            .build();
+
+    assertEquals(usage, new Response.Usage(1, 2, 3, 4, 10, 8, 0));
+    assertEquals(10, usage.totalTokens());
   }
 
   @ParameterizedTest
@@ -192,18 +231,27 @@ class ResponseTest {
   }
 
   @Test
-  void usageOfWithoutAReasoningCountReportsNone() {
+  void usageWithoutAReasoningCountReportsNone() {
     assertEquals(0, Response.Usage.of(10, 300).reasoningTokens());
-    assertEquals(0, Response.Usage.of(10, 300, 20, 30).reasoningTokens());
+    assertEquals(0, cachedCounts().build().reasoningTokens());
   }
 
   @Test
-  void usageOfWithAReasoningCountIsOneRequestWhoseTotalsIgnoreIt() {
-    var usage = Response.Usage.of(10, 300, 20, 30, 120);
+  void usageWithAReasoningCountIsOneRequestWhoseTotalsIgnoreIt() {
+    var withoutReasoning = cachedCounts().build();
+    var usage = cachedCounts().withReasoningTokens(120).build();
 
     assertEquals(new Response.Usage(10, 300, 20, 30, 360, 60, 120), usage);
-    assertEquals(Response.Usage.of(10, 300, 20, 30).totalTokens(), usage.totalTokens());
-    assertEquals(Response.Usage.of(10, 300, 20, 30).promptTokens(), usage.promptTokens());
+    assertEquals(withoutReasoning.totalTokens(), usage.totalTokens());
+    assertEquals(withoutReasoning.promptTokens(), usage.promptTokens());
+  }
+
+  private static Response.Usage.Builder cachedCounts() {
+    return Response.Usage.newBuilder()
+        .withInputTokens(10)
+        .withOutputTokens(300)
+        .withCacheCreationInputTokens(20)
+        .withCacheReadInputTokens(30);
   }
 
   @Test
@@ -211,20 +259,44 @@ class ResponseTest {
     var pricing = new CostCalculator.Pricing(3_000_000L, 15_000_000L, 3_750_000L, 300_000L);
 
     assertEquals(
-        pricing.cost(Response.Usage.of(10, 300, 20, 30)),
-        pricing.cost(Response.Usage.of(10, 300, 20, 30, 120)));
+        pricing.cost(cachedCounts().build()),
+        pricing.cost(cachedCounts().withReasoningTokens(120).build()));
   }
 
   @Test
   void usagePlusSumsTheReasoningCounts() {
-    var sum = Response.Usage.of(10, 300, 0, 0, 120).plus(Response.Usage.of(5, 40, 0, 0, 25));
+    var sum =
+        Response.Usage.newBuilder()
+            .withInputTokens(10)
+            .withOutputTokens(300)
+            .withReasoningTokens(120)
+            .build()
+            .plus(
+                Response.Usage.newBuilder()
+                    .withInputTokens(5)
+                    .withOutputTokens(40)
+                    .withReasoningTokens(25)
+                    .build());
 
     assertEquals(new Response.Usage(15, 340, 0, 0, 355, 5, 145), sum);
   }
 
   @Test
   void usagePlusSumsClassWise() {
-    var sum = Response.Usage.of(100, 50, 20, 10).plus(Response.Usage.of(1, 2, 3, 4));
+    var sum =
+        Response.Usage.newBuilder()
+            .withInputTokens(100)
+            .withOutputTokens(50)
+            .withCacheCreationInputTokens(20)
+            .withCacheReadInputTokens(10)
+            .build()
+            .plus(
+                Response.Usage.newBuilder()
+                    .withInputTokens(1)
+                    .withOutputTokens(2)
+                    .withCacheCreationInputTokens(3)
+                    .withCacheReadInputTokens(4)
+                    .build());
 
     assertEquals(new Response.Usage(101, 52, 23, 14, 190, 8, 0), sum);
   }
@@ -239,7 +311,13 @@ class ResponseTest {
 
   @Test
   void usagePlusKeepsTheEarlierPromptSizeWhenTheLaterReportsNone() {
-    var usage = Response.Usage.of(1_000, 7, 500, 4_000);
+    var usage =
+        Response.Usage.newBuilder()
+            .withInputTokens(1_000)
+            .withOutputTokens(7)
+            .withCacheCreationInputTokens(500)
+            .withCacheReadInputTokens(4_000)
+            .build();
 
     assertEquals(usage, usage.plus(Response.Usage.of(0, 0)));
   }
@@ -251,7 +329,20 @@ class ResponseTest {
 
   @Test
   void usagePlusRecomputesTheTotal() {
-    var sum = Response.Usage.of(1, 2, 3, 4).plus(Response.Usage.of(10, 20, 30, 40));
+    var sum =
+        Response.Usage.newBuilder()
+            .withInputTokens(1)
+            .withOutputTokens(2)
+            .withCacheCreationInputTokens(3)
+            .withCacheReadInputTokens(4)
+            .build()
+            .plus(
+                Response.Usage.newBuilder()
+                    .withInputTokens(10)
+                    .withOutputTokens(20)
+                    .withCacheCreationInputTokens(30)
+                    .withCacheReadInputTokens(40)
+                    .build());
 
     assertEquals(110, sum.totalTokens());
   }
@@ -268,15 +359,22 @@ class ResponseTest {
     assertFalse(Response.Usage.of(0, 0).reportsTokens());
     assertTrue(Response.Usage.of(1, 0).reportsTokens());
     assertTrue(Response.Usage.of(0, 1).reportsTokens());
-    assertTrue(Response.Usage.of(0, 0, 1, 0).reportsTokens());
-    assertTrue(Response.Usage.of(0, 0, 0, 1).reportsTokens());
+    assertTrue(Response.Usage.newBuilder().withCacheCreationInputTokens(1).build().reportsTokens());
+    assertTrue(Response.Usage.newBuilder().withCacheReadInputTokens(1).build().reportsTokens());
   }
 
   @Test
-  void usageOfWithCacheTokensRejectsOverflow() {
-    // input + output + cacheCreation + cacheRead would exceed Integer.MAX_VALUE.
+  void usageBuilderRejectsCountsWhoseSumOverflowsAnInt() {
     var huge = Integer.MAX_VALUE - 10;
-    assertThrows(ArithmeticException.class, () -> Response.Usage.of(huge, huge, huge, huge));
+    assertThrows(
+        ArithmeticException.class,
+        () ->
+            Response.Usage.newBuilder()
+                .withInputTokens(huge)
+                .withOutputTokens(huge)
+                .withCacheCreationInputTokens(huge)
+                .withCacheReadInputTokens(huge)
+                .build());
   }
 
   @Test

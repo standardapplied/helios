@@ -44,7 +44,8 @@ class AnthropicStreamParserTest {
     parser.parse(
         "{\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_read_input_tokens\":3}}}");
 
-    assertEquals(Response.Usage.of(0, 0, 0, 3), parser.partial().usage());
+    assertEquals(
+        Response.Usage.newBuilder().withCacheReadInputTokens(3).build(), parser.partial().usage());
   }
 
   @Test
@@ -55,8 +56,10 @@ class AnthropicStreamParserTest {
     cacheWritesOnly.parse(
         "{\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":2}}}");
 
-    assertEquals(Response.Usage.of(0, 4, 0, 0), outputOnly.partial().usage());
-    assertEquals(Response.Usage.of(0, 0, 2, 0), cacheWritesOnly.partial().usage());
+    assertEquals(Response.Usage.of(0, 4), outputOnly.partial().usage());
+    assertEquals(
+        Response.Usage.newBuilder().withCacheCreationInputTokens(2).build(),
+        cacheWritesOnly.partial().usage());
   }
 
   @Test
@@ -215,7 +218,14 @@ class AnthropicStreamParserTest {
     var done =
         assertInstanceOf(StreamEvent.Done.class, parser.parse("{\"type\":\"message_stop\"}"));
 
-    assertEquals(Response.Usage.of(10682, 510, 4, 5), done.response().usage());
+    assertEquals(
+        Response.Usage.newBuilder()
+            .withInputTokens(10682)
+            .withOutputTokens(510)
+            .withCacheCreationInputTokens(4)
+            .withCacheReadInputTokens(5)
+            .build(),
+        done.response().usage());
   }
 
   @Test
@@ -232,10 +242,33 @@ class AnthropicStreamParserTest {
     var withoutUsage =
         parser.parse("{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
 
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 1, 5, 7)), started);
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(25, 15, 5, 7)), streamedText);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(25)
+                .withOutputTokens(1)
+                .withCacheCreationInputTokens(5)
+                .withCacheReadInputTokens(7)
+                .build()),
+        started);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(25)
+                .withOutputTokens(15)
+                .withCacheCreationInputTokens(5)
+                .withCacheReadInputTokens(7)
+                .build()),
+        streamedText);
     assertNull(withoutUsage);
-    assertEquals(Response.Usage.of(25, 15, 5, 7), parser.partial().usage());
+    assertEquals(
+        Response.Usage.newBuilder()
+            .withInputTokens(25)
+            .withOutputTokens(15)
+            .withCacheCreationInputTokens(5)
+            .withCacheReadInputTokens(7)
+            .build(),
+        parser.partial().usage());
   }
 
   @Test
@@ -257,12 +290,45 @@ class AnthropicStreamParserTest {
             "{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":241,"
                 + "\"output_tokens_details\":{}}}");
 
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(2, 3, 568, 904)), started);
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(2, 235, 568, 904, 95)), thought);
     assertEquals(
-        new StreamEvent.UsageDelta(Response.Usage.of(2, 240, 568, 904, 95)), withoutDetails);
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(2)
+                .withOutputTokens(3)
+                .withCacheCreationInputTokens(568)
+                .withCacheReadInputTokens(904)
+                .build()),
+        started);
     assertEquals(
-        new StreamEvent.UsageDelta(Response.Usage.of(2, 241, 568, 904, 95)), withoutThinking);
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(2)
+                .withOutputTokens(235)
+                .withCacheCreationInputTokens(568)
+                .withCacheReadInputTokens(904)
+                .withReasoningTokens(95)
+                .build()),
+        thought);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(2)
+                .withOutputTokens(240)
+                .withCacheCreationInputTokens(568)
+                .withCacheReadInputTokens(904)
+                .withReasoningTokens(95)
+                .build()),
+        withoutDetails);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder()
+                .withInputTokens(2)
+                .withOutputTokens(241)
+                .withCacheCreationInputTokens(568)
+                .withCacheReadInputTokens(904)
+                .withReasoningTokens(95)
+                .build()),
+        withoutThinking);
     var done =
         assertInstanceOf(StreamEvent.Done.class, parser.parse("{\"type\":\"message_stop\"}"));
     assertEquals(95, done.response().usage().reasoningTokens());
@@ -279,7 +345,13 @@ class AnthropicStreamParserTest {
             StreamEvent.Error.class,
             parser.parse("{\"type\":\"error\",\"error\":{\"type\":\"api_error\"}}"));
 
-    assertEquals(Response.Usage.of(4, 408, 0, 0, 21), error.partial().usage());
+    assertEquals(
+        Response.Usage.newBuilder()
+            .withInputTokens(4)
+            .withOutputTokens(408)
+            .withReasoningTokens(21)
+            .build(),
+        error.partial().usage());
   }
 
   @Test
@@ -291,8 +363,14 @@ class AnthropicStreamParserTest {
     var outputCaughtUp =
         parser.parse("{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":235}}");
 
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 10, 0, 0, 10)), overReported);
-    assertEquals(new StreamEvent.UsageDelta(Response.Usage.of(0, 235, 0, 0, 40)), outputCaughtUp);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder().withOutputTokens(10).withReasoningTokens(10).build()),
+        overReported);
+    assertEquals(
+        new StreamEvent.UsageDelta(
+            Response.Usage.newBuilder().withOutputTokens(235).withReasoningTokens(40).build()),
+        outputCaughtUp);
   }
 
   @Test

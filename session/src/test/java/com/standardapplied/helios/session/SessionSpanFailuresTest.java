@@ -190,7 +190,8 @@ final class SessionSpanFailuresTest {
     ContextCompactor compactor =
         (history, context) ->
             compactions.getAndIncrement() == 1
-                ? new CompactionResult(history, Usage.of(0, 0, 0, 900), "summary")
+                ? new CompactionResult(
+                    history, Usage.newBuilder().withCacheReadInputTokens(900).build(), "summary")
                 : CompactionResult.noOp(history);
     var spans = new SpanCapture(failing("chat scripted", false));
     var model =
