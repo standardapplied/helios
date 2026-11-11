@@ -4,6 +4,14 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- `AnthropicModelId.CLAUDE_FABLE_5_2` and `CLAUDE_MYTHOS_5_2`, released by Anthropic on 2026-11-09:
+  1,000,000-token context, 128,000 output tokens, always-on adaptive thinking with progress updates,
+  no forced tool choice, reasoning bound to its prompt, and list prices of $8 / $40 per million
+  input / output tokens with $0.20 cache reads in `AnthropicPricing`, whose `AS_OF` is now
+  2026-11-11.
+
 ### Changed
 
 - `SseReader` reads a stream's lines on the consuming thread, with one idle watchdog per stream, a
@@ -20,6 +28,11 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ### Compatibility
 
+- A `switch` over `AnthropicModelId` without `default` gains two cases, `CLAUDE_FABLE_5_2` and
+  `CLAUDE_MYTHOS_5_2`.
+- A request to `claude-fable-5-2` or `claude-mythos-5-2` that forces a tool choice or sets
+  `temperature` or `topP` now fails when the model is created; the API answered it with a 400
+  before.
 - A blocked read is released only by the body: the idle timeout and `close()` close it, and an
   interrupt is seen once the body answers it. A body given to the `InputStream` constructor whose
   `read` ignores both keeps its consumer blocked past the idle timeout. The JDK HTTP client's

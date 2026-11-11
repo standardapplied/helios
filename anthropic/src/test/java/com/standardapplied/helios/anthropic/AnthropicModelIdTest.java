@@ -149,6 +149,32 @@ class AnthropicModelIdTest {
   }
 
   @Test
+  void fable52AndMythos52AreCatalogued() {
+    assertEquals("claude-fable-5-2", AnthropicModelId.CLAUDE_FABLE_5_2.id());
+    assertEquals("claude-mythos-5-2", AnthropicModelId.CLAUDE_MYTHOS_5_2.id());
+    for (var model :
+        List.of(AnthropicModelId.CLAUDE_FABLE_5_2, AnthropicModelId.CLAUDE_MYTHOS_5_2)) {
+      assertEquals(1_000_000, model.contextWindow());
+      assertEquals(128_000, model.maxOutputTokens());
+      assertEquals(AnthropicModelId.ReasoningRules.ALWAYS_ON_WITH_PROGRESS, model.reasoning());
+      assertFalse(model.acceptsForcedToolChoice());
+      assertTrue(model.bindsReasoning());
+      assertEquals(model, AnthropicModelId.fromId(model.id()));
+      assertEquals(model, AnthropicModelId.fromWireId(model.id()));
+      assertTrue(AnthropicModelId.isSupported(model.id()));
+    }
+  }
+
+  @Test
+  void fable52WireIdDoesNotResolveToFable5Family() {
+    assertEquals(
+        AnthropicModelId.CLAUDE_FABLE_5_2, AnthropicModelId.fromWireId("claude-fable-5-2"));
+    assertEquals(
+        AnthropicModelId.CLAUDE_FABLE_5_2,
+        AnthropicModelId.fromWireId("claude-fable-5-2-20261109"));
+  }
+
+  @Test
   void fable51AndMythos51AreCatalogued() {
     for (var model :
         List.of(AnthropicModelId.CLAUDE_FABLE_5_1, AnthropicModelId.CLAUDE_MYTHOS_5_1)) {
@@ -175,6 +201,8 @@ class AnthropicModelIdTest {
   void forcedToolChoiceIsRejectedOnlyByTheModelsThatDocumentIt() {
     var rejecting =
         Set.of(
+            AnthropicModelId.CLAUDE_FABLE_5_2,
+            AnthropicModelId.CLAUDE_MYTHOS_5_2,
             AnthropicModelId.CLAUDE_FABLE_5_1,
             AnthropicModelId.CLAUDE_MYTHOS_5_1,
             AnthropicModelId.CLAUDE_OPUS_5_5,
@@ -206,7 +234,7 @@ class AnthropicModelIdTest {
         AnthropicModelId.fromWireId("claude-opus-5-7"),
         "an uncatalogued release must fall back to unknown-model defaults, not Opus 5's");
     assertNull(AnthropicModelId.fromWireId("claude-sonnet-5-9"));
-    assertNull(AnthropicModelId.fromWireId("claude-fable-5-2"));
+    assertNull(AnthropicModelId.fromWireId("claude-fable-5-3"));
   }
 
   @Test

@@ -51,6 +51,8 @@ class AnthropicReasoningTest {
   /** The models "Preserved thinking" lists as binding a thinking block to its prefix (Nov 2026). */
   private static final Set<AnthropicModelId> BINDING =
       EnumSet.of(
+          AnthropicModelId.CLAUDE_FABLE_5_2,
+          AnthropicModelId.CLAUDE_MYTHOS_5_2,
           AnthropicModelId.CLAUDE_FABLE_5_1,
           AnthropicModelId.CLAUDE_MYTHOS_5_1,
           AnthropicModelId.CLAUDE_OPUS_5_5,
@@ -74,6 +76,8 @@ class AnthropicReasoningTest {
 
   private static final Map<AnthropicModelId, Documented> DOCUMENTED =
       Map.ofEntries(
+          Map.entry(AnthropicModelId.CLAUDE_FABLE_5_2, ALWAYS_ON_WITH_PROGRESS),
+          Map.entry(AnthropicModelId.CLAUDE_MYTHOS_5_2, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_FABLE_5_1, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_MYTHOS_5_1, ALWAYS_ON_WITH_PROGRESS),
           Map.entry(AnthropicModelId.CLAUDE_FABLE_5, ALWAYS_ON_WITH_PROGRESS),
