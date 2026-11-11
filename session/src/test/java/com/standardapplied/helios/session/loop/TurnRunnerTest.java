@@ -221,7 +221,7 @@ final class TurnRunnerTest {
   }
 
   @Test
-  void usageDeltaAndToolUseChunksAreIgnored() {
+  void aMessageStopsUsageReplacesAnEarlierUsageDeltaAndToolUseChunksEmitNothing() {
     var call = new ToolCall("c", "ignored", Map.of());
     var model =
         syntheticStreamingModel(
@@ -234,7 +234,7 @@ final class TurnRunnerTest {
                 new ModelChunk.MessageStop("STOP", Usage.of(7, 2), Map.of(), List.of())));
     var outcome = runner(model).runTurn(freshState(), SessionLimits.defaults());
     assertEquals("done", outcome.assistantContent());
-    assertEquals(Usage.of(7, 2), outcome.usage(), "MessageStop usage wins; UsageDelta ignored");
+    assertEquals(Usage.of(7, 2), outcome.usage(), "the MessageStop usage replaces the UsageDelta");
     assertEquals(
         1,
         events.stream().filter(e -> e instanceof QueryEvent.AssistantText).count(),

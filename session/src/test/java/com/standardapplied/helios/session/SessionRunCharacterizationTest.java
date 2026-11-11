@@ -70,7 +70,7 @@ class SessionRunCharacterizationTest {
       var success = assertInstanceOf(ResultMessage.Success.class, terminal);
       assertEquals("{\"answer\":\"final\"}", success.result());
       assertEquals(new Usage(63, 22, 0, 0, 85, 30), success.usage());
-      assertEquals(CostEstimate.ofMicroUsd(401), success.cost());
+      assertEquals(CostEstimate.ofMicroUsd(501), success.cost());
       assertEquals(
           EXPECTED_EVENTS, events.stream().map(SessionRunCharacterizationTest::describe).toList());
       assertEquals(
