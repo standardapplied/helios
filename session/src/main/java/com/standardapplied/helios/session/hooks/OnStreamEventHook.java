@@ -11,8 +11,8 @@ import com.standardapplied.helios.session.QueryEvent;
  * meters, and audit shipping live here.
  *
  * <p>Unlike the other phase hooks, this one returns {@code void} — it cannot mutate the event,
- * block its delivery, or terminate the session. Misbehaving stream-event hooks must not be able to
- * corrupt the SSE stream.
+ * block its delivery, or end the run. Misbehaving stream-event hooks must not be able to corrupt
+ * the SSE stream.
  *
  * <p>Stream-event hooks run synchronously on the thread that emits the event: the loop's, or for
  * the text, thinking and citations of a model turn the turn's stream reader. Long-running work
