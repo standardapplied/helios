@@ -275,24 +275,24 @@ final class SkillSessionTest {
     var other = new CountedFile("print(1)");
     var pdf =
         skill("pdf", "Extracts text from PDFs.", "Use pdfplumber.")
-            .withFile("docs/a b-ü.md", read)
+            .withFile("docs/R&D a b-ü.md", read)
             .withFile("scripts/x.py", other)
             .build();
     var model =
         model(
             ScriptedModel.newBuilder()
                 .withToolCallsTurn(load("c1", "pdf"))
-                .withToolCallsTurn(read("c2", "pdf", "docs/a b-ü.md"))
+                .withToolCallsTurn(read("c2", "pdf", "docs/R&D a b-ü.md"))
                 .withTextTurn("done"));
 
     var results = results(run(model, options(model, pdf)));
 
     assertTrue(
-        results.get("c1").output().contains("\n<file>docs/a b-ü.md</file>\n"),
+        results.get("c1").output().contains("\n<file>docs/R&D a b-ü.md</file>\n"),
         results.get("c1")::output);
     assertEquals(
         ToolResult.success(
-            "<skill_file skill=\"pdf\" path=\"docs/a b-ü.md\">\nthe notes\n</skill_file>"),
+            "<skill_file skill=\"pdf\" path=\"docs/R&D a b-ü.md\">\nthe notes\n</skill_file>"),
         results.get("c2"));
     assertEquals(List.of(1, 0), List.of(read.reads.get(), other.reads.get()));
   }

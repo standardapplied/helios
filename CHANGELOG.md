@@ -4,6 +4,32 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.3] — 2026-11-12 — The helios-skills module: Agent Skills read from folders
+
+### Added
+
+- The `helios-skills` module (`com.standardapplied.helios.skills`). `Skills.discover(Path)` reads
+  the Agent Skills folders of the user and of a project, and `Skills.load(Path...)` reads given
+  folders, into `Skill` values, leniently, each problem logged as a warning and one skill's problem
+  never stopping the others. A loaded skill is a snapshot: each `SKILL.md` and the text of each file
+  are read once during the call, and nothing touches the disk afterwards; call again to pick up a
+  change. Load skills once, at startup or while no session can write those folders, from a platform
+  thread, and reuse the list: a process rewriting a folder during the call can make it serve any
+  file the JVM can read, or block it forever. Bounds: a `SKILL.md` of 1 MiB; a file kept as text of
+  60,000 bytes (a larger or non-UTF-8 file stays listed and its read answers why); depth 4; 2,000
+  directories and 10,000 files per folder; 1,000 files per skill; 16 MiB of file bytes per call,
+  about twice that in heap. When names collide the first found wins, and `discover` reads the
+  user's folders first, so a repository's skill cannot take the place of one the user installed. It
+  brings in `tools.jackson.dataformat:jackson-dataformat-yaml` 3.1.7 and
+  `org.snakeyaml:snakeyaml-engine` 3.0.1 (Apache-2.0), for that module only.
+
+### Compatibility
+
+- `Skill` refuses a description longer than 1,024 characters, the Agent Skills limit, since every
+  request's system prompt carries it; 3.1.2 accepted one.
+- `Skill` accepts `&` in a file path and in its directory; 3.1.2 refused it, which ruled out every
+  skill under an ordinary folder such as `R&D/`. `<`, `>` and `"` stay refused.
+
 ## [3.1.2] — 2026-11-12 — Agent Skills in a session, builders for Usage, Permission and Pricing, and a gate against positional arguments
 
 ### Added

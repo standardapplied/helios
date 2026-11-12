@@ -97,7 +97,7 @@ jobs:
         run: ./mvnw -B pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check
 
       - name: Deploy to Maven Central
-        run: ./mvnw -B clean deploy -Prelease -DskipTests -Djacoco.skip=true -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing
+        run: ./mvnw -B clean deploy -Prelease -DskipTests -Djacoco.skip=true -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing,skills
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}

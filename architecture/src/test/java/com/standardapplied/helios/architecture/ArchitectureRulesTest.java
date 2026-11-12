@@ -283,6 +283,20 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void onlyTheSkillsModuleReadsYaml() {
+    noClasses()
+        .that()
+        .resideOutsideOfPackage(HELIOS + ".skills..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage("tools.jackson.dataformat.yaml..", "org.snakeyaml..")
+        .because(
+            "the session takes Skill values; reading SKILL.md frontmatter is helios-skills'"
+                + " alone")
+        .check(LIBRARY);
+  }
+
+  @Test
   void openTelemetryStaysOutOfCoreAndItsSdkInPersistence() {
     CompositeArchRule.of(
             noClasses()
@@ -784,6 +798,7 @@ class ArchitectureRulesTest {
   void exportedPackagesAreReadFromTheModuleDescriptors() {
     assertTrue(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(Response.Usage.class)));
     assertTrue(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(TraceRollup.class)));
+    assertTrue(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(HELIOS + ".skills.Skills")));
     assertFalse(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(HELIOS + ".anthropic.api.ContentDelta")));
     assertFalse(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(HELIOS + ".session.loop.AgentLoop")));
   }
