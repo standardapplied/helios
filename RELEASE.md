@@ -106,7 +106,10 @@ Snapshots are not published to Maven Central. Use `mvn install` for local testin
 
 ### 1. Set the release version on main
 
-Open a pull request from `main` that sets the release version and dates the `CHANGELOG.md` entry:
+Open a pull request from `main` that sets the release version, dates the `CHANGELOG.md` entry and
+sets the README's install block to the release: in `README.md`, replace the version inside
+`<helios.version>...</helios.version>` with the release version. `QuickStartsDocsTest` fails while
+that version differs from the newest release heading (`## [X.Y.Z]`) in `CHANGELOG.md`.
 
 ```bash
 git checkout main
@@ -114,7 +117,7 @@ git pull
 git checkout -b release-prep-3.0.0
 mvn versions:set -DnewVersion=3.0.0
 mvn versions:commit
-git add pom.xml */pom.xml examples/*/pom.xml CHANGELOG.md
+git add pom.xml */pom.xml examples/*/pom.xml CHANGELOG.md README.md
 git commit -m "Release 3.0.0"
 ```
 

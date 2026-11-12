@@ -27,7 +27,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * Holds every {@code java} block of the README, the module READMEs and the guides under {@code
  * docs/} to the body of the snippet method named by the marker on the line before it, a {@code <!--
  * snippet: <Class>#<method> -->} naming a class of this package, so a block that drifts from the
- * API it documents fails the build.
+ * API it documents fails the build. It also holds the README's install block to the newest release
+ * in {@code CHANGELOG.md}.
  */
 final class QuickStartsDocsTest {
 
@@ -37,6 +38,9 @@ final class QuickStartsDocsTest {
   private static final Pattern MARKER = Pattern.compile("<!-- snippet: (\\w+#\\w+) -->");
   private static final Pattern METHOD = Pattern.compile(" {2}static void (\\w+)\\(.*");
   private static final String BLOCK = "var options = SessionPresets.minimal(model);";
+  private static final Pattern INSTALLED =
+      Pattern.compile("\\s*<helios\\.version>(.+)</helios\\.version>");
+  private static final Pattern RELEASE = Pattern.compile("## \\[(.+?)].*");
 
   static Stream<String> documents() throws IOException {
     try (var guides = Files.list(ROOT.resolve("docs"))) {
@@ -90,6 +94,50 @@ final class QuickStartsDocsTest {
     var thrown = assertThrows(AssertionError.class, () -> check("README.md", readme, bodies));
 
     assertTrue(thrown.getMessage().contains(expected), thrown.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("installs")
+  void theInstallBlockNamesTheNewestRelease(
+      List<String> readme, List<String> changelog, String expected) {
+    assertEquals(expected, installMismatch(readme, changelog));
+  }
+
+  static Stream<Arguments> installs() throws IOException {
+    var release =
+        List.of("# Changelog", "## Unreleased", "## [3.1.3] — title", "## [3.1.2] — title");
+    return Stream.of(
+        Arguments.of(
+            Files.readAllLines(ROOT.resolve("README.md")),
+            Files.readAllLines(ROOT.resolve("CHANGELOG.md")),
+            ""),
+        Arguments.of(List.of("  <helios.version>3.1.3</helios.version>"), release, ""),
+        Arguments.of(
+            List.of("  <helios.version>3.1.2</helios.version>"),
+            release,
+            "README.md installs 3.1.2, CHANGELOG.md's newest release is 3.1.3"),
+        Arguments.of(
+            List.of("no install block"),
+            release,
+            "README.md installs nothing, CHANGELOG.md's newest release is 3.1.3"));
+  }
+
+  /** Empty when the README's install block names CHANGELOG.md's newest release, else why not. */
+  private static String installMismatch(List<String> readme, List<String> changelog) {
+    var installed = first(readme, INSTALLED, "nothing");
+    var released = first(changelog, RELEASE, "none");
+    return installed.equals(released)
+        ? ""
+        : "README.md installs " + installed + ", CHANGELOG.md's newest release is " + released;
+  }
+
+  private static String first(List<String> lines, Pattern pattern, String none) {
+    return lines.stream()
+        .map(pattern::matcher)
+        .filter(Matcher::matches)
+        .map(match -> match.group(1))
+        .findFirst()
+        .orElse(none);
   }
 
   private static void check(String document, List<String> lines, Map<String, List<String>> bodies) {
