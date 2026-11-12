@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.3] — 2026-11-12 — The helios-skills module: Agent Skills read from folders
+
 ### Added
 
 - The `helios-skills` module (`com.standardapplied.helios.skills`). `Skills.discover(Path)` reads
@@ -25,6 +27,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 - `Skill` refuses a description longer than 1,024 characters, the Agent Skills limit, since every
   request's system prompt carries it; 3.1.2 accepted one.
+- `Skill` accepts `&` in a file path and in its directory; 3.1.2 refused it, which ruled out every
+  skill under an ordinary folder such as `R&D/`. `<`, `>` and `"` stay refused.
 
 ## [3.1.2] — 2026-11-12 — Agent Skills in a session, builders for Usage, Permission and Pricing, and a gate against positional arguments
 
