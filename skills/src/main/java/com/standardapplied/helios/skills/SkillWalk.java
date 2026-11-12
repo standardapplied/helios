@@ -19,13 +19,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.TreeMap;
-import java.util.logging.Logger;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * One walk of a skills root, which finds its skills and lists their files together: a directory
  * holding a {@code SKILL.md} regular file is a skill, and the regular files below it are its files.
- * It follows no link, skips hidden entries and {@code node_modules} silently, reads at most {@link
- * #MAX_DIRECTORIES} directories, and leaves out, with a warning, a directory it cannot read.
+ * It follows no link, reporting the links it meets outside a skill in one warning, skips hidden
+ * entries and {@code node_modules} silently, stops at its bounds, and leaves out, with a warning, a
+ * directory it cannot read.
  */
 final class SkillWalk extends SimpleFileVisitor<Path> {
 
@@ -41,40 +43,44 @@ final class SkillWalk extends SimpleFileVisitor<Path> {
   /** Files one skill lists: the 1,000 results {@link GlobTool} returns at most. */
   static final int MAX_FILES = 1_000;
 
-  private static final Logger LOGGER = Logger.getLogger(Skills.class.getName());
+  /**
+   * Files one root's walk lists, all skills together, ten times {@link #MAX_FILES}: an empty, too
+   * large or non-UTF-8 file costs nothing against the call's byte budget, so without this the names
+   * alone would be bounded only by the checkout.
+   */
+  static final int MAX_ROOT_FILES = 10 * MAX_FILES;
+
+  private static final int LINKS_NAMED = 3;
 
   private final Path root;
   private final Map<Path, List<String>> skills = new TreeMap<>();
-  private final List<Path> links = new ArrayList<>();
+  private final TreeSet<Path> links = new TreeSet<>();
   private Path skill;
   private List<String> files;
   private boolean cut;
   private int directories;
+  private int listed;
 
-  private SkillWalk(Path root) {
+  SkillWalk(Path root) {
     this.root = root;
   }
 
   /**
-   * What one walk found.
-   *
-   * @param skills each skill's directory, in path order, with the keys of its files, in key order
-   * @param links the links met outside any skill, none of them followed
+   * The skills below {@code root}, a real directory path: each skill's directory, in path order,
+   * with the keys of its files, in key order.
    */
-  record Found(Map<Path, List<String>> skills, List<Path> links) {}
-
-  /** Walk {@code root}, a real directory path. */
-  static Found walk(Path root) {
+  static Map<Path, List<String>> walk(Path root) {
     var walk = new SkillWalk(root);
     try {
       Files.walkFileTree(root, walk);
     } catch (IOException e) {
-      walk.warn("stopped (" + SkillLog.failed(e) + "); the skills found so far are kept");
+      SkillLog.warn(
+          "Scanning %s for skills: stopped (%s); the skills found so far are kept",
+          root, SkillLog.failed(e));
     }
-    var skills = new TreeMap<Path, List<String>>();
-    walk.skills.forEach(
-        (directory, keys) -> skills.put(directory, keys.stream().sorted().toList()));
-    return new Found(skills, List.copyOf(walk.links));
+    walk.warnLinks();
+    walk.skills.values().forEach(keys -> keys.sort(null));
+    return walk.skills;
   }
 
   @Override
@@ -83,7 +89,9 @@ final class SkillWalk extends SimpleFileVisitor<Path> {
       return SKIP_SUBTREE;
     }
     if (++directories > MAX_DIRECTORIES) {
-      warn("stopped after " + MAX_DIRECTORIES + " directories; the rest are left out");
+      SkillLog.warn(
+          "Scanning %s for skills: stopped after %s directories; the rest are left out",
+          root, MAX_DIRECTORIES);
       return TERMINATE;
     }
     if (skill == null
@@ -104,7 +112,7 @@ final class SkillWalk extends SimpleFileVisitor<Path> {
     if (skill == null && attributes.isSymbolicLink()) {
       links.add(file);
     } else if (skill != null && attributes.isRegularFile()) {
-      list(key(file));
+      return list(key(file));
     }
     return CONTINUE;
   }
@@ -115,7 +123,7 @@ final class SkillWalk extends SimpleFileVisitor<Path> {
       throw e;
     }
     if (!skipped(file) && !beyondSkill(file)) {
-      warn("left out " + file + " (" + SkillLog.failed(e) + ")");
+      SkillLog.warn("Scanning %s for skills: left out %s (%s)", root, file, SkillLog.failed(e));
     }
     return CONTINUE;
   }
@@ -125,29 +133,50 @@ final class SkillWalk extends SimpleFileVisitor<Path> {
     if (directory.equals(skill)) {
       skill = null;
     }
-    return super.postVisitDirectory(directory, e);
+    return e == null ? CONTINUE : visitFileFailed(directory, e);
   }
 
-  private void list(String key) {
+  private FileVisitResult list(String key) {
     if (SKILL_FILE.equals(key)) {
+      return CONTINUE;
+    }
+    if (files.size() == MAX_FILES) {
+      if (!cut) {
+        cut = true;
+        SkillLog.warn(
+            "Scanning %s for skills: listed %s files of %s; the rest are left out",
+            root, MAX_FILES, skill);
+      }
+      return CONTINUE;
+    }
+    if (listed == MAX_ROOT_FILES) {
+      SkillLog.warn(
+          "Scanning %s for skills: stopped after %s files; the rest are left out",
+          root, MAX_ROOT_FILES);
+      return TERMINATE;
+    }
+    listed++;
+    files.add(key);
+    return CONTINUE;
+  }
+
+  private void warnLinks() {
+    if (links.isEmpty()) {
       return;
     }
-    if (files.size() < MAX_FILES) {
-      files.add(key);
-    } else if (!cut) {
-      cut = true;
-      warn("listed " + MAX_FILES + " files of " + skill + "; the rest are left out");
-    }
+    var more = links.size() - LINKS_NAMED;
+    SkillLog.warn(
+        "Scanning %s for skills: links not followed: %s%s; pass a link's target to Skills.load"
+            + " to read the skills there",
+        root,
+        links.stream().limit(LINKS_NAMED).map(Path::toString).collect(Collectors.joining(", ")),
+        more > 0 ? " and " + more + " more" : "");
   }
 
   private String key(Path file) {
     var key = new StringJoiner("/");
     skill.relativize(file).forEach(segment -> key.add(segment.toString()));
     return key.toString();
-  }
-
-  private void warn(String what) {
-    SkillLog.warn(LOGGER, () -> "Scanning " + root + " for skills: " + what);
   }
 
   private static boolean skipped(Path path) {

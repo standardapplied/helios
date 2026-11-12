@@ -2,11 +2,11 @@
 
 package com.standardapplied.helios.skills;
 
-import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.Skill;
 import com.standardapplied.helios.session.files.ReadTool;
 import com.standardapplied.helios.session.memory.FileSystemMemoryBackend;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -31,7 +30,7 @@ import tools.jackson.dataformat.yaml.YAMLParser;
  * call: the frontmatter and body of each {@code SKILL.md}, under the standard's lenient rules where
  * {@code Skill} allows them, and the text of each listed file, held in memory, so a loaded skill
  * never reads the disk again. A problem with a skill skips it with a warning. Stateful: it counts
- * the text the call keeps against {@link #MAX_LOADED_BYTES}.
+ * the bytes of text the call keeps against {@link #MAX_LOADED_BYTES}.
  */
 final class SkillReader {
 
@@ -46,26 +45,16 @@ final class SkillReader {
   static final int MAX_BUNDLED_FILE_BYTES = ReadTool.MAX_OUTPUT_CHARS;
 
   /**
-   * The text one call keeps, all skills together: sixteen {@code SKILL.md} files at their cap, 16
-   * MiB, so what a call holds stays bounded however many skills its roots hold.
+   * The bytes of text one call keeps, all skills together: sixteen {@code SKILL.md} files at their
+   * cap, 16 MiB, so what a call holds stays bounded however many skills its roots hold.
    */
   static final long MAX_LOADED_BYTES = 16L * MAX_SKILL_FILE_BYTES;
 
-  private static final Logger LOGGER = Logger.getLogger(Skills.class.getName());
-  private static final int MAX_INSTRUCTIONS_CHARS = SessionLimits.defaults().maxToolResultChars();
   private static final YAMLMapper YAML =
       YAMLMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
   private static final Pattern FENCE =
       Pattern.compile("^---[ \\t]*$", Pattern.MULTILINE | Pattern.UNIX_LINES);
   private static final String BYTE_ORDER_MARK = Character.toString(0xFEFF);
-  private static final String USE_AT_ITS_PATH = "; use it at its path under the skill directory";
-  private static final String TOO_LARGE =
-      "larger than " + MAX_BUNDLED_FILE_BYTES + " bytes, the most a skill file read returns";
-  private static final String SPENT =
-      ": the call's "
-          + MAX_LOADED_BYTES
-          + " bytes of skill text are spent; the skills loaded"
-          + " before it are kept";
 
   private long left = MAX_LOADED_BYTES;
 
@@ -76,17 +65,8 @@ final class SkillReader {
   Optional<Skill> read(Path directory, List<String> keys) {
     var file = directory.resolve(SkillWalk.SKILL_FILE);
     try {
-      var bytes = bytes(file, MAX_SKILL_FILE_BYTES);
-      if (bytes.length > MAX_SKILL_FILE_BYTES) {
-        throw new IllegalArgumentException("it is larger than " + MAX_SKILL_FILE_BYTES + " bytes");
-      }
-      var text = utf8(bytes);
-      if (!charge(bytes.length, directory)) {
-        return Optional.empty();
-      }
-      return withFiles(parse(directory, text), directory, keys);
-    } catch (CharacterCodingException e) {
-      return skipped(file, "it is not UTF-8");
+      var content = text(file, MAX_SKILL_FILE_BYTES);
+      return spent() ? Optional.empty() : withFiles(parse(directory, content), directory, keys);
     } catch (IOException e) {
       return skipped(file, SkillLog.failed(e));
     } catch (JacksonException e) {
@@ -101,28 +81,44 @@ final class SkillReader {
     return left < 0;
   }
 
-  private boolean charge(int bytes, Path directory) {
-    left -= bytes;
-    if (spent()) {
-      SkillLog.warn(LOGGER, () -> "Stopped loading skills at " + directory + SPENT);
+  /** At most {@code cap} + 1 bytes of {@code in}, so a caller can tell a file over its cap. */
+  static byte[] bytes(InputStream in, int cap) throws IOException {
+    return in.readNBytes(cap + 1);
+  }
+
+  /**
+   * {@code file}, opened without following a link, as strict UTF-8 text of at most {@code cap}
+   * bytes, charged to the budget.
+   *
+   * @throws IllegalArgumentException if it is larger or not UTF-8
+   */
+  private String text(Path file, int cap) throws IOException {
+    byte[] bytes;
+    try (var in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+      bytes = bytes(in, cap);
     }
-    return !spent();
+    if (bytes.length > cap) {
+      throw new IllegalArgumentException("it is larger than " + cap + " bytes");
+    }
+    String text;
+    try {
+      text = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+    } catch (CharacterCodingException e) {
+      throw new IllegalArgumentException("it is not UTF-8", e);
+    }
+    left -= bytes.length;
+    if (spent()) {
+      SkillLog.warn(
+          "Stopped loading skills at %s: it would pass the call's %s bytes of text; the skills"
+              + " loaded before its skill are kept",
+          file, MAX_LOADED_BYTES);
+    }
+    return text;
   }
 
   private static Optional<Skill> skipped(Path file, String reason) {
-    SkillLog.warn(LOGGER, () -> "Skipping skill " + file + ": " + reason);
+    SkillLog.warn("Skipping skill %s: %s", file, reason);
     return Optional.empty();
-  }
-
-  /** At most {@code cap} + 1 bytes of {@code file}, opened without following a link. */
-  private static byte[] bytes(Path file, int cap) throws IOException {
-    try (var in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-      return in.readNBytes(cap + 1);
-    }
-  }
-
-  private static String utf8(byte[] bytes) throws CharacterCodingException {
-    return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
   }
 
   private static Skill parse(Path directory, String content) {
@@ -146,7 +142,11 @@ final class SkillReader {
             .withInstructions(text.substring(fences.end()).strip())
             .withDirectory(directory.toString())
             .build();
-    warnLeniencies(directory, skill);
+    if (!directory.endsWith(skill.name())) {
+      SkillLog.warn(
+          "Skill %s at %s: its name differs from its directory's name; loading it",
+          skill.name(), directory);
+    }
     return skill;
   }
 
@@ -176,37 +176,6 @@ final class SkillReader {
     return value.stringValue();
   }
 
-  private static void warnLeniencies(Path directory, Skill skill) {
-    var folder = directory.getFileName().toString();
-    var instructions = skill.instructions().length();
-    if (!skill.name().equals(folder)) {
-      loading(skill, "its name differs from its directory's name " + folder);
-    }
-    if (instructions > MAX_INSTRUCTIONS_CHARS) {
-      loading(
-          skill,
-          "its instructions are "
-              + instructions
-              + " characters, more than the default tool-result cap of "
-              + MAX_INSTRUCTIONS_CHARS
-              + ", so the model will see them cut once and never receive the cut part; the"
-              + " standard recommends a body under 5,000 tokens");
-    }
-  }
-
-  private static void loading(Skill skill, String departure) {
-    SkillLog.warn(
-        LOGGER,
-        () ->
-            "Skill "
-                + skill.name()
-                + " at "
-                + skill.directory().orElseThrow()
-                + ": "
-                + departure
-                + "; loading it");
-  }
-
   /**
    * {@code base} with each file of {@code keys} below {@code directory} that can be read and that
    * {@code Skill} accepts, or empty when the budget runs out on the way.
@@ -215,49 +184,34 @@ final class SkillReader {
     var files = new HashMap<String, Supplier<String>>();
     for (var key : keys) {
       try {
-        var content = snapshot(directory.resolve(key), key, directory);
-        if (content.isEmpty()) {
-          return Optional.empty();
-        }
-        base.toBuilder().withFile(key, content.get()).build();
-        files.put(key, content.get());
+        var content = snapshot(directory.resolve(key), key);
+        base.toBuilder().withFile(key, content).build();
+        files.put(key, content);
       } catch (IOException e) {
-        leftOut(base, key, SkillLog.failed(e));
+        SkillLog.warn(
+            "Skill %s: leaving out its file %s: %s", base.name(), key, SkillLog.failed(e));
       } catch (IllegalArgumentException e) {
-        leftOut(base, key, e.getMessage());
+        SkillLog.warn("Skill %s: leaving out its file %s: %s", base.name(), key, e.getMessage());
+      }
+      if (spent()) {
+        return Optional.empty();
       }
     }
     return Optional.of(base.toBuilder().withFiles(files).build());
   }
 
-  /**
-   * What reading {@code key} returns from now on: its text, or why it cannot be read as text; empty
-   * when keeping its text would spend the budget.
-   */
-  private Optional<Supplier<String>> snapshot(Path file, String key, Path directory)
-      throws IOException {
-    var bytes = bytes(file, MAX_BUNDLED_FILE_BYTES);
-    if (bytes.length > MAX_BUNDLED_FILE_BYTES) {
-      return Optional.of(unreadable(key, TOO_LARGE));
-    }
-    String text;
+  /** What reading {@code key} returns from now on: its text, or why it cannot be read as text. */
+  private Supplier<String> snapshot(Path file, String key) throws IOException {
     try {
-      text = utf8(bytes);
-    } catch (CharacterCodingException e) {
-      return Optional.of(unreadable(key, "not UTF-8 text"));
+      var text = text(file, MAX_BUNDLED_FILE_BYTES);
+      return () -> text;
+    } catch (IllegalArgumentException e) {
+      var message =
+          "skill file %s: %s; use it at its path under the skill directory"
+              .formatted(key, e.getMessage());
+      return () -> {
+        throw new UncheckedIOException(message, new IOException(message));
+      };
     }
-    return charge(bytes.length, directory) ? Optional.of(() -> text) : Optional.empty();
-  }
-
-  private static Supplier<String> unreadable(String key, String reason) {
-    var message = "skill file " + key + " is " + reason + USE_AT_ITS_PATH;
-    return () -> {
-      throw new UncheckedIOException(message, new IOException(message));
-    };
-  }
-
-  private static void leftOut(Skill skill, String key, String reason) {
-    SkillLog.warn(
-        LOGGER, () -> "Skill " + skill.name() + ": leaving out its file " + key + ": " + reason);
   }
 }

@@ -6,15 +6,12 @@ import com.standardapplied.helios.session.Skill;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -24,16 +21,22 @@ import java.util.stream.Stream;
  * <p>Every directory up to four levels below a folder that holds a {@code SKILL.md} regular file is
  * a skill, the folder itself included. Its {@code SKILL.md}, at most 1 MiB, is YAML frontmatter
  * between {@code ---} lines, of which {@code name} and {@code description} are read, then the body,
- * its instructions. Its other regular files, to four levels and at most 1,000, are its files. Below
- * a folder no link is followed, hidden entries and {@code node_modules} are skipped, and at most
- * 2,000 directories are read.
+ * its instructions. Its other regular files, to four levels and at most 1,000, are its files; a
+ * {@code SKILL.md} inside a skill is one of its files, not a second skill. Below a folder no link
+ * is followed, hidden entries and {@code node_modules} are skipped, and at most 2,000 directories
+ * and 10,000 files are read.
  *
  * <p>A loaded skill is a snapshot: a call reads everything once, and nothing touches the disk after
  * it returns. A file of at most 60,000 bytes of UTF-8 is kept as text; a larger or binary one is
  * listed, for a script to use at its path, and reading it fails. One call keeps at most 16 MiB of
- * text. A change on disk is seen by calling again. Load skills while nothing else writes their
- * folders: a writer racing the call can make it read another file than it listed, or wait on a
- * FIFO.
+ * file bytes, which may take about twice that in heap. A change on disk is seen by calling again.
+ *
+ * <p>Load skills once, at startup or while no session can write their folders, and reuse the list
+ * across sessions: skills are immutable values. A process rewriting a folder during the call can
+ * make the loader serve any file the JVM can read as a skill's file, or block the call forever;
+ * call it from a platform thread, not a virtual one. After the call returns, nothing on disk can
+ * affect a loaded skill. Which folders to load is the host's trust decision: a skill's instructions
+ * reach the model, and its scripts may be proposed to {@code Execute}.
  *
  * <p>Reading is lenient: a skill or file that cannot be loaded, including one whose name,
  * description, directory or file path {@code Skill} refuses, is left out and the rest load. Each
@@ -42,9 +45,6 @@ import java.util.stream.Stream;
  * name, the first found wins. Results are in folder order, then by directory path.
  */
 public final class Skills {
-
-  private static final Logger LOGGER = Logger.getLogger(Skills.class.getName());
-  private static final int LINKS_NAMED = 3;
 
   private Skills() {}
 
@@ -114,37 +114,25 @@ public final class Skills {
    */
   private static Optional<Path> inProject(Path project, String folder) {
     var path = project.resolve(folder);
-    return realDirectory(path).filter(real -> inside(project, path, real));
-  }
-
-  private static boolean inside(Path project, Path path, Path real) {
-    if (!real.startsWith(project)) {
+    var real = realDirectory(path);
+    if (real.isPresent() && !real.get().startsWith(project)) {
       SkillLog.warn(
-          LOGGER,
-          () ->
-              "Skipping "
-                  + path
-                  + ": it leads through a link to "
-                  + real
-                  + ", outside the project "
-                  + project
-                  + "; pass that folder to Skills.load if you trust it");
+          "Skipping %s: it leads through a link to %s, outside the project %s; pass that folder to"
+              + " Skills.load if you trust it",
+          path, real.get(), project);
+      return Optional.empty();
     }
-    return real.startsWith(project);
+    return real;
   }
 
   private static List<Skill> scan(List<Path> roots) {
-    var directories = new LinkedHashMap<Path, List<String>>();
-    var links = new ArrayList<Path>();
-    for (var root : roots.stream().distinct().toList()) {
-      var found = SkillWalk.walk(root);
-      found.skills().forEach(directories::putIfAbsent);
-      links.addAll(found.links());
-    }
-    warnLinks(links);
+    var skillFiles = new LinkedHashMap<Path, List<String>>();
+    roots.stream()
+        .distinct()
+        .forEach(root -> SkillWalk.walk(root).forEach(skillFiles::putIfAbsent));
     var reader = new SkillReader();
     var skills = new LinkedHashMap<String, Skill>();
-    for (var skill : directories.entrySet()) {
+    for (var skill : skillFiles.entrySet()) {
       if (reader.spent()) {
         break;
       }
@@ -153,41 +141,12 @@ public final class Skills {
     return List.copyOf(skills.values());
   }
 
-  private static void warnLinks(List<Path> links) {
-    if (links.isEmpty()) {
-      return;
-    }
-    var named =
-        links.stream()
-            .sorted()
-            .limit(LINKS_NAMED)
-            .map(Path::toString)
-            .collect(Collectors.joining(", "));
-    var more = links.size() > LINKS_NAMED ? " and " + (links.size() - LINKS_NAMED) + " more" : "";
-    SkillLog.warn(
-        LOGGER,
-        () ->
-            "Not following "
-                + links.size()
-                + " links met while scanning for skills ("
-                + named
-                + more
-                + "); pass a link's target to Skills.load to read the skills there");
-  }
-
   private static void keepFirst(Map<String, Skill> skills, Skill skill) {
     var first = skills.putIfAbsent(skill.name(), skill);
     if (first != null) {
       SkillLog.warn(
-          LOGGER,
-          () ->
-              "Skipping skill "
-                  + skill.name()
-                  + " at "
-                  + skill.directory().orElseThrow()
-                  + ": the skill at "
-                  + first.directory().orElseThrow()
-                  + ", found first with that name, is kept");
+          "Skipping skill %s at %s: the skill at %s, found first with that name, is kept",
+          skill.name(), skill.directory().orElseThrow(), first.directory().orElseThrow());
     }
   }
 }
