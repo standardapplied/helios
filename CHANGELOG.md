@@ -37,6 +37,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   and tools. On Anthropic models that bind reasoning, the next request drops earlier reasoning
   once, with one cache miss; Gemini resends the whole conversation once.
 - A host tool named `Skill` collides only in a session with skills.
+- `Skill` refuses a description longer than 1,024 characters, the Agent Skills limit, since every
+  request's system prompt carries it. Such a skill was accepted since #200 on `main`, never
+  released.
 - `Response.Usage.of` with four and with five counts is removed; `Usage.of(input, output)` stays.
   Replace `Usage.of(input, output, cacheCreation, cacheRead, reasoning)` with
   `Usage.newBuilder()`, then `withInputTokens(input)`, `withOutputTokens(output)`,
