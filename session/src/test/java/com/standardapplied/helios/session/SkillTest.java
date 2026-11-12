@@ -98,13 +98,23 @@ final class SkillTest {
   }
 
   @Test
-  void aLongDescriptionAndEmptyInstructionsAreAccepted() {
-    var description = "d".repeat(2_000);
+  void aDescriptionOf1024CharactersAndEmptyInstructionsAreAccepted() {
+    var description = "d".repeat(1_024);
 
     var skill = valid().withDescription(description).withInstructions("").build();
 
     assertEquals(description, skill.description());
     assertEquals("", skill.instructions());
+  }
+
+  @Test
+  void aDescriptionOver1024CharactersIsRefusedNamingTheLimitAndTheLength() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> valid().withDescription("d".repeat(1_025)).build());
+
+    assertEquals("description must be at most 1024 characters, not 1025", refused.getMessage());
   }
 
   @Test
