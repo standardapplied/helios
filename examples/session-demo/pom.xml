@@ -54,6 +54,32 @@
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Compile the documentation's code blocks (QuickStartsDocsTest) for every module the
+             README and docs/ show. -->
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-runtime</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-repl</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-onnx</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-persistence</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.standardapplied</groupId>
             <artifactId>helios-core</artifactId>

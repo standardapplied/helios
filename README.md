@@ -1,68 +1,47 @@
 # Helios
 
-The Helios agentic framework for the JVM. A provider-agnostic `Model` interface, a streamable steerable session SDK, sandboxed code execution, structured output, durable sessions, and end-to-end tracing — for tool-using agents that run reliably in production.
+Helios is an agentic framework for the JVM. It gives you a provider-agnostic `Model` interface with
+Anthropic, Gemini and OpenAI providers, and `AgentSession`, a long-lived, streamable, steerable
+conversation that runs the agent loop with tools, permissions, hooks, durable storage and
+OpenTelemetry tracing. Optional modules serve sessions over HTTP, run model-written Java in a
+sandbox, compute embeddings locally and store traces in PostgreSQL.
 
-Simple, explicit, no magic. No annotation-driven DI, no reflective surprises.
-
-Published to [Maven Central](https://central.sonatype.com/namespace/com.standardapplied) under the `com.standardapplied` namespace. MIT licensed.
+Explicit wiring, no annotation-driven dependency injection, no reflective surprises. Published to
+[Maven Central](https://central.sonatype.com/namespace/com.standardapplied) under
+`com.standardapplied`. MIT licensed.
 
 ## Requirements
 
-- Java 25+
-- Maven 3.9+
-
-Strict workspace file tools and filesystem memory additionally require Linux x86-64/AArch64,
-the default filesystem, `/proc/self/fd`, and an explicit JVM native-access grant. See
-[workspace confinement](#path-traversal-jails) for launch flags and compatibility details.
+- Java 25 or later.
+- Building Helios itself needs Maven 3.9.14 or later.
+- The strict workspace file tools and filesystem memory also need Linux x86-64 or AArch64 and a
+  native-access grant; see [Workspace confinement](docs/security.md#workspace-confinement).
 
 ## Modules
 
-Pick what you need — each jar is published independently:
+Each jar is published on its own; most applications want `helios-session` and one provider.
 
-| Artifact | What it gives you | External deps |
-|----------|-------------------|---------------|
-| `helios-core` | `Model` interface + value types, `Tool` / `CommandGrant`, `OutputSchema` + `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `SecretRegistry` + `Redactor`, `CostEstimate` / `CostCalculator` | None |
-| `helios-session` | v2 SDK — long-lived `AgentSession` running an agent loop on a virtual thread. `SessionPresets`, hooks, declarative `Permission`, file tools, `MemoryBackend`, `ExecutionProvider`, `ContextCompactor` | Jackson 3.x |
-| `helios-runtime` | Helidon HTTP/SSE surface for `helios-session` — `POST /sessions`, SSE `/events`, long-poll `/result` | Helidon SE, Jackson 3.x |
-| `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3.x |
-| `helios-anthropic` | Anthropic Claude provider (Messages API) | Jackson 3.x |
-| `helios-openai` | OpenAI GPT provider (Responses API) | Jackson 3.x |
-| `helios-repl` | Sandboxed JShell execution for the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, `ReplSession`, custom host functions) | Jackson 3.x |
-| `helios-onnx` | Local embeddings via ONNX Runtime | ONNX Runtime, DJL Tokenizers |
-| `helios-persistence` | PostgreSQL-backed `PromptRegistry`, `PgSessionStore`, `PgTraceStore` and `PgSpanExporter`, the OpenTelemetry exporter that writes the trace tables | Helidon DbClient, OpenTelemetry SDK |
-| `helios-skills` | `Skills.discover` / `Skills.load`: Agent Skills folders (`SKILL.md`) into `Skill` values | Jackson 3.x YAML (SnakeYAML Engine) |
-
-Most agentic apps want `helios-session` + one provider. Drop down to `helios-core`'s `Model` directly for one-shot calls; expose a session over HTTP with `helios-runtime`.
-
-## Production Readiness
-
-Helios is used in production but has documented limitations that you should understand before adopting it. This section is intentionally explicit so you can decide whether the current state fits your deployment risk profile.
-
-### What's hardened
-
-- **Fail-secure defaults.** `RuntimeServer.Builder` binds `127.0.0.1` (loopback) by default — external traffic is explicit opt-in via `withHost("0.0.0.0")`. Every HTTP route authenticates the request through the configured `Authenticator` and acts only on the caller's own sessions; an unauthenticated server (`withoutAuthentication()`) is accepted only on a loopback bind.
-- **Cooperative cancellation, no `Error` swallowing.** `RetryPolicy` and the session loop catch `Exception`, not `Throwable`. An `Error` (OOM, StackOverflow, LinkageError, an `AssertionError`) caught on any thread the session runs work on (the loop, the model stream, a tool, a hook, a cancellation callback, the execution provider's start and end) is never retried or turned into a tool result or terminal: it ends the session, no further model or tool call is made, and the run's future completes exceptionally with the first such `Error`, as the same instance, and the session closes (later ones suppressed on it; one no run carries is logged at `SEVERE`). The run's virtual thread then ends by throwing it to its uncaught-exception handler. That ends the thread, not the JVM; what an `Error` means for the process is the host's decision. A failure inside the sandbox child process stays contained and comes back as tool output. `Tool.execute` preserves the calling thread's interrupt status when the executor's exception chain carries `InterruptedException`.
-- **Sandboxed subprocess execution with dedicated RPC channel and descendant reaping.** The `JvmSandbox` ↔ host RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700); the host accepts exactly one connection then closes the listener, so no other process — including a JShell snippet inside the subprocess — can forge frames by writing to subprocess stdout. (Earlier versions used a `\0RPC:`-prefixed channel multiplexed on stdout, which a snippet could forge via `new PrintStream(new FileOutputStream(FileDescriptor.out))`. C1 in the original review.) Subprocess stdout stays for captured output only and is never parsed as RPC. `JvmSandbox.close()` and its JVM-shutdown-hook path snapshot descendants before killing the parent, then forcibly destroy the snapshot — snippets that call `Runtime.exec(...)` cannot orphan grandchildren past sandbox lifetime. A snippet that outlives its timeout is stopped through `jshell.stop()`, repeated until it and every thread it started have ended; one still running after `JvmSandboxConfig.stopGrace` (5 s by default) cannot be reached inside the JVM, so the sandbox answers the execute and halts with exit code 3.
-- **Path-traversal jails on every filesystem boundary.** `WorkspaceRoot` backing the session's `Read` / `Grep` / `Glob` tools and the filesystem memory backend (lexical `..`/absolute refusal + canonicalisation of the deepest existing prefix + no-follow opens), `OnnxModelDownloader` (refuses absolute paths and traversal in HuggingFace-supplied filenames), and `CommandGrant` (per-call temp working directory, argv pre-scan refusing registered secrets).
-- **SQL identifier validation on the persistence schema name.** `PgConfig` rejects schema names that don't match Postgres' unquoted-identifier shape, so configuration-driven schema names cannot inject SQL via the qualifier substitution.
-- **One secret registry per session, applied where tool output enters it.** The session redacts every tool result and every error it reports against `SessionOptions.withSecretRegistry(registry)`, and output cut at a size cap loses any trailing start of a secret. See [Secret redaction](#secret-redaction-secretregistry--redactor).
-- **A slow reader never stalls the loop.** Each `events()` reader has its own 256-event buffer. A routine event never waits: a reader whose buffer is full misses it at once. The control events `RunEnded`, `QuestionAsked` and `Error` wait up to 30 s for room, then are missed too. A reader is never left guessing: one `QueryEvent.EventsDropped(count)` sits where its missed events would have been, and its stream's first miss is logged as a WARNING. A slow or paused SSE client cannot pin the agent loop.
-- **Test coverage.** One JaCoCo gate in the root `pom.xml` holds every library module (`helios-core`, `-session`, `-runtime`, `-gemini`, `-anthropic`, `-openai`, `-persistence`, `-onnx`, `-repl`, `-testing`, `-skills`) at 95% instruction / 90% branch. Tests across the project: about 7,900, run on every build. The provider modules (`helios-gemini`, `helios-anthropic`, `helios-openai`) run their live-API tests only when a provider key is set; CI runs everything else, and gates coverage, without those keys.
-
-### Known limitations
-
-These are documented intentionally — they're real and you should plan around them. We are working through them in priority order; this README will move them from "limitation" to "hardened" as each lands.
-
-- **Persistence layer stores trace payloads verbatim unless you set a redactor.** `helios_traces.{input_text, output_text, attributes}` and `helios_spans.attributes` capture exactly what they are given. That faithful capture is what makes the audit trail useful for evals, debugging, and post-hoc analysis. A session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; for whatever else reaches these tables, set `PgConfig.Builder.withRedactor(registry.redactor())`, which runs every text field and JSON-serialised attribute map through the redactor before it reaches the database.
-- **No backwards compatibility guarantee.** Helios is pre-1.0 in spirit — the public API may change between minor versions. Tag a known good version and pin it.
-- **`FinishReason.LENGTH` is terminal.** When the model truncates output at its `max_output_tokens` cap, the loop terminates with `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing. Deployers that previously relied on the loop continuing past LENGTH should adjust `max_output_tokens` in `ModelConfig`. This is a deliberate change from earlier behaviour — silent re-issue burned `maxTurns` of budget without making progress.
-- **Live integration coverage is environment-gated.** Provider integration tests run with real API keys only when a release is cut; you should add equivalent live tests for the workloads that matter to you before relying on the SDK in production-critical paths.
-
-If any of these is a deal-breaker for your use case, open an issue — prioritisation tracks demand.
+| Artifact | What it gives you | External dependencies |
+|---|---|---|
+| `helios-core` | `Model` and its value types, `Tool` and `CommandGrant`, `OutputSchema` and `Provenanced<T>`, `TokenCounter`, `FaultTolerance`, `SecretRegistry` and `Redactor`, `CostEstimate` and `CostCalculator` | none |
+| `helios-session` | `AgentSession`, `SessionPresets`, hooks, `Permission`, workspace file tools, memory, `ExecutionProvider`, `ContextCompactor`, session stores | Jackson 3, OpenTelemetry API |
+| `helios-anthropic` | Anthropic Claude provider (Messages API) | Jackson 3 |
+| `helios-gemini` | Google Gemini provider (Interactions API) | Jackson 3 |
+| `helios-openai` | OpenAI provider (Responses API) | Jackson 3 |
+| `helios-runtime` | HTTP and SSE surface for sessions | Helidon SE, Jackson 3 |
+| `helios-repl` | Sandboxed JShell behind the `Execute` tool (`JShellExecutionProvider`, `JvmSandbox`, host functions) | Jackson 3 |
+| `helios-onnx` | Local embeddings | ONNX Runtime, DJL Tokenizers |
+| `helios-persistence` | PostgreSQL `PgSessionStore`, `PgTraceStore`, `PgSpanExporter`, `PgAnnotationStore`, `PgPromptRegistry` | Helidon DbClient, PostgreSQL JDBC, OpenTelemetry SDK |
+| `helios-skills` | `Skills.discover` and `Skills.load`: Agent Skills folders (`SKILL.md`) into `Skill` values | Jackson 3 YAML (SnakeYAML Engine) |
+| `helios-testing` | `ScriptedModel`, a deterministic `Model` for tests and evals | Jackson 3 |
 
 ## Installation
 
 ```xml
+<properties>
+  <helios.version>3.1.3</helios.version>
+</properties>
+
 <dependency>
   <groupId>com.standardapplied</groupId>
   <artifactId>helios-session</artifactId>
@@ -70,186 +49,44 @@ If any of these is a deal-breaker for your use case, open an issue — prioritis
 </dependency>
 <dependency>
   <groupId>com.standardapplied</groupId>
-  <artifactId>helios-anthropic</artifactId>  <!-- or -gemini, -openai -->
+  <artifactId>helios-anthropic</artifactId>  <!-- or helios-gemini, helios-openai -->
   <version>${helios.version}</version>
 </dependency>
 ```
 
-JPMS:
+Add any other module from the table the same way, `helios-skills` for skills read from folders.
+On the module path, `requires com.standardapplied.helios.session;` and the provider's module, such
+as `requires com.standardapplied.helios.anthropic;` (`...helios.skills` for `helios-skills`).
 
+## Quick start
+
+### A model call
+
+`Model` is the "send messages, get a response" shape: no session, no loop, no tools.
+
+<!-- snippet: ProviderSnippets#modelCall -->
 ```java
-requires com.standardapplied.helios.session;
-requires com.standardapplied.helios.anthropic;
-```
-
-Optional: `helios-skills` reads [Agent Skills](#skills) folders into `Skill` values; add the artifact and `requires com.standardapplied.helios.skills;`.
-
-## Quick Start
-
-Three ways in, depending on what you're building.
-
-### 1) One-shot model call
-
-Direct `Model` API for the "send messages, get a response" shape. No session, no loop, no tools — just the model.
-
-```java
-try (var model = new AnthropicProvider().create(
-    AnthropicModelId.CLAUDE_SONNET_5_5.id(),
-    ModelConfig.newBuilder().withApiKey(System.getenv("ANTHROPIC_API_KEY")).build())) {
-  var response = model.chat(List.of(
-      Message.system("You are a helpful assistant."),
-      Message.user("What is the capital of France?")), List.of());
+try (var model =
+    new AnthropicProvider()
+        .create(
+            AnthropicModelId.CLAUDE_SONNET_5_5.id(),
+            ModelConfig.newBuilder().withApiKey(System.getenv("ANTHROPIC_API_KEY")).build())) {
+  var response =
+      model.chat(
+          List.of(
+              Message.system("You are a helpful assistant."),
+              Message.user("What is the capital of France?")),
+          List.of());
   System.out.println(response.content());
 }
 ```
 
-All providers implement the same `Model` interface — swap providers without touching the rest of your code.
+### A session with tools
 
-#### Reasoning
-
-`ModelConfig.reasoning` says what a reasoning model should do; leave it unset and Helios sends no
-thinking, reasoning or effort field, so the provider's defaults apply. `Reasoning.Off` stops
-reasoning; `Reasoning.Effort(level, display)` reasons at `MINIMAL`..`MAX` and returns the reasoning
-`HIDDEN`, as a `SUMMARY`, or only as the `PROGRESS` notes the model writes between tool calls.
-
-```java
-var config = ModelConfig.newBuilder()
-    .withApiKey(System.getenv("ANTHROPIC_API_KEY"))
-    .withReasoning(new Reasoning.Effort(Reasoning.Level.MEDIUM, Reasoning.Display.PROGRESS))
-    .build();
-var model = new AnthropicProvider().create(AnthropicModelId.CLAUDE_OPUS_5_5.id(), config);
-```
-
-Each provider's model catalogue declares what a model accepts, and the request is exactly what
-was asked or `create` throws, naming the model, the rejected value and the accepted ones: `Off` on
-Opus 5.5 (which always thinks), `MAX` on gpt-5.5, `PROGRESS` on any model without progress notes,
-`temperature` on any catalogued Claude model. Nothing is clamped or silently dropped. An Anthropic or
-OpenAI model id the catalogue does not know is sent whatever the provider can spell, and the API
-judges it.
-
-Gemini video understanding uses the Files API for large or reusable videos. Google currently
-accepts Files API video references through the beta Interactions endpoint; the stable endpoint can
-reject the same `video` content block. Select `v1beta` before constructing the model. Helios never
-replays a rejected stable request against beta automatically.
-
-```java
-var config = ModelConfig.newBuilder()
-    .withApiKey(System.getenv("GEMINI_API_KEY"))
-    .withApiVersion("v1beta")
-    .build();
-
-try (var files = new GeminiFilesClient(config);
-    var video = files.upload(Path.of("meeting.mp4"), "video/mp4");
-    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
-  var message = Message.newBuilder()
-      .withRole(Role.USER)
-      .withContent("Summarize this video and list the decisions.")
-      .withFileReferences(List.of(video.awaitActive()))
-      .build();
-
-  System.out.println(model.chat(List.of(message), List.of()).content());
-}
-```
-
-`upload` returns a `ManagedFile` as soon as the bytes land, before Gemini has processed the file.
-`awaitActive()` waits for processing (10 minutes by default, or `awaitActive(timeout)`) and
-returns the reference a message carries; it throws when processing fails or runs out of time. The
-handle is the caller's: `close()` or `delete()` removes its validated `files/{id}` resource,
-including after a failed wait and on exceptional exits from try-with-resources, and Helios never
-deletes it on its own. For an `AgentSession`, attach the same reference with
-`UserMessage.newBuilder().withFileReference(video.awaitActive())`. Inline media remains available
-for small inputs; `GeminiFilesClient` streams uploads without loading video bytes into heap.
-
-### Gemini privacy controls
-
-For privacy-sensitive calls, combine managed deletion, stateless interactions and disabled
-raw-output capture:
-
-```java
-var config = ModelConfig.newBuilder()
-    .withApiKey(System.getenv("GEMINI_API_KEY"))
-    .withApiVersion("v1beta")
-    .withProviderContinuation(false)
-    .withRawOutputCapture(RawOutputCapturePolicy.DISABLED)
-    .build();
-
-try (var files = new GeminiFilesClient(config);
-    var media = files.upload(Path.of("private-video.mp4"), "video/mp4");
-    var model = new GeminiProvider().create(GeminiModelId.GEMINI_3_8_FLASH.id(), config)) {
-  var input = Message.newBuilder()
-      .withRole(Role.USER)
-      .withContent("Analyze the video.")
-      .withFileReferences(List.of(media.awaitActive()))
-      .build();
-  var response = model.chat(List.of(input), List.of());
-}
-```
-
-`withProviderContinuation(false)` resends local history and neither sends nor returns Gemini
-interaction IDs. A changed system prompt or tool set, or an interaction that expired or was
-deleted, costs one resend of the whole conversation, never the request. `RawOutputCapturePolicy.DISABLED` preserves actionable schema and submit-validator
-corrections while keeping raw model text out of structured-output exceptions. The effective
-Interactions version is reported in response metadata under `gemini.apiVersion`; base URLs and
-credentials are excluded from that diagnostic.
-A response Gemini blocks for recitation ends with `FinishReason.CONTENT_FILTER`; a session ends
-in `Refusal` with Gemini's message.
-When `withBaseUrl(...)` is also set, that compatibility override supplies the complete endpoint
-prefix and therefore takes precedence over canonical version-path construction.
-
-The Gemini provider has no logging calls and does not log request bodies, uploaded bytes, file URIs,
-API keys, prompts, responses, or thinking text. Application code must apply the same discipline to
-exceptions and model responses. Managed deletion requests early removal, but provider-side
-processing and physical retention remain controlled by Google. Google currently documents Files
-API uploads as temporary with automatic deletion after 48 hours; consult Google's current data and
-retention terms for the deployed account and region.
-
-Keep video traffic on `v1beta` until the credential-gated `GeminiVideoIntegrationTest` also passes
-when configured for `v1` with the same model, Files API upload, and structured-output schema. Only
-then change the configured version; endpoint selection is immutable for each model instance.
-
-On Claude models that bind thinking to its prompt (Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1,
-Opus 5.5, Sonnet 5.5, Haiku 5.5), a changed system prompt or tool set costs the earlier turns'
-reasoning, and the prompt cache, once, never the request.
-
-Anthropic models use managed five-minute prompt caching by default. Select the one-hour
-cache for conversations whose reusable prefixes must survive longer gaps, or disable caching
-for one-shot workloads:
-
-```java
-var provider = new AnthropicProvider();
-var config = ModelConfig.of(System.getenv("ANTHROPIC_API_KEY"));
-
-Model longLived = provider.create(
-    AnthropicModelId.CLAUDE_OPUS_5.id(),
-    config,
-    CachePolicy.longLived());
-
-Model uncached = provider.create(
-    AnthropicModelId.CLAUDE_OPUS_5.id(),
-    config,
-    CachePolicy.disabled());
-```
-
-For cost tracking, `AnthropicPricing.calculator(cachePolicy)` prices every catalogued Claude
-model at Anthropic's list price, including each model's cache-read rate, the cache-write rate
-that matches the policy's TTL, and Haiku 5.5's two prompt-length tiers:
-
-```java
-var options = SessionOptions.newBuilder()
-    .withModel(longLived)
-    .withCostCalculator(AnthropicPricing.calculator(CachePolicy.longLived()))
-    .build();
-```
-
-`AnthropicPricing.AS_OF` records when the rates were last checked against the pricing page. For
-negotiated or partner-platform rates, build a `CostCalculator.staticTable(...)` of rate cards built
-with `Pricing.newBuilder()`, each rate in micro-USD per million tokens from your rate card
-(`withInputMicroUsdPerMillion`, `withOutputMicroUsdPerMillion`, `withCacheWriteMicroUsdPerMillion`,
-`withCacheReadMicroUsdPerMillion`).
-
-### 2) Streamable session
-
-`AgentSession` is a conversation that runs many times. Each `send` steers the run in progress or starts the next one and returns that run's result future; read `events()` with for-each, `interrupt()` the current run, `runBlocking` for synchronous results. This is the shape that shows up in production: multi-turn tool use, follow-up questions, mid-run user steering, permission gates, observability.
+`AgentSession` is a conversation that runs many times. The `workspace` preset gives the model the
+`Read`, `Glob`, `Grep` and `LS` tools over a directory, a memory store, and a permission policy
+that asks before writes and execution. `model` is any `Model`, such as the one above built outside
+a try block, since the session uses it until it closes.
 
 <!-- snippet: QuickStarts#workspaceSession -->
 ```java
@@ -261,676 +98,125 @@ try (var session =
 }
 ```
 
-See [Sessions](#sessions-helios-session) below.
+### The HTTP surface
 
-### 3) HTTP surface
+`helios-runtime` serves sessions to clients in any language. This server listens on
+`127.0.0.1:8080` without authentication, which it allows only on a loopback address:
 
-`helios-runtime` exposes a session over REST + SSE so non-JVM clients can drive it. `POST /sessions`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/interrupt`, SSE `GET /sessions/{id}/events`, long-poll `GET /sessions/{id}/result?timeout=<s>`, `GET /sessions/{id}/questions`, `POST /sessions/{id}/questions/{questionId}`, `DELETE /sessions/{id}`, each authenticated and scoped to the caller's own sessions (see [HTTP surface defaults](#http-surface-defaults)). See `runtime/` for routes.
-
-A session that asks the user, through a permission rule that says "ask" or the model's `AskUserQuestion`, waits until the question is answered. A client that missed the `QuestionAsked` event lists the questions still pending:
-
-```http
-GET /v1/sessions/sess-1/questions
-
-200 OK
-[{"questionId": "perm-0193…", "header": "Permission",
-  "question": "Allow Write(./notes.md)?\n\nArguments: {\"path\":\"./notes.md\"}",
-  "options": [{"label": "Allow", "description": "ask rule Write(**) matched Write(./notes.md)"},
-              {"label": "Deny", "description": "Refuse this tool call"}],
-  "multiSelect": false}]
-```
-
-and answers one by its id; `customText` is optional:
-
-```http
-POST /v1/sessions/sess-1/questions/perm-0193…
-{"selectedLabels": ["Allow"], "customText": ""}
-
-202 Accepted
-```
-
-An id starting `perm-` asks to approve a tool call; one starting `q-` is the model's own question. Tell them apart by the prefix, never the header: the model chooses its own question's header and labels. The answer names no tool or arguments, so it approves exactly the call the question was asked about. A body that is not a valid response is `400`, a question not pending (unknown or already answered) `404`, a closed session `409`; `401`, `413`, `429` and `503` as for `POST .../messages`.
-
-## Sessions (`helios-session`)
-
-A *session* is a conversation; a *run* is one execution, from the message that starts it to its terminal `ResultMessage`; a *turn* is one model call and its tool round. `AgentSession.open(SessionOptions)` opens a session with no run. Key surfaces:
-
-- `send(UserMessage)` — steer the run in progress, or start the next run when none is in progress; returns that run's `CompletableFuture<ResultMessage>`. A session runs again after any ending (success, a limit, a cancel, an error) until it is closed, and every run sees the whole conversation.
-- `events()` — a new `EventStream` per call, an `Iterable<QueryEvent>` that is also `AutoCloseable`, read once with for-each, across every run until the session closes (`RunStarted` and `RunEnded` bracket each run; every event names its `runId`).
-- `runBlocking(msg)` and `runBlocking(msg, OutputSchema)` — `send(msg).join()`, and its typed variant.
-- `interrupt()` — cancel the run in progress (`Cancelled`, reason `"interrupted"`); the session stays open. The text the model streamed before the cut stays as the conversation's last assistant message (see *Partial turns* below).
-- `answer(qid, response)` — resolve a pending `AskUserQuestion` or permission approval; `pendingQuestions()` lists the ones still open. A run's end cancels its unanswered questions.
-- `close()` — `AutoCloseable`; never throws. It cancels the run in progress (`"session closed"`), waits for it, then tears the session down: `onSessionEnd` for a session with an execution provider, then the event streams, without waiting for their readers. The run's end and the teardown share one deadline, `SessionLimits.stopGrace` (5 s) from the start of `close()`; a step after one that used it up still runs but is not waited for. A tool that ignores both its token and interruption may still run, and its effects land, after the result settles; it is logged as still running.
-
-<!-- snippet: QuickStarts#chat -->
+<!-- snippet: HttpSnippets#localServer -->
 ```java
-try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
-  var answer = session.send("Which classes form the session's public API?").join();
-  var followUp = session.send("Which of them does a chat application need?").join();
-  System.out.println(answer + "\n" + followUp);
+try (var model =
+        new AnthropicProvider()
+            .create(
+                AnthropicModelId.CLAUDE_SONNET_5_5.id(),
+                ModelConfig.of(System.getenv("ANTHROPIC_API_KEY")));
+    var server =
+        RuntimeServer.builder()
+            .withRegistry(SessionRegistry.inMemory())
+            .withOptionsFactory(
+                request ->
+                    SessionPresets.minimal(model).withSessionId(request.sessionId()).build())
+            .withoutAuthentication()
+            .withPort(8080)
+            .build()) {
+  System.in.read();
 }
 ```
-
-`maxTurns`, `maxBudgetMicroUsd` and `maxWallClock` count per run. A run that ends with tool calls unanswered (a hook's `Stop`, an interrupt, an error) answers each with a "not run" tool message, so the next run's history is one a provider accepts. An execution provider that refuses at `open` makes it throw `SessionUnavailableException`.
-
-**Storing a conversation.** `withStore(store)` makes a session durable: `open` loads the conversation stored under the session id, or starts it when there is none, and each turn appends what it added, so a handle opened days later, in any process, carries on. Helios ships `InMemorySessionStore`, `FileSessionStore` (one JSON-lines file per session) and, in `helios-persistence`, `PgSessionStore` (one Postgres row per entry); the system prompt is never stored and always comes from the options. One writer per session id at a time is the caller's job: a second writer's run ends `ErrorDuringExecution` of kind `SessionConflict`, and its session closes. A run's last turn is stored with a `SessionEntry.RunEnded` naming the run and its terminal, in one batch, so after a crash `store.load(id).lastRunEnded()` tells whether the run that wrote last ended. A `Success` run's answer is `lastRunEnded().orElseThrow().result()`, whether the model's reply, a hook's `Stop` text or empty. The messages the session writes itself, a rejected structured output, its correction, a hook's `Inject`, a partial turn and a skill put back after a compaction, carry a `MessageOrigin` tag in their metadata. A session id is 1 to 128 characters of `[A-Za-z0-9._:-]`, not starting with `.`.
-
-<!-- snippet: QuickStarts#storedChat -->
-```java
-var store = FileSessionStore.of(Path.of("conversations"));
-try (var session =
-    AgentSession.open(
-        options.toBuilder().withSessionId("member-42").withStore(store).build())) {
-  session.send("Where did we leave off?").join();
-}
-```
-
-**Partial turns.** A model call cut short, by `interrupt()`, `close()`, the wall clock, a stream failure (for a transient one, the last attempt's text once retries run out, or the failed attempt's when the run is cut during its retry back-off) or the stream idle timeout, keeps the text it streamed as the run's last assistant message, tagged `MessageOrigin.PARTIAL_TURN` (`helios.origin`: `partial-turn`); its tool calls, its reasoning and its provider metadata are dropped, and blank text keeps nothing. A store holds it with the run's `RunEnded`, and the next run, in the same session or one reopened under its id, sends it as an ordinary text-only assistant turn before the new user message, so the model can carry on. It is the text the run's `AssistantText` events carried: to show it as an unfinished reply, or to leave it out of a transcript, check `MessageOrigin.of(message)` for `PARTIAL_TURN`.
-
-**Restarting after a crash.** A run the process lost leaves a stored history that ends after a whole turn, never with a tool call that has no result, so the session reopens and takes a new message. Load the session, see that `lastRunEnded()` is empty, reopen it under the same id, then `send` a continuation of your choosing, or record the run as abandoned and send nothing.
-
-<!-- snippet: QuickStarts#restart -->
-```java
-var ended = store.load("member-42").lastRunEnded();
-try (var session =
-    AgentSession.open(
-        options.toBuilder().withSessionId("member-42").withStore(store).build())) {
-  if (ended.isEmpty()) {
-    session.send("Your last answer was cut off; pick up where you left off.").join();
-  }
-}
-```
-
-`SessionPresets` ships three curated factories, each returning a `SessionOptions.Builder` that already holds the model:
-
-- `minimal(model)` — model only, defaults for everything else.
-- `readOnly(model, root)` — `Read` / `Glob` / `Grep` / `LS` rooted at the workspace, gated by `Permission.planMode()`.
-- `workspace(model, root)` — same read tools plus a `FileSystemMemoryBackend` (the session registers `MemoryRead` and `MemoryWrite` for it) plus `Permission.defaultInWorkspace()` (reads + memory allowed, writes / edit / execute asked).
-
-Further tools append with `withTool(binding)` (`withTools(list)` replaces the list), as hooks do with `withHook`. Built-in tools come with what they serve: a memory backend adds `MemoryRead` and `MemoryWrite`, `withExecutionProvider(provider)` adds `Execute` and starts and ends the provider with the session (`workspace(model, root).withExecutionProvider(provider)` is an agent that runs code, which `defaultInWorkspace()` asks before each execution), `withAskUserQuestion()` adds `AskUserQuestion`, and skills add `Skill` (see *Skills* below). Two tools with one name fail `AgentSession.open`.
-
-Every session has a permission policy. Without `withPermission` it is `Permission.empty(DEFAULT)`, which runs reads and asks before every write, execution and network call; a headless host, where no one answers, opts out with `withPermission(Permission.empty(PermissionMode.BYPASS_PERMISSIONS))` or allow rules for the tools its runs need.
-
-### Subagents
-
-A subagent is a child agent the model delegates a task to. `withSubagent(new Subagent(name, description, options))` registers the built-in `Agent` tool, whose call names the subagent and gives it a prompt; each call runs one fresh child session from the subagent's own options, waits for its run and closes it. Nothing is inherited from the parent: the child's model, prompt, tools, skills, permission, limits, output schema and store are all in its options.
-
-<!-- snippet: QuickStarts#subagents -->
-```java
-var researcher =
-    new Subagent(
-        "researcher",
-        "reads the repository and answers one question about it",
-        SessionPresets.readOnly(model, repo).build());
-var options =
-    SessionPresets.minimal(model)
-        .withSubagent(researcher)
-        .withPermission(
-            Permission.newBuilder(PermissionMode.DEFAULT)
-                .withAllow(PermissionRule.of("Agent", "researcher"))
-                .build())
-        .build();
-try (var session = AgentSession.open(options)) {
-  System.out.println(session.send("Which classes form the session's public API?").join());
-}
-```
-
-- **Result.** A child's `Success` is the call's result (its JSON under an output schema); any other terminal, a child that cannot open and an unknown name are failures the model reads. The child's secret registry redacts what it answers before the parent's does.
-- **Spend.** The child's usage and cost are added to the parent run's as it spends, so the parent's `ResultMessage` and budget count them; under `maxBudgetMicroUsd` the child gets at most what the run has left, and with nothing left the call fails without starting one. Under a budget every subagent needs a cost calculator.
-- **Time and cancellation.** The call's deadline is the subagent's `maxWallClock` plus its `stopGrace`, not `toolTimeoutDefault`. An interrupt, a close, the deadline or the parent's wall clock interrupts the child, which ends `Cancelled`; at the deadline the call waits the subagent's `stopGrace` for it to close.
-- **Permissions.** `Agent` is an `EXECUTION` tool keyed `Agent(<name>)`, so a rule allows, asks or denies one subagent, and hooks apply as to any tool. A child has no one to answer: its `ASK` is denied, so allow in its own permission what it needs.
-- **Skills.** A child sees only the skills in its subagent's own options, never the parent's.
-- **Linkage.** The child's run span nests under the call's `execute_tool` span and carries `helios.parent.session_id`, `helios.parent.run_id` and `helios.parent.tool_call_id`; `PgTraceStore.list` with the filter `attributes eq "${\"helios.parent.session_id\":\"<id>\"}"` finds a session's children.
-
-Helios runs subagents in the foreground of the parent's call. Background work, delivery into the parent (`send`), caps on concurrent children and idempotency are the host's job, and a child session the host starts itself is linked with its own `withTraceAttributes` labels.
-
-Stream events for a live UI:
-
-```java
-var events = session.events();
-Thread.ofVirtual().start(() -> {
-  try (events) {
-    for (var event : events) {
-      if (event instanceof QueryEvent.AssistantText t) System.out.print(t.text());
-    }
-  }
-});
-session.send(UserMessage.text("Refactor the loop module's package-info comments."));
-```
-
-Hooks, declarative permissions, cost tracking, budget caps, session limits, context compaction, the HTTP + SSE surface — see [`session/README.md`](session/README.md) for the full quickstart.
-
-### Skills
-
-A skill, in the [Agent Skills](https://agentskills.io) format, is a name, a description and instructions, with optional files. Build one with `Skill.newBuilder()`: `withName`, `withDescription` and `withInstructions` are required; `withDirectory(path)` says where its files live, and `withFile(path, content)` (or `withFiles(map)`) adds a file, its content a `Supplier<String>` called each time the model reads that file. A `Skill` shared by several sessions has its suppliers called concurrently. A name is at most 64 characters of `[a-z0-9]+(-[a-z0-9]+)*`; a file path or the directory holds no `<`, `>`, `"` and no control, format or line or paragraph separator character, so the model sees each exactly as it must spell it. `withSkill(skill)` appends one and `withSkills(list)` replaces them. No preset adds a skill: adding one is your trust decision, since what a skill says reaches the model as instructions.
-
-<!-- snippet: QuickStarts#skills -->
-```java
-var releaseNotes =
-    Skill.newBuilder()
-        .withName("release-notes")
-        .withDescription("Writes release notes from the commits since the last tag.")
-        .withInstructions(
-            "List the commits since the last tag, group them by module and write one line for"
-                + " each change a user of the library would notice.")
-        .build();
-var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
-try (var session = AgentSession.open(options)) {
-  System.out.println(session.send("Write the notes for the next release.").join());
-}
-```
-
-- **Catalog.** The session's one system message is your prompt, a blank line, a line telling the model to load a matching skill before it starts, a blank line, then an `<available_skills>` list of each skill's name and XML-escaped description, in `withSkills` order. `SessionOptions.systemPrompt()` stays your text. A session without skills sends exactly what it sent before: no catalog and no tool.
-- **The `Skill` tool.** `{"skill": "<name>"}` answers the skill's instructions inside `<skill_content name="<name>">`, followed by its directory and its `<skill_resources>` list of files when it has them. Once the skill is loaded in the conversation, `{"skill": "<name>", "file": "<path>"}` answers one listed file inside `<skill_file>`, calling only that file's supplier; before, it answers that the skill must be loaded first, and a path that is not exactly one of the skill's files reads nothing. A skill already loaded in the conversation answers that it is loaded. Results are redacted, cut to `maxToolResultChars` and evented like any tool's: instructions longer than that are cut once, and the cut part is not served again.
-- **Permissions.** `Skill` is a `READ` tool keyed `Skill(<name>)` or `Skill(<name>/<file>)`, so it runs without asking in every mode but `LOCKED_DOWN`. Since a skill's files are readable only once it is loaded, denying `Skill(pdf)` (`PermissionRule.of("Skill", "pdf")`) covers the skill and its files, while a rule over `Skill(pdf/**)` restricts its files alone; hooks apply as to any tool. A tool of yours named `Skill` collides only in a session with skills.
-- **Compaction.** When a compaction removes what the model loaded, the session puts each such skill back right after the system message, as a user message tagged `MessageOrigin.SKILL` holding the text the model was given, whatever compactor you set; it survives any number of compactions. Skills put back come in the order they were first loaded, before any activation your compactor kept. A `PreModelTurnHook`'s `MutateHistory` is yours: nothing is put back after it.
-- **Reopening.** What the model loaded is read from the history, so a reopened session needs nothing more in its store. A skill no longer in the options stays in the conversation as sent, but cannot be loaded and is not put back; changed instructions reach the model only in a new session. Changing a session's skills or their descriptions between runs changes its system prompt and tool list: on Anthropic models that bind reasoning the next request drops earlier reasoning once, with one cache miss, and Gemini resends the whole conversation once.
-- **Subagents.** A child sees only the skills in its subagent's own options, never the parent's.
-- **Scripts.** Helios runs no skill code. A script runs through `Execute`, under your permission policy, at the path the activation's "Skill directory" names; making that path visible to your execution provider's sandbox is yours. To offer a user-typed `/skill-name`, find the skill in `options.skills()` and send its `instructions()` in a message of your own; such a message is not a load, so a compaction does not put it back.
-
-**Loading skills from folders.** The optional `helios-skills` artifact reads Agent Skills folders, each a `SKILL.md` of YAML frontmatter between `---` lines and a Markdown body, into `Skill` values.
-
-- **Two calls.** `Skills.discover(repo)` reads `~/.agents/skills`, `~/.claude/skills`, `<repo>/.agents/skills` and `<repo>/.claude/skills`, in that order (`~` is the JVM's `user.home`, read on each call). `Skills.load(folders...)` reads the folders you name, in your order; each must exist and may itself be a skill's folder. `Skills.load(repo.resolve(".agents/skills"))` reads a project's skills without the user's.
-- **Which skill wins.** When two skills share a name the first found wins and the other is left out with a warning, so a user skill wins over a project skill: a repository cannot take the place of a skill the user installed. This is Claude Code's order, not the agentskills.io guide's suggestion of project over user.
-- **A snapshot.** A call reads each `SKILL.md` and the text of each file once, and nothing touches the disk after it returns: a loaded skill keeps working if its folder is changed or deleted, and does not see the change. Call again to pick up changes, and build new sessions with the result.
-- **What is found.** Every directory up to four levels below a folder that holds a `SKILL.md` is a skill, and its regular files up to four levels below it are its files; a `SKILL.md` inside a skill is one of that skill's files, not a second skill. Hidden entries and `node_modules` are skipped. The four folders and the ones passed to `load` are resolved, so a link there is followed, but a project folder only while its real path stays inside the project. Below them no link is followed.
-- **Bounds.** A `SKILL.md` of at most 1 MiB; 2,000 directories and 10,000 files per folder; 1,000 files per skill; 16 MiB of file bytes per call (about twice that in heap), past which the call stops and returns the skills loaded before it.
-- **Listed but not readable.** A file larger than 60,000 bytes, the largest page the `Read` tool returns, chosen so a file fits whole under the default 65,536-character tool-result cap, or one that is not UTF-8 text, such as an image, stays listed for a script to use at its path; reading it through `Skill` answers why it cannot.
-- **Lenient reading.** A name unlike its directory's and unknown frontmatter keys still load (`allowed-tools` is ignored; your `Permission` stays the only authority). A `SKILL.md` without valid frontmatter (a duplicated key or a YAML alias included), or whose name, description or directory `Skill` refuses, is skipped and the others load; a file `Skill` refuses or that cannot be read is left out of its skill.
-- **Trust.** Loading is your decision. A repository's `.agents/skills` and `.claude/skills` are written by its author: their instructions reach the model, and their scripts may be proposed to `Execute`. What `discover` finds reaches a session only when you pass it to `withSkills`; to keep a project's folders out, call `load` with folders of your own.
-- **Load skills once**, at startup or while no session can write those folders, and reuse the returned list across sessions: skills are immutable values. A process rewriting a folder during the call can make the loader serve any file the JVM can read as a skill's file, or block the call forever; call it from a platform thread, not a virtual one. After the call returns, nothing on disk can affect a loaded skill.
-- **Scripts** run as the Scripts bullet says, through an `ExecutionProvider` whose sandbox sees the skill's folder; for a sandbox that mounts the skills at another path, rebuild each skill with that path, `skill.toBuilder().withDirectory(mount).build()`.
-- **Warnings.** Every skip and leniency is a `WARNING` on the logger `com.standardapplied.helios.skills.Skills`, the only report; attach a `java.util.logging.Handler` to collect them.
-
-<!-- snippet: QuickStarts#discoveredSkills -->
-```java
-var options = SessionPresets.workspace(model, repo).withSkills(Skills.discover(repo)).build();
-try (var session = AgentSession.open(options)) {
-  System.out.println(session.send("Write the notes for the next release.").join());
-}
-```
-
-### Terminal classification
-
-The loop terminates when the model's `FinishReason` indicates the session is done — `STOP` (natural completion), `CONTENT_FILTER` (refusal), `ERROR` (provider error), or `LENGTH` (response truncated at `max_output_tokens`). `LENGTH` produces `ResultMessage.ErrorDuringExecution(kind="max-tokens")` rather than re-issuing — deployers that need higher per-turn ceilings should raise `ModelConfig.maxOutputTokens` instead of relying on the loop to retry. See [Known limitations](#known-limitations) for the rationale (the previous behaviour silently burned `maxTurns` of budget without making progress).
-
-### Event delivery semantics
-
-`AgentSession.events()` opens a new `EventStream` per call, spanning every run until the session closes, with its own 256-event buffer.
-The loop never waits for a reader on a routine event: a full stream misses it at once. `RunEnded`, `QuestionAsked` and `Error`
-wait up to 30 s for room, then are missed too; a missed terminal stays readable through the future `send` returned, a missed
-question through `pendingQuestions()`. The events a stream misses in a row are marked by one `QueryEvent.EventsDropped`, read
-where they would have been (before the next event, or before the iteration ends) and carrying their `count` and the first one's
-run, turn and timestamp; a stream's first miss is logged as a WARNING, later ones at FINE, a missed control event always as a
-WARNING. A reader that keeps up never reads a marker. The session never waits for readers, so a reader that must have handled
-`RunEnded` before that future completes synchronises with its own thread. Details: `EventStream` javadoc.
-
-A host that forwards the stream to a browser forwards the marker too (the SSE route names it `event: EventsDropped`). On
-`EventsDropped`, the turn's partial text is incomplete: replace it with the run's result, from the future `send` returned, the
-`/result` long poll or the stored session.
-
-### Context compaction
-
-The agent loop counts context fill from the input size the provider reported for the last request, system prompt and tool definitions included, plus a pluggable `TokenCounter`'s estimate (default char-based, ~4 chars/token) of the messages added since. Before the first report, after a history replacement and after a turn with no report, the estimate covers the whole history. It reacts at two watermarks:
-
-- **0.85** of `SessionLimits.maxContextTokens()` → emits `QueryEvent.ContextWarning(usagePct)` once.
-- **0.95** → invokes the configured `ContextCompactor` (in a session with skills, its result gets the skills the model loaded put back before the shrink check, after any wrapper of yours has seen it), swaps the returned history in if the `TokenCounter` estimates it below the history it was given, and emits `QueryEvent.ContextEdited(removedBlocks, tokensBefore, tokensAfter)`, both token counts being those estimates. The compactor is skipped while what the estimate cannot see, such as inline files and tool definitions, reaches 0.95 by itself; a request that truly overflows ends with the provider's error.
-
-The default `SummarizingCompactor` keeps the system prompt and the pending user turn and replaces the rest of the conversation with one summary from one model call. No earlier assistant turn survives, so no reasoning a provider signed against the old conversation (Claude Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) is replayed and no `tool_call`/`tool_result` pair is left to split; it never compacts in the middle of a tool round. No file survives either: the summary model sees a `{file <mimeType>}` marker where each was, never its bytes, and the summary ends with a list of the files it left behind, to send again if they are still needed. The summary call runs on a virtual thread under a configurable timeout (default 60s), ends when the run is cancelled, and reports its `Usage` so spend gates through `SessionLimits.maxBudgetMicroUsd`.
-
-Pick the summary model, prompt and timeout via `SummarizingCompactor.newBuilder(...)`, swap the whole compactor through `SessionOptions.Builder.withContextCompactor(...)`, turn compaction off with `ContextCompactor.disabled()` (it leaves the history unchanged, so a long session overflows and the provider's error ends it), or do ad-hoc rewrites by returning `HookOutcome.mutateHistory(rewritten)` from a `PreModelTurnHook`. See [`session/README.md`](session/README.md#context-compaction) for the full surface.
-
-To see the history on both sides of a compaction, wrap the default compactor; `QueryEvent.ContextEdited` carries the removed-block and token counts, and a `PreModelTurnHook` returning `Stop` ends the session after one:
-
-<!-- snippet: QuickStarts#archivingCompaction -->
-```java
-ContextCompactor archiving =
-    (history, context) -> {
-      archive.save(history);
-      var result = defaultCompactor.compact(history, context);
-      archive.saveCompacted(result.history());
-      return result;
-    };
-var options = SessionPresets.workspace(model, repo).withContextCompactor(archiving).build();
-```
-
-## Resource Lifecycle
-
-`Model` is `AutoCloseable` and holds long-lived resources (HTTP connection pool, file descriptors). **Build it once at app startup, share across many sessions, close once at app shutdown.** The component that constructs a `Model` owns its lifecycle — a session does NOT close its `Model` because closing one model would break sibling sessions sharing it.
-
-<!-- snippet: QuickStarts#sharedModel -->
-```java
-try (var model = new AnthropicProvider().create(modelId, config)) {
-  for (var request : requests) {
-    try (var session = AgentSession.open(SessionPresets.workspace(model, repo).build())) {
-      session.runBlocking(UserMessage.text(request));
-    }
-  }
-} // HttpClient and connection pool released here
-```
-
-`AgentSession` is `AutoCloseable` and owns its loop, its event streams' fan-out, and any pending tool/question state. Always use try-with-resources; `close()` cancels the loop, and the result future settles once the teardown has run, each of its waits bounded by `SessionLimits.stopGrace` (5 s).
-
-`ReplSession` is `AutoCloseable` and owns its sandbox subprocess. `JvmSandbox` also installs a JVM shutdown hook so a leaked sandbox is force-killed on host JVM exit. Both the explicit close and the shutdown hook snapshot the subprocess's descendants and forcibly destroy them before the parent — snippets that call `Runtime.exec(...)` cannot leave orphaned grandchildren past the sandbox lifetime.
-
-## Tools
-
-```java
-var weatherTool = Tool.newBuilder()
-    .withName("get_weather")
-    .withDescription("Current weather for a city")
-    .withParameter(ToolParameter.newBuilder()
-        .withName("city").withType(ParameterType.STRING).withRequired(true).build())
-    .withExecutor((args, ctx) -> ToolResult.success("72°F in " + args.get("city")))
-    .build();
-```
-
-The session runs each tool call once; it never retries one: `ToolDispatch` runs the tool once on a virtual thread bounded by the per-call timeout, and turns an unknown tool, a timeout or a thrown exception into a failed result the model sees.
-
-### CommandGrant — give the agent a CLI without giving it the secrets
-
-`CommandGrant` produces a `Tool` that lets the model invoke a single CLI binary under tight controls. It must be built with the registry of the sessions that run it; `build()` registers every `withEnv(...)` value there, and the session redacts the tool's output against it:
-
-```java
-import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolCategory;
-
-var registry = new SecretRegistry();
-var gh = CommandGrant.builder("gh")
-    .withSecretRegistry(registry)                     // required: the sessions' registry
-    .withEnv("GH_TOKEN", System.getenv("GH_TOKEN"))   // value never reaches the model
-    .withTimeout(Duration.ofSeconds(30))
-    .withMaxOutputBytes(50_000)
-    .withArgValidator(args ->
-        args.isEmpty() || !"auth".equals(args.get(0))
-            ? Optional.empty()
-            : Optional.of("'gh auth' is not allowed via this grant"))
-    .build();
-
-var options = SessionOptions.newBuilder()
-    .withModel(model)
-    .withSecretRegistry(registry)                     // the same instance
-    .withTool(ToolBinding.newBuilder(gh.toTool()).withCategory(ToolCategory.EXECUTION).build())
-    .build();
-```
-
-`build()` without `withSecretRegistry` throws, and the tool refuses to start a process in a session whose registry is a different instance. Hardening is on by default: binary path pinned at build, argv-only (no shell), `ProcessBuilder` env cleared then injected so the JVM's environment never leaks into the child, argv pre-scan refuses any registered secret value (forces env-only secret transport), per-call temp working directory, output capped (a stream cut at the cap loses any trailing start of a registered secret), descendants killed on timeout, stderr hidden from the model unless `withStderrToModel(true)`.
-
-### Curated corpus — point the workspace tools at any root
-
-The session's `Read` / `Grep` / `Glob` tools accept any `WorkspaceRoot`, not just the agent's working directory — point them at a curated reference tree to give the model native lexical search over operator-supplied content (the "no vector DB needed for a bounded corpus" pattern). Their text output is redacted by the session like every tool's, so with one `SecretRegistry` set on the session and on your `CommandGrant`s, a token written to a file by `gh auth login` stays scrubbed when the agent later reads it back.
-
-```java
-var corpus  = WorkspaceRoot.of(Path.of("/var/kb/support"));
-var options = SessionOptions.newBuilder()
-    .withModel(model)
-    .withSecretRegistry(registry)
-    .withTool(ReadTool.binding(corpus))
-    .withTool(GrepTool.binding(corpus))
-    .withTool(GlobTool.binding(corpus))
-    .withPermission(Permission.planMode())
-    .build();
-```
-
-Path-jail (`..` / absolute refusal + canonicalisation + no-follow opens) is built into `WorkspaceRoot`; per-file size caps, per-output byte caps, hidden-directory pruning, symlink/special-file skipping during walks, and binary skip are built into the tools. `Permission.planMode()` or a curated `Permission` policy enforces read-only at the session level — there is no `Write` tool to disable. To track what the agent read, register a `PostToolUseHook` on `Read`.
-
-## Structured Output
-
-`OutputSchema.of(MyRecord.class)` generates a JSON Schema from a Java record. The model returns a typed value, validated against the schema; shape mismatches surface as `StructuredOutputParseException` with a per-field diff.
-
-```java
-record Sentiment(String label, double confidence) {}
-
-var response = model.chat(messages, List.of(), OutputSchema.of(Sentiment.class));
-Sentiment s = response.parsed();
-```
-
-For provenance-tagged output (Basis-style — every field carries source citations + confidence), wrap with `OutputSchema.provenancedOf(MyOutput.class)`:
-
-```java
-var schema = OutputSchema.provenancedOf(MappingProposal.class);
-var response = model.chat(messages, List.of(), schema);
-Provenanced<MappingProposal> result = response.parsed();
-// result.output() = the typed output; result.provenance() = per-field sources + confidence
-```
-
-`ProvenanceValidator.DEFAULT` rejects `MEDIUM`/`HIGH` confidence entries that have no sources — the calibration mechanism that prevents the model from rubber-stamping HIGH on every field. Custom validators via `OutputSchema.provenancedOf(MyOutput.class, validator)`.
-
-Through `session.runBlocking(message, schema)`, the loop intercepts `StructuredOutputParseException`, injects a corrective USER turn carrying the diff, and re-iterates.
-
-## Streaming
-
-The session's `events()` stream is the primary streaming surface — see [Sessions](#sessions-helios-session). For direct model use without a session:
-
-```java
-try (var stream = model.chatStream(messages, tools)) {
-  while (stream.hasNext()) {
-    switch (stream.next()) {
-      case ModelChunk.TextDelta d -> System.out.print(d.text());
-      case ModelChunk.ToolUseStop stop -> System.out.println("Called: " + stop.toolCall().name());
-      case ModelChunk.MessageStop stop -> System.out.println("\n" + stop.finishReason());
-      default -> {}
-    }
-  }
-}
-```
-
-Nothing is sent before the first `hasNext()`; each chunk arrives as the provider streams it.
-`close()`, from any thread, aborts the request and closes its connection without closing the model.
-A failed turn throws its exception from `hasNext()`.
-`model.chat(messages, tools)` drains the same stream (`ChunkDrain.drain`).
-A model you write that can only answer blockingly implements `BlockingModel`.
-
-## Fault Tolerance
-
-Composable retry, circuit breaker, and timeout — zero dependencies:
-
-```java
-var ft = FaultTolerance.newBuilder()
-    .withRetry(RetryPolicy.newBuilder()
-        .withMaxAttempts(3)
-        .withBackoff(Backoff.exponential(Duration.ofMillis(500), 2.0))
-        .build())
-    .withCircuitBreaker(CircuitBreaker.newBuilder()
-        .withFailureThreshold(5)
-        .withHalfOpenAfter(Duration.ofSeconds(30))
-        .build())
-    .withOperationTimeout(Duration.ofMinutes(5))
-    .build();
-
-var result = ft.execute(() -> model.chat(messages, List.of()));   // checked exceptions: see Javadoc
-```
-
-`FaultTolerance.withoutRetry()` returns a sibling envelope with retry stripped (circuit breaker + timeout retained), for wrapping an operation that must not replay.
-
-## Observability
-
-The session's `events()` stream is the primary observability surface. Read an `EventStream` on a thread of your own (or register an `OnStreamEventHook` for in-loop interception) and pick the events you care about — see the sealed hierarchy in `com.standardapplied.helios.session.QueryEvent` (`AssistantText`, `ToolUse`, `ToolResult`, `ContextWarning`, `ContextEdited`, `HookFired`, `TurnEnded`, `RunStarted`, `RunEnded`, etc.).
-
-```java
-try (var events = session.events()) {
-  for (var ev : events) {
-    switch (ev) {
-      case QueryEvent.ToolUse t -> log.info("tool: {} args={}", t.call().name(), t.call().arguments());
-      case QueryEvent.ContextWarning w -> metrics.recordContextFill(w.usagePct());
-      case QueryEvent.RunEnded e -> auditSink.flush(e.result());
-      default -> { /* skip */ }
-    }
-  }
-}
-```
-
-For HTTP clients, `helios-runtime` exposes the same events as Server-Sent Events under `GET /sessions/{id}/events`.
-
-**Tracing.** A session emits live OpenTelemetry spans through `withOpenTelemetry` (default `GlobalOpenTelemetry`, a no-op without an SDK),
-following the GenAI semantic conventions: an `invoke_agent` span per run, a child of the span current at `send`, and under it `chat`
-per model attempt, `execute_tool` per tool call and `hook` per hook decision, each current while its step runs.
-Each step span carries `helios.turn.index`, the `turnIndex` of the events it is built from (`1` for a run's first model turn,
-`0` for a hook that fires before it), so a reader joins events to spans and tells which model call asked for which tool.
-A `chat` span carries `gen_ai.response.model` when the provider reported the model that served the call, which
-`Response.metadata()` holds under `Response.RESPONSE_MODEL_KEY`, and `helios.model.first_chunk_ms` and `helios.model.first_text_ms`,
-whole milliseconds from the attempt's start to its first chunk of any kind and to its first text, each absent when the attempt had none;
-tokens per second is yours to derive.
-A `chat` span carries `gen_ai.usage.reasoning.output_tokens` when the provider reported reasoning tokens, a part of its output tokens
-(`Response.Usage.reasoningTokens()`); the run span carries the run's total.
-A compactor's summary call is a `chat` span with `helios.compaction` = `true` and no turn index.
-`TraceDetail.STANDARD` (the default) records no content; `VERBOSE` adds prompts, answers, tool arguments and results, redacted.
-`PgSpanExporter` stores the spans for `PgTraceStore`; your application adds `io.opentelemetry:opentelemetry-sdk`:
-
-```java
-var tracing = SdkTracerProvider.builder()
-    .addSpanProcessor(BatchSpanProcessor.builder(new PgSpanExporter(pgConfig)).build())
-    .build();
-options.withOpenTelemetry(OpenTelemetrySdk.builder().setTracerProvider(tracing).build());
-```
-
-`withTraceAttributes(Map.of("app.eval.case_id", "c-17"))` labels every run span of the session; each key starts with `app.`,
-so a label never replaces a `helios.*` or `gen_ai.*` attribute. To record what your application made of a run's answer
-(what it rendered, a fallback, a verification), end a span of your own that names the run: `PgSpanExporter` stores any span
-carrying `helios.run.id` as one of that run's spans, of kind `host`, through the same redactor, and ignores every other span.
-
-```java
-var span = tracer.spanBuilder("answer").startSpan();
-try (var ignored = span.makeCurrent()) {
-  var result = session.send(message).join();
-  span.setAttribute("helios.run.id", result.runId());
-  span.setAttribute("app.reply.fallback", render(result));
-} finally {
-  span.end();
-}
-```
-
-`traceStore.findById(runId).spans()` returns that span with the run's own, in start order, its `kind()` `host` and its
-`scope()` your tracer's instrumentation scope.
-
-`PgTraceStore.list` selects runs by label through SCIM's JSON containment, `attributes eq "${\"app.eval.case_id\":\"c-17\"}"`:
-build the JSON object with a JSON library, then escape each `\` and `"` in it for the filter text.
-
-## Sandboxed Code Execution (`helios-repl`)
-
-The `helios-repl` module runs Java snippets in a JVM subprocess sandbox. A session reaches it through the `Execute` tool with `runtime: JSHELL`: wire `JShellExecutionProvider` as the session's execution provider, which registers `Execute` over it. Each session gets its own sandbox, so variables, imports and classes persist across its `Execute` calls. The sandbox reaches the host only through the custom host functions you register on `ReplConfig`:
-
-```java
-var quote = new HostFunction(
-    "marketQuote",
-    "Current price of a ticker",
-    List.of(HostParameter.required("ticker", ParameterType.STRING, "Ticker symbol")),
-    params -> prices.latest((String) params.get("ticker")));
-
-try (var executionProvider = JShellExecutionProvider.create(
-         ReplConfig.newBuilder().withHostFunction(quote).build());
-     var session = AgentSession.open(
-         SessionOptions.newBuilder()
-             .withModel(model)
-             .withExecutionProvider(executionProvider)
-             .withPermission(Permission.lockedDown())
-             .build())) {
-  session.runBlocking(UserMessage.text("What is AAPL trading at?"));
-}
-```
-
-The model calls `Execute` with `{"runtime": "JSHELL", "script": "println(marketQuote(\"AAPL\"))"}` and gets back the snippet's stdout, stderr and exit code. Tell the model what the sandbox offers in your system prompt: `SandboxPrelude.modelFacingSummary()` describes the built-in helpers, and `SandboxPrelude.formatSignature(quote)` renders a host function's signature as the model calls it. Credentials never enter the sandbox: a host function runs in the host process and returns only what it chooses to.
-
-### Scripting prelude
-
-Every sandbox boots with a JShell preamble that adds standard imports (`java.util.*`, `java.util.stream.*`, `Collectors`, `java.io.*`, `java.math.*`, `java.time.*`), free `print` / `println` / `printf` (no `System.out`), and ten script-style helpers: `sum`, `sumInts`, `mean`, `max`, `min`, `join`, `filter`, `map`, `sorted`, `countBy`. So `println(sum(numbers))` replaces `System.out.println(numbers.stream().mapToInt(Integer::intValue).sum())`.
-
-Custom host functions you register get typed static JShell wrappers synthesised into the prelude — `HostFunction("marketQuote", [HostParameter.required("ticker", STRING, ...)], handler)` becomes callable as `marketQuote("AAPL")` from emitted Java code.
-
-## Embeddings (`helios-onnx`)
-
-Local vector embeddings via ONNX Runtime. Models download from HuggingFace on first use and are cached locally.
-
-```java
-try (var model = EmbeddingProvider.resolve(
-    OnnxModelId.NOMIC_EMBED_V1_5.id(), EmbeddingConfig.defaults())) {
-  float[] vector = model.embed("A man is eating food.").getOrThrow();
-}
-```
-
-Supported: `NOMIC_EMBED_V1_5` (768-dim encoder, 8192 tokens), `EMBEDDING_GEMMA_300M` (768-dim decoder, 2048 tokens), `HARRIER_OSS_V1_270M` (640-dim multilingual decoder, 32768 tokens), `HARRIER_OSS_V1_0_6B` (1024-dim multilingual decoder, 32768 tokens).
-
-Each model ships with sensible default query/document prefixes; pass a custom prefix per call when a different task shape needs different instructions:
-
-```java
-model.embedQuery(query, "Instruct: Given a brief professional summary, find the matching profile\nQuery: ");
-model.embedDocument(doc, null);  // null = use the spec default
-```
-
-## Persistence (`helios-persistence`)
-
-PostgreSQL-backed `PromptRegistry`, `SessionStore` and trace tables. `PgSpanExporter` writes a session's spans as they end (a step's row before its run's), `PgTraceStore` reads them back by run id (`findById`, `list`, `summarize` by name or model), and `PgAnnotationStore` attaches notes to a run id or a span id. All share a `PgConfig` carrying the `DbClient` and schema name. A run the process died in leaves its span rows without a run row: `findById` returns null for it, and nothing cleans the rows up.
-
-```java
-var pgConfig = PgConfig.newBuilder()
-    .withDbClient(dbClient)
-    .withSchema("helios")
-    .build();
-
-var spanExporter = new PgSpanExporter(pgConfig);
-var traceStore = new PgTraceStore(pgConfig);
-var annotationStore = new PgAnnotationStore(pgConfig);
-var promptRegistry = new PgPromptRegistry(pgConfig);
-var sessionStore = new PgSessionStore(pgConfig);
-```
-
-Schema lives on the classpath at `com/standardapplied/helios/persistence/schema.sql` — run it against your database to create the `helios_*` tables. It only creates tables that are missing, so an upgrade also runs the release's DDL delta from `CHANGELOG.md`. Optional custom schema prefix is applied to all generated SQL; the schema name is validated against Postgres' unquoted-identifier shape (`[A-Za-z_][A-Za-z0-9_]{0,62}`) at `PgConfig` construction.
-
-**Annotations.** `persistence.Annotation` is a structured note attached to a stored run or span (`subjectId`, the run id or the span id). An optional `facet` addresses a named sub-coordinate within the subject, so one author can hold several judgments about one subject — e.g. one rating per evaluation dimension — without minting synthetic ids; `authorKind` (`HUMAN | MODEL | SYSTEM`) types the author and `metadata` (a `jsonb` map) carries opaque consumer context. `PgAnnotationStore.upsertAnnotation` persists the full record and is idempotent on `(subjectId, facet, label, authorId)`. Read through the same store via `findAnnotationsBySubject(id)`, `findAnnotationsBySubjects(ids)` (batch), or `listAnnotations(paginate, scimFilter)` (SCIM over the first-class columns). `facet`, `label`, and `metadata` are opaque to Helios — it stores and returns them without interpretation.
-
-**Trace fidelity by design.** Trace payloads (`helios_traces.{input_text, output_text, attributes}`, `helios_spans.attributes`) are persisted verbatim unless `PgConfig.Builder.withRedactor(registry.redactor())` is set, in which case every trace text field and JSON-serialised attribute map runs through the supplied `Redactor` before reaching the DB. A session's spans carry content only under `TraceDetail.VERBOSE`, redacted by the session; `withRedactor` still applies to everything `PgSpanExporter` writes. `PgSessionStore` applies no redactor, the configured one included: it stores the conversation the model received, which the session already redacted against its `SecretRegistry`, and redacting it again would change replayed messages that a provider's signed reasoning is bound to.
-
-## Security
-
-Helios is designed for production but has known limitations — see [Production Readiness](#production-readiness) above for the full hardening surface and the deferred items. This section documents the security primitives library users build on.
-
-### Secret redaction (`SecretRegistry` + `Redactor`)
-
-`core.common.SecretRegistry` holds secret values by name; its `redactor()` replaces each with `<redacted:NAME>`.
-A session has one (`SessionOptions.withSecretRegistry`, default empty). **A secret a tool returns never reaches the model or anything
-the session emits:** the session redacts every tool result once, before its event, hooks and history, and the error text it reports.
-User messages, the system prompt and the model's output are not redacted; the `withSecretRegistry` javadoc lists what else is not.
-`ModelConfig.toString()` elides the API key and header values. Accepted values: `SecretRegistry` javadoc.
-
-```java
-var registry = new SecretRegistry();
-registry.register("STRIPE_KEY", System.getenv("STRIPE_KEY"));
-registry.register("GH_TOKEN", System.getenv("GH_TOKEN"));
-
-var options = SessionOptions.newBuilder()
-    .withModel(model)
-    .withSecretRegistry(registry)
-    .build();
-```
-
-### Sandbox security model
-
-Defense in depth, not a single boundary:
-
-1. **OS-level sandbox** (deployer's responsibility) — a container, VM, or namespace boundary around the Helios process. This is the authoritative escape boundary and the only layer that isolates the filesystem and the network.
-2. **JVM subprocess sandbox** (`JvmSandbox`) — the model's code runs in a separate JVM with cleared environment, system-properties stripped from parent JVM args, classpath/modulepath inherited but agents (`-javaagent`, `-Dauth.token=…`) filtered, descendants reaped on close / shutdown hook, single-execute serialised via `Semaphore(1)`.
-3. **Bytecode policy** (`SandboxPolicy` + `PolicyBytecodeVerifier`) — every snippet class is scanned before it links. Direct calls, field access, class literals, and every reference reachable through `invokedynamic` bootstrap arguments, method-handle constants and dynamic constants are checked against the same owner/member rules, so `FileReader::new` is denied exactly like `new FileReader(...)`. Malformed or cyclic constant pools fail closed.
-4. **JShell prelude controls** — typed wrappers around `HostFunction`s, reserved-name skip on synthesiser, frozen `HostFunctionRegistry` after sandbox boot.
-
-**What the sandbox subprocess is not.** The child JVM runs as the same user as the Helios process, in the same mount and network namespaces. Its private working directory scopes relative paths, nothing more: absolute paths, `/proc`, the host's sockets and every file the Helios user can read are reachable from a snippet unless a bytecode policy denies the API or the OS boundary hides the resource. The bytecode verifier is defense in depth against honest mistakes and probing snippets; it is a static scan of JShell-compiled classes, not a JVM security manager, and it inherits the JVM's own limits (a static receiver type it cannot widen, JDK internals reached through `--add-opens`, native code with `--enable-native-access`). Treat layer 1 as mandatory for untrusted snippets.
-
-The sandbox subprocess RPC runs on a per-session Unix domain socket bound in a private temp directory (mode 0700) — the host accepts exactly one connection from the subprocess on startup and then closes the listener and deletes the socket file. A JShell snippet that obtains a raw `PrintStream` to `FileDescriptor.out` can write whatever it wants to subprocess stdout; the host reads stdout into the execution result's captured-output buffer but never parses it as RPC, so forged frames are inert text. A snippet's stdout and stderr are each cut at 1,000,000 characters per execute, followed by a `[output truncated: <n> more chars discarded]` line, and an RPC frame over 8,000,000 characters ends the sandbox.
-
-#### Least-privilege deployment
-
-`JvmSandbox` launches its child with `ProcessBuilder`, so the child shares whatever confinement the Helios process itself runs under. The supported least-privilege contract is therefore to run the process that owns the sandbox — the whole application, or a dedicated executor service that exposes only the `Sandbox` seam — inside a container that grants nothing it does not need. Rootless Podman, no image beyond the JDK and your jars:
 
 ```bash
-podman run --rm \
-  --network none \
-  --read-only --tmpfs /tmp \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --pids-limit 256 --memory 1g \
-  -v /opt/helios/app:/opt/helios/app:ro \
-  -v /srv/tenant-42/workspace:/workspace:ro \
-  docker.io/library/eclipse-temurin:25-jdk \
-  java --enable-native-access=ALL-UNNAMED -cp '/opt/helios/app/*' your.Executor
+curl -s -X POST 127.0.0.1:8080/v1/sessions
+# {"sessionId":"sess-…","eventsUrl":"/v1/sessions/sess-…/events"}
+curl -sN 127.0.0.1:8080/v1/sessions/sess-…/events &
+curl -s -X POST 127.0.0.1:8080/v1/sessions/sess-…/messages -d '{"text": "What is the capital of France?"}'
+curl -s '127.0.0.1:8080/v1/sessions/sess-…/result?timeout=60'
 ```
 
-- Use a full JDK 25 image: the executor and sandbox require `jdk.jshell` and `jdk.compiler`, which are absent from the Temurin JRE image.
-- `--network none` removes every interface but loopback inside the container; the host's listeners and the wider network are unreachable even with a permissive `SandboxPolicy`. Replace it with an egress-filtered network only for workloads that need one.
-- `--read-only --tmpfs /tmp` gives the sandbox its scratch directory and RPC socket directory on a private tmpfs and nothing else writable. Mount the workspace read-only and let host-owned tools (`Read` / `Grep` / `Glob` on a `WorkspaceRoot`) mediate access.
-- `--cap-drop ALL --security-opt no-new-privileges` blocks privilege escalation inside the container; `--pids-limit` and `--memory` bound fork bombs and heap abuse beyond `JvmSandboxConfig.maxHeapMb`.
+## What's in the box
 
-`IsolatedDeploymentTest` in `helios-repl` exercises this recipe with the real `JvmSandbox` under a permissive policy: a snippet inside the container cannot read a host sentinel file or connect to a host TCP listener. It runs wherever rootless Podman can start a container and skips with a stated reason elsewhere, so a green build on an unsupported host is not a claim of enforcement.
+- [Sessions](docs/sessions.md): runs and their endings, limits, events, durable conversations,
+  partial turns, context compaction, failures, resource lifecycle.
+- [Tools, permissions and hooks](docs/tools-and-permissions.md): writing tools, `CommandGrant`,
+  the workspace file tools on any corpus, permission rules and modes, hook phases.
+- [Subagents and skills](docs/subagents-and-skills.md): the `Agent` tool, Agent Skills in a session
+  and `helios-skills`.
+- [Providers and models](docs/providers.md): reasoning, Anthropic prompt caching and list prices,
+  Gemini files, video and privacy controls, cost and budgets, structured output, streaming, fault
+  tolerance.
+- [Observability and persistence](docs/observability-and-persistence.md): event-based observation,
+  OpenTelemetry spans and their attributes, PostgreSQL trace, session, prompt and annotation stores.
+- [Sandboxed execution and embeddings](docs/sandbox-and-embeddings.md): `helios-repl` and
+  `helios-onnx`.
+- [HTTP surface](docs/http.md): routes, questions and approvals, authentication and limits.
+- [Security](docs/security.md): secret redaction, the sandbox's layers and deployment, workspace
+  confinement.
 
-### Path-traversal jails
+## Production readiness
 
-Every filesystem boundary in the framework refuses traversal. Lexical normalise + `startsWith(root)` first (to reject `..` and absolute paths without dereferencing), then `toRealPath()` to refuse symlink escapes:
+Helios runs in production. What is hardened:
 
-- `WorkspaceRoot` (backing the session's `Read` / `Grep` / `Glob` tools at the workspace or any curated-corpus root, and `FileSystemMemoryBackend`)
-- `CommandGrant` (per-call temp cwd unless explicit `withCwd`)
-- `OnnxModelDownloader` (HF-supplied file paths against the local model cache)
-- `PgConfig` (Postgres schema name validated against unquoted-identifier shape)
+- **Fail-secure HTTP.** `RuntimeServer` binds `127.0.0.1` by default, authenticates every request
+  and serves a principal only its own sessions; unauthenticated serving is refused off loopback.
+  Every request is admitted against finite bounds. See [Authentication and limits](docs/http.md#authentication-and-limits).
+- **One secret registry per session**, applied where tool output enters it, before events, hooks
+  and history. See [Secret redaction](docs/security.md#secret-redaction).
+- **A layered code sandbox**: a separate JVM per session with a private RPC socket, a bytecode
+  policy and descendant reaping, under an OS boundary you provide. See
+  [Sandbox security model](docs/security.md#sandbox-security-model).
+- **Confinement on every filesystem path** the framework opens: descriptor-based workspace I/O,
+  checked model-download paths, a validated SQL schema name. See
+  [Workspace confinement](docs/security.md#workspace-confinement).
+- **Errors are not swallowed.** An `Error` on any thread a session runs work on ends the session
+  and fails the run's future with it; it is never retried or turned into a tool result. See
+  [Failures](docs/sessions.md#failures).
+- **A slow reader never stalls the loop**: each event stream has its own bounded buffer and marks
+  what it missed. See [Events](docs/sessions.md#events).
+- **Test coverage.** One JaCoCo gate in the root `pom.xml` holds every library module at 95%
+  instruction and 90% branch coverage, from the offline suite. Live provider tests run only when a
+  release is cut, and a failing one stops the release.
 
-`WorkspaceRoot` is the confinement contract for `Read`, `Grep`, `Glob`, `LS` and filesystem memory. `root()` is canonical. `resolveSafe` canonicalises the deepest *existing* prefix, rejecting outside, dangling and looping links even for a not-yet-existing leaf. Explicitly configured root aliases and requests through legitimate in-workspace aliases remain supported; returned paths use their canonical spelling.
+### Known limitations
 
-Strict I/O does not trust that earlier path check. It descends from the filesystem root using directory descriptors and single-component no-follow `openat` calls, including every ancestor of the workspace root. An `O_PATH` descriptor pins the leaf for metadata inspection without opening a FIFO or device for I/O. Only a regular file is reopened through the kernel's `/proc/self/fd` namespace, while its descriptor remains owned by the stream. Size-limited reads validate that pinned target and enforce the byte budget during reading, including concurrent growth. `Grep` sniffs and searches the same bounded content. MIME detection does not invoke platform detectors that might reopen an unconfined pathname.
+- **No compatibility guarantee.** A release, a patch release included, can change the public API
+  (3.1.2 removed `Usage.of` with four and five counts and the four-rate `Pricing.ofUsdPerMillion`);
+  each change is listed in [`CHANGELOG.md`](CHANGELOG.md). Pin a version.
+- **Trace payloads are stored verbatim unless you set a redactor.** See
+  [What the trace tables hold](docs/observability-and-persistence.md#what-the-trace-tables-hold).
+- **A truncated response ends the run.** `FinishReason.LENGTH` ends it in `ErrorDuringExecution`
+  of kind `max-tokens` rather than re-issuing the turn; raise `ModelConfig.maxOutputTokens` instead.
+- **Strict file confinement is Linux-only**, and is not a snapshot: hard links, bind mounts and
+  case-insensitive filesystems are out of scope. See [Workspace confinement](docs/security.md#workspace-confinement).
+- **The code sandbox is not an OS boundary.** Its child JVM runs as your user, in your namespaces;
+  untrusted snippets need a container or VM around it.
+- **Live coverage is yours.** Provider tests with real keys run only at release; add live tests for
+  the workloads that matter to you before relying on them in production-critical paths.
 
-Directory creation (`mkdirat`), deletion (`unlinkat`), and directory enumeration also use pinned directory descriptors. Walkers never follow directory symlinks, and content tools skip non-regular entries. `LS` can display symlink metadata without following it. A missing workspace root is not recreated. New files and directories are owner-only (0600/0700, further restricted by the process umask); existing permissions are preserved. Default output creates or truncates, `CREATE_NEW` remains exclusive, and `DELETE_ON_CLOSE` is explicitly unsupported in strict mode.
+If one of these rules Helios out for you, open an issue.
 
-`FileSystemMemoryBackend` is strictly narrower: a `/memories/...` path must canonicalise to exactly its lexical location under `<root>/.agent/memory`, so any symlink in that path — even one pointing at another file inside the workspace — is refused for `view`, `create`, `strReplace`, `insert`, `delete` and `list`. That directory is reserved in every workspace: `Read`, `Grep`, `Glob` and `LS` refuse a path in it and walkers skip it, so it is reachable only through `MemoryRead` and `MemoryWrite` (`Execute` is not covered; the sandbox is the boundary there). Memory always uses strict I/O, even if supplied a trusted-mode workspace. Memory content is strict UTF-8; invalid text is rejected before creating directories or opening a write target.
+## Design principles
 
-Strict mode requires Linux x86-64 or AArch64, the default filesystem and mounted `/proc/self/fd`. It uses JDK 25's Foreign Function & Memory API to call libc; no downloaded native library, compiler or private JDK API is needed. Enable native access for the session module:
-
-```text
-java --enable-native-access=com.standardapplied.helios.session --module-path ... --module your.application/your.Main
-```
-
-For a classpath application, use `java --enable-native-access=ALL-UNNAMED -cp ... your.Main`. Maven tests configure these grants automatically. The host grant is not propagated to `JvmSandbox` child JVMs. Construction fails closed when native access, the filesystem or the platform is unsupported, including macOS and Windows; there is no automatic weaker fallback.
-
-`new WorkspaceRoot(root, false)` is the explicit, portable **trusted-workspace** opt-out, never a preset default. It permits symlinks outside the root and does not provide race-resistant ancestor confinement: a concurrent writer that swaps in a symlink after a path was authorised, or after a walked entry was checked against the permission policy, can redirect the operation. Use it only when nothing else writes to the workspace while the agent runs, or when every process that can write it may also read every target a symlink in it may reach. It does not relax filesystem memory's requirements.
-
-Descriptor confinement prevents symlink substitution from redirecting an operation. It is not a filesystem snapshot: an opened inode remains the operation's target after a rename, and another writer can still edit its contents. Hard links, bind mounts, a hostile kernel or a process that can modify the host's mount namespace require OS-level isolation. Permission keys assume a case-sensitive filesystem: on a case-insensitive one (an ext4 casefold directory, vfat, SMB) a path spelled in another case names the same file under a different key, so path rules there are out of scope like hard links. These file tools are not a sandbox for arbitrary code execution.
-
-### HTTP surface defaults
-
-`RuntimeServer.Builder` binds **`127.0.0.1` by default**. Every route runs one `Authenticator` before it reads a body or looks up a
-session, and a session answers only the `Principal` that created it: anyone else gets the same `404` as for an unknown id. A missing
-or invalid credential is `401` with the authenticator's `challenge()` in `WWW-Authenticate`, and expiry or revocation closes open
-SSE streams without another event; pending result polls answer `401`. A non-loopback host needs an authenticator;
-`withoutAuthentication()` serves a loopback bind only. Details: `AgentHttpService` and `Authenticator` javadoc.
-
-Behind an authenticating reverse proxy, trust the identity it asserts only on its connections:
-
-```java
-var server = RuntimeServer.builder()
-    .withRegistry(SessionRegistry.inMemory())
-    .withOptionsFactory(request -> SessionOptions.newBuilder()
-        .withModel(model)
-        .withSessionId(request.sessionId())
-        .withSystemPrompt(promptFor(request.owner().tenant()))
-        .build())
-    .withHost("0.0.0.0")
-    .withAuthenticator(TrustedProxyAuthenticator.newBuilder()
-        .withTrustedProxy(InetAddress.getByName("10.0.0.5"))  // reads X-Authenticated-Tenant / -Subject
-        .build())
-    .build();
-```
-
-The proxy must strip client-supplied copies of both headers. Any other verifier (a JWT library, mutual TLS) is an `Authenticator`.
-
-Every request is admitted against finite bounds before any work: a body is at most 256 KiB (`413`), a principal has at most 32
-requests in flight, open streams and polls included (`429`), and a server at most 512 (`503`). A principal holds at most 16
-sessions and a registry 256 (`429` / `503`), the owner's longest-idle session evicted first; an idle session closes after 15 minutes.
-A refusal answers without reading the body and closes the connection. `RuntimeServer` sets two Helidon options so that no body byte
-is ever parsed as a request (a request-smuggling guard), and a `WebServer` of your own that mounts `AgentHttpService` must set both:
-
-```java
-WebServer.builder()
-    .maxPayloadSize(limits.maxRequestBytes())
-    .addProtocol(Http1Config.builder().continueImmediately(true).build())
-```
-
-## Design Principles
-
-- **No magic** — explicit wiring, no annotation-driven DI.
-- **Records everywhere** — immutable data, pattern matching, sealed types (`Result<T>`, `QueryEvent`, `ResultMessage`, `HookOutcome`).
-- **Builder pattern** — `with` prefix, static `newBuilder()` factory.
-- **JPMS modules** — proper encapsulation, ServiceLoader SPI for providers.
-- **Production from day 1** — fault tolerance, tracing, one JaCoCo coverage gate holding every library module at 95% instruction / 90% branch.
-- **Currency is integer micro-USD** — `long microUsd` (Stripe-style fixed-precision). `BigDecimal` only at the display boundary.
+- **No magic**: explicit wiring, no annotation-driven dependency injection.
+- **Records and sealed types**: immutable data and pattern matching (`Result<T>`, `QueryEvent`,
+  `ResultMessage`, `HookOutcome`).
+- **Builders**: `with`-prefixed methods, from a static `newBuilder()` (or `builder()`).
+- **JPMS modules**, with providers registered through the `ServiceLoader` SPI.
+- **Currency is integer micro-USD** (`long`), `BigDecimal` only at the display boundary.
 
 ## Building
 
 ```bash
 mvn package
-mvn spotless:apply                # auto-format (Google Java Format, 2-space indent)
+mvn spotless:apply       # format (Google Java Format, 2-space indent)
 ./mvnw -B clean verify   # what CI runs: tests, coverage and the quality gate
 ```
 
 ### Contributing
 
 `mvn verify` enforces a quality gate on main and test code: PMD complexity, size and coupling
-limits, CPD duplication detection across modules, and ArchUnit architecture rules. A change that
-breaks it is fixed in the code — exclusions are never added and rules are never suppressed in
-source. The limits, the commands and the policy are in the
-["Quality gate" section of `AGENTS.md`](AGENTS.md#quality-gate).
+limits, CPD duplication detection across modules, ArchUnit architecture rules and a Javadoc gate. A
+change that breaks it is fixed in the code: exclusions are never added and rules are never
+suppressed in source. The limits, the commands and the policy are in the
+["Quality gate" section of `AGENTS.md`](AGENTS.md#quality-gate). Every Java block in this README and
+in `docs/` is compiled by the build (see `QuickStartsDocsTest`), and every relative link is checked.
 
 ## License
 

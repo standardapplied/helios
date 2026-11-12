@@ -42,7 +42,7 @@ nb-configuration.xml
 .DS_Store
 *.tmp
 
-docs/
+docs/specs/
 reports/
 
 # Python (config/security)
