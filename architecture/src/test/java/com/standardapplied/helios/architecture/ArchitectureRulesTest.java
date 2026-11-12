@@ -17,14 +17,20 @@ import static com.tngtech.archunit.core.domain.properties.HasName.AndFullName.Pr
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameStartingWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.codeUnits;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noCodeUnits;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMembers;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.Response;
+import com.standardapplied.helios.persistence.TraceRollup;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -33,22 +39,37 @@ import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
+import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.domain.JavaStaticInitializer;
+import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.CompositeArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
+import java.lang.module.ModuleDescriptor;
 import java.lang.module.ModuleFinder;
+import java.lang.module.ModuleReference;
+import java.lang.reflect.RecordComponent;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -166,6 +187,17 @@ class ArchitectureRulesTest {
       new ClassFileImporter()
           .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
           .importPackages(HELIOS);
+
+  private static final int SHORTEST_FLAGGED_RUN = 4;
+
+  private static final String SHAPES = HELIOS + ".architecture.shapes";
+
+  private static final Map<Path, Set<String>> EXPORTS_BY_CODE_SOURCE = new ConcurrentHashMap<>();
+
+  private static final DescribedPredicate<JavaClass> IN_AN_EXPORTED_PACKAGE =
+      describe(
+          "reside in a package their module exports to every module",
+          type -> exportedPackages(type).contains(type.getPackageName()));
 
   @Test
   void coreDependsOnNothingOutsideTheJdk() {
@@ -690,5 +722,195 @@ class ArchitectureRulesTest {
                     && (call.getName().startsWith("read")
                         || call.getName().startsWith("write")
                         || call.getName().equals("transferTo")));
+  }
+
+  @Test
+  void noPublicApiTakesFourArgumentsOfOneTypeInARow() {
+    noPublicApiTakesFourArgumentsOfOneTypeInARow(IN_AN_EXPORTED_PACKAGE).check(LIBRARY);
+  }
+
+  @Test
+  void theFourInARowRuleFlagsExactlyThePositionalShapes() {
+    var shape = SHAPES + ".PositionalShapes$";
+    var missingBuilder = " declares no public static newBuilder()";
+    var shapes = new ClassFileImporter().importPackages(SHAPES);
+
+    var report =
+        noPublicApiTakesFourArgumentsOfOneTypeInARow(resideInAPackage(SHAPES))
+            .evaluate(shapes)
+            .getFailureReport()
+            .getDetails();
+
+    assertEquals(
+        Set.of(
+            shape
+                + "PositionalUsage.<init>(int, int, int, int, int, long) takes 5 arguments of type"
+                + " int in a row, parameters 1 to 5; record "
+                + shape
+                + "PositionalUsage"
+                + missingBuilder,
+            shape
+                + "HiddenBuilderUsage.<init>(int, int, int, int, int, long) takes 5 arguments of"
+                + " type int in a row, parameters 1 to 5; record "
+                + shape
+                + "HiddenBuilderUsage"
+                + missingBuilder,
+            shape
+                + "NamedUsage.of(int, int, int, int) takes 4 arguments of type int in a row,"
+                + " parameters 1 to 4",
+            shape
+                + "SameRules.<init>(java.util.List<java.lang.String>, java.util.List<java.lang.String>,"
+                + " java.util.List<java.lang.String>, java.util.List<java.lang.String>) takes 4"
+                + " arguments of type java.util.List<java.lang.String> in a row, parameters 1 to 4"
+                + "; record "
+                + shape
+                + "SameRules"
+                + missingBuilder,
+            shape
+                + "Factories.sum(int, int, int, int) takes 4 arguments of type int in a row,"
+                + " parameters 1 to 4",
+            shape
+                + "Factories.join(java.lang.String, java.lang.String, java.lang.String,"
+                + " java.lang.String) takes 4 arguments of type java.lang.String in a row,"
+                + " parameters 1 to 4",
+            shape
+                + "Factories.<init>(long, long, long, long) takes 4 arguments of type long in a"
+                + " row, parameters 1 to 4"),
+        Set.copyOf(report));
+    assertEquals(7, report.size());
+  }
+
+  @Test
+  void exportedPackagesAreReadFromTheModuleDescriptors() {
+    assertTrue(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(Response.Usage.class)));
+    assertTrue(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(TraceRollup.class)));
+    assertFalse(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(HELIOS + ".anthropic.api.ContentDelta")));
+    assertFalse(IN_AN_EXPORTED_PACKAGE.test(LIBRARY.get(HELIOS + ".session.loop.AgentLoop")));
+  }
+
+  static ArchRule noPublicApiTakesFourArgumentsOfOneTypeInARow(
+      DescribedPredicate<JavaClass> exported) {
+    return codeUnits()
+        .that(
+            describe(
+                "are public or protected, neither synthetic nor bridge, and declared in types that"
+                    + " are public with every enclosing type and "
+                    + exported.getDescription(),
+                unit -> inThePublishedApi(unit, exported)))
+        .should(
+            new ArchCondition<JavaCodeUnit>("take at most three arguments of one type in a row") {
+              @Override
+              public void check(JavaCodeUnit unit, ConditionEvents events) {
+                runsOfOneType(unit)
+                    .forEach(run -> events.add(SimpleConditionEvent.violated(unit, run)));
+              }
+            })
+        .because(
+            "four or more arguments of one type in a row compile in any order, and every"
+                + " positional caller breaks when one is added: take them through a builder (a"
+                + " record declares a public static newBuilder() whose with... steps name each"
+                + " component, as Response.newBuilder() does, which exempts its canonical"
+                + " constructor) or through a record that names them; never reorder parameters to"
+                + " break the run");
+  }
+
+  private static boolean inThePublishedApi(
+      JavaCodeUnit unit, DescribedPredicate<JavaClass> exported) {
+    var modifiers = unit.getModifiers();
+    return (modifiers.contains(JavaModifier.PUBLIC) || modifiers.contains(JavaModifier.PROTECTED))
+        && !modifiers.contains(JavaModifier.SYNTHETIC)
+        && !modifiers.contains(JavaModifier.BRIDGE)
+        && publicWithEveryEnclosingType(unit.getOwner())
+        && exported.test(unit.getOwner());
+  }
+
+  private static boolean publicWithEveryEnclosingType(JavaClass type) {
+    return type.getModifiers().contains(JavaModifier.PUBLIC)
+        && type.getEnclosingClass()
+            .map(ArchitectureRulesTest::publicWithEveryEnclosingType)
+            .orElse(true);
+  }
+
+  private static List<String> runsOfOneType(JavaCodeUnit unit) {
+    if (isCanonicalConstructor(unit) && declaresAPublicNewBuilder(unit.getOwner())) {
+      return List.of();
+    }
+    var types = unit.getParameterTypes().stream().map(JavaType::getName).toList();
+    var runs = new ArrayList<String>();
+    var start = 0;
+    for (var end = 1; end <= types.size(); end++) {
+      if (end == types.size() || !types.get(end).equals(types.get(start))) {
+        if (end - start >= SHORTEST_FLAGGED_RUN) {
+          runs.add(describeRun(unit, types, start, end));
+        }
+        start = end;
+      }
+    }
+    return runs;
+  }
+
+  private static String describeRun(JavaCodeUnit unit, List<String> types, int start, int end) {
+    var owner = unit.getOwner().getName();
+    var run =
+        owner
+            + "."
+            + unit.getName()
+            + "("
+            + String.join(", ", types)
+            + ") takes "
+            + (end - start)
+            + " arguments of type "
+            + types.get(start)
+            + " in a row, parameters "
+            + (start + 1)
+            + " to "
+            + end;
+    return isCanonicalConstructor(unit)
+        ? run + "; record " + owner + " declares no public static newBuilder()"
+        : run;
+  }
+
+  private static boolean isCanonicalConstructor(JavaCodeUnit unit) {
+    var owner = unit.getOwner();
+    return unit.isConstructor()
+        && owner.isRecord()
+        && unit.getRawParameterTypes().stream()
+            .map(JavaClass::reflect)
+            .toList()
+            .equals(
+                Arrays.stream(owner.reflect().getRecordComponents())
+                    .map(RecordComponent::getType)
+                    .toList());
+  }
+
+  private static boolean declaresAPublicNewBuilder(JavaClass type) {
+    return type.tryGetMethod("newBuilder")
+        .filter(
+            method ->
+                method.getModifiers().containsAll(Set.of(JavaModifier.PUBLIC, JavaModifier.STATIC)))
+        .isPresent();
+  }
+
+  private static Set<String> exportedPackages(JavaClass type) {
+    return EXPORTS_BY_CODE_SOURCE.computeIfAbsent(
+        codeSource(type), ArchitectureRulesTest::unqualifiedExports);
+  }
+
+  private static Path codeSource(JavaClass type) {
+    try {
+      return Path.of(type.reflect().getProtectionDomain().getCodeSource().getLocation().toURI());
+    } catch (URISyntaxException e) {
+      throw new IllegalStateException("cannot locate the code source of " + type.getName(), e);
+    }
+  }
+
+  private static Set<String> unqualifiedExports(Path codeSource) {
+    return ModuleFinder.of(codeSource).findAll().stream()
+        .map(ModuleReference::descriptor)
+        .filter(descriptor -> !descriptor.isAutomatic())
+        .flatMap(descriptor -> descriptor.exports().stream())
+        .filter(export -> !export.isQualified())
+        .map(ModuleDescriptor.Exports::source)
+        .collect(Collectors.toUnmodifiableSet());
   }
 }

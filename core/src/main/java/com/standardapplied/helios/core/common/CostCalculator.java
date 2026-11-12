@@ -83,7 +83,8 @@ public interface CostCalculator {
    * small premium over base input), and cache reads at {@code cacheReadMicroUsdPerMillion}
    * (typically a deep discount). Providers that do not report cache token counts always leave the
    * cache fields at zero in {@link Usage}, so deployers without a caching story can keep using
-   * {@link #ofUsdPerMillion(double, double)} and pay only for input + output as before.
+   * {@link #ofUsdPerMillion(double, double)} and pay only for input + output as before. A card with
+   * cache rates is built by name through {@link #newBuilder()}.
    *
    * @param inputMicroUsdPerMillion micro-USD per million uncached input tokens; non-negative
    * @param outputMicroUsdPerMillion micro-USD per million output tokens; non-negative
@@ -144,8 +145,8 @@ public interface CostCalculator {
 
     /**
      * Convenience for rates expressed in dollars-per-million-tokens with no explicit cache rates.
-     * Tests and scripts; production callers should prefer the canonical constructor with raw
-     * micro-USD to avoid the floating-point conversion. Fractional micro-USD round half-up.
+     * Tests and scripts; production callers should prefer {@link #newBuilder()} with raw micro-USD
+     * to avoid the floating-point conversion. Fractional micro-USD round half-up.
      *
      * @param inputUsdPerMillion USD per million input tokens; non-negative
      * @param outputUsdPerMillion USD per million output tokens; non-negative
@@ -160,26 +161,14 @@ public interface CostCalculator {
     }
 
     /**
-     * Convenience for rates expressed in dollars-per-million-tokens with explicit cache rates.
+     * Starts a builder for a rate card by named rates, each in micro-USD per million tokens. The
+     * input and output rates are required; the cache-write and cache-read rates default to the
+     * input rate, as {@link #Pricing(long, long)} does.
      *
-     * @param inputUsdPerMillion USD per million uncached input tokens; non-negative
-     * @param outputUsdPerMillion USD per million output tokens; non-negative
-     * @param cacheWriteUsdPerMillion USD per million cache-write tokens; non-negative
-     * @param cacheReadUsdPerMillion USD per million cache-read tokens; non-negative
-     * @return a {@code Pricing}
-     * @throws IllegalArgumentException if a rate is {@code NaN}, infinite, negative, or its
-     *     micro-USD amount does not fit in a {@code long}
+     * @return a new builder
      */
-    public static Pricing ofUsdPerMillion(
-        double inputUsdPerMillion,
-        double outputUsdPerMillion,
-        double cacheWriteUsdPerMillion,
-        double cacheReadUsdPerMillion) {
-      return new Pricing(
-          CostEstimate.toMicroUsd(inputUsdPerMillion),
-          CostEstimate.toMicroUsd(outputUsdPerMillion),
-          CostEstimate.toMicroUsd(cacheWriteUsdPerMillion),
-          CostEstimate.toMicroUsd(cacheReadUsdPerMillion));
+    public static Builder newBuilder() {
+      return new Builder();
     }
 
     /**
@@ -209,6 +198,86 @@ public interface CostCalculator {
           Math.addExact(
               Math.addExact(inputMicro, outputMicro),
               Math.addExact(cacheWriteMicro, cacheReadMicro)));
+    }
+
+    /**
+     * Builds a {@link Pricing} by named rates, so a cache-write and a cache-read rate cannot be
+     * swapped. The {@code with*} methods validate nothing; {@link #build()} validates as the
+     * canonical constructor does. Not thread-safe.
+     */
+    public static class Builder {
+      private Long inputMicroUsdPerMillion;
+      private Long outputMicroUsdPerMillion;
+      private Long cacheWriteMicroUsdPerMillion;
+      private Long cacheReadMicroUsdPerMillion;
+
+      private Builder() {}
+
+      /**
+       * Sets the rate for uncached input tokens. Required.
+       *
+       * @param inputMicroUsdPerMillion micro-USD per million uncached input tokens
+       * @return this builder
+       */
+      public Builder withInputMicroUsdPerMillion(long inputMicroUsdPerMillion) {
+        this.inputMicroUsdPerMillion = inputMicroUsdPerMillion;
+        return this;
+      }
+
+      /**
+       * Sets the rate for output tokens. Required.
+       *
+       * @param outputMicroUsdPerMillion micro-USD per million output tokens
+       * @return this builder
+       */
+      public Builder withOutputMicroUsdPerMillion(long outputMicroUsdPerMillion) {
+        this.outputMicroUsdPerMillion = outputMicroUsdPerMillion;
+        return this;
+      }
+
+      /**
+       * Sets the rate for tokens written to the provider's prompt cache. Defaults to the input
+       * rate.
+       *
+       * @param cacheWriteMicroUsdPerMillion micro-USD per million cache-write input tokens
+       * @return this builder
+       */
+      public Builder withCacheWriteMicroUsdPerMillion(long cacheWriteMicroUsdPerMillion) {
+        this.cacheWriteMicroUsdPerMillion = cacheWriteMicroUsdPerMillion;
+        return this;
+      }
+
+      /**
+       * Sets the rate for tokens read from the provider's prompt cache. Defaults to the input rate.
+       *
+       * @param cacheReadMicroUsdPerMillion micro-USD per million cache-read input tokens
+       * @return this builder
+       */
+      public Builder withCacheReadMicroUsdPerMillion(long cacheReadMicroUsdPerMillion) {
+        this.cacheReadMicroUsdPerMillion = cacheReadMicroUsdPerMillion;
+        return this;
+      }
+
+      /**
+       * Builds the rate card.
+       *
+       * @return the pricing
+       * @throws IllegalStateException if the input or the output rate was never set
+       * @throws IllegalArgumentException if any rate is negative
+       */
+      public Pricing build() {
+        if (inputMicroUsdPerMillion == null) {
+          throw new IllegalStateException("inputMicroUsdPerMillion is required");
+        }
+        if (outputMicroUsdPerMillion == null) {
+          throw new IllegalStateException("outputMicroUsdPerMillion is required");
+        }
+        return new Pricing(
+            inputMicroUsdPerMillion,
+            outputMicroUsdPerMillion,
+            Objects.requireNonNullElse(cacheWriteMicroUsdPerMillion, inputMicroUsdPerMillion),
+            Objects.requireNonNullElse(cacheReadMicroUsdPerMillion, inputMicroUsdPerMillion));
+      }
     }
   }
 }

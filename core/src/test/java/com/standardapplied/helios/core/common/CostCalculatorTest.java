@@ -19,6 +19,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 final class CostCalculatorTest {
 
+  private static final Pricing CACHE_AWARE =
+      Pricing.newBuilder()
+          .withInputMicroUsdPerMillion(15_000_000L)
+          .withOutputMicroUsdPerMillion(75_000_000L)
+          .withCacheWriteMicroUsdPerMillion(18_750_000L)
+          .withCacheReadMicroUsdPerMillion(1_500_000L)
+          .build();
+
   // ── ZERO sentinel ────────────────────────────────────────────────────────
 
   @Test
@@ -63,17 +71,9 @@ final class CostCalculatorTest {
   @ParameterizedTest
   @ValueSource(
       doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1e-7, 1e300})
-  void pricingOfFactoriesRejectARateThatIsNotAFiniteNonNegativeLongOfMicroUsd(double rate) {
+  void pricingOfFactoryRejectsARateThatIsNotAFiniteNonNegativeLongOfMicroUsd(double rate) {
     assertThrows(IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(rate, 1.0));
     assertThrows(IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, rate));
-    assertThrows(
-        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(rate, 1.0, 1.0, 1.0));
-    assertThrows(
-        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, rate, 1.0, 1.0));
-    assertThrows(
-        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, 1.0, rate, 1.0));
-    assertThrows(
-        IllegalArgumentException.class, () -> Pricing.ofUsdPerMillion(1.0, 1.0, 1.0, rate));
   }
 
   @Test
@@ -184,19 +184,42 @@ final class CostCalculatorTest {
   }
 
   @Test
-  void pricingFourArgCanonicalConstructorCarriesEachRate() {
-    // input $15/M, output $75/M, cache write $18.75/M (1.25x), cache read $1.50/M (0.10x).
-    var p = new Pricing(15_000_000L, 75_000_000L, 18_750_000L, 1_500_000L);
-    assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
-    assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
-    assertEquals(18_750_000L, p.cacheWriteMicroUsdPerMillion());
-    assertEquals(1_500_000L, p.cacheReadMicroUsdPerMillion());
+  void pricingBuilderCarriesEachNamedRate() {
+    assertEquals(new Pricing(15_000_000L, 75_000_000L, 18_750_000L, 1_500_000L), CACHE_AWARE);
+  }
+
+  @Test
+  void pricingBuilderDefaultsCacheRatesToInputRate() {
+    var p =
+        Pricing.newBuilder()
+            .withInputMicroUsdPerMillion(3_000_000L)
+            .withOutputMicroUsdPerMillion(15_000_000L)
+            .build();
+
+    assertEquals(new Pricing(3_000_000L, 15_000_000L), p);
+  }
+
+  @Test
+  void pricingBuilderRequiresTheInputRate() {
+    var builder = Pricing.newBuilder().withOutputMicroUsdPerMillion(15_000_000L);
+
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+
+    assertEquals("inputMicroUsdPerMillion is required", ex.getMessage());
+  }
+
+  @Test
+  void pricingBuilderRequiresTheOutputRate() {
+    var builder = Pricing.newBuilder().withInputMicroUsdPerMillion(3_000_000L);
+
+    var ex = assertThrows(IllegalStateException.class, builder::build);
+
+    assertEquals("outputMicroUsdPerMillion is required", ex.getMessage());
   }
 
   @Test
   void pricingCostIncludesEveryTokenClassWeighted() {
     // Mirror the matchmaking baseline shape: $15/M input, $75/M output, plus cache ratios.
-    var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
     var usage =
         Usage.newBuilder()
             .withInputTokens(1_000_000)
@@ -205,7 +228,7 @@ final class CostCalculatorTest {
             .withCacheReadInputTokens(1_000_000)
             .build();
     // input  $15.00 + output $75.00 + cache write $18.75 + cache read $1.50 = $110.25
-    assertEquals(110_250_000L, p.cost(usage).microUsd());
+    assertEquals(110_250_000L, CACHE_AWARE.cost(usage).microUsd());
   }
 
   @Test
@@ -214,11 +237,10 @@ final class CostCalculatorTest {
     // shifts a large share of input tokens from "input" (full price) to "cache_read" (0.10x).
     // The pre-fix calculation billed every input token at full price; the post-fix calculation
     // applies the discount to cache reads.
-    var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
 
     // No-caching baseline (pre-fix): 12_279_022 input tokens × $15/M + 684_700 × $75/M.
     var baseline = Usage.of(12_279_022, 684_700);
-    var baselineCost = p.cost(baseline).microUsd();
+    var baselineCost = CACHE_AWARE.cost(baseline).microUsd();
     // Integer math: 12_279_022 × 15 / 1 = 184_185_330 microUSD; 684_700 × 75 / 1 = 51_352_500.
     assertEquals(184_185_330L + 51_352_500L, baselineCost, "baseline matches matchmaking trace");
 
@@ -231,7 +253,7 @@ final class CostCalculatorTest {
             .withOutputTokens(684_700)
             .withCacheReadInputTokens(9_823_217)
             .build();
-    var withCacheCost = p.cost(withCache).microUsd();
+    var withCacheCost = CACHE_AWARE.cost(withCache).microUsd();
 
     // Cache-aware cost: 2_455_805 × 15 = 36_837_075; 684_700 × 75 = 51_352_500;
     // 9_823_217 × 1_500_000 / 1_000_000 = 14_734_825 (integer trunc of 14_734_825.5).
@@ -244,23 +266,28 @@ final class CostCalculatorTest {
 
   @Test
   void pricingRejectsNegativeCacheWriteRate() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> new Pricing(0L, 0L, -1L, 0L));
+    var builder =
+        Pricing.newBuilder()
+            .withInputMicroUsdPerMillion(0L)
+            .withOutputMicroUsdPerMillion(0L)
+            .withCacheWriteMicroUsdPerMillion(-1L);
+
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+
     assertEquals("cacheWriteMicroUsdPerMillion must be non-negative, got -1", ex.getMessage());
   }
 
   @Test
   void pricingRejectsNegativeCacheReadRate() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> new Pricing(0L, 0L, 0L, -1L));
-    assertEquals("cacheReadMicroUsdPerMillion must be non-negative, got -1", ex.getMessage());
-  }
+    var builder =
+        Pricing.newBuilder()
+            .withInputMicroUsdPerMillion(0L)
+            .withOutputMicroUsdPerMillion(0L)
+            .withCacheReadMicroUsdPerMillion(-1L);
 
-  @Test
-  void pricingOfUsdPerMillionFourArgFactory() {
-    var p = Pricing.ofUsdPerMillion(15.0, 75.0, 18.75, 1.5);
-    assertEquals(15_000_000L, p.inputMicroUsdPerMillion());
-    assertEquals(75_000_000L, p.outputMicroUsdPerMillion());
-    assertEquals(18_750_000L, p.cacheWriteMicroUsdPerMillion());
-    assertEquals(1_500_000L, p.cacheReadMicroUsdPerMillion());
+    var ex = assertThrows(IllegalArgumentException.class, builder::build);
+
+    assertEquals("cacheReadMicroUsdPerMillion must be non-negative, got -1", ex.getMessage());
   }
 
   @Test

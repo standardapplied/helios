@@ -106,6 +106,11 @@ public final class AnthropicPricing {
 
   private static Pricing pricing(long input, long output, long cacheRead, CachePolicy cachePolicy) {
     var cacheWrite = cachePolicy instanceof CachePolicy.LongLived ? input * 2 : input * 5 / 4;
-    return new Pricing(input, output, cacheWrite, cacheRead);
+    return Pricing.newBuilder()
+        .withInputMicroUsdPerMillion(input)
+        .withOutputMicroUsdPerMillion(output)
+        .withCacheWriteMicroUsdPerMillion(cacheWrite)
+        .withCacheReadMicroUsdPerMillion(cacheRead)
+        .build();
   }
 }

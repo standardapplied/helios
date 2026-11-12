@@ -239,9 +239,10 @@ var options = SessionOptions.newBuilder()
 ```
 
 `AnthropicPricing.AS_OF` records when the rates were last checked against the pricing page. For
-negotiated or partner-platform rates, build a `CostCalculator.staticTable(...)` with
-`Pricing.ofUsdPerMillion(input, output, cacheWrite, cacheRead)`, taking all four rates from your
-rate card.
+negotiated or partner-platform rates, build a `CostCalculator.staticTable(...)` of rate cards built
+with `Pricing.newBuilder()`, each rate in micro-USD per million tokens from your rate card
+(`withInputMicroUsdPerMillion`, `withOutputMicroUsdPerMillion`, `withCacheWriteMicroUsdPerMillion`,
+`withCacheReadMicroUsdPerMillion`).
 
 ### 2) Streamable session
 
