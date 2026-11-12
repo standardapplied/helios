@@ -12,7 +12,7 @@
 
     <artifactId>helios-onnx</artifactId>
     <name>helios-onnx</name>
-    <description>Local ONNX Runtime embedding models (Nomic, Gemma)</description>
+    <description>Local ONNX Runtime embedding models (Nomic Embed, EmbeddingGemma, Harrier)</description>
     <packaging>jar</packaging>
 
     <properties>

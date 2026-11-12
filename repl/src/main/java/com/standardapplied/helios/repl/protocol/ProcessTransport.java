@@ -20,8 +20,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * NDJSON transport over stdin/stdout streams. JSON-RPC lines from the subprocess are prefixed with
- * a magic marker ({@code \0RPC:}) to distinguish them from regular print output.
+ * NDJSON transport over a pair of streams, which the sandbox host side ({@code SandboxRpc}) opens
+ * on its RPC socket. A line carrying the magic marker ({@code \0RPC:}) is a JSON-RPC message; any
+ * other line is kept as captured output.
  */
 public final class ProcessTransport implements RpcTransport {
 
@@ -45,8 +46,8 @@ public final class ProcessTransport implements RpcTransport {
   /**
    * Create a transport over the given streams.
    *
-   * @param input the stream to read messages from (sandbox stdout)
-   * @param output the stream to write messages to (sandbox stdin)
+   * @param input the stream to read messages from (the RPC socket's input)
+   * @param output the stream to write messages to (the RPC socket's output)
    */
   public ProcessTransport(InputStream input, OutputStream output) {
     if (input == null) {

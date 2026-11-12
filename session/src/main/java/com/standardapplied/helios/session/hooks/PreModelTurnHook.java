@@ -13,7 +13,7 @@ import java.util.List;
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.MutateHistory} replaces the conversation history the model will see (the
  * BYO-compactor-as-hook path); {@link HookOutcome.Inject} queues a synthetic user message before
- * the call; {@link HookOutcome.Stop} terminates the session.
+ * the call; {@link HookOutcome.Stop} ends the run as a {@code Success} with its result.
  */
 @FunctionalInterface
 public non-sealed interface PreModelTurnHook extends Hook {

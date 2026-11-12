@@ -11,7 +11,7 @@ import com.standardapplied.helios.core.model.Response;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.Inject} queues a synthetic user message before the next turn; {@link
- * HookOutcome.Stop} terminates the session.
+ * HookOutcome.Stop} ends the run as a {@code Success} with its result.
  */
 @FunctionalInterface
 public non-sealed interface PostModelTurnHook extends Hook {

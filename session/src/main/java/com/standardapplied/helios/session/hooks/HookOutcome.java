@@ -26,7 +26,7 @@ import java.util.Objects;
  *   <li>{@link MutateResult} — replace tool-result output.
  *   <li>{@link Block} — refuse the action, emit a blocked event.
  *   <li>{@link Inject} — inject a synthetic user message before the next turn.
- *   <li>{@link Stop} — terminate the session with the given result string.
+ *   <li>{@link Stop} — end the run as a {@code Success} with the given result string.
  * </ul>
  */
 public sealed interface HookOutcome
@@ -135,7 +135,7 @@ public sealed interface HookOutcome
   }
 
   /**
-   * Stop outcome that terminates the session with the given result.
+   * Stop outcome that ends the run as a {@code Success} with the given result.
    *
    * @param result non-blank terminal result string
    * @return a fresh {@link Stop}
