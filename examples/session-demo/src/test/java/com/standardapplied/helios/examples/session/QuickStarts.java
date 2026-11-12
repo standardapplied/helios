@@ -10,6 +10,7 @@ import com.standardapplied.helios.core.model.Model;
 import com.standardapplied.helios.core.model.ModelConfig;
 import com.standardapplied.helios.session.AgentSession;
 import com.standardapplied.helios.session.ContextCompactor;
+import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.ResultMessage;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.SessionOptions;
@@ -32,9 +33,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The README quick starts that call {@code SessionPresets}, one method per block, so the build
- * compiles every one of them. A block's free variables are its method's parameters. {@link
- * QuickStartsDocsTest} holds each README block to its method's body; none of these methods runs.
+ * The session blocks of the README and {@code docs/}, one method per block, so the build compiles
+ * every one of them. A block's free variables are its method's parameters. {@link
+ * QuickStartsDocsTest} holds each block to its method's body; none of these methods runs.
  */
 final class QuickStarts {
 
@@ -124,6 +125,33 @@ final class QuickStarts {
     try (var session = AgentSession.open(options)) {
       System.out.println(session.send("Write the notes for the next release.").join());
     }
+  }
+
+  static void liveEvents(AgentSession session) throws InterruptedException {
+    var events = session.events();
+    var printer =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (events) {
+                    for (var event : events) {
+                      switch (event) {
+                        case QueryEvent.AssistantText t -> System.out.print(t.text());
+                        case QueryEvent.ToolUse u ->
+                            System.out.println("\n[tool: " + u.call().name() + "]");
+                        case QueryEvent.ToolResult r ->
+                            System.out.println("[result: " + r.result().output() + "]");
+                        case QueryEvent.MessageBlocked b ->
+                            System.err.println("[blocked: " + b.reason() + "]");
+                        case QueryEvent.RunEnded e -> System.out.println("\n— run done —");
+                        default -> {}
+                      }
+                    }
+                  }
+                });
+    var terminal = session.send("Refactor the loop module's package-info comments.").join();
+    session.close();
+    printer.join();
   }
 
   static void sharedModel(String modelId, ModelConfig config, List<String> requests, Path repo) {
