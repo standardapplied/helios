@@ -25,6 +25,7 @@ import com.standardapplied.helios.session.permissions.PermissionMode;
 import com.standardapplied.helios.session.permissions.PermissionRule;
 import com.standardapplied.helios.session.store.FileSessionStore;
 import com.standardapplied.helios.session.store.SessionStore;
+import com.standardapplied.helios.skills.Skills;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -113,6 +114,13 @@ final class QuickStarts {
                     + " each change a user of the library would notice.")
             .build();
     var options = SessionPresets.workspace(model, repo).withSkill(releaseNotes).build();
+    try (var session = AgentSession.open(options)) {
+      System.out.println(session.send("Write the notes for the next release.").join());
+    }
+  }
+
+  static void discoveredSkills(Model model, Path repo) {
+    var options = SessionPresets.workspace(model, repo).withSkills(Skills.discover(repo)).build();
     try (var session = AgentSession.open(options)) {
       System.out.println(session.send("Write the notes for the next release.").join());
     }

@@ -66,6 +66,7 @@
         <module>onnx</module>
         <module>repl</module>
         <module>testing</module>
+        <module>skills</module>
         <module>architecture</module>
         <module>examples/session-demo</module>
     </modules>

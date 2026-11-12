@@ -23,6 +23,7 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | `com.standardapplied:helios-persistence` | PostgreSQL persistence for traces, prompts and sessions via Helidon DbClient |
 | `com.standardapplied:helios-repl` | Sandboxed JShell execution substrate |
 | `com.standardapplied:helios-testing` | `ScriptedModel` test double for deterministic evals |
+| `com.standardapplied:helios-skills` | Reads Agent Skills folders (`SKILL.md`) into `Skill` values |
 
 `helios-core` and `helios-session` also publish their test fixtures as attached artifacts with
 the `tests` classifier: `helios-core-<version>-tests.jar` (`com.standardapplied.helios.core.test`:
@@ -161,6 +162,7 @@ https://repo1.maven.org/maven2/com/standardapplied/helios-onnx/3.0.0/
 https://repo1.maven.org/maven2/com/standardapplied/helios-persistence/3.0.0/
 https://repo1.maven.org/maven2/com/standardapplied/helios-repl/3.0.0/
 https://repo1.maven.org/maven2/com/standardapplied/helios-testing/3.0.0/
+https://repo1.maven.org/maven2/com/standardapplied/helios-skills/<version>/
 ```
 
 To skip this manual step, add `<autoPublish>true</autoPublish>` to the `central-publishing-maven-plugin` configuration in `pom.xml`.
@@ -201,4 +203,4 @@ git push
 
 **Central Portal rejects the namespace**: Confirm the publishing account can see `com.standardapplied` as **Verified** under **Namespaces**.
 
-**Manual deploy (without CI)**: Add Central Portal credentials to `~/.m2/settings.xml` under server id `central`, then run `mvn clean deploy -Prelease -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing`.
+**Manual deploy (without CI)**: Add Central Portal credentials to `~/.m2/settings.xml` under server id `central`, then run `mvn clean deploy -Prelease -pl core,session,runtime,gemini,anthropic,openai,onnx,persistence,repl,testing,skills`.
