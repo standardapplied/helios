@@ -4,14 +4,11 @@ package com.standardapplied.helios.skills;
 
 import static org.junit.jupiter.api.Assumptions.abort;
 
-import com.standardapplied.helios.core.test.Await;
 import com.standardapplied.helios.session.Skill;
 import com.standardapplied.helios.session.test.LogCapture;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
@@ -98,34 +95,6 @@ final class SkillFolders {
     try {
       Files.createDirectories(link.getParent());
       return Files.createSymbolicLink(link, target);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-  }
-
-  /** A FIFO at {@code path}, made with {@code mkfifo}; skips the test where there is none. */
-  static Path fifo(Path path) {
-    Process mkfifo;
-    try {
-      mkfifo = new ProcessBuilder("mkfifo", path.toString()).start();
-    } catch (IOException e) {
-      return abort("mkfifo is not available: " + e.getMessage());
-    }
-    Await.termination("mkfifo " + path, mkfifo);
-    if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-      throw new AssertionError("mkfifo made no " + path);
-    }
-    return path;
-  }
-
-  /**
-   * A sparse file of {@code size} bytes at {@code path}, which costs no disk: a reader that does
-   * not stop at its cap fails on it.
-   */
-  static Path sparse(Path path, long size) {
-    try (var file = new RandomAccessFile(write(path, "").toFile(), "rw")) {
-      file.setLength(size);
-      return path;
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }

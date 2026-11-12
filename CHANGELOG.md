@@ -31,11 +31,15 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   folders, into `Skill` values, leniently, each problem logged as a warning and one skill's problem
   never stopping the others. A loaded skill is a snapshot: each `SKILL.md` and the text of each file
   are read once during the call, and nothing touches the disk afterwards; call again to pick up a
-  change. A file over 60,000 bytes or not UTF-8 stays listed and its read answers why; a call keeps
-  at most 16 MiB of text. When names collide the first found wins, and `discover` reads the user's
-  folders first, so a repository's skill cannot take the place of one the user installed. It brings
-  in `tools.jackson.dataformat:jackson-dataformat-yaml` 3.1.7 and `org.snakeyaml:snakeyaml-engine`
-  3.0.1 (Apache-2.0), for that module only.
+  change. Load skills once, at startup or while no session can write those folders, from a platform
+  thread, and reuse the list: a process rewriting a folder during the call can make it serve any
+  file the JVM can read, or block it forever. Bounds: a `SKILL.md` of 1 MiB; a file kept as text of
+  60,000 bytes (a larger or non-UTF-8 file stays listed and its read answers why); depth 4; 2,000
+  directories and 10,000 files per folder; 1,000 files per skill; 16 MiB of file bytes per call,
+  about twice that in heap. When names collide the first found wins, and `discover` reads the
+  user's folders first, so a repository's skill cannot take the place of one the user installed. It
+  brings in `tools.jackson.dataformat:jackson-dataformat-yaml` 3.1.7 and
+  `org.snakeyaml:snakeyaml-engine` 3.0.1 (Apache-2.0), for that module only.
 
 ### Compatibility
 

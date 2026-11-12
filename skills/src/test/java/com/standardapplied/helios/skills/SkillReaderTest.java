@@ -3,14 +3,12 @@
 package com.standardapplied.helios.skills;
 
 import static com.standardapplied.helios.skills.SkillFolders.directory;
-import static com.standardapplied.helios.skills.SkillFolders.fifo;
 import static com.standardapplied.helios.skills.SkillFolders.link;
 import static com.standardapplied.helios.skills.SkillFolders.load;
 import static com.standardapplied.helios.skills.SkillFolders.nameAndDescription;
 import static com.standardapplied.helios.skills.SkillFolders.real;
 import static com.standardapplied.helios.skills.SkillFolders.skill;
 import static com.standardapplied.helios.skills.SkillFolders.skillFile;
-import static com.standardapplied.helios.skills.SkillFolders.sparse;
 import static com.standardapplied.helios.skills.SkillFolders.unreadable;
 import static com.standardapplied.helios.skills.SkillFolders.write;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -21,9 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.standardapplied.helios.session.Skill;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -46,8 +46,8 @@ final class SkillReaderTest {
   private static final String NOT_A_STRING = " is missing or not a string";
   private static final String NOT_YAML = "its frontmatter is not valid YAML: ";
   private static final String USE_AT_ITS_PATH = "; use it at its path under the skill directory";
-  private static final String TOO_LARGE =
-      " is larger than 60000 bytes, the most a skill file read returns" + USE_AT_ITS_PATH;
+  private static final String TOO_LARGE = ": it is larger than 60000 bytes" + USE_AT_ITS_PATH;
+  private static final String NOT_UTF8 = ": it is not UTF-8" + USE_AT_ITS_PATH;
   private static final String REFUSED_KEY =
       "\" must be /-separated segments, none empty, . or .., with no \\\\, no <, >, \" and no"
           + " control, format, line separator or paragraph separator character";
@@ -127,31 +127,13 @@ final class SkillReaderTest {
         List.of(
             "Skill pdf at "
                 + real(root()).resolve("pdf-tools")
-                + ": its name differs from its directory's name pdf-tools; loading it"),
+                + ": its name differs from its directory's name; loading it"),
         scanned.warnings());
   }
 
   @Test
-  void instructionsOverTheDefaultToolResultCapLoadWithAWarningNamingBothLengths() {
-    var body = "b".repeat(65_537);
-    pdf(skillFile(nameAndDescription("pdf"), body));
-
-    var scanned = load(root());
-
-    assertEquals(body, scanned.only().instructions());
-    assertEquals(
-        List.of(
-            "Skill pdf at "
-                + real(root()).resolve("pdf")
-                + ": its instructions are 65537 characters, more than the default tool-result cap"
-                + " of 65536, so the model will see them cut once and never receive the cut part;"
-                + " the standard recommends a body under 5,000 tokens; loading it"),
-        scanned.warnings());
-  }
-
-  @Test
-  void instructionsAtTheCapAndADescriptionOf1024CharactersLoadSilently() {
-    pdf(skillFile("name: pdf\ndescription: " + "d".repeat(1_024), "b".repeat(65_536)));
+  void aDescriptionOf1024CharactersLoadsSilently() {
+    pdf(skillFile("name: pdf\ndescription: " + "d".repeat(1_024), ""));
 
     var scanned = load(root());
 
@@ -352,7 +334,7 @@ final class SkillReaderTest {
     var file = pdf(skillFile(nameAndDescription("pdf"), ""));
 
     try (var ignored = unreadable(file)) {
-      assertSkippedStarting("reading it failed: java.nio.file.AccessDeniedException");
+      assertSkipped("reading it failed: java.nio.file.AccessDeniedException: " + real(file));
     }
   }
 
@@ -558,7 +540,7 @@ final class SkillReaderTest {
     var directory = skill(root(), "pdf");
     write(directory.resolve("image.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
 
-    assertRefused(load(root()).only(), "image.png", " is not UTF-8 text" + USE_AT_ITS_PATH);
+    assertRefused(load(root()).only(), "image.png", NOT_UTF8);
   }
 
   @Test
@@ -612,7 +594,7 @@ final class SkillReaderTest {
             "big.md",
             "threw skill file big.md" + TOO_LARGE,
             "image.png",
-            "threw skill file image.png is not UTF-8 text" + USE_AT_ITS_PATH),
+            "threw skill file image.png" + NOT_UTF8),
         outcomes(skill));
     return skill;
   }
@@ -630,31 +612,6 @@ final class SkillReaderTest {
   }
 
   @Test
-  void nothingIsReadAfterTheCallSoAFileReplacedByALinkOutsideChangesNoRead() throws IOException {
-    var skill = loadedSkill();
-    var before = outcomes(skill);
-    var file = root().resolve("pdf/a.md");
-
-    Files.delete(file);
-    link(file, write(temp.resolve("secret.txt"), "secret"));
-
-    assertEquals(before, outcomes(skill));
-  }
-
-  @Test
-  void nothingIsReadAfterTheCallSoAFolderReplacedByAFifoChangesNoRead() throws IOException {
-    var skill = loadedSkill();
-    var before = outcomes(skill);
-    var folder = root().resolve("pdf/refs");
-
-    Files.delete(folder.resolve("b.md"));
-    Files.delete(folder);
-    fifo(folder);
-
-    assertEquals(before, outcomes(skill));
-  }
-
-  @Test
   void aChangeAfterTheCallIsNotSeenUntilTheNextLoad() {
     var directory = skill(root(), "pdf");
     var file = write(directory.resolve("R&D/guide.md"), "old");
@@ -667,10 +624,40 @@ final class SkillReaderTest {
   }
 
   @Test
-  void aSparseFileOfTwoGibibytesIsListedAsTooLargeAfterABoundedRead() {
-    var directory = skill(root(), "pdf");
-    sparse(directory.resolve("huge.bin"), Integer.MAX_VALUE + 2L);
+  void theReasonAFileCannotBeReadIsFixedAtLoad() {
+    var skill = loadedSkill();
+    var before = outcomes(skill);
 
-    assertRefused(load(root()).only(), "huge.bin", TOO_LARGE);
+    write(root().resolve("pdf/big.md"), "short now");
+    write(root().resolve("pdf/image.png"), "text now");
+
+    assertEquals(before, outcomes(skill));
+  }
+
+  @Test
+  void aBoundedReadAsksForAtMostOneByteMoreThanItsCap() throws IOException {
+    assertEquals(11, SkillReader.bytes(endlessUpTo(11), 10).length);
+  }
+
+  /** An endless stream of {@code a} that fails the test when asked for more than {@code most}. */
+  private static InputStream endlessUpTo(long most) {
+    return new InputStream() {
+      private long asked;
+
+      @Override
+      public int read() {
+        return read(new byte[1], 0, 1) < 0 ? -1 : 'a';
+      }
+
+      @Override
+      public int read(byte[] b, int off, int len) {
+        asked += len;
+        if (asked > most) {
+          throw new AssertionError("asked for " + asked + " bytes, more than " + most);
+        }
+        Arrays.fill(b, off, off + len, (byte) 'a');
+        return len;
+      }
+    };
   }
 }

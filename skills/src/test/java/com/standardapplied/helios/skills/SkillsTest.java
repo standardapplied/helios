@@ -12,13 +12,19 @@ import static com.standardapplied.helios.skills.SkillFolders.skill;
 import static com.standardapplied.helios.skills.SkillFolders.skillFile;
 import static com.standardapplied.helios.skills.SkillFolders.unreadable;
 import static com.standardapplied.helios.skills.SkillFolders.write;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.standardapplied.helios.session.test.LogCapture;
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.logging.LogRecord;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +37,9 @@ final class SkillsTest {
 
   private static final String LINK_HINT =
       "; pass a link's target to Skills.load to read the skills there";
+  private static final String SPENT =
+      ": it would pass the call's 16777216 bytes of text; the skills loaded before its skill are"
+          + " kept";
 
   @TempDir Path temp;
 
@@ -106,7 +115,7 @@ final class SkillsTest {
         List.of(
             "Skill deploy at "
                 + real(planted)
-                + ": its name differs from its directory's name release-helper; loading it",
+                + ": its name differs from its directory's name; loading it",
             "Skipping skill deploy at "
                 + real(planted)
                 + ": the skill at "
@@ -150,6 +159,40 @@ final class SkillsTest {
   }
 
   @Test
+  void aProjectFolderLinkedToAnotherFolderInsideTheProjectLoadsItsSkills() {
+    var project = project();
+    skill(project.resolve("shared/skills"), "pdf");
+    link(project.resolve(".claude/skills"), Path.of("../shared/skills"));
+
+    var scanned = scanned(() -> Skills.discover(project, home()));
+
+    assertEquals(List.of("pdf"), scanned.names());
+    assertEquals(List.of(), scanned.warnings());
+  }
+
+  @Test
+  void aProjectFolderLinkedToASiblingWhosePathStartsWithTheProjectsIsSkipped() {
+    var project = project();
+    var sibling = directory(temp.resolve("project2/skills"));
+    skill(sibling, "planted");
+    var folder = link(project.resolve(".agents/skills"), Path.of("../../project2/skills"));
+
+    var scanned = scanned(() -> Skills.discover(project, home()));
+
+    assertEquals(List.of(), scanned.skills());
+    assertEquals(
+        List.of(
+            "Skipping "
+                + real(project).resolve(project.relativize(folder))
+                + ": it leads through a link to "
+                + real(sibling)
+                + ", outside the project "
+                + real(project)
+                + "; pass that folder to Skills.load if you trust it"),
+        scanned.warnings());
+  }
+
+  @Test
   void aUserFolderMayBeALink() {
     var elsewhere = directory(temp.resolve("dotfiles/skills"));
     skill(elsewhere, "mine");
@@ -170,8 +213,15 @@ final class SkillsTest {
   }
 
   @Test
-  void discoverOfTheUserHomeRuns() {
-    assertDoesNotThrow(() -> scanned(() -> Skills.discover(project())));
+  void discoverReadsTheFoldersOfTheJvmsUserHome() {
+    skill(home().resolve(".agents/skills"), "mine");
+    var userHome = System.getProperty("user.home");
+    System.setProperty("user.home", home().toString());
+    try {
+      assertEquals(List.of("mine"), scanned(() -> Skills.discover(project())).names());
+    } finally {
+      System.setProperty("user.home", userHome);
+    }
   }
 
   @Test
@@ -283,7 +333,7 @@ final class SkillsTest {
   }
 
   @Test
-  void linksMetByAScanAreReportedInOneWarningNamingTheFirstThree() {
+  void linksMetByAScanAreReportedInOneWarningNamingThem() {
     var target = skill(directory(temp.resolve("elsewhere")), "linked");
     var root = root();
     var directoryLink = link(root.resolve("a-linked"), target);
@@ -294,13 +344,42 @@ final class SkillsTest {
     assertEquals(List.of(), scanned.skills());
     assertEquals(
         List.of(
-            "Not following 2 links met while scanning for skills ("
-                + real(root).resolve(root.relativize(directoryLink))
-                + ", "
-                + real(root).resolve(root.relativize(fileLink))
-                + ")"
-                + LINK_HINT),
+            linksNotFollowed(
+                root,
+                real(root).resolve(root.relativize(directoryLink))
+                    + ", "
+                    + real(root).resolve(root.relativize(fileLink)))),
         scanned.warnings());
+  }
+
+  @Test
+  void exactlyThreeLinksAreNamedWithNothingMore() {
+    var target = skill(directory(temp.resolve("elsewhere")), "linked");
+    var root = root();
+    List.of("l1", "l2", "l3").forEach(name -> link(root.resolve(name), target));
+
+    var real = real(root);
+    assertEquals(
+        List.of(
+            linksNotFollowed(
+                root, real.resolve("l1") + ", " + real.resolve("l2") + ", " + real.resolve("l3"))),
+        load(root).warnings());
+  }
+
+  @Test
+  void aLinkInARootReachedTwiceIsReportedOnce() {
+    var target = skill(directory(temp.resolve("elsewhere")), "linked");
+    var root = root();
+    link(root.resolve("l1"), target);
+    var linked = link(temp.resolve("linked"), root);
+
+    assertEquals(
+        List.of(linksNotFollowed(root, real(root).resolve("l1").toString())),
+        load(root, linked).warnings());
+  }
+
+  private static String linksNotFollowed(Path root, String named) {
+    return "Scanning " + real(root) + " for skills: links not followed: " + named + LINK_HINT;
   }
 
   @Test
@@ -309,20 +388,18 @@ final class SkillsTest {
     var root = root();
     IntStream.range(10, 60).forEach(i -> link(root.resolve("l" + i), target));
 
-    var scanned = load(root);
-
     var real = real(root);
     assertEquals(
         List.of(
-            "Not following 50 links met while scanning for skills ("
-                + real.resolve("l10")
-                + ", "
-                + real.resolve("l11")
-                + ", "
-                + real.resolve("l12")
-                + " and 47 more)"
-                + LINK_HINT),
-        scanned.warnings());
+            linksNotFollowed(
+                root,
+                real.resolve("l10")
+                    + ", "
+                    + real.resolve("l11")
+                    + ", "
+                    + real.resolve("l12")
+                    + " and 47 more")),
+        load(root).warnings());
   }
 
   @Test
@@ -428,24 +505,33 @@ final class SkillsTest {
 
     assertEquals(List.of("a", "c", "e"), scanned.names());
     assertEquals(2, scanned.warnings().size(), scanned.warnings()::toString);
+    assertTrue(
+        scanned
+            .warnings()
+            .getFirst()
+            .startsWith(
+                "Skipping skill "
+                    + real(first).resolve("b/SKILL.md")
+                    + ": its frontmatter is not valid YAML: "),
+        scanned.warnings()::toString);
     assertEquals(
-        List.of(
-            "Skipping skill " + real(first).resolve("b/SKILL.md") + ": ",
-            "Skipping skill " + real(second).resolve("d/SKILL.md") + ": "),
-        scanned.warnings().stream()
-            .map(warning -> warning.substring(0, warning.indexOf(": ") + 2))
-            .toList());
+        "Skipping skill "
+            + real(second).resolve("d/SKILL.md")
+            + ": skill name \"D\" must match [a-z0-9]+(-[a-z0-9]+)* in at most 64 characters",
+        scanned.warnings().getLast());
   }
 
   @Test
-  void skillsHolding16MebibytesOfTextAllLoad() {
+  void skillsHolding16MebibytesOfTextAllLoadAndAFileNotKeptCostsNothing() {
     var root = root();
     fillTheBudget(root, 0);
+    write(root.resolve("s10/big.md"), "b".repeat(60_001));
 
     var scanned = load(root);
 
     assertEquals(16L * 1_048_576, SkillReader.MAX_LOADED_BYTES);
     assertEquals(16, scanned.skills().size());
+    assertEquals(Set.of("big.md"), scanned.skills().getFirst().files().keySet());
     assertEquals(List.of(), scanned.warnings());
   }
 
@@ -457,14 +543,9 @@ final class SkillsTest {
 
     var scanned = load(root);
 
+    assertEquals(IntStream.range(10, 25).mapToObj(i -> "s" + i).toList(), scanned.names());
     assertEquals(
-        IntStream.range(10, 25).mapToObj(i -> "s" + i).toList(), scanned.names(), "s25 dropped");
-    assertEquals(
-        List.of(
-            "Stopped loading skills at "
-                + real(root).resolve("s25")
-                + ": the call's 16777216 bytes of skill text are spent; the skills loaded before"
-                + " it are kept"),
+        List.of("Stopped loading skills at " + real(root).resolve("s25/rest.md") + SPENT),
         scanned.warnings());
   }
 
@@ -479,11 +560,7 @@ final class SkillsTest {
 
     assertEquals(IntStream.range(10, 26).mapToObj(i -> "s" + i).toList(), scanned.names());
     assertEquals(
-        List.of(
-            "Stopped loading skills at "
-                + real(root).resolve("s26")
-                + ": the call's 16777216 bytes of skill text are spent; the skills loaded before"
-                + " it are kept"),
+        List.of("Stopped loading skills at " + real(root).resolve("s26/SKILL.md") + SPENT),
         scanned.warnings());
   }
 
@@ -500,13 +577,65 @@ final class SkillsTest {
   }
 
   /**
-   * A skill in {@code directory} whose {@code SKILL.md} is {@code bytes} long, padded by a YAML
-   * comment.
+   * A skill in {@code directory} whose {@code SKILL.md} is {@code bytes} bytes long, padded by a
+   * YAML comment of two-byte characters, so a budget counting characters would hold half as much.
    */
   private static Path padded(Path directory, int bytes) {
     var comment = nameAndDescription(directory.getFileName().toString()) + "\n#";
-    var unpadded = skillFile(comment, "").length();
-    write(directory.resolve("SKILL.md"), skillFile(comment + "x".repeat(bytes - unpadded), ""));
+    var padding = bytes - skillFile(comment, "").length();
+    var pad = "é".repeat(padding / 2) + "x".repeat(padding % 2);
+    write(directory.resolve("SKILL.md"), skillFile(comment + pad, ""));
     return directory;
+  }
+
+  @Test
+  void aRootListsAtMostTenThousandFilesThenStopsWithAWarning() {
+    var root = root();
+    IntStream.range(0, 10).forEach(i -> manyFiles(root.resolve("s" + i), SkillWalk.MAX_FILES));
+    var exactly = load(root);
+    manyFiles(root.resolve("t"), 1);
+
+    var past = load(root);
+
+    assertEquals(10_000, SkillWalk.MAX_ROOT_FILES);
+    assertEquals(List.of(10_000, 0), List.of(files(exactly), exactly.warnings().size()));
+    assertEquals(10_000, files(past));
+    assertEquals(
+        List.of(
+            "Scanning "
+                + real(root)
+                + " for skills: stopped after 10000 files; the rest are left out"),
+        past.warnings());
+  }
+
+  private static void manyFiles(Path directory, int count) {
+    skill(directory.getParent(), directory.getFileName().toString());
+    IntStream.range(0, count).forEach(i -> write(directory.resolve("f" + i + ".md"), ""));
+  }
+
+  private static int files(SkillFolders.Scanned scanned) {
+    return scanned.skills().stream().mapToInt(skill -> skill.files().size()).sum();
+  }
+
+  @Test
+  void aDirectoryWhoseListingFailsIsLeftOutWithAWarningAndTheWalkGoesOn() throws IOException {
+    var root = real(root());
+    var directory = root.resolve("broken");
+    var records = new ArrayList<LogRecord>();
+
+    FileVisitResult result;
+    try (var ignored = LogCapture.of(Skills.class, records)) {
+      result = new SkillWalk(root).postVisitDirectory(directory, new IOException("listing broke"));
+    }
+
+    assertEquals(FileVisitResult.CONTINUE, result);
+    assertEquals(
+        List.of(
+            "Scanning "
+                + root
+                + " for skills: left out "
+                + directory
+                + " (reading it failed: java.io.IOException: listing broke)"),
+        records.stream().map(LogRecord::getMessage).toList());
   }
 }

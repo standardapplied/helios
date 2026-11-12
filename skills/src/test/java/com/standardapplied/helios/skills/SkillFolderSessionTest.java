@@ -74,14 +74,11 @@ final class SkillFolderSessionTest {
     }
 
     assertInstanceOf(ResultMessage.Success.class, result);
+    var system = model.calls().getFirst().getFirst();
+    assertEquals(Role.SYSTEM, system.role());
     assertTrue(
-        model
-            .calls()
-            .getFirst()
-            .getFirst()
-            .content()
-            .contains("<name>greeting</name>\n    <description>Greets.</description>"),
-        () -> model.calls().getFirst().getFirst().content());
+        system.content().contains("<name>greeting</name>\n    <description>Greets.</description>"),
+        system::content);
     var tools =
         model.calls().getLast().stream()
             .filter(message -> message.role() == Role.TOOL)
