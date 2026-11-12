@@ -12,7 +12,7 @@ import com.standardapplied.helios.core.model.Response;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} confirms the stop; {@link
  * HookOutcome.Inject} treats the response as not-terminal and queues a synthetic user message for
- * the next turn, so on the session's last allowed turn it ends the session in {@link
+ * the next turn, so on the run's last allowed turn it ends the run in {@link
  * com.standardapplied.helios.session.ResultMessage.ErrorMaxTurns}; {@link HookOutcome.Stop}
  * confirms termination with a custom result string.
  *

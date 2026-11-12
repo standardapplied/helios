@@ -61,13 +61,14 @@ import java.util.OptionalLong;
  *       use a tighter cost ceiling). Any positive value is treated as a hard cap and clamped
  *       against the model's actual window to avoid requesting more context than the provider
  *       supports.
- *   <li>{@code streamRetryPolicy}: 3 attempts, 1 s/4 s/16 s exponential back-off capped at 30 s,
- *       ±25% jitter (see {@link StreamRetryPolicy#defaults()}). The loop retries a turn that failed
- *       with {@link com.standardapplied.helios.core.model.TransientStreamException}: a transport
- *       failure, a 408, 429 or 5xx answer to the stream request, or an error event the provider
- *       marks retryable mid-stream. It waits the answer's {@code Retry-After} capped by the
- *       back-off's maximum delay when the answer carried one, the back-off's delay otherwise. On
- *       exhaustion the run ends as {@link ResultMessage.ErrorTransientStream}. Use {@link
+ *   <li>{@code streamRetryPolicy}: 3 attempts in all, so at most two waits, 1 s then 4 s
+ *       (exponential, ×4, capped at 30 s), ±25% jitter (see {@link StreamRetryPolicy#defaults()}).
+ *       The loop retries a turn that failed with {@link
+ *       com.standardapplied.helios.core.model.TransientStreamException}: a transport failure, a
+ *       408, 429 or 5xx answer to the stream request, or an error event the provider marks
+ *       retryable mid-stream. It waits the answer's {@code Retry-After} capped by the back-off's
+ *       maximum delay when the answer carried one, the back-off's delay otherwise. On exhaustion
+ *       the run ends as {@link ResultMessage.ErrorTransientStream}. Use {@link
  *       StreamRetryPolicy#disabled()} for fail-fast behaviour.
  *   <li>{@code startTimeout}: 60 seconds — how long {@link AgentSession#open} waits for the
  *       execution provider's {@code onSessionStart}, which may fork a sandbox. A start that has not

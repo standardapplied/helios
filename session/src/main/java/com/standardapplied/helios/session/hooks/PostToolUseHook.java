@@ -13,7 +13,8 @@ import com.standardapplied.helios.core.tool.ToolResult;
  *
  * <p>Outcome semantics (spec §9.3): {@link HookOutcome.Continue} proceeds; {@link
  * HookOutcome.MutateResult} rewrites the tool result output; {@link HookOutcome.Inject} queues a
- * synthetic user message before the next turn; {@link HookOutcome.Stop} terminates the session.
+ * synthetic user message before the next turn; {@link HookOutcome.Stop} ends the run as a {@code
+ * Success} with its result.
  */
 @FunctionalInterface
 public non-sealed interface PostToolUseHook extends Hook {

@@ -7,12 +7,12 @@
     <parent>
         <groupId>com.standardapplied</groupId>
         <artifactId>helios</artifactId>
-        <version>3.1.3</version>
+        <version>3.1.4-SNAPSHOT</version>
     </parent>
 
     <artifactId>helios-core</artifactId>
     <name>helios-core</name>
-    <description>Core abstractions: Agent, Memory, Tools, Fault Tolerance, Workflows</description>
+    <description>Core abstractions: the Model interface and provider plumbing, tools, fault tolerance, output schemas, prompts, embeddings, cost and secret redaction</description>
 
     <properties>
         <!--

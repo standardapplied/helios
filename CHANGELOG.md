@@ -4,6 +4,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Changed
+
+- The README is a landing page; the reference moved to guides under `docs/`.
+
 ## [3.1.3] — 2026-11-12 — The helios-skills module: Agent Skills read from folders
 
 ### Added
