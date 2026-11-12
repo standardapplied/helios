@@ -777,10 +777,8 @@ final class AgentLoopTest {
     // Two-rate price table: main is 10× more expensive than summary.
     var pricing =
         java.util.Map.of(
-            "test",
-                new CostCalculator.Pricing(100_000_000L, 100_000_000L, 100_000_000L, 100_000_000L),
-            "summary-model",
-                new CostCalculator.Pricing(10_000_000L, 10_000_000L, 10_000_000L, 10_000_000L));
+            "test", new CostCalculator.Pricing(100_000_000L, 100_000_000L),
+            "summary-model", new CostCalculator.Pricing(10_000_000L, 10_000_000L));
     var calculator = CostCalculator.staticTable(pricing);
     ContextCompactor reporting =
         (history, state) ->

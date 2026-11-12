@@ -20,6 +20,10 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `withAllow`, `withAsk` and `withDeny` each append rules to the list they name, and `build()`; and
   `Permission.toBuilder()`, which seeds a builder with a permission's mode and rules, so a host
   layers its rules onto a preset. No permission decision changes.
+- `CostCalculator.Pricing.newBuilder()`, which builds a rate card by named rates
+  (`withInputMicroUsdPerMillion`, `withOutputMicroUsdPerMillion`, `withCacheWriteMicroUsdPerMillion`,
+  `withCacheReadMicroUsdPerMillion`, `build`), so a cache-write and a cache-read rate cannot be
+  swapped. The input and output rates are required; each cache rate defaults to the input rate.
 
 ### Compatibility
 
@@ -39,6 +43,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `withReasoningTokens`. The usage built is the same.
 - `Permission.newBuilder(mode)`: none; the canonical constructor remains, since a record cannot
   hide it.
+- `Pricing.ofUsdPerMillion(input, output, cacheWrite, cacheRead)` is removed; build with
+  `Pricing.newBuilder()` and each rate in micro-USD (`CostEstimate.ofUsd(usd).microUsd()` converts
+  a dollar rate). `Pricing.ofUsdPerMillion(input, output)` and `Pricing(long, long)` stay.
 
 ## [3.1.1] — 2026-11-11 — Partial turns, usage of failed and cut calls, reasoning tokens, new models and corrected prices
 
