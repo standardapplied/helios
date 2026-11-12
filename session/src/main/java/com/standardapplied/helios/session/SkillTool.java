@@ -29,8 +29,9 @@ import java.util.Optional;
  * user message tagged {@link MessageOrigin#SKILL}, that opens with a session skill's {@code
  * <skill_content>} tag. Only a loaded skill's files can be read, so a rule over {@code
  * Skill(<name>)} governs the skill and its files. The tool reaches its run's history through {@link
- * Run#stateOfThisThread}. The description is the one text it escapes: {@link Skill} refuses every
- * character a path or the directory would need escaped.
+ * Run#stateOfThisThread}. The description is the one text it escapes: {@link Skill} refuses {@code
+ * <}, {@code >} and {@code "} in a path or the directory, which could close or forge a tag or
+ * attribute, and an {@code &} is shown as is, since the result is never parsed as XML.
  */
 final class SkillTool {
 
