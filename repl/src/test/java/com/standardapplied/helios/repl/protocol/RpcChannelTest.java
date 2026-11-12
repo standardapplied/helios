@@ -302,16 +302,26 @@ class RpcChannelTest {
 
   /**
    * Only the reader loop's exit can fail this call: nothing answers it, its timeout is beyond the
-   * hang guard, and the channel is not closed until the call has failed.
+   * hang guard, and the channel is not closed until the call has failed. The peer sends a last
+   * message and closes, so the reader takes it from a closed transport and ends at its loop's
+   * check.
    */
   @Test
   void transportCloseTerminatesReaderLoop() {
-    var transport = new FakeTransport();
+    var transport =
+        new FakeTransport() {
+          @Override
+          public RpcMessage receive() {
+            var message = super.receive();
+            die();
+            return message;
+          }
+        };
     var channel = new RpcChannel(transport, new HostFunctionRegistry(), BEYOND_HANG_GUARD);
     var pending = callThatIsNeverAnswered(channel);
     transport.nextSent();
 
-    transport.close();
+    transport.enqueueIncoming(new RpcMessage.Notification("last", Map.of()));
 
     var failure = Await.failure("the call the ended reader loop abandons", pending);
     assertInstanceOf(RpcChannel.RpcException.class, failure);
@@ -562,14 +572,17 @@ class RpcChannelTest {
   void isActiveReturnsFalseWhenTransportClosedButChannelOpen() {
     var transport = new FakeTransport();
     var channel = new RpcChannel(transport, new HostFunctionRegistry(), BEYOND_HANG_GUARD);
-    transport.close();
+    transport.awaitReceive("the reader to wait for a message");
+    transport.die();
     assertFalse(channel.isActive(), "isActive must return false when transport is closed");
     channel.close();
   }
 
   /**
    * The transport dies under a running handler while close() has not been called on the channel.
-   * The handler's response is dropped by safeSend's pre-check.
+   * The handler's response is dropped by safeSend's pre-check. The transport dies only once the
+   * reader waits for its next message, and without waking it, so the reader cannot close the
+   * channel before the handler sends.
    */
   @Test
   void safeSendPreCheckCatchesTransportClosedButChannelOpen() {
@@ -588,8 +601,10 @@ class RpcChannelTest {
       var channel = new RpcChannel(transport, registry, BEYOND_HANG_GUARD);
       transport.enqueueIncoming(new RpcMessage.Request("r-tx", "wait", Map.of()));
       Await.latch("the handler to start", inHandler);
+      transport.awaitReceive("the reader to take the request");
+      transport.awaitReceive("the reader to wait for the next message");
 
-      transport.close();
+      transport.die();
       releaseHandler.countDown();
 
       capture.awaitMessage(SEND_SKIPPED);
@@ -683,7 +698,8 @@ class RpcChannelTest {
 
   /**
    * The transport died (broken pipe, peer EOF) but close() has not been called on the channel: the
-   * other arm of handleRequest's guard.
+   * other arm of handleRequest's guard. The transport dies once the reader waits for a message, and
+   * without waking it, so the reader cannot close the channel first.
    */
   @Test
   void handleRequestEarlyExitsWhenTransportClosedButChannelOpen() {
@@ -697,7 +713,8 @@ class RpcChannelTest {
               return Map.of();
             });
     var channel = new RpcChannel(transport, registry, BEYOND_HANG_GUARD);
-    transport.close();
+    transport.awaitReceive("the reader to wait for a message");
+    transport.die();
 
     channel.handleRequest(new RpcMessage.Request("r-tx-closed", "nope", Map.of()));
 
@@ -785,7 +802,9 @@ class RpcChannelTest {
 
   /**
    * The peer closes while a handler writes its response: the write fails and the transport is
-   * closed by the time safeSend looks again, so the failure is the benign race, logged at FINE.
+   * closed by the time safeSend looks again, so the failure is the benign race, logged at FINE. The
+   * transport dies once the reader waits for its next message, and without waking it, so the reader
+   * cannot close the channel before safeSend looks.
    */
   @Test
   void handlerSendIoExceptionDuringMidFlightCloseLogsFine() {
@@ -793,7 +812,9 @@ class RpcChannelTest {
         new FakeTransport() {
           @Override
           public void send(RpcMessage message) throws IOException {
-            close();
+            awaitReceive("the reader to take the request");
+            awaitReceive("the reader to wait for the next message");
+            die();
             throw new IOException("synthetic mid-send close");
           }
         };
@@ -997,11 +1018,22 @@ class RpcChannelTest {
 
     private final BlockingQueue<RpcMessage> incoming = new LinkedBlockingQueue<>();
     private final BlockingQueue<RpcMessage> sent = new LinkedBlockingQueue<>();
+    private final BlockingQueue<Thread> receives = new LinkedBlockingQueue<>();
     private volatile boolean open = true;
     private volatile Consumer<RpcMessage> onSendCallback = message -> {};
 
     void enqueueIncoming(RpcMessage msg) {
       incoming.add(msg);
+    }
+
+    /** Waits for the next call to {@code receive()}, counted from the first. */
+    void awaitReceive(String description) {
+      Await.next(description, receives);
+    }
+
+    /** Ends the transport as a broken pipe does, leaving a blocked reader blocked. */
+    void die() {
+      open = false;
     }
 
     void onSend(Consumer<RpcMessage> callback) {
@@ -1027,6 +1059,7 @@ class RpcChannelTest {
 
     @Override
     public RpcMessage receive() {
+      receives.add(Thread.currentThread());
       try {
         var message = incoming.take();
         return open ? message : null;
