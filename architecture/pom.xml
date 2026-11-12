@@ -83,6 +83,12 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>com.standardapplied</groupId>
+            <artifactId>helios-skills</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit</artifactId>
             <version>${archunit-version}</version>

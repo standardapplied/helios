@@ -26,6 +26,16 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   (`withInputMicroUsdPerMillion`, `withOutputMicroUsdPerMillion`, `withCacheWriteMicroUsdPerMillion`,
   `withCacheReadMicroUsdPerMillion`, `build`), so a cache-write and a cache-read rate cannot be
   swapped. The input and output rates are required; each cache rate defaults to the input rate.
+- The `helios-skills` module (`com.standardapplied.helios.skills`). `Skills.discover(Path)` reads
+  the Agent Skills folders of the user and of a project, and `Skills.load(Path...)` reads given
+  folders, into `Skill` values, leniently, each problem logged as a warning and one skill's problem
+  never stopping the others. A loaded skill is a snapshot: each `SKILL.md` and the text of each file
+  are read once during the call, and nothing touches the disk afterwards; call again to pick up a
+  change. A file over 60,000 bytes or not UTF-8 stays listed and its read answers why; a call keeps
+  at most 16 MiB of text. When names collide the first found wins, and `discover` reads the user's
+  folders first, so a repository's skill cannot take the place of one the user installed. It brings
+  in `tools.jackson.dataformat:jackson-dataformat-yaml` 3.1.7 and `org.snakeyaml:snakeyaml-engine`
+  3.0.1 (Apache-2.0), for that module only.
 
 ### Compatibility
 
