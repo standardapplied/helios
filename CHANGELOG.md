@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.2] — 2026-11-12 — Agent Skills in a session, builders for Usage, Permission and Pricing, and a gate against positional arguments
+
 ### Added
 
 - `Skill` in `helios-session`, built through `Skill.newBuilder()` (`withName`, `withDescription`,
