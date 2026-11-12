@@ -16,7 +16,21 @@
 
     <properties>
         <helios.test.native-access>ALL-UNNAMED,com.standardapplied.helios.session</helios.test.native-access>
+        <helios.test.forks>3</helios.test.forks>
     </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <forkCount>${helios.test.forks}</forkCount>
+                    <reuseForks>true</reuseForks>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
     <dependencies>
         <dependency>

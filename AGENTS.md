@@ -247,6 +247,13 @@ log or bisecting a failure. A test that fails only when modules build side by si
 something with another module's tests (a port, a path, a cache, the machine's load) and is fixed
 at that cause; a module is never serialised to hide it.
 
+`repl`'s test classes also run side by side, in separate JVMs: `repl/pom.xml` sets surefire's
+`forkCount` to the property `helios.test.forks` (3) and reuses each fork, which runs one class after
+another. A `repl` test must not assume it is the only one running: it takes its own directory,
+port and socket, never relies on the machine being idle, and asserts only on its own JVM and the
+processes it started. Every fork's JaCoCo agent appends to the module's one `target/jacoco.exec`
+under a file lock, so the coverage gate reads all of them.
+
 CI runs the same build through `./mvnw`, which downloads Maven 3.9.14 and checks its SHA-256. The
 wrapper needs `unzip`: without it, the script fetches the `.tar.gz` and refuses it because the
 checksum is the `.zip`'s. Where Maven 3.9.14 is installed, `mvn` is the same build, since the
