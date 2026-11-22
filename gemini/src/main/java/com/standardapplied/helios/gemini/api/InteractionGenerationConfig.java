@@ -17,7 +17,8 @@ import java.util.List;
  * @param maxOutputTokens maximum number of tokens to generate
  * @param stopSequences sequences that stop generation
  * @param seed random seed for reproducibility
- * @param thinkingLevel thinking level ({@code minimal}, {@code low}, {@code medium}, {@code high})
+ * @param thinkingLevel thinking level ({@code minimal}, {@code low}, {@code medium}, {@code high},
+ *     {@code xhigh})
  * @param thinkingSummaries whether thought summaries are returned ({@code auto}) or not ({@code
  *     none})
  * @param toolChoice tool-choice policy (bare string {@code auto}/{@code any}/{@code none}, or an

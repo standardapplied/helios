@@ -55,6 +55,12 @@ class GeminiRequestSnapshotTest {
           modelAt(id, settings(new Reasoning.Effort(Level.MEDIUM, Display.SUMMARY))),
           withTools(THOUGHTS));
     }
+    for (var id : List.of(GeminiModelId.GEMINI_4_NEON, GeminiModelId.GEMINI_4_HYDROGEN)) {
+      snapshot(
+          id.id() + " xhigh summary tools",
+          modelAt(id, settings(new Reasoning.Effort(Level.XHIGH, Display.SUMMARY))),
+          withTools(THOUGHTS));
+    }
     var flash = GeminiModelId.GEMINI_3_8_FLASH;
     var low = settings(new Reasoning.Effort(Level.LOW, Display.HIDDEN));
     snapshot("schema", modelAt(flash, low), withSchema(List.of()));

@@ -51,6 +51,8 @@ class GeminiProviderTest {
     assertTrue(provider.supports("gemini-3.8-flash"));
     assertTrue(provider.supports("gemini-4-argon"));
     assertTrue(provider.supports("gemini-4-carbon"));
+    assertTrue(provider.supports("gemini-4-neon"));
+    assertTrue(provider.supports("gemini-4-hydrogen"));
   }
 
   @Test
@@ -91,7 +93,8 @@ class GeminiProviderTest {
 
     assertEquals(
         "Unsupported model: gpt-4. Supported models: gemini-3.6-flash, gemini-3.7-flash,"
-            + " gemini-3.8-flash, gemini-4-argon, gemini-4-carbon",
+            + " gemini-3.8-flash, gemini-4-argon, gemini-4-carbon, gemini-4-neon,"
+            + " gemini-4-hydrogen",
         exception.getMessage());
   }
 
@@ -116,12 +119,12 @@ class GeminiProviderTest {
         "Unsupported model: "
             + removed
             + ". Supported models: gemini-3.6-flash, gemini-3.7-flash, gemini-3.8-flash,"
-            + " gemini-4-argon, gemini-4-carbon",
+            + " gemini-4-argon, gemini-4-carbon, gemini-4-neon, gemini-4-hydrogen",
         exception.getMessage());
   }
 
   @ParameterizedTest
-  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON"})
+  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON", "GEMINI_4_NEON", "GEMINI_4_HYDROGEN"})
   void aGemini4ModelIsCreatedWithItsWindowAndOutputCeilingAndRequestedById(GeminiModelId model) {
     var config = ModelConfig.of("test-api-key");
 

@@ -20,40 +20,52 @@ public enum GeminiModelId {
   // maxOutputTokens reflects the documented per-model output ceiling at time of writing —
   // operators can override per-call via ModelConfig.Builder.withMaxOutputTokens.
   // reasoning lists each model's documented thinking_level set (Gemini thinking guide, Gemini 3
-  // guide and Gemini 4 Argon page, 2026-10-20; Gemini 4 Carbon page, 2026-11-11): 3.7 Flash, 3.8
-  // Flash, 4 Argon and 4 Carbon accept low/medium/high; 3.6 Flash also accepts minimal. None can
-  // turn thinking off; thought summaries are on or off through thinking_summaries.
+  // guide and Gemini 4 Argon page, 2026-10-20; Gemini 4 Carbon page, 2026-11-11; Gemini 4 Neon and
+  // Hydrogen pages, 2026-11-22): 3.7 Flash, 3.8 Flash, 4 Argon and 4 Carbon accept low/medium/high;
+  // 3.6 Flash also accepts minimal; 4 Neon and 4 Hydrogen also accept xhigh. None can turn thinking
+  // off; thought summaries are on or off through thinking_summaries.
   /**
    * Gemini 3.6 Flash: thinking level {@code minimal} to {@code high}; thinking cannot be turned
    * off.
    */
-  GEMINI_3_6_FLASH("gemini-3.6-flash", 1_048_576, 65_536, Level.MINIMAL),
+  GEMINI_3_6_FLASH("gemini-3.6-flash", 1_048_576, 65_536, Level.MINIMAL, Level.HIGH),
   /**
    * Gemini 3.7 Flash: thinking level {@code low} to {@code high}; thinking cannot be turned off.
    */
-  GEMINI_3_7_FLASH("gemini-3.7-flash", 1_048_576, 65_536, Level.LOW),
+  GEMINI_3_7_FLASH("gemini-3.7-flash", 1_048_576, 65_536, Level.LOW, Level.HIGH),
   /**
    * Gemini 3.8 Flash: thinking level {@code low} to {@code high}; thinking cannot be turned off.
    */
-  GEMINI_3_8_FLASH("gemini-3.8-flash", 1_048_576, 65_536, Level.LOW),
+  GEMINI_3_8_FLASH("gemini-3.8-flash", 1_048_576, 65_536, Level.LOW, Level.HIGH),
   /** Gemini 4 Argon: thinking level {@code low} to {@code high}; thinking cannot be turned off. */
-  GEMINI_4_ARGON("gemini-4-argon", 1_048_576, 65_536, Level.LOW),
+  GEMINI_4_ARGON("gemini-4-argon", 1_048_576, 65_536, Level.LOW, Level.HIGH),
   /** Gemini 4 Carbon: thinking level {@code low} to {@code high}; thinking cannot be turned off. */
-  GEMINI_4_CARBON("gemini-4-carbon", 1_048_576, 65_536, Level.LOW);
+  GEMINI_4_CARBON("gemini-4-carbon", 1_048_576, 65_536, Level.LOW, Level.HIGH),
+  /** Gemini 4 Neon: thinking level {@code low} to {@code xhigh}; thinking cannot be turned off. */
+  GEMINI_4_NEON("gemini-4-neon", 1_048_576, 65_536, Level.LOW, Level.XHIGH),
+  /**
+   * Gemini 4 Hydrogen: thinking level {@code low} to {@code xhigh}; thinking cannot be turned off.
+   */
+  GEMINI_4_HYDROGEN("gemini-4-hydrogen", 1_048_576, 65_536, Level.LOW, Level.XHIGH);
 
   private final String id;
   private final int contextWindow;
   private final int maxOutputTokens;
   private final ReasoningSupport reasoning;
 
-  GeminiModelId(String id, int contextWindow, int maxOutputTokens, Level lowestThinkingLevel) {
+  GeminiModelId(
+      String id,
+      int contextWindow,
+      int maxOutputTokens,
+      Level lowestThinkingLevel,
+      Level highestThinkingLevel) {
     this.id = id;
     this.contextWindow = contextWindow;
     this.maxOutputTokens = maxOutputTokens;
     this.reasoning =
         new ReasoningSupport(
             false,
-            EnumSet.range(lowestThinkingLevel, Level.HIGH),
+            EnumSet.range(lowestThinkingLevel, highestThinkingLevel),
             EnumSet.of(Display.HIDDEN, Display.SUMMARY));
   }
 

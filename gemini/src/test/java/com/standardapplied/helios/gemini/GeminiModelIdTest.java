@@ -18,14 +18,16 @@ import org.junit.jupiter.params.provider.EnumSource;
 class GeminiModelIdTest {
 
   @Test
-  void theCatalogueIsExactlyTheFiveSupportedModels() {
+  void theCatalogueIsExactlyTheSevenSupportedModels() {
     assertEquals(
         EnumSet.of(
             GeminiModelId.GEMINI_3_6_FLASH,
             GeminiModelId.GEMINI_3_7_FLASH,
             GeminiModelId.GEMINI_3_8_FLASH,
             GeminiModelId.GEMINI_4_ARGON,
-            GeminiModelId.GEMINI_4_CARBON),
+            GeminiModelId.GEMINI_4_CARBON,
+            GeminiModelId.GEMINI_4_NEON,
+            GeminiModelId.GEMINI_4_HYDROGEN),
         EnumSet.allOf(GeminiModelId.class));
   }
 
@@ -36,6 +38,8 @@ class GeminiModelIdTest {
     assertEquals("gemini-3.8-flash", GeminiModelId.GEMINI_3_8_FLASH.id());
     assertEquals("gemini-4-argon", GeminiModelId.GEMINI_4_ARGON.id());
     assertEquals("gemini-4-carbon", GeminiModelId.GEMINI_4_CARBON.id());
+    assertEquals("gemini-4-neon", GeminiModelId.GEMINI_4_NEON.id());
+    assertEquals("gemini-4-hydrogen", GeminiModelId.GEMINI_4_HYDROGEN.id());
   }
 
   @ParameterizedTest

@@ -42,6 +42,8 @@ class GeminiReasoningTest {
 
   private static final Set<Level> LOW_TO_HIGH = EnumSet.range(Level.LOW, Level.HIGH);
 
+  private static final Set<Level> LOW_TO_XHIGH = EnumSet.range(Level.LOW, Level.XHIGH);
+
   private static final Set<Display> DISPLAYS = EnumSet.of(Display.HIDDEN, Display.SUMMARY);
 
   private static final Map<Display, String> SUMMARIES =
@@ -54,7 +56,9 @@ class GeminiReasoningTest {
           GeminiModelId.GEMINI_3_7_FLASH, LOW_TO_HIGH,
           GeminiModelId.GEMINI_3_8_FLASH, LOW_TO_HIGH,
           GeminiModelId.GEMINI_4_ARGON, LOW_TO_HIGH,
-          GeminiModelId.GEMINI_4_CARBON, LOW_TO_HIGH);
+          GeminiModelId.GEMINI_4_CARBON, LOW_TO_HIGH,
+          GeminiModelId.GEMINI_4_NEON, LOW_TO_XHIGH,
+          GeminiModelId.GEMINI_4_HYDROGEN, LOW_TO_XHIGH);
 
   static Stream<Arguments> acceptedCells() {
     return ReasoningMatrix.cells(DOCUMENTED, GeminiReasoningTest::accepts, true);
