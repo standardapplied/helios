@@ -4,9 +4,22 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+### Added
+
+- `GeminiModelId.GEMINI_4_NEON` (`gemini-4-neon`), released 2026-11-18: 1,048,576-token context,
+  65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
+- `GeminiModelId.GEMINI_4_HYDROGEN` (`gemini-4-hydrogen`), released 2026-11-12: 1,048,576-token
+  context, 65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
+
 ### Changed
 
 - The README is a landing page; the reference moved to guides under `docs/`.
+
+### Compatibility
+
+- Add a case to a `switch` without `default` over `GeminiModelId` (`GEMINI_4_NEON`,
+  `GEMINI_4_HYDROGEN`).
+- `GeminiProvider`'s unsupported-model message lists `gemini-4-neon` and `gemini-4-hydrogen`.
 
 ## [3.1.3] — 2026-11-12 — The helios-skills module: Agent Skills read from folders
 

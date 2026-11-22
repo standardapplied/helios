@@ -33,7 +33,7 @@ class Gemini4IntegrationTest {
   private static final String TOOL_NAME = "get_temperature";
 
   @ParameterizedTest
-  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON"})
+  @EnumSource(names = {"GEMINI_4_ARGON", "GEMINI_4_CARBON", "GEMINI_4_NEON", "GEMINI_4_HYDROGEN"})
   void aForcedToolCallIsAnsweredThroughItsReplayedThoughtSignatures(GeminiModelId modelId) {
     var tools = List.of(temperatureTool());
     var messages = new ArrayList<>(List.of(Message.user("What is the temperature in Paris?")));
