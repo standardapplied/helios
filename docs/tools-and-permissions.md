@@ -36,7 +36,12 @@ A tool reaches a session as a `ToolBinding`: `withTool(ToolBinding.newBuilder(to
 The category (`READ`, `WRITE`, `EXECUTION`, `NETWORK` or `CONTROL`) sets the permission default.
 The session runs each tool call once and never retries one: `ToolDispatch` runs the tool on a
 virtual thread bounded by the per-call timeout (`SessionLimits.toolTimeoutDefault`), and turns an
-unknown tool, a timeout or a thrown exception into a failed result the model sees.
+unknown tool, a timeout or a thrown exception into a failed result the model sees. A call naming
+no registered tool, usually a misspelling or a wrong case, is answered `tool not found: <name>`,
+followed by `; did you mean: <a>, <b>?` when tools offered on that turn are close to the name: up
+to three, nearest first, within a case-insensitive edit distance of 2 or a third of the name's
+length, whichever is larger. A tool hidden on that turn by its `withVisibility` predicate is never
+suggested.
 
 ## Testing with scripted tools
 

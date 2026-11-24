@@ -23,6 +23,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 ### Changed
 
 - The README is a landing page; the reference moved to guides under `docs/`.
+- A call naming no registered tool now tells the model what it could have called:
+  `tool not found: <name>; did you mean: <a>, <b>?`, naming up to three of the tools offered on
+  that turn within a case-insensitive edit distance of 2 or a third of the name's length, nearest
+  first. A tool hidden on the turn by its visibility predicate is never named, and with no close
+  tool the text is unchanged. The `QueryEvent.ToolResult`, `PostToolUse` hooks and the history see
+  the new text; the outcome is still `ToolOutcome.NotFound`.
 
 ### Compatibility
 

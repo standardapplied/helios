@@ -6,12 +6,12 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The registered tool names closest to a name the model called that is not registered, so the
- * not-found result can name what the model could have called. Closeness is the Levenshtein
- * distance, without regard to case ({@link Locale#ROOT}); a name qualifies at a distance of at most
- * the larger of 2 and a third of the called name's length. A called name over 256 characters gets
- * no suggestion, which bounds the work a hostile name can buy at 256 × the registered names'
- * length.
+ * The candidate tool names closest to a name the model called that is not registered, so the
+ * not-found result can name what the model could have called; the candidates are the tools offered
+ * on the turn. Closeness is the Levenshtein distance, without regard to case ({@link Locale#ROOT});
+ * a candidate qualifies at a distance of at most the larger of 2 and a third of the called name's
+ * length. A called name over 256 characters gets no suggestion, which bounds the work a hostile
+ * name can buy at 256 × the candidates' total length, in two rows of memory per candidate.
  */
 final class ToolNameSuggestions {
 
@@ -24,20 +24,20 @@ final class ToolNameSuggestions {
   private ToolNameSuggestions() {}
 
   /**
-   * At most three of {@code registered}, nearest first, ties in {@code registered}'s order.
+   * At most three of {@code candidates}, nearest first, ties in {@code candidates}' order.
    *
    * @param called the name the model called; non-null
-   * @param registered the registered names, in registration order; non-null
+   * @param candidates the names that may be suggested, in the order ties keep; non-null
    * @return the qualifying names, empty when none qualifies or {@code called} is over 256
    *     characters
    */
-  static List<String> closest(String called, List<String> registered) {
+  static List<String> closest(String called, List<String> candidates) {
     if (called.length() > MAX_CALLED_LENGTH) {
       return List.of();
     }
     var target = called.toLowerCase(Locale.ROOT);
     var limit = Math.max(MIN_DISTANCE_LIMIT, called.length() / 3);
-    return registered.stream()
+    return candidates.stream()
         .map(name -> new Scored(name, distance(target, name.toLowerCase(Locale.ROOT))))
         .filter(scored -> scored.distance() <= limit)
         .sorted(Comparator.comparingInt(Scored::distance))
