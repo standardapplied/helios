@@ -16,7 +16,6 @@ import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.tools.ToolBinding;
-import com.standardapplied.helios.session.tools.ToolVisibilityContext;
 import java.util.List;
 import java.util.Objects;
 
@@ -151,8 +150,7 @@ public final class TurnRunner {
   }
 
   private List<Tool> visibleTools(SessionState state) {
-    var visibilityCtx = new ToolVisibilityContext(state.sessionId(), state.currentTurnIndex());
-    return collaborators.toolDispatch().registry().visible(visibilityCtx).stream()
+    return collaborators.toolDispatch().registry().visible(state).stream()
         .map(ToolBinding::tool)
         .toList();
   }

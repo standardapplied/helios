@@ -8,6 +8,7 @@ curated corpus, the permission rules and the hook phases. The confinement the fi
 is in the [security guide](security.md#workspace-confinement). Back to the [README](../README.md).
 
 - [Tools](#tools)
+- [Testing with scripted tools](#testing-with-scripted-tools)
 - [CommandGrant: a CLI without its secrets](#commandgrant-a-cli-without-its-secrets)
 - [A curated corpus](#a-curated-corpus)
 - [Permissions](#permissions)
@@ -35,7 +36,52 @@ A tool reaches a session as a `ToolBinding`: `withTool(ToolBinding.newBuilder(to
 The category (`READ`, `WRITE`, `EXECUTION`, `NETWORK` or `CONTROL`) sets the permission default.
 The session runs each tool call once and never retries one: `ToolDispatch` runs the tool on a
 virtual thread bounded by the per-call timeout (`SessionLimits.toolTimeoutDefault`), and turns an
-unknown tool, a timeout or a thrown exception into a failed result the model sees.
+unknown tool, a timeout or a thrown exception into a failed result the model sees. A call naming
+no registered tool, usually a misspelling or a wrong case, is answered `tool not found: <name>`,
+followed by `; did you mean: <a>, <b>?` when tools offered on that turn are close to the name: up
+to three, nearest first, within a case-insensitive edit distance of 2 or a third of the name's
+length, whichever is larger. A tool hidden on that turn by its `withVisibility` predicate is never
+suggested.
+
+## Testing with scripted tools
+
+`helios-testing`'s `ScriptedTool` stands in for a tool in a test, as `ScriptedModel` stands in
+for the model. Each call returns the next outcome scripted with `withResult`, `withSuccess`,
+`withFailure` or `withThrow` (thrown from the tool, so the session answers it as `Threw`), in
+order, whatever its arguments; a call past the script throws `IllegalStateException`. `calls()`
+records every call's arguments, and `tool()` is the `Tool` to register. A run this short fits the
+event stream's 256-event buffer, so the test reads the stream after `runBlocking` returns:
+
+<!-- snippet: ToolSnippets#scriptedTool -->
+```java
+var weather = ScriptedTool.newBuilder("get_weather").withSuccess("72°F in Paris").build();
+var model =
+    ScriptedModel.newBuilder()
+        .withToolCallsTurn(new ToolCall("c1", "get_weather", Map.of("city", "Paris")))
+        .withTextTurn("It is 72°F in Paris.")
+        .build();
+var options =
+    SessionOptions.newBuilder()
+        .withModel(model)
+        .withTool(
+            ToolBinding.newBuilder(weather.tool()).withCategory(ToolCategory.READ).build())
+        .build();
+
+try (var session = AgentSession.open(options);
+    var events = session.events()) {
+  session.runBlocking(UserMessage.text("What is the weather in Paris?"));
+  var results = new ArrayList<ToolResult>();
+  for (var event : events) {
+    if (event instanceof QueryEvent.ToolResult result) {
+      results.add(result.result());
+    } else if (event instanceof QueryEvent.RunEnded) {
+      break;
+    }
+  }
+  assertEquals(List.of(Map.of("city", "Paris")), weather.calls());
+  assertEquals(List.of(ToolResult.success("72°F in Paris")), results);
+}
+```
 
 ## CommandGrant: a CLI without its secrets
 

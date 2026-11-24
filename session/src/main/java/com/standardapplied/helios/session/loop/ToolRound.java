@@ -5,12 +5,14 @@ package com.standardapplied.helios.session.loop;
 import com.standardapplied.helios.core.common.Strings;
 import com.standardapplied.helios.core.model.Message;
 import com.standardapplied.helios.core.model.ToolCall;
+import com.standardapplied.helios.core.tool.ToolOutcome;
 import com.standardapplied.helios.core.tool.ToolResult;
 import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionLimits;
 import com.standardapplied.helios.session.hooks.HookOutcome;
 import com.standardapplied.helios.session.hooks.HookPhase;
 import com.standardapplied.helios.session.permissions.Permission;
+import com.standardapplied.helios.session.tools.ToolBinding;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,8 +51,11 @@ import java.util.function.Predicate;
  *       result by {@link Permission#NAME}; an admitted call emits {@link QueryEvent.ToolUse} with
  *       the canonical call, which is dispatched with what its policy withholds and which {@code
  *       PostToolUse} hooks and the {@link QueryEvent.ToolResult} see. A call naming no registered
- *       tool skips the stage, and dispatch answers it {@code NotFound}. A refusal's reason and a
- *       hook's {@code Block} reason go through {@link RedactedReason}.
+ *       tool skips the stage, and dispatch answers it {@code NotFound}; the round replaces that
+ *       answer with one naming up to three of the tools offered on this turn ({@link
+ *       ToolRegistry#visible}) closest to the called name ({@link ToolNameSuggestions}), before it
+ *       is redacted and emitted. A refusal's reason and a hook's {@code Block} reason go through
+ *       {@link RedactedReason}.
  *   <li><b>PostToolUse</b>: {@code MutateResult} rewrites the tool result's output and keeps its
  *       outcome, since a hook changes what the model reads, not what happened; {@code Inject}
  *       queues a synthetic user message; {@code Stop} appends the result and terminates.
@@ -236,13 +241,30 @@ final class ToolRound {
   }
 
   /**
+   * {@code result}, or for a call naming no registered tool, its not-found result naming the
+   * closest tools offered on this turn. A registered tool's result is kept as it is, even a {@code
+   * NotFound} it returned itself, and runs no visibility predicate.
+   */
+  private ToolResult suggestingOffered(SessionState state, ToolCall call, ToolResult result) {
+    var registry = collaborators.toolDispatch().registry();
+    if (!(result.outcome() instanceof ToolOutcome.NotFound)
+        || registry.get(call.name()).isPresent()) {
+      return result;
+    }
+    var offered = registry.visible(state).stream().map(ToolBinding::name).toList();
+    return ToolResult.notFound(call.name(), ToolNameSuggestions.closest(call.name(), offered));
+  }
+
+  /**
    * Run the planned call, or take its substitute, emit its redacted result and apply the {@code
    * PostToolUse} hooks to it; returns {@code true} when a hook stopped the session.
    */
   private boolean complete(SessionState state, PlannedCall planned, SessionLimits limits) {
     var call = planned.call();
     var raw =
-        planned.substitute() == null ? dispatch(state, planned, limits) : planned.substitute();
+        planned.substitute() == null
+            ? suggestingOffered(state, call, dispatch(state, planned, limits))
+            : planned.substitute();
     var result = emitRedacted(state, call, raw, planned.redactions());
     var decision =
         collaborators.hooks().firePostToolUse(call, result, collaborators.hookContext(state));

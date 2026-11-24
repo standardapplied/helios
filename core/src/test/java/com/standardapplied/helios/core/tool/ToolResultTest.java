@@ -88,6 +88,38 @@ class ToolResultTest {
   }
 
   @Test
+  void notFoundWithNoClosestNamesIsTheBareText() {
+    assertEquals(ToolResult.notFound("serch"), ToolResult.notFound("serch", List.of()));
+  }
+
+  @Test
+  void notFoundSuggestsTheClosestNamesInTheOrderGiven() {
+    var one = ToolResult.notFound("serch", List.of("search"));
+    var three = ToolResult.notFound("raed", List.of("Read", "read_file", "Ready"));
+
+    assertEquals(new ToolOutcome.NotFound(), one.outcome());
+    assertEquals("tool not found: serch; did you mean: search?", one.output());
+    assertEquals(new ToolOutcome.NotFound(), three.outcome());
+    assertEquals("tool not found: raed; did you mean: Read, read_file, Ready?", three.output());
+  }
+
+  @Test
+  void notFoundRejectsAMissingOrBlankClosestName() {
+    var withNull = new ArrayList<String>();
+    withNull.add(null);
+
+    assertRejectsNull("toolName must not be null", () -> ToolResult.notFound(null, List.of()));
+    assertRejectsNull("closest must not be null", () -> ToolResult.notFound("serch", null));
+    assertRejectsNull("closest name must not be null", () -> ToolResult.notFound("x", withNull));
+    assertEquals(
+        "closest name must not be blank",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ToolResult.notFound("serch", List.of("search", " ")))
+            .getMessage());
+  }
+
+  @Test
   void rejectedNamesTheHookAndReason() {
     var result = ToolResult.rejected("AuditHook", "not allowed");
 

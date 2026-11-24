@@ -10,10 +10,25 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
 - `GeminiModelId.GEMINI_4_HYDROGEN` (`gemini-4-hydrogen`), released 2026-11-12: 1,048,576-token
   context, 65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
+- `ScriptedTool` in `helios-testing`, the tool counterpart of `ScriptedModel`:
+  `ScriptedTool.newBuilder(name)` takes the description and parameters `Tool.Builder` takes, then
+  outcomes answered one per call in order (`withResult`, `withSuccess`, `withFailure`, and
+  `withThrow`, which the session answers as `ToolOutcome.Threw`); a call past the script throws
+  `IllegalStateException` naming the tool and the call number. `calls()` records every call's
+  arguments, copied on arrival; `tool()` is the `Tool` to register.
+- `ToolResult.notFound(String toolName, List<String> closest)`: a `ToolOutcome.NotFound` result
+  whose output names the given tools, `tool not found: <name>; did you mean: <a>, <b>?`; with an
+  empty list it is the text of `notFound(String)`, which now delegates to it.
 
 ### Changed
 
 - The README is a landing page; the reference moved to guides under `docs/`.
+- A call naming no registered tool now tells the model what it could have called:
+  `tool not found: <name>; did you mean: <a>, <b>?`, naming up to three of the tools offered on
+  that turn within a case-insensitive edit distance of 2 or a third of the name's length, nearest
+  first. A tool hidden on the turn by its visibility predicate is never named, and with no close
+  tool the text is unchanged. The `QueryEvent.ToolResult`, `PostToolUse` hooks and the history see
+  the new text; the outcome is still `ToolOutcome.NotFound`.
 
 ### Compatibility
 

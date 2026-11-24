@@ -53,8 +53,13 @@ public final class ToolRegistry {
     return Optional.ofNullable(bindingsByName.get(name));
   }
 
-  /** The bindings advertised on the turn {@code ctx} describes, in registration order. */
-  List<ToolBinding> visible(ToolVisibilityContext ctx) {
+  /**
+   * The bindings advertised on {@code state}'s current turn, in registration order: the tools the
+   * model is offered, and the only names a not-found call is told about. Runs every binding's
+   * visibility predicate.
+   */
+  List<ToolBinding> visible(SessionState state) {
+    var ctx = new ToolVisibilityContext(state.sessionId(), state.currentTurnIndex());
     return bindings.stream().filter(b -> b.visible(ctx)).toList();
   }
 }

@@ -183,6 +183,17 @@ final class ToolOutcomeSessionTest {
   }
 
   @Test
+  void aMisspeltToolIsNotFoundNamingTheClosestToolAndTheRunGoesOn() {
+    var run =
+        run(withTools(tool("search", (args, ctx) -> ToolResult.success("ok"))), call("serch"));
+    var hint = "tool not found: serch; did you mean: search?";
+
+    assertEquals(expected(new ToolOutcome.NotFound(), hint), run.onlyResult());
+    assertEquals(List.of(hint), toolMessages(run, 1));
+    assertInstanceOf(ResultMessage.Success.class, run.terminal());
+  }
+
+  @Test
   void aHookBlockIsRejectedByThatHook() {
     var options =
         withTools(tool("t", (args, ctx) -> ToolResult.success("ran")))

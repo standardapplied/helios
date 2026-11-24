@@ -33,7 +33,7 @@ Each jar is published on its own; most applications want `helios-session` and on
 | `helios-onnx` | Local embeddings | ONNX Runtime, DJL Tokenizers |
 | `helios-persistence` | PostgreSQL `PgSessionStore`, `PgTraceStore`, `PgSpanExporter`, `PgAnnotationStore`, `PgPromptRegistry` | Helidon DbClient, PostgreSQL JDBC, OpenTelemetry SDK |
 | `helios-skills` | `Skills.discover` and `Skills.load`: Agent Skills folders (`SKILL.md`) into `Skill` values | Jackson 3 YAML (SnakeYAML Engine) |
-| `helios-testing` | `ScriptedModel`, a deterministic `Model` for tests and evals | Jackson 3 |
+| `helios-testing` | `ScriptedModel` and `ScriptedTool`, a deterministic `Model` and `Tool` for tests and evals | Jackson 3 |
 
 ## Installation
 
