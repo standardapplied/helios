@@ -16,6 +16,9 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   `withThrow`, which the session answers as `ToolOutcome.Threw`); a call past the script throws
   `IllegalStateException` naming the tool and the call number. `calls()` records every call's
   arguments, copied on arrival; `tool()` is the `Tool` to register.
+- `ToolResult.notFound(String toolName, List<String> closest)`: a `ToolOutcome.NotFound` result
+  whose output names the given tools, `tool not found: <name>; did you mean: <a>, <b>?`; with an
+  empty list it is the text of `notFound(String)`, which now delegates to it.
 
 ### Changed
 

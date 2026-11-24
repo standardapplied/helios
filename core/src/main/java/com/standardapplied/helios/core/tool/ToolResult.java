@@ -5,6 +5,7 @@
 
 package com.standardapplied.helios.core.tool;
 
+import com.standardapplied.helios.core.common.Validate;
 import com.standardapplied.helios.core.model.InlineFile;
 import java.time.Duration;
 import java.util.List;
@@ -143,8 +144,29 @@ public record ToolResult(ToolOutcome outcome, String output, List<InlineFile> at
    * @return a {@link ToolOutcome.NotFound} result
    */
   public static ToolResult notFound(String toolName) {
+    return notFound(toolName, List.of());
+  }
+
+  /**
+   * No tool named {@code toolName} is registered; the output names {@code closest} so the model can
+   * correct the call: {@code tool not found: <name>; did you mean: <a>, <b>?}, the names in the
+   * order given. With no names it is the text of {@link #notFound(String)}.
+   *
+   * @param toolName the name the model called; non-null
+   * @param closest the registered names to suggest, nearest first; non-null, each non-blank
+   * @return a {@link ToolOutcome.NotFound} result
+   * @throws NullPointerException if {@code toolName}, {@code closest} or one of its names is null
+   * @throws IllegalArgumentException if one of the names is blank
+   */
+  public static ToolResult notFound(String toolName, List<String> closest) {
     Objects.requireNonNull(toolName, "toolName must not be null");
-    return new ToolResult(new ToolOutcome.NotFound(), "tool not found: " + toolName, List.of());
+    Objects.requireNonNull(closest, "closest must not be null");
+    var names = closest.stream().map(name -> Validate.notBlank("closest name", name)).toList();
+    var output = "tool not found: " + toolName;
+    return new ToolResult(
+        new ToolOutcome.NotFound(),
+        names.isEmpty() ? output : output + "; did you mean: " + String.join(", ", names) + "?",
+        List.of());
   }
 
   /**
