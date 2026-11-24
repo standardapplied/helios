@@ -1,14 +1,20 @@
 /* Copyright (c) 2026 Standard Applied Intelligence Labs | SPDX-License-Identifier: MIT */
 package com.standardapplied.helios.examples.session;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import com.standardapplied.helios.core.common.SecretRegistry;
 import com.standardapplied.helios.core.model.Model;
+import com.standardapplied.helios.core.model.ToolCall;
 import com.standardapplied.helios.core.tool.CommandGrant;
 import com.standardapplied.helios.core.tool.ParameterType;
 import com.standardapplied.helios.core.tool.Tool;
 import com.standardapplied.helios.core.tool.ToolParameter;
 import com.standardapplied.helios.core.tool.ToolResult;
+import com.standardapplied.helios.session.AgentSession;
+import com.standardapplied.helios.session.QueryEvent;
 import com.standardapplied.helios.session.SessionOptions;
+import com.standardapplied.helios.session.UserMessage;
 import com.standardapplied.helios.session.files.GlobTool;
 import com.standardapplied.helios.session.files.GrepTool;
 import com.standardapplied.helios.session.files.ReadTool;
@@ -16,8 +22,13 @@ import com.standardapplied.helios.session.files.WorkspaceRoot;
 import com.standardapplied.helios.session.permissions.Permission;
 import com.standardapplied.helios.session.tools.ToolBinding;
 import com.standardapplied.helios.session.tools.ToolCategory;
+import com.standardapplied.helios.testing.ScriptedModel;
+import com.standardapplied.helios.testing.ScriptedTool;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -43,6 +54,36 @@ final class ToolSnippets {
                     .build())
             .withExecutor((args, ctx) -> ToolResult.success("72°F in " + args.get("city")))
             .build();
+  }
+
+  static void scriptedTool() {
+    var weather = ScriptedTool.newBuilder("get_weather").withSuccess("72°F in Paris").build();
+    var model =
+        ScriptedModel.newBuilder()
+            .withToolCallsTurn(new ToolCall("c1", "get_weather", Map.of("city", "Paris")))
+            .withTextTurn("It is 72°F in Paris.")
+            .build();
+    var options =
+        SessionOptions.newBuilder()
+            .withModel(model)
+            .withTool(
+                ToolBinding.newBuilder(weather.tool()).withCategory(ToolCategory.READ).build())
+            .build();
+
+    try (var session = AgentSession.open(options);
+        var events = session.events()) {
+      session.runBlocking(UserMessage.text("What is the weather in Paris?"));
+      var results = new ArrayList<ToolResult>();
+      for (var event : events) {
+        if (event instanceof QueryEvent.ToolResult result) {
+          results.add(result.result());
+        } else if (event instanceof QueryEvent.RunEnded) {
+          break;
+        }
+      }
+      assertEquals(List.of(Map.of("city", "Paris")), weather.calls());
+      assertEquals(List.of(ToolResult.success("72°F in Paris")), results);
+    }
   }
 
   static void commandGrant(Model model) {

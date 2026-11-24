@@ -58,6 +58,12 @@
              README and docs/ show. -->
         <dependency>
             <groupId>com.standardapplied</groupId>
+            <artifactId>helios-testing</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.standardapplied</groupId>
             <artifactId>helios-runtime</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>

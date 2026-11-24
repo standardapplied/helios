@@ -10,6 +10,12 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
   65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
 - `GeminiModelId.GEMINI_4_HYDROGEN` (`gemini-4-hydrogen`), released 2026-11-12: 1,048,576-token
   context, 65,536 output tokens, thinking `LOW`..`XHIGH`, never off.
+- `ScriptedTool` in `helios-testing`, the tool counterpart of `ScriptedModel`:
+  `ScriptedTool.newBuilder(name)` takes the description and parameters `Tool.Builder` takes, then
+  outcomes answered one per call in order (`withResult`, `withSuccess`, `withFailure`, and
+  `withThrow`, which the session answers as `ToolOutcome.Threw`); a call past the script throws
+  `IllegalStateException` naming the tool and the call number. `calls()` records every call's
+  arguments, copied on arrival; `tool()` is the `Tool` to register.
 
 ### Changed
 
