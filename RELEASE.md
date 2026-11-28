@@ -22,7 +22,7 @@ This project publishes to Maven Central via the [Central Publishing Portal](http
 | `com.standardapplied:helios-onnx` | Local ONNX Runtime embedding models |
 | `com.standardapplied:helios-persistence` | PostgreSQL persistence for traces, prompts and sessions via Helidon DbClient |
 | `com.standardapplied:helios-repl` | Sandboxed JShell execution substrate |
-| `com.standardapplied:helios-testing` | `ScriptedModel` test double for deterministic evals |
+| `com.standardapplied:helios-testing` | `ScriptedModel` and `ScriptedTool` test doubles for deterministic evals |
 | `com.standardapplied:helios-skills` | Reads Agent Skills folders (`SKILL.md`) into `Skill` values |
 
 `helios-core` and `helios-session` also publish their test fixtures as attached artifacts with

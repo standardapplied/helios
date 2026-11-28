@@ -39,7 +39,7 @@ Each jar is published on its own; most applications want `helios-session` and on
 
 ```xml
 <properties>
-  <helios.version>3.1.3</helios.version>
+  <helios.version>3.1.4</helios.version>
 </properties>
 
 <dependency>
