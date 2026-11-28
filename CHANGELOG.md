@@ -4,6 +4,8 @@ All notable changes to Helios are documented here. Versions follow [SemVer](http
 
 ## Unreleased
 
+## [3.1.4] — 2026-11-28 — Gemini 4 Neon and Hydrogen, ScriptedTool, closest-tool hints
+
 ### Added
 
 - `GeminiModelId.GEMINI_4_NEON` (`gemini-4-neon`), released 2026-11-18: 1,048,576-token context,
